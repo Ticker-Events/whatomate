@@ -17,6 +17,7 @@ type Config struct {
 	Redis        RedisConfig        `koanf:"redis"`
 	JWT          JWTConfig          `koanf:"jwt"`
 	WhatsApp     WhatsAppConfig     `koanf:"whatsapp"`
+	AiSensy      AiSensyConfig      `koanf:"aisensy"`
 	AI           AIConfig           `koanf:"ai"`
 	Storage      StorageConfig      `koanf:"storage"`
 	DefaultAdmin DefaultAdminConfig `koanf:"default_admin"`
@@ -24,6 +25,15 @@ type Config struct {
 	Cookie       CookieConfig       `koanf:"cookie"`
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
+}
+
+// AiSensyConfig holds AiSensy Direct API configuration.
+type AiSensyConfig struct {
+	// BaseURL is the AiSensy Direct API base URL.
+	// Defaults to https://backend.aisensy.com/direct-apis/t1/api
+	BaseURL string `koanf:"base_url"`
+	// WebhookSecret is the HMAC-SHA256 shared secret used to verify AiSensy webhook signatures.
+	WebhookSecret string `koanf:"webhook_secret"`
 }
 
 type TTSConfig struct {
@@ -218,6 +228,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.WhatsApp.BaseURL == "" {
 		cfg.WhatsApp.BaseURL = "https://graph.facebook.com"
+	}
+	if cfg.AiSensy.BaseURL == "" {
+		cfg.AiSensy.BaseURL = "https://backend.aisensy.com/direct-apis/t1/api"
 	}
 	if cfg.Storage.Type == "" {
 		cfg.Storage.Type = "local"

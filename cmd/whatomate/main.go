@@ -23,6 +23,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/internal/worker"
+	"github.com/shridarpatil/whatomate/pkg/aisensy"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -181,6 +182,9 @@ func runServer(args []string) {
 	// Initialize WhatsApp client
 	waClient := whatsapp.NewWithBaseURL(lo, cfg.WhatsApp.BaseURL)
 
+	// Initialize AiSensy client
+	aiSensyClient := aisensy.New(cfg.AiSensy, lo)
+
 	// Initialize WebSocket hub
 	wsHub := websocket.NewHub(lo)
 	go wsHub.Run()
@@ -204,6 +208,7 @@ func runServer(args []string) {
 		Redis:      rdb,
 		Log:        lo,
 		WhatsApp:   waClient,
+		AiSensy:    aiSensyClient,
 		WSHub:      wsHub,
 		Queue:      jobQueue,
 		HTTPClient: httpClient,
@@ -264,7 +269,9 @@ func runServer(args []string) {
 		ReadTimeout:        time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout:       time.Duration(cfg.Server.WriteTimeout) * time.Second,
 		MaxRequestBodySize: 15 * 1024 * 1024,
-		Name:               "Whatomate",
+		// Cookie-based JWT auth can push request headers past fasthttp's 4 KB default.
+		ReadBufferSize: 64 * 1024,
+		Name:           "Whatomate",
 	}
 
 	// Start server in goroutine

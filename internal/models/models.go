@@ -313,6 +313,15 @@ type WhatsAppAccount struct {
 	CreatedByID        *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
 	UpdatedByID        *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 
+	// Provider identifies the messaging backend: "meta" (default) or "aisensy".
+	Provider string `gorm:"size:20;default:'meta'" json:"provider"`
+
+	// AiSensy-specific credentials (populated when Provider == "aisensy")
+	AiSensyEmail     string `gorm:"size:255" json:"-"`
+	AiSensyPassword  string `gorm:"type:text" json:"-"` // encrypted
+	AiSensyProjectID string `gorm:"size:100" json:"aisensy_project_id,omitempty"`
+	AiSensyToken     string `gorm:"type:text" json:"-"` // cached JWT, encrypted
+
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
 	CreatedBy    *User         `gorm:"foreignKey:CreatedByID" json:"created_by,omitempty"`
@@ -324,19 +333,34 @@ func (WhatsAppAccount) TableName() string {
 }
 
 // ToWAAccount converts the model to the whatsapp client's Account type.
+// It populates both Meta and AiSensy fields so either client can use it.
 func (a *WhatsAppAccount) ToWAAccount() *whatsapp.Account {
+	provider := a.Provider
+	if provider == "" {
+		provider = "meta"
+	}
 	return &whatsapp.Account{
-		PhoneID:     a.PhoneID,
-		BusinessID:  a.BusinessID,
-		AppID:       a.AppID,
-		APIVersion:  a.APIVersion,
-		AccessToken: a.AccessToken,
+		PhoneID:          a.PhoneID,
+		BusinessID:       a.BusinessID,
+		AppID:            a.AppID,
+		APIVersion:       a.APIVersion,
+		AccessToken:      a.AccessToken,
+		AiSensyEmail:     a.AiSensyEmail,
+		AiSensyPassword:  a.AiSensyPassword,
+		AiSensyProjectID: a.AiSensyProjectID,
+		AiSensyToken:     a.AiSensyToken,
+		Provider:         provider,
 	}
 }
 
-// DecryptSecrets decrypts the encrypted access token and app secret fields.
+// IsAiSensy returns true when the account uses the AiSensy Direct API provider.
+func (a *WhatsAppAccount) IsAiSensy() bool {
+	return a.Provider == "aisensy"
+}
+
+// DecryptSecrets decrypts all encrypted credential fields based on provider.
 func (a *WhatsAppAccount) DecryptSecrets(encryptionKey string) {
-	crypto.DecryptFields(encryptionKey, &a.AccessToken, &a.AppSecret)
+	crypto.DecryptFields(encryptionKey, &a.AccessToken, &a.AppSecret, &a.AiSensyPassword, &a.AiSensyToken)
 }
 
 // Contact represents a WhatsApp contact/profile

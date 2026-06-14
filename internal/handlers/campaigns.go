@@ -892,14 +892,14 @@ func (a *App) UploadCampaignMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Unsupported file type: "+mimeType, nil, "")
 	}
 
-	// Upload to WhatsApp
+	// Upload to the messaging provider
 	waAccount := a.toWhatsAppAccount(account)
 
 	ctx := r.RequestCtx
-	mediaID, err := a.WhatsApp.UploadMedia(ctx, waAccount, data, mimeType, fileHeader.Filename)
+	mediaID, err := a.getMessagingClient(account).UploadMedia(ctx, waAccount, data, mimeType, fileHeader.Filename)
 	if err != nil {
-		a.Log.Error("Failed to upload media to WhatsApp", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload media to WhatsApp", nil, "")
+		a.Log.Error("Failed to upload media to provider", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload media to provider", nil, "")
 	}
 
 	// Save file locally for preview

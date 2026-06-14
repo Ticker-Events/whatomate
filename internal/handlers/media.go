@@ -75,17 +75,23 @@ func getExtensionFromMimeType(mimeType string) string {
 	}
 }
 
-// DownloadAndSaveMedia downloads media from Meta and saves it locally
+// DownloadAndSaveMedia downloads media from the configured provider and saves it locally.
 // Returns the local file path (relative to media storage) or error
 func (a *App) DownloadAndSaveMedia(ctx context.Context, mediaID string, mimeType string, account *whatsapp.Account) (string, error) {
-	// Get the media URL from Meta
-	mediaURL, err := a.WhatsApp.GetMediaURL(ctx, mediaID, account)
+	// Choose client based on provider field on the account
+	var client whatsapp.MessagingClient = a.WhatsApp
+	if account.Provider == "aisensy" && a.AiSensy != nil {
+		client = a.AiSensy
+	}
+
+	// Get the media URL (or sentinel for AiSensy)
+	mediaURL, err := client.GetMediaURL(ctx, mediaID, account)
 	if err != nil {
 		return "", fmt.Errorf("failed to get media URL: %w", err)
 	}
 
 	// Download the media content
-	data, err := a.WhatsApp.DownloadMedia(ctx, mediaURL, account.AccessToken)
+	data, err := client.DownloadMedia(ctx, mediaURL, account.AccessToken)
 	if err != nil {
 		return "", fmt.Errorf("failed to download media: %w", err)
 	}

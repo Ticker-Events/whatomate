@@ -120,7 +120,7 @@ func (a *App) CreateCatalog(r *fastglue.Request) error {
 	ctx := context.Background()
 	waAccount := a.toWhatsAppAccount(account)
 
-	metaCatalogID, err := a.WhatsApp.CreateCatalog(ctx, waAccount, req.Name)
+	metaCatalogID, err := a.getMessagingClient(account).CreateCatalog(ctx, waAccount, req.Name)
 	if err != nil {
 		a.Log.Error("Failed to create catalog in Meta", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create catalog", nil, "")
@@ -197,7 +197,7 @@ func (a *App) DeleteCatalog(r *fastglue.Request) error {
 	ctx := context.Background()
 	waAccount := a.toWhatsAppAccount(account)
 
-	if err := a.WhatsApp.DeleteCatalog(ctx, waAccount, catalog.MetaCatalogID); err != nil {
+	if err := a.getMessagingClient(account).DeleteCatalog(ctx, waAccount, catalog.MetaCatalogID); err != nil {
 		a.Log.Error("Failed to delete catalog from Meta", "error", err)
 		// Continue with local deletion even if Meta fails
 	}
@@ -240,7 +240,7 @@ func (a *App) SyncCatalogs(r *fastglue.Request) error {
 	ctx := context.Background()
 	waAccount := a.toWhatsAppAccount(account)
 
-	metaCatalogs, err := a.WhatsApp.ListCatalogs(ctx, waAccount)
+	metaCatalogs, err := a.getMessagingClient(account).ListCatalogs(ctx, waAccount)
 	if err != nil {
 		a.Log.Error("Failed to fetch catalogs from Meta", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to fetch catalogs", nil, "")
@@ -367,7 +367,7 @@ func (a *App) CreateCatalogProduct(r *fastglue.Request) error {
 		Description: req.Description,
 	}
 
-	metaProductID, err := a.WhatsApp.CreateProduct(ctx, waAccount, catalog.MetaCatalogID, productInput)
+	metaProductID, err := a.getMessagingClient(account).CreateProduct(ctx, waAccount, catalog.MetaCatalogID, productInput)
 	if err != nil {
 		a.Log.Error("Failed to create product in Meta", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create product", nil, "")
@@ -463,7 +463,7 @@ func (a *App) UpdateCatalogProduct(r *fastglue.Request) error {
 		Description: req.Description,
 	}
 
-	if err := a.WhatsApp.UpdateProduct(ctx, waAccount, product.MetaProductID, productInput); err != nil {
+	if err := a.getMessagingClient(account).UpdateProduct(ctx, waAccount, product.MetaProductID, productInput); err != nil {
 		a.Log.Error("Failed to update product in Meta", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update product", nil, "")
 	}
@@ -532,7 +532,7 @@ func (a *App) DeleteCatalogProduct(r *fastglue.Request) error {
 	ctx := context.Background()
 	waAccount := a.toWhatsAppAccount(account)
 
-	if err := a.WhatsApp.DeleteProduct(ctx, waAccount, product.MetaProductID); err != nil {
+	if err := a.getMessagingClient(account).DeleteProduct(ctx, waAccount, product.MetaProductID); err != nil {
 		a.Log.Error("Failed to delete product from Meta", "error", err)
 		// Continue with local deletion
 	}

@@ -245,7 +245,8 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 	}
 
 	// Verify webhook signature before processing any fields.
-	// Find a phoneNumberID from any change to look up the account's AppSecret.
+	// For AiSensy accounts the signature is verified against the global AiSensy
+	// webhook secret; for Meta accounts it uses the per-account AppSecret.
 	if len(signature) > 0 {
 		for _, entry := range payload.Entry {
 			for _, change := range entry.Changes {
@@ -254,14 +255,27 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 					continue
 				}
 				account, err := a.getWhatsAppAccountCached(phoneNumberID)
-				if err != nil || account.AppSecret == "" {
+				if err != nil {
 					continue
 				}
-				if !verifyWebhookSignature(body, signature, []byte(account.AppSecret)) {
+				var secret []byte
+				if account.IsAiSensy() {
+					if s := a.Config.AiSensy.WebhookSecret; s != "" {
+						secret = []byte(s)
+					}
+				} else if account.AppSecret != "" {
+					secret = []byte(account.AppSecret)
+				}
+				if len(secret) == 0 {
+					// No secret configured; skip signature check for this account
+					a.Log.Debug("Webhook signature check skipped (no secret)", "phone_id", phoneNumberID)
+					break
+				}
+				if !verifyWebhookSignature(body, signature, secret) {
 					a.Log.Warn("Invalid webhook signature", "phone_id", phoneNumberID)
 					return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid signature", nil, "")
 				}
-				a.Log.Debug("Webhook signature verified successfully")
+				a.Log.Debug("Webhook signature verified successfully", "provider", account.Provider)
 				break
 			}
 		}

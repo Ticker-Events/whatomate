@@ -11,10 +11,12 @@ import (
 	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	"github.com/shridarpatil/whatomate/pkg/aisensy"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -29,6 +31,8 @@ type App struct {
 	Redis             *redis.Client
 	Log               logf.Logger
 	WhatsApp          *whatsapp.Client
+	// AiSensy is the AiSensy Direct API client (nil when not configured).
+	AiSensy           *aisensy.Client
 	WSHub             *websocket.Hub
 	Queue             queue.Queue
 	CampaignSubCancel context.CancelFunc
@@ -44,6 +48,15 @@ type App struct {
 	S3Client *storage.S3Client
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
+}
+
+// getMessagingClient returns the appropriate MessagingClient for the account.
+// AiSensy accounts use the AiSensy Direct API; all others use the Meta WhatsApp Cloud API.
+func (a *App) getMessagingClient(account *models.WhatsAppAccount) whatsapp.MessagingClient {
+	if account != nil && account.IsAiSensy() && a.AiSensy != nil {
+		return a.AiSensy
+	}
+	return a.WhatsApp
 }
 
 // WaitForBackgroundTasks blocks until all background goroutines complete.

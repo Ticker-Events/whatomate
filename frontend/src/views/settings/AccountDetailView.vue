@@ -49,6 +49,7 @@ import {
 interface WhatsAppAccount {
   id: string
   name: string
+  provider: string
   app_id: string
   phone_id: string
   business_id: string
@@ -60,6 +61,10 @@ interface WhatsAppAccount {
   status: string
   has_access_token: boolean
   has_app_secret: boolean
+  aisensy_email?: string
+  aisensy_project_id?: string
+  has_aisensy_password?: boolean
+  business_calling_enabled?: boolean
   phone_number?: string
   display_name?: string
   created_by_id?: string
@@ -108,11 +113,15 @@ const canDelete = computed(() => authStore.hasPermission('accounts', 'delete'))
 
 const form = ref({
   name: '',
+  provider: 'meta',
   app_id: '',
   phone_id: '',
   business_id: '',
   access_token: '',
   app_secret: '',
+  aisensy_email: '',
+  aisensy_password: '',
+  aisensy_project_id: '',
   webhook_verify_token: '',
   api_version: 'v21.0',
   is_default_incoming: false,
@@ -120,6 +129,8 @@ const form = ref({
   auto_read_receipt: false,
   business_calling_enabled: false,
 })
+
+const isAiSensy = computed(() => form.value.provider === 'aisensy')
 
 const breadcrumbs = computed(() => [
   { label: t('nav.settings'), href: '/settings' },
@@ -153,11 +164,15 @@ function syncForm() {
   if (!account.value) return
   form.value = {
     name: account.value.name,
+    provider: account.value.provider || 'meta',
     app_id: account.value.app_id || '',
     phone_id: account.value.phone_id,
     business_id: account.value.business_id,
     access_token: '',
     app_secret: '',
+    aisensy_email: account.value.aisensy_email || '',
+    aisensy_password: '',
+    aisensy_project_id: account.value.aisensy_project_id || '',
     webhook_verify_token: account.value.webhook_verify_token || '',
     api_version: account.value.api_version,
     is_default_incoming: account.value.is_default_incoming,
@@ -168,11 +183,19 @@ function syncForm() {
 }
 
 async function save() {
-  if (!form.value.name.trim() || !form.value.phone_id.trim() || !form.value.business_id.trim()) {
-    toast.error(t('accounts.fillRequired', 'Name, Phone ID, and Business ID are required'))
+  if (!form.value.name.trim() || !form.value.phone_id.trim()) {
+    toast.error(t('accounts.fillRequired', 'Name and Phone ID are required'))
     return
   }
-  if (isNew.value && !form.value.access_token.trim()) {
+  if (!isAiSensy.value && !form.value.business_id.trim()) {
+    toast.error(t('accounts.businessIdRequired', 'Business Account ID is required for Meta accounts'))
+    return
+  }
+  if (isAiSensy.value && isNew.value && (!form.value.aisensy_email.trim() || !form.value.aisensy_password.trim() || !form.value.aisensy_project_id.trim())) {
+    toast.error(t('accounts.aisensyFieldsRequired', 'Email, Password, and Project ID are required for AiSensy accounts'))
+    return
+  }
+  if (!isAiSensy.value && isNew.value && !form.value.access_token.trim()) {
     toast.error(t('accounts.accessTokenRequired', 'Access token is required'))
     return
   }
@@ -182,6 +205,7 @@ async function save() {
     const payload: any = { ...form.value }
     if (!isNew.value && !payload.access_token) delete payload.access_token
     if (!isNew.value && !payload.app_secret) delete payload.app_secret
+    if (!isNew.value && !payload.aisensy_password) delete payload.aisensy_password
 
     if (isNew.value) {
       const response = await api.post('/accounts', payload)
@@ -347,50 +371,105 @@ onMounted(async () => {
 
         <Separator />
 
-        <div class="grid grid-cols-2 gap-4">
-          <div class="space-y-1.5">
-            <Label class="text-xs">{{ $t('accounts.metaAppId', 'Meta App ID') }}</Label>
-            <Input v-model="form.app_id" :disabled="!canWrite" />
+        <!-- Provider toggle -->
+        <div class="space-y-1.5">
+          <Label class="text-xs">{{ $t('accounts.provider', 'Provider') }}</Label>
+          <div class="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              :class="!isAiSensy ? 'border-primary text-primary' : ''"
+              :disabled="!canWrite || !isNew"
+              @click="form.provider = 'meta'"
+            >Meta</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              :class="isAiSensy ? 'border-primary text-primary' : ''"
+              :disabled="!canWrite || !isNew"
+              @click="form.provider = 'aisensy'"
+            >AiSensy</Button>
           </div>
-          <div class="space-y-1.5">
-            <Label class="text-xs">{{ $t('accounts.phoneNumberId', 'Phone Number ID') }} *</Label>
-            <Input v-model="form.phone_id" :disabled="!canWrite" />
-          </div>
-          <div class="space-y-1.5">
-            <Label class="text-xs">{{ $t('accounts.businessAccountId', 'Business Account ID') }} *</Label>
-            <Input v-model="form.business_id" :disabled="!canWrite" />
-          </div>
-          <div class="space-y-1.5">
-            <Label class="text-xs">{{ $t('accounts.apiVersion', 'API Version') }}</Label>
-            <Input v-model="form.api_version" :disabled="!canWrite" />
-          </div>
+          <p v-if="!isNew" class="text-[11px] text-muted-foreground">Provider cannot be changed after account creation.</p>
         </div>
 
         <Separator />
 
+        <!-- Phone Number ID (always required) -->
         <div class="grid grid-cols-2 gap-4">
           <div class="space-y-1.5">
-            <Label class="text-xs">
-              {{ $t('accounts.accessToken', 'Access Token') }}
-              <span v-if="isNew" class="text-destructive">*</span>
-              <span v-else class="text-muted-foreground text-[10px]">{{ $t('accounts.accessTokenKeepExisting', '(leave empty to keep existing)') }}</span>
-            </Label>
-            <Input v-model="form.access_token" type="password" :disabled="!canWrite" />
-            <Badge v-if="account?.has_access_token" variant="outline" class="border-green-600 text-green-600">
-              <Check class="h-3 w-3 mr-1" /> {{ $t('accounts.configured', 'Configured') }}
-            </Badge>
+            <Label class="text-xs">{{ $t('accounts.phoneNumberId', 'Phone Number ID') }} *</Label>
+            <Input v-model="form.phone_id" :disabled="!canWrite" />
           </div>
-          <div class="space-y-1.5">
-            <Label class="text-xs">
-              {{ $t('accounts.appSecret', 'App Secret') }}
-              <span v-if="!isNew" class="text-muted-foreground text-[10px]">{{ $t('accounts.accessTokenKeepExisting', '(leave empty to keep existing)') }}</span>
-            </Label>
-            <Input v-model="form.app_secret" type="password" :disabled="!canWrite" />
-            <Badge v-if="account?.has_app_secret" variant="outline" class="border-green-600 text-green-600">
-              <Check class="h-3 w-3 mr-1" /> {{ $t('accounts.configured', 'Configured') }}
-            </Badge>
-          </div>
+
+          <!-- Meta-only fields -->
+          <template v-if="!isAiSensy">
+            <div class="space-y-1.5">
+              <Label class="text-xs">{{ $t('accounts.businessAccountId', 'Business Account ID') }} *</Label>
+              <Input v-model="form.business_id" :disabled="!canWrite" />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">{{ $t('accounts.metaAppId', 'Meta App ID') }}</Label>
+              <Input v-model="form.app_id" :disabled="!canWrite" />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">{{ $t('accounts.apiVersion', 'API Version') }}</Label>
+              <Input v-model="form.api_version" :disabled="!canWrite" />
+            </div>
+          </template>
+
+          <!-- AiSensy-only fields -->
+          <template v-if="isAiSensy">
+            <div class="space-y-1.5">
+              <Label class="text-xs">{{ $t('accounts.aisensyProjectId', 'AiSensy Project ID') }} *</Label>
+              <Input v-model="form.aisensy_project_id" :disabled="!canWrite" />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">{{ $t('accounts.aisensyEmail', 'AiSensy Email') }} *</Label>
+              <Input v-model="form.aisensy_email" type="email" :disabled="!canWrite" />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">
+                {{ $t('accounts.aisensyPassword', 'AiSensy Password') }}
+                <span v-if="isNew" class="text-destructive">*</span>
+                <span v-else class="text-muted-foreground text-[10px]">{{ $t('accounts.accessTokenKeepExisting', '(leave empty to keep existing)') }}</span>
+              </Label>
+              <Input v-model="form.aisensy_password" type="password" :disabled="!canWrite" />
+              <Badge v-if="account?.has_aisensy_password" variant="outline" class="border-green-600 text-green-600">
+                <Check class="h-3 w-3 mr-1" /> {{ $t('accounts.configured', 'Configured') }}
+              </Badge>
+            </div>
+          </template>
         </div>
+
+        <!-- Meta credential fields -->
+        <template v-if="!isAiSensy">
+          <Separator />
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-1.5">
+              <Label class="text-xs">
+                {{ $t('accounts.accessToken', 'Access Token') }}
+                <span v-if="isNew" class="text-destructive">*</span>
+                <span v-else class="text-muted-foreground text-[10px]">{{ $t('accounts.accessTokenKeepExisting', '(leave empty to keep existing)') }}</span>
+              </Label>
+              <Input v-model="form.access_token" type="password" :disabled="!canWrite" />
+              <Badge v-if="account?.has_access_token" variant="outline" class="border-green-600 text-green-600">
+                <Check class="h-3 w-3 mr-1" /> {{ $t('accounts.configured', 'Configured') }}
+              </Badge>
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">
+                {{ $t('accounts.appSecret', 'App Secret') }}
+                <span v-if="!isNew" class="text-muted-foreground text-[10px]">{{ $t('accounts.accessTokenKeepExisting', '(leave empty to keep existing)') }}</span>
+              </Label>
+              <Input v-model="form.app_secret" type="password" :disabled="!canWrite" />
+              <Badge v-if="account?.has_app_secret" variant="outline" class="border-green-600 text-green-600">
+                <Check class="h-3 w-3 mr-1" /> {{ $t('accounts.configured', 'Configured') }}
+              </Badge>
+            </div>
+          </div>
+        </template>
 
         <Separator />
 
@@ -466,13 +545,23 @@ onMounted(async () => {
           <CardTitle class="text-sm font-medium">{{ $t('accounts.setupGuide', 'Setup Guide') }}</CardTitle>
         </CardHeader>
         <CardContent>
-          <ol class="list-decimal list-inside space-y-2.5 text-sm text-muted-foreground">
+          <!-- Meta setup guide -->
+          <ol v-if="!isAiSensy" class="list-decimal list-inside space-y-2.5 text-sm text-muted-foreground">
             <li>{{ $t('accounts.setupStep1', 'Go to') }} <a href="https://developers.facebook.com" target="_blank" class="text-primary hover:underline">Meta Developer Console</a> {{ $t('accounts.setupStep1End', 'and create an app') }}</li>
             <li>{{ $t('accounts.setupStep2', 'Add WhatsApp product to your app') }}</li>
             <li>{{ $t('accounts.setupStep3', 'Copy') }} <strong>{{ $t('accounts.setupStep3Bold1', 'Phone Number ID') }}</strong> {{ $t('accounts.setupStep3And', 'and') }} <strong>{{ $t('accounts.setupStep3Bold2', 'Business Account ID') }}</strong></li>
             <li>{{ $t('accounts.setupStep4', 'Generate a permanent token from') }} <a href="https://business.facebook.com/settings/system-users" target="_blank" class="text-primary hover:underline">Business Settings</a></li>
             <li>{{ $t('accounts.setupStep5', 'Configure the webhook URL and verify token in Meta dashboard') }}</li>
             <li>{{ $t('accounts.setupStep6', 'Click Test Connection to verify') }}</li>
+          </ol>
+          <!-- AiSensy setup guide -->
+          <ol v-else class="list-decimal list-inside space-y-2.5 text-sm text-muted-foreground">
+            <li>{{ $t('accounts.aisensySetupStep1', 'Log in to your') }} <a href="https://app.aisensy.com" target="_blank" class="text-primary hover:underline">AiSensy Dashboard</a></li>
+            <li>{{ $t('accounts.aisensySetupStep2', 'Go to Settings → Direct API to find your') }} <strong>{{ $t('accounts.aisensySetupStep2Bold', 'Project ID') }}</strong></li>
+            <li>{{ $t('accounts.aisensySetupStep3', 'Copy the') }} <strong>{{ $t('accounts.aisensySetupStep3Bold', 'Phone Number ID') }}</strong> {{ $t('accounts.aisensySetupStep3End', 'from your WhatsApp account in AiSensy') }}</li>
+            <li>{{ $t('accounts.aisensySetupStep4', 'Enter your AiSensy account email and password') }}</li>
+            <li>{{ $t('accounts.aisensySetupStep5', 'Configure the webhook URL in the AiSensy dashboard') }}</li>
+            <li>{{ $t('accounts.aisensySetupStep6', 'Click Test Connection to verify') }}</li>
           </ol>
         </CardContent>
       </Card>

@@ -13,6 +13,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
+	"github.com/shridarpatil/whatomate/pkg/aisensy"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/zerodha/logf"
 	"gorm.io/gorm"
@@ -25,12 +26,21 @@ type Worker struct {
 	Redis     *redis.Client
 	Log       logf.Logger
 	WhatsApp  *whatsapp.Client
+	AiSensy   *aisensy.Client
 	Consumer  *queue.RedisConsumer
 	Publisher *queue.Publisher
 }
 
 // Ensure Worker implements JobHandler interface
 var _ queue.JobHandler = (*Worker)(nil)
+
+// getMessagingClient returns the appropriate MessagingClient for the account.
+func (w *Worker) getMessagingClient(account *models.WhatsAppAccount) whatsapp.MessagingClient {
+	if account != nil && account.IsAiSensy() && w.AiSensy != nil {
+		return w.AiSensy
+	}
+	return w.WhatsApp
+}
 
 // New creates a new Worker instance
 func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*Worker, error) {
@@ -47,6 +57,7 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 		Redis:     rdb,
 		Log:       log,
 		WhatsApp:  whatsapp.New(log),
+		AiSensy:   aisensy.New(cfg.AiSensy, log),
 		Consumer:  consumer,
 		Publisher: publisher,
 	}, nil
@@ -250,7 +261,7 @@ func (w *Worker) checkCampaignCompletion(ctx context.Context, campaignID, organi
 	}
 }
 
-// sendTemplateMessage sends a template message via WhatsApp Cloud API
+// sendTemplateMessage sends a template message via the appropriate provider.
 func (w *Worker) sendTemplateMessage(ctx context.Context, account *models.WhatsAppAccount, template *models.Template, recipient *models.BulkMessageRecipient, campaignHeaderMediaID, campaignHeaderMediaFilename string) (string, error) {
 	waAccount := account.ToWAAccount()
 
@@ -273,7 +284,7 @@ func (w *Worker) sendTemplateMessage(ctx context.Context, account *models.WhatsA
 	components = append(components, flowComponents...)
 
 	rcpt := whatsapp.Recipient{Phone: recipient.PhoneNumber}
-	return w.WhatsApp.SendTemplateMessage(ctx, waAccount, rcpt, template.Name, template.Language, components)
+	return w.getMessagingClient(account).SendTemplateMessage(ctx, waAccount, rcpt, template.Name, template.Language, components)
 }
 
 // decryptAccountSecrets decrypts the encrypted secrets on a WhatsApp account.

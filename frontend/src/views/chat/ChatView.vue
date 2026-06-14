@@ -2436,64 +2436,109 @@ async function sendMediaMessage() {
 
     <!-- Template Params Dialog -->
     <Dialog v-model:open="templateDialogOpen">
-      <DialogContent class="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{{ templateParamNames.length > 0 ? $t('chat.fillParameters') : $t('chat.preview') }}</DialogTitle>
+      <DialogContent class="max-w-2xl w-full p-0 gap-0 overflow-hidden flex flex-col" style="max-height: 90vh;">
+        <!-- Header -->
+        <DialogHeader class="px-6 pt-6 pb-4 border-b shrink-0">
+          <DialogTitle>{{ $t('chat.sendTemplate') }}</DialogTitle>
           <DialogDescription>
             {{ selectedTemplate?.display_name || selectedTemplate?.name }}
           </DialogDescription>
         </DialogHeader>
-        <div class="py-4 space-y-3">
-          <!-- Header media upload -->
-          <HeaderMediaUpload
-            v-if="templateNeedsHeaderMedia"
-            :file="templateHeaderFile"
-            :preview-url="templateHeaderPreview"
-            :accept-types="templateHeaderAccept"
-            :label="selectedTemplate?.header_type === 'IMAGE' ? $t('chat.headerImage') : selectedTemplate?.header_type === 'VIDEO' ? $t('chat.headerVideo') : $t('chat.headerDocument')"
-            @change="handleTemplateHeaderFile"
-            @clear="clearTemplateHeaderMedia"
-          />
 
-          <div v-for="param in templateParamNames" :key="param" class="space-y-1">
-            <label class="text-sm font-medium">{{ param }}</label>
-            <Input
-              v-model="templateParamValues[param]"
-              :placeholder="param"
-              class="h-9"
-            />
-          </div>
-          <div v-for="(btnParam, idx) in templateButtonUrlParams" :key="`btn-${btnParam.index}`" class="space-y-1">
-            <label class="text-sm font-medium">
-              {{ btnParam.type === 'COPY_CODE' ? `Coupon Code (${btnParam.text})` : $t('chat.urlButtonParam', { button: btnParam.text }) }}
-            </label>
-            <Input
-              v-model="templateButtonUrlParams[idx].value"
-              :placeholder="btnParam.type === 'COPY_CODE' ? 'WELCOME10' : $t('chat.urlButtonParamPlaceholder')"
-              class="h-9"
-            />
-          </div>
-          <div v-if="templatePreview" class="space-y-1">
-            <label class="text-xs font-medium text-muted-foreground">{{ $t('chat.preview') }}</label>
-            <div class="chat-bubble chat-bubble-outgoing ml-auto" style="max-width: 100%;">
-              <img v-if="templateHeaderPreview" :src="templateHeaderPreview" class="rounded-lg mb-2 max-h-40 w-full object-cover" />
-              <span class="whitespace-pre-wrap break-words text-sm">{{ templatePreview }}</span>
-              <div
-                v-if="selectedTemplate?.buttons?.length"
-                class="interactive-buttons mt-2 -mx-2 -mb-1.5 border-t"
-              >
-                <div
-                  v-for="(btn, index) in selectedTemplate.buttons"
-                  :key="index"
-                  :class="['py-2 text-sm text-center font-medium', Number(index) > 0 && 'border-t']"
-                >
-                  {{ btn.text }}
+        <!-- Two-column body -->
+        <div class="flex flex-1 min-h-0 divide-x">
+          <!-- Left: Variables -->
+          <div class="flex flex-col w-1/2 min-h-0">
+            <div class="px-1 py-2 shrink-0">
+              <p class="text-xs font-medium text-muted-foreground uppercase tracking-wider px-5">{{ $t('chat.fillParameters') }}</p>
+            </div>
+            <ScrollArea class="flex-1 px-6 pb-4">
+              <div class="space-y-3 pt-1">
+                <!-- Header media upload -->
+                <HeaderMediaUpload
+                  v-if="templateNeedsHeaderMedia"
+                  :file="templateHeaderFile"
+                  :preview-url="templateHeaderPreview"
+                  :accept-types="templateHeaderAccept"
+                  :label="selectedTemplate?.header_type === 'IMAGE' ? $t('chat.headerImage') : selectedTemplate?.header_type === 'VIDEO' ? $t('chat.headerVideo') : $t('chat.headerDocument')"
+                  @change="handleTemplateHeaderFile"
+                  @clear="clearTemplateHeaderMedia"
+                />
+
+                <div v-if="templateParamNames.length === 0 && templateButtonUrlParams.length === 0 && !templateNeedsHeaderMedia" class="py-6 text-center text-sm text-muted-foreground">
+                  {{ $t('chat.noVariables') }}
+                </div>
+
+                <div v-for="param in templateParamNames" :key="param" class="space-y-1">
+                  <label class="text-sm font-medium">{{ param }}</label>
+                  <Input
+                    v-model="templateParamValues[param]"
+                    :placeholder="param"
+                    class="h-9"
+                  />
+                </div>
+
+                <div v-for="(btnParam, idx) in templateButtonUrlParams" :key="`btn-${btnParam.index}`" class="space-y-1">
+                  <label class="text-sm font-medium">
+                    {{ btnParam.type === 'COPY_CODE' ? `Coupon Code (${btnParam.text})` : $t('chat.urlButtonParam', { button: btnParam.text }) }}
+                  </label>
+                  <Input
+                    v-model="templateButtonUrlParams[idx].value"
+                    :placeholder="btnParam.type === 'COPY_CODE' ? 'WELCOME10' : $t('chat.urlButtonParamPlaceholder')"
+                    class="h-9"
+                  />
                 </div>
               </div>
+            </ScrollArea>
+          </div>
+
+          <!-- Right: Preview -->
+          <div class="flex flex-col w-1/2 min-h-0 bg-[#0a0a0b] light:bg-slate-50">
+            <div class="px-1 py-2 shrink-0">
+              <p class="text-xs font-medium text-muted-foreground uppercase tracking-wider px-5">{{ $t('chat.preview') }}</p>
             </div>
+            <ScrollArea class="flex-1 px-6 pb-4">
+              <div class="flex flex-col gap-2 pt-1">
+                <div class="chat-bubble chat-bubble-outgoing ml-auto" style="max-width: 100%;">
+                  <!-- Header text -->
+                  <p v-if="selectedTemplate?.header_type === 'TEXT' && selectedTemplate?.header_content" class="font-semibold text-sm mb-1">
+                    {{ selectedTemplate.header_content }}
+                  </p>
+                  <!-- Header media preview -->
+                  <img v-if="templateHeaderPreview && selectedTemplate?.header_type === 'IMAGE'" :src="templateHeaderPreview" class="rounded-lg mb-2 max-h-40 w-full object-cover" />
+                  <div v-else-if="selectedTemplate?.header_type === 'IMAGE'" class="rounded-lg mb-2 h-24 w-full bg-white/10 flex items-center justify-center text-xs text-muted-foreground">
+                    {{ $t('chat.headerImage') }}
+                  </div>
+                  <div v-else-if="selectedTemplate?.header_type === 'VIDEO' || selectedTemplate?.header_type === 'DOCUMENT'" class="rounded-lg mb-2 h-16 w-full bg-white/10 flex items-center justify-center text-xs text-muted-foreground">
+                    {{ selectedTemplate?.header_type }}
+                  </div>
+                  <!-- Body -->
+                  <span class="whitespace-pre-wrap break-words text-sm">{{ templatePreview || selectedTemplate?.body_content }}</span>
+                  <!-- Footer -->
+                  <p v-if="selectedTemplate?.footer_content" class="text-xs text-muted-foreground mt-1">
+                    {{ selectedTemplate.footer_content }}
+                  </p>
+                  <!-- Buttons -->
+                  <div
+                    v-if="selectedTemplate?.buttons?.length"
+                    class="interactive-buttons mt-2 -mx-2 -mb-1.5 border-t"
+                  >
+                    <div
+                      v-for="(btn, index) in selectedTemplate.buttons"
+                      :key="index"
+                      :class="['py-2 text-sm text-center font-medium', Number(index) > 0 && 'border-t']"
+                    >
+                      {{ btn.text }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </ScrollArea>
           </div>
         </div>
-        <div class="flex justify-end gap-2">
+
+        <!-- Footer: always visible -->
+        <div class="flex justify-end gap-2 px-6 py-4 border-t shrink-0">
           <Button variant="outline" @click="templateDialogOpen = false">{{ $t('common.cancel') }}</Button>
           <Button @click="sendTemplateMessage" :disabled="isSendingTemplate">
             <Loader2 v-if="isSendingTemplate" class="h-4 w-4 mr-2 animate-spin" />

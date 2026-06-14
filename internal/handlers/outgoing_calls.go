@@ -150,10 +150,10 @@ func (a *App) SendCallPermissionRequest(r *fastglue.Request) error {
 
 	waAccount := account.ToWAAccount()
 
-	// Send permission request via WhatsApp Messages API
+	// Send permission request via messaging provider
 	ctx := r.RequestCtx
 	rcpt := whatsapp.Recipient{Phone: contact.PhoneNumber, BSUID: contact.BSUID}
-	messageID, err := a.WhatsApp.SendCallPermissionRequest(ctx, waAccount, rcpt, "")
+	messageID, err := a.getMessagingClient(&account).SendCallPermissionRequest(ctx, waAccount, rcpt, "")
 	if err != nil {
 		a.Log.Error("Failed to send call permission request", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send permission request", nil, "")
@@ -242,9 +242,9 @@ func (a *App) GetCallPermission(r *fastglue.Request) error {
 
 	waAccount := account.ToWAAccount()
 
-	// Check permission via WhatsApp API
+	// Check permission via messaging provider
 	ctx := r.RequestCtx
-	status, err := a.WhatsApp.GetCallPermission(ctx, waAccount, contact.PhoneNumber)
+	status, err := a.getMessagingClient(&account).GetCallPermission(ctx, waAccount, contact.PhoneNumber)
 	if err != nil {
 		a.Log.Error("Failed to check call permission via API", "error", err, "phone", contact.PhoneNumber)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to check permission", nil, "")
