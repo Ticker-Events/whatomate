@@ -321,7 +321,9 @@ type WhatsAppAccount struct {
 	// Calling API. Used by the canned-response editor to disable the Call
 	// button option, and by the send path to refuse voice_call sends.
 	BusinessCallingEnabled bool       `gorm:"default:false" json:"business_calling_enabled"`
+	IsSMB                  bool       `gorm:"default:false" json:"is_smb"`
 	Status                 string     `gorm:"size:20;default:'active'" json:"status"`
+	Pin                    string     `gorm:"size:255" json:"-"` // 6-digit 2FA PIN (encrypted)
 	CreatedByID            *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
 	UpdatedByID            *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 
@@ -333,6 +335,7 @@ type WhatsAppAccount struct {
 	AiSensyPassword  string `gorm:"type:text" json:"-"` // encrypted
 	AiSensyProjectID string `gorm:"size:100" json:"aisensy_project_id,omitempty"`
 	AiSensyToken     string `gorm:"type:text" json:"-"` // cached JWT, encrypted
+
 
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
@@ -370,9 +373,9 @@ func (a *WhatsAppAccount) IsAiSensy() bool {
 	return a.Provider == "aisensy"
 }
 
-// DecryptSecrets decrypts all encrypted credential fields based on provider.
+// DecryptSecrets decrypts all encrypted credential fields (Meta + AiSensy + PIN).
 func (a *WhatsAppAccount) DecryptSecrets(encryptionKey string) {
-	crypto.DecryptFields(encryptionKey, &a.AccessToken, &a.AppSecret, &a.AiSensyPassword, &a.AiSensyToken)
+	crypto.DecryptFields(encryptionKey, &a.AccessToken, &a.AppSecret, &a.Pin, &a.AiSensyPassword, &a.AiSensyToken)
 }
 
 // Contact represents a WhatsApp contact/profile

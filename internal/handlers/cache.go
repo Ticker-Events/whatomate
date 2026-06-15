@@ -222,6 +222,7 @@ type whatsAppAccountCache struct {
 	models.WhatsAppAccount
 	AccessToken     string `json:"access_token"`
 	AppSecret       string `json:"app_secret"`
+	Pin             string `json:"pin"`
 	AiSensyEmail    string `json:"aisensy_email"`
 	AiSensyPassword string `json:"aisensy_password"`
 	AiSensyToken    string `json:"aisensy_token"`
@@ -260,6 +261,7 @@ func (a *App) getWhatsAppAccountCached(phoneID string) (*models.WhatsAppAccount,
 		WhatsAppAccount: account,
 		AccessToken:     account.AccessToken,
 		AppSecret:       account.AppSecret,
+		Pin:             account.Pin,
 		AiSensyEmail:    account.AiSensyEmail,
 		AiSensyPassword: account.AiSensyPassword,
 		AiSensyToken:    account.AiSensyToken,
@@ -276,6 +278,7 @@ func (a *App) getWhatsAppAccountCached(phoneID string) (*models.WhatsAppAccount,
 func restoreWhatsAppAccountSecrets(cacheData *whatsAppAccountCache) {
 	cacheData.WhatsAppAccount.AccessToken = cacheData.AccessToken
 	cacheData.WhatsAppAccount.AppSecret = cacheData.AppSecret
+	cacheData.WhatsAppAccount.Pin = cacheData.Pin
 	cacheData.WhatsAppAccount.AiSensyEmail = cacheData.AiSensyEmail
 	cacheData.WhatsAppAccount.AiSensyPassword = cacheData.AiSensyPassword
 	cacheData.WhatsAppAccount.AiSensyToken = cacheData.AiSensyToken

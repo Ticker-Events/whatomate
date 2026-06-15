@@ -88,3 +88,22 @@ func finalizeContact(db *gorm.DB, contact *models.Contact, profileName string) (
 	}
 	return contact, true, nil
 }
+
+// FindContact finds a contact for the given phone number with both forms (normalized and +prefix).
+func FindContact(db *gorm.DB, orgID uuid.UUID, phoneNumber string) (*models.Contact, error) {
+	normalizedPhone := normalizePhone(phoneNumber)
+	if normalizedPhone == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	var contact models.Contact
+	if err := db.Where("organization_id = ? AND phone_number = ?", orgID, normalizedPhone).First(&contact).Error; err == nil {
+		return &contact, nil
+	}
+
+	if err := db.Where("organization_id = ? AND phone_number = ?", orgID, "+"+normalizedPhone).First(&contact).Error; err == nil {
+		return &contact, nil
+	}
+
+	return nil, gorm.ErrRecordNotFound
+}
