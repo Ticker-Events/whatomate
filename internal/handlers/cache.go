@@ -38,10 +38,11 @@ const (
 	tagsCachePrefix            = "tags:"
 )
 
-// chatbotSettingsCache is used for caching since AI.APIKey has json:"-" tag
+// chatbotSettingsCache is used for caching since AI.APIKey / CommerceMCPAPIKey have json:"-" tags
 type chatbotSettingsCache struct {
 	models.ChatbotSettings
-	AIAPIKey string `json:"ai_api_key_cache"`
+	AIAPIKey          string `json:"ai_api_key_cache"`
+	CommerceMCPAPIKey string `json:"ai_commerce_mcp_api_key_cache"`
 }
 
 // getChatbotSettingsCached retrieves chatbot settings from cache or database
@@ -54,8 +55,9 @@ func (a *App) getChatbotSettingsCached(orgID uuid.UUID, whatsAppAccount string) 
 	if err == nil && cached != "" {
 		var cacheData chatbotSettingsCache
 		if err := json.Unmarshal([]byte(cached), &cacheData); err == nil {
-			// Restore the API key from the cache wrapper
+			// Restore secrets from the cache wrapper
 			cacheData.AI.APIKey = cacheData.AIAPIKey
+			cacheData.AI.CommerceMCPAPIKey = cacheData.CommerceMCPAPIKey
 			return &cacheData.ChatbotSettings, nil
 		}
 	}
@@ -71,10 +73,11 @@ func (a *App) getChatbotSettingsCached(orgID uuid.UUID, whatsAppAccount string) 
 		return nil, result.Error
 	}
 
-	// Cache the result (include AI APIKey explicitly since it has json:"-" tag)
+	// Cache the result (include secrets explicitly since they have json:"-" tags)
 	cacheData := chatbotSettingsCache{
-		ChatbotSettings: settings,
-		AIAPIKey:        settings.AI.APIKey,
+		ChatbotSettings:   settings,
+		AIAPIKey:          settings.AI.APIKey,
+		CommerceMCPAPIKey: settings.AI.CommerceMCPAPIKey,
 	}
 	if data, err := json.Marshal(cacheData); err == nil {
 		a.Redis.Set(ctx, cacheKey, data, settingsCacheTTL)
@@ -203,11 +206,14 @@ func (a *App) deleteKeysByPattern(ctx context.Context, pattern string) {
 	}
 }
 
-// whatsAppAccountCache is used for caching since AccessToken and AppSecret have json:"-" tag
+// whatsAppAccountCache is used for caching since credential fields have json:"-" tags.
 type whatsAppAccountCache struct {
 	models.WhatsAppAccount
-	AccessToken string `json:"access_token"`
-	AppSecret   string `json:"app_secret"`
+	AccessToken     string `json:"access_token"`
+	AppSecret       string `json:"app_secret"`
+	AiSensyEmail    string `json:"aisensy_email"`
+	AiSensyPassword string `json:"aisensy_password"`
+	AiSensyToken    string `json:"aisensy_token"`
 }
 
 // getWhatsAppAccountCached retrieves WhatsApp account by phone_id from cache or database
@@ -220,10 +226,15 @@ func (a *App) getWhatsAppAccountCached(phoneID string) (*models.WhatsAppAccount,
 	if err == nil && cached != "" {
 		var cacheData whatsAppAccountCache
 		if err := json.Unmarshal([]byte(cached), &cacheData); err == nil {
-			cacheData.WhatsAppAccount.AccessToken = cacheData.AccessToken
-			cacheData.WhatsAppAccount.AppSecret = cacheData.AppSecret
-			a.decryptAccountSecrets(&cacheData.WhatsAppAccount)
-			return &cacheData.WhatsAppAccount, nil
+			restoreWhatsAppAccountSecrets(&cacheData)
+			// Older cache entries omitted AiSensy secrets (json:"-"); treat as miss.
+			if cacheData.WhatsAppAccount.Provider == "aisensy" &&
+				(cacheData.WhatsAppAccount.AiSensyEmail == "" || cacheData.WhatsAppAccount.AiSensyPassword == "") {
+				a.Redis.Del(ctx, cacheKey)
+			} else {
+				a.decryptAccountSecrets(&cacheData.WhatsAppAccount)
+				return &cacheData.WhatsAppAccount, nil
+			}
 		}
 	}
 
@@ -233,11 +244,14 @@ func (a *App) getWhatsAppAccountCached(phoneID string) (*models.WhatsAppAccount,
 		return nil, err
 	}
 
-	// Cache the result (include AccessToken and AppSecret explicitly since they have json:"-")
+	// Cache the result (credential fields have json:"-" so copy them explicitly)
 	cacheData := whatsAppAccountCache{
 		WhatsAppAccount: account,
 		AccessToken:     account.AccessToken,
 		AppSecret:       account.AppSecret,
+		AiSensyEmail:    account.AiSensyEmail,
+		AiSensyPassword: account.AiSensyPassword,
+		AiSensyToken:    account.AiSensyToken,
 	}
 	if data, err := json.Marshal(cacheData); err == nil {
 		a.Redis.Set(ctx, cacheKey, data, whatsappAccountCacheTTL)
@@ -246,6 +260,14 @@ func (a *App) getWhatsAppAccountCached(phoneID string) (*models.WhatsAppAccount,
 	// Decrypt secrets before returning
 	a.decryptAccountSecrets(&account)
 	return &account, nil
+}
+
+func restoreWhatsAppAccountSecrets(cacheData *whatsAppAccountCache) {
+	cacheData.WhatsAppAccount.AccessToken = cacheData.AccessToken
+	cacheData.WhatsAppAccount.AppSecret = cacheData.AppSecret
+	cacheData.WhatsAppAccount.AiSensyEmail = cacheData.AiSensyEmail
+	cacheData.WhatsAppAccount.AiSensyPassword = cacheData.AiSensyPassword
+	cacheData.WhatsAppAccount.AiSensyToken = cacheData.AiSensyToken
 }
 
 // decryptAccountSecrets decrypts the encrypted secrets on a WhatsApp account.

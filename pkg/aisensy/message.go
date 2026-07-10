@@ -253,7 +253,7 @@ func (c *Client) SendFlowMessage(ctx context.Context, account *whatsapp.Account,
 		ctaText = ctaText[:20]
 	}
 	if flowToken == "" {
-		flowToken = fmt.Sprintf("flow_%d", account.AiSensyProjectID)
+		flowToken = fmt.Sprintf("flow_%s", account.AiSensyProjectID)
 	}
 	if firstScreen == "" {
 		firstScreen = "FIRST_SCREEN"

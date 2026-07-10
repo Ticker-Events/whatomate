@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
+	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
@@ -51,16 +52,40 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 
 	publisher := queue.NewPublisher(rdb, log)
 
-	return &Worker{
+	aiSensyClient := aisensy.New(cfg.AiSensy, log)
+	w := &Worker{
 		Config:    cfg,
 		DB:        db,
 		Redis:     rdb,
 		Log:       log,
 		WhatsApp:  whatsapp.New(log),
-		AiSensy:   aisensy.New(cfg.AiSensy, log),
+		AiSensy:   aiSensyClient,
 		Consumer:  consumer,
 		Publisher: publisher,
-	}, nil
+	}
+	aiSensyClient.PersistToken = w.persistAiSensyToken
+	return w, nil
+}
+
+// persistAiSensyToken encrypts and stores a refreshed JWT on the WhatsApp account.
+func (w *Worker) persistAiSensyToken(ctx context.Context, projectID, token string) error {
+	if projectID == "" || token == "" {
+		return fmt.Errorf("project_id and token are required")
+	}
+	enc, err := crypto.Encrypt(token, w.Config.App.EncryptionKey)
+	if err != nil {
+		return fmt.Errorf("encrypt aisensy token: %w", err)
+	}
+	res := w.DB.WithContext(ctx).Model(&models.WhatsAppAccount{}).
+		Where("aisensy_project_id = ? AND provider = ?", projectID, "aisensy").
+		Update("aisensy_token", enc)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("no aisensy account found for project_id %s", projectID)
+	}
+	return nil
 }
 
 // Run starts the worker and processes jobs until context is cancelled

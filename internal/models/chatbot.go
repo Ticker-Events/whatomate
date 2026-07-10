@@ -53,6 +53,12 @@ type AIConfig struct {
 	SystemPrompt   string     `gorm:"column:ai_system_prompt;type:text" json:"ai_system_prompt"`
 	IncludeHistory bool       `gorm:"column:ai_include_history;default:true" json:"ai_include_history"`
 	HistoryLimit   int        `gorm:"column:ai_history_limit;default:4" json:"ai_history_limit"`
+
+	// Commerce tools (ticker-events buyer MCP via LLM tool calling)
+	CommerceEnabled   bool   `gorm:"column:ai_commerce_enabled;default:false" json:"ai_commerce_enabled"`
+	CommerceMCPURL    string `gorm:"column:ai_commerce_base_url;size:500" json:"ai_commerce_mcp_url"` // streamable-http endpoint, e.g. http://127.0.0.1:8100/mcp
+	CommerceMCPAPIKey string `gorm:"column:ai_commerce_mcp_api_key;type:text" json:"-"`               // optional X-MCP-API-Key
+	CommerceStoreID   string `gorm:"column:ai_commerce_store_id;size:50" json:"ai_commerce_store_id"`
 }
 
 // PanelFieldConfig defines a field to display in the contact info panel

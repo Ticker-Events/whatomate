@@ -23,12 +23,19 @@ type tokenCacheEntry struct {
 	expiresAt time.Time
 }
 
+// PersistTokenFunc saves a refreshed AiSensy JWT for a project so it can be
+// reused across process restarts (stored encrypted on whatsapp_accounts).
+type PersistTokenFunc func(ctx context.Context, projectID, token string) error
+
 // Client implements whatsapp.MessagingClient using AiSensy's Direct API.
 // It manages JWT generation and automatic refresh on 401 responses.
 type Client struct {
 	HTTPClient *http.Client
 	Log        logf.Logger
 	baseURL    string
+
+	// PersistToken optionally writes refreshed JWTs to durable storage.
+	PersistToken PersistTokenFunc
 
 	// tokenCache caches JWT tokens per project ID to avoid unnecessary regeneration.
 	// key: projectID, value: tokenCacheEntry
@@ -147,12 +154,25 @@ func (c *Client) getToken(ctx context.Context, account *whatsapp.Account) (strin
 		return "", err
 	}
 
+	c.cacheAndPersistToken(ctx, account, projectID, token)
+	return token, nil
+}
+
+func (c *Client) cacheAndPersistToken(ctx context.Context, account *whatsapp.Account, projectID, token string) {
 	exp := jwtExpiry(token)
 	if exp.IsZero() {
 		exp = time.Now().Add(24 * time.Hour) // conservative fallback
 	}
 	c.tokenCache.Store(projectID, tokenCacheEntry{token: token, expiresAt: exp})
-	return token, nil
+	if account != nil {
+		account.AiSensyToken = token
+	}
+	if c.PersistToken == nil {
+		return
+	}
+	if err := c.PersistToken(ctx, projectID, token); err != nil {
+		c.Log.Warn("failed to persist aisensy token", "project_id", projectID, "error", err)
+	}
 }
 
 // invalidateToken clears the cached token for a project so the next call
@@ -183,11 +203,7 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, ac
 		if err != nil {
 			return nil, fmt.Errorf("failed to refresh aisensy token: %w", err)
 		}
-		exp := jwtExpiry(token)
-		if exp.IsZero() {
-			exp = time.Now().Add(24 * time.Hour)
-		}
-		c.tokenCache.Store(account.AiSensyProjectID, tokenCacheEntry{token: token, expiresAt: exp})
+		c.cacheAndPersistToken(ctx, account, account.AiSensyProjectID, token)
 
 		respBody, statusCode, err = c.rawRequest(ctx, method, url, body, token)
 		if err != nil {
@@ -289,12 +305,7 @@ func (c *Client) ValidateCredentials(ctx context.Context, account *whatsapp.Acco
 		return nil, fmt.Errorf("aisensy credential validation failed: %w", err)
 	}
 
-	// Cache the new token
-	exp := jwtExpiry(token)
-	if exp.IsZero() {
-		exp = time.Now().Add(24 * time.Hour)
-	}
-	c.tokenCache.Store(projectID, tokenCacheEntry{token: token, expiresAt: exp})
+	c.cacheAndPersistToken(ctx, account, projectID, token)
 
 	return &whatsapp.CredentialsValidationResult{
 		VerifiedName: "AiSensy Project " + projectID,

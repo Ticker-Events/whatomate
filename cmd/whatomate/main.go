@@ -213,6 +213,7 @@ func runServer(args []string) {
 		Queue:      jobQueue,
 		HTTPClient: httpClient,
 	}
+	aiSensyClient.PersistToken = app.PersistAiSensyToken
 
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client

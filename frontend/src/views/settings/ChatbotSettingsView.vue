@@ -130,10 +130,15 @@ const aiSettings = ref({
   ai_api_key: '',
   ai_model: '',
   ai_max_tokens: 500,
-  ai_system_prompt: ''
+  ai_system_prompt: '',
+  ai_commerce_enabled: false,
+  ai_commerce_mcp_url: '',
+  ai_commerce_mcp_api_key: '',
+  ai_commerce_store_id: ''
 })
 
 const isAIEnabled = ref(false)
+const isAICommerceEnabled = ref(false)
 
 const aiProviders = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
@@ -148,6 +153,10 @@ const availableModels = computed(() => {
 
 watch(isAIEnabled, (newValue) => {
   aiSettings.value.ai_enabled = newValue
+})
+
+watch(isAICommerceEnabled, (newValue) => {
+  aiSettings.value.ai_commerce_enabled = newValue
 })
 
 // SLA Settings
@@ -232,13 +241,19 @@ onMounted(async () => {
 
       const aiEnabledValue = chatbotData.settings.ai_enabled === true
       isAIEnabled.value = aiEnabledValue
+      const aiCommerceEnabledValue = chatbotData.settings.ai_commerce_enabled === true
+      isAICommerceEnabled.value = aiCommerceEnabledValue
       aiSettings.value = {
         ai_enabled: aiEnabledValue,
         ai_provider: chatbotData.settings.ai_provider || '',
         ai_api_key: '',
         ai_model: chatbotData.settings.ai_model || '',
         ai_max_tokens: chatbotData.settings.ai_max_tokens || 500,
-        ai_system_prompt: chatbotData.settings.ai_system_prompt || ''
+        ai_system_prompt: chatbotData.settings.ai_system_prompt || '',
+        ai_commerce_enabled: aiCommerceEnabledValue,
+        ai_commerce_mcp_url: chatbotData.settings.ai_commerce_mcp_url || chatbotData.settings.ai_commerce_base_url || '',
+        ai_commerce_mcp_api_key: '',
+        ai_commerce_store_id: chatbotData.settings.ai_commerce_store_id || ''
       }
 
       const slaEnabledValue = chatbotData.settings.sla_enabled === true
@@ -341,14 +356,21 @@ async function saveAISettings() {
       ai_provider: aiSettings.value.ai_provider,
       ai_model: aiSettings.value.ai_model,
       ai_max_tokens: aiSettings.value.ai_max_tokens,
-      ai_system_prompt: aiSettings.value.ai_system_prompt
+      ai_system_prompt: aiSettings.value.ai_system_prompt,
+      ai_commerce_enabled: aiSettings.value.ai_commerce_enabled,
+      ai_commerce_mcp_url: aiSettings.value.ai_commerce_mcp_url,
+      ai_commerce_store_id: aiSettings.value.ai_commerce_store_id
     }
     if (aiSettings.value.ai_api_key) {
       payload.ai_api_key = aiSettings.value.ai_api_key
     }
+    if (aiSettings.value.ai_commerce_mcp_api_key) {
+      payload.ai_commerce_mcp_api_key = aiSettings.value.ai_commerce_mcp_api_key
+    }
     await chatbotService.updateSettings(payload)
     toast.success(t('chatbotSettings.aiSettingsSaved'))
     aiSettings.value.ai_api_key = ''
+    aiSettings.value.ai_commerce_mcp_api_key = ''
     refreshActivityLog(aiLogKey)
   } catch (error) {
     toast.error(t('chatbotSettings.aiSaveFailed'))
@@ -953,6 +975,50 @@ function removeEscalationUser(userId: string) {
                       :placeholder="$t('chatbotSettings.systemPromptPlaceholder') + '...'"
                       :rows="3"
                     />
+                  </div>
+
+                  <Separator />
+
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <p class="font-medium">{{ $t('chatbotSettings.enableCommerceTools') }}</p>
+                      <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.enableCommerceToolsDesc') }}</p>
+                    </div>
+                    <Switch
+                      :checked="isAICommerceEnabled"
+                      @update:checked="(val: boolean) => isAICommerceEnabled = val"
+                    />
+                  </div>
+
+                  <div v-if="isAICommerceEnabled" class="space-y-4">
+                    <div class="space-y-2">
+                      <Label>{{ $t('chatbotSettings.commerceMcpUrl') }}</Label>
+                      <Input
+                        v-model="aiSettings.ai_commerce_mcp_url"
+                        type="url"
+                        :placeholder="$t('chatbotSettings.commerceMcpUrlPlaceholder')"
+                      />
+                      <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMcpUrlHint') }}</p>
+                    </div>
+                    <div class="space-y-2">
+                      <Label>{{ $t('chatbotSettings.commerceMcpApiKey') }}</Label>
+                      <Input
+                        v-model="aiSettings.ai_commerce_mcp_api_key"
+                        type="password"
+                        :placeholder="$t('chatbotSettings.commerceMcpApiKeyPlaceholder')"
+                      />
+                      <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMcpApiKeyHint') }}</p>
+                    </div>
+                    <div class="space-y-2">
+                      <Label>{{ $t('chatbotSettings.commerceStoreId') }}</Label>
+                      <Input
+                        v-model="aiSettings.ai_commerce_store_id"
+                        :placeholder="$t('chatbotSettings.commerceStoreIdPlaceholder')"
+                        class="w-48"
+                      />
+                      <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceStoreIdHint') }}</p>
+                    </div>
+                    <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMaxTokensHint') }}</p>
                   </div>
                 </div>
 
