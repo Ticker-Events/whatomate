@@ -13,6 +13,8 @@ import (
 const (
 	// CampaignStatsChannel is the Redis pub/sub channel for campaign stats updates
 	CampaignStatsChannel = "whatomate:campaign_stats"
+	// WSBroadcastChannel is the Redis pub/sub channel for cross-instance WebSocket fan-out
+	WSBroadcastChannel = "whatomate:ws:broadcast"
 )
 
 // CampaignStatsUpdate represents a campaign stats update message
@@ -53,6 +55,15 @@ func (p *Publisher) PublishCampaignStats(ctx context.Context, update *CampaignSt
 	}
 
 	p.log.Debug("Published campaign stats update", "campaign_id", update.CampaignID, "status", update.Status)
+	return nil
+}
+
+// PublishWSBroadcast publishes a WebSocket broadcast envelope for other API instances.
+func (p *Publisher) PublishWSBroadcast(ctx context.Context, payload []byte) error {
+	if err := p.client.Publish(ctx, WSBroadcastChannel, payload).Err(); err != nil {
+		p.log.Error("Failed to publish WebSocket broadcast", "error", err)
+		return err
+	}
 	return nil
 }
 
@@ -105,6 +116,40 @@ func (s *Subscriber) SubscribeCampaignStats(ctx context.Context, handler func(up
 				}
 
 				handler(&update)
+			}
+		}
+	}()
+
+	return nil
+}
+
+// SubscribeWSBroadcasts subscribes to cross-instance WebSocket broadcast envelopes.
+// The handler receives the raw JSON payload for each message.
+func (s *Subscriber) SubscribeWSBroadcasts(ctx context.Context, handler func(payload []byte)) error {
+	pubsub := s.client.Subscribe(ctx, WSBroadcastChannel)
+
+	_, err := pubsub.Receive(ctx)
+	if err != nil {
+		_ = pubsub.Close()
+		return err
+	}
+
+	s.log.Info("Subscribed to WebSocket broadcast channel")
+
+	ch := pubsub.Channel()
+	go func() {
+		defer func() { _ = pubsub.Close() }()
+		for {
+			select {
+			case <-ctx.Done():
+				s.log.Info("WebSocket broadcast subscriber shutting down")
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					s.log.Info("WebSocket broadcast channel closed")
+					return
+				}
+				handler([]byte(msg.Payload))
 			}
 		}
 	}()

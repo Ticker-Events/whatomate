@@ -20,16 +20,16 @@ import (
 
 // AccountRequest represents the request body for creating/updating an account
 type AccountRequest struct {
-	Name               string `json:"name" validate:"required"`
+	Name string `json:"name" validate:"required"`
 	// Provider selects the messaging backend: "meta" (default) or "aisensy"
-	Provider           string `json:"provider"`
-	AppID              string `json:"app_id"`
-	PhoneID            string `json:"phone_id" validate:"required"`
-	BusinessID         string `json:"business_id"`
-	AccessToken        string `json:"access_token"`
-	AppSecret          string `json:"app_secret"` // Meta App Secret for webhook signature verification
-	WebhookVerifyToken string `json:"webhook_verify_token"`
-	APIVersion         string `json:"api_version"`
+	Provider               string `json:"provider"`
+	AppID                  string `json:"app_id"`
+	PhoneID                string `json:"phone_id" validate:"required"`
+	BusinessID             string `json:"business_id"`
+	AccessToken            string `json:"access_token"`
+	AppSecret              string `json:"app_secret"` // Meta App Secret for webhook signature verification
+	WebhookVerifyToken     string `json:"webhook_verify_token"`
+	APIVersion             string `json:"api_version"`
 	IsDefaultIncoming      bool   `json:"is_default_incoming"`
 	IsDefaultOutgoing      bool   `json:"is_default_outgoing"`
 	AutoReadReceipt        bool   `json:"auto_read_receipt"`
@@ -43,32 +43,32 @@ type AccountRequest struct {
 
 // AccountResponse represents the response for an account (without sensitive data)
 type AccountResponse struct {
-	ID                 uuid.UUID  `json:"id"`
-	Name               string     `json:"name"`
-	Provider           string     `json:"provider"`
-	AppID              string     `json:"app_id"`
-	PhoneID            string     `json:"phone_id"`
-	BusinessID         string     `json:"business_id"`
-	WebhookVerifyToken string     `json:"webhook_verify_token"`
-	APIVersion         string     `json:"api_version"`
+	ID                     uuid.UUID  `json:"id"`
+	Name                   string     `json:"name"`
+	Provider               string     `json:"provider"`
+	AppID                  string     `json:"app_id"`
+	PhoneID                string     `json:"phone_id"`
+	BusinessID             string     `json:"business_id"`
+	WebhookVerifyToken     string     `json:"webhook_verify_token"`
+	APIVersion             string     `json:"api_version"`
 	IsDefaultIncoming      bool       `json:"is_default_incoming"`
 	IsDefaultOutgoing      bool       `json:"is_default_outgoing"`
 	AutoReadReceipt        bool       `json:"auto_read_receipt"`
 	BusinessCallingEnabled bool       `json:"business_calling_enabled"`
 	Status                 string     `json:"status"`
-	HasAccessToken     bool       `json:"has_access_token"`
-	HasAppSecret       bool       `json:"has_app_secret"`
-	AiSensyEmail       string     `json:"aisensy_email,omitempty"`
-	AiSensyProjectID   string     `json:"aisensy_project_id,omitempty"`
-	HasAiSensyPassword bool       `json:"has_aisensy_password"`
-	PhoneNumber        string     `json:"phone_number,omitempty"`
-	DisplayName        string     `json:"display_name,omitempty"`
-	CreatedByID        *uuid.UUID `json:"created_by_id,omitempty"`
-	CreatedByName      string     `json:"created_by_name,omitempty"`
-	UpdatedByID        *uuid.UUID `json:"updated_by_id,omitempty"`
-	UpdatedByName      string     `json:"updated_by_name,omitempty"`
-	CreatedAt          string     `json:"created_at"`
-	UpdatedAt          string     `json:"updated_at"`
+	HasAccessToken         bool       `json:"has_access_token"`
+	HasAppSecret           bool       `json:"has_app_secret"`
+	AiSensyEmail           string     `json:"aisensy_email,omitempty"`
+	AiSensyProjectID       string     `json:"aisensy_project_id,omitempty"`
+	HasAiSensyPassword     bool       `json:"has_aisensy_password"`
+	PhoneNumber            string     `json:"phone_number,omitempty"`
+	DisplayName            string     `json:"display_name,omitempty"`
+	CreatedByID            *uuid.UUID `json:"created_by_id,omitempty"`
+	CreatedByName          string     `json:"created_by_name,omitempty"`
+	UpdatedByID            *uuid.UUID `json:"updated_by_id,omitempty"`
+	UpdatedByName          string     `json:"updated_by_name,omitempty"`
+	CreatedAt              string     `json:"created_at"`
+	UpdatedAt              string     `json:"updated_at"`
 }
 
 // ListAccounts returns all WhatsApp accounts for the organization
@@ -154,26 +154,26 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 	}
 
 	account := models.WhatsAppAccount{
-		OrganizationID:     orgID,
-		Name:               req.Name,
-		Provider:           provider,
-		AppID:              req.AppID,
-		PhoneID:            req.PhoneID,
-		BusinessID:         req.BusinessID,
-		AccessToken:        encAccessToken,
-		AppSecret:          encAppSecret,
-		WebhookVerifyToken: webhookVerifyToken,
-		APIVersion:         apiVersion,
+		OrganizationID:         orgID,
+		Name:                   req.Name,
+		Provider:               provider,
+		AppID:                  req.AppID,
+		PhoneID:                req.PhoneID,
+		BusinessID:             req.BusinessID,
+		AccessToken:            encAccessToken,
+		AppSecret:              encAppSecret,
+		WebhookVerifyToken:     webhookVerifyToken,
+		APIVersion:             apiVersion,
 		IsDefaultIncoming:      req.IsDefaultIncoming,
 		IsDefaultOutgoing:      req.IsDefaultOutgoing,
 		AutoReadReceipt:        req.AutoReadReceipt,
 		BusinessCallingEnabled: req.BusinessCallingEnabled,
 		Status:                 "active",
-		CreatedByID:        &userID,
-		UpdatedByID:        &userID,
-		AiSensyEmail:       req.AiSensyEmail,
-		AiSensyPassword:    encAiSensyPassword,
-		AiSensyProjectID:   req.AiSensyProjectID,
+		CreatedByID:            &userID,
+		UpdatedByID:            &userID,
+		AiSensyEmail:           req.AiSensyEmail,
+		AiSensyPassword:        encAiSensyPassword,
+		AiSensyProjectID:       req.AiSensyProjectID,
 	}
 
 	// If this is set as default, unset other defaults
@@ -483,28 +483,28 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		provider = "meta"
 	}
 	resp := AccountResponse{
-		ID:                 acc.ID,
-		Name:               acc.Name,
-		Provider:           provider,
-		AppID:              acc.AppID,
-		PhoneID:            acc.PhoneID,
-		BusinessID:         acc.BusinessID,
-		WebhookVerifyToken: acc.WebhookVerifyToken,
-		APIVersion:         acc.APIVersion,
+		ID:                     acc.ID,
+		Name:                   acc.Name,
+		Provider:               provider,
+		AppID:                  acc.AppID,
+		PhoneID:                acc.PhoneID,
+		BusinessID:             acc.BusinessID,
+		WebhookVerifyToken:     acc.WebhookVerifyToken,
+		APIVersion:             acc.APIVersion,
 		IsDefaultIncoming:      acc.IsDefaultIncoming,
 		IsDefaultOutgoing:      acc.IsDefaultOutgoing,
 		AutoReadReceipt:        acc.AutoReadReceipt,
 		BusinessCallingEnabled: acc.BusinessCallingEnabled,
 		Status:                 acc.Status,
-		HasAccessToken:     acc.AccessToken != "",
-		HasAppSecret:       acc.AppSecret != "",
-		AiSensyEmail:       acc.AiSensyEmail,
-		AiSensyProjectID:   acc.AiSensyProjectID,
-		HasAiSensyPassword: acc.AiSensyPassword != "",
-		CreatedByID:        acc.CreatedByID,
-		UpdatedByID:        acc.UpdatedByID,
-		CreatedAt:          acc.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:          acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		HasAccessToken:         acc.AccessToken != "",
+		HasAppSecret:           acc.AppSecret != "",
+		AiSensyEmail:           acc.AiSensyEmail,
+		AiSensyProjectID:       acc.AiSensyProjectID,
+		HasAiSensyPassword:     acc.AiSensyPassword != "",
+		CreatedByID:            acc.CreatedByID,
+		UpdatedByID:            acc.UpdatedByID,
+		CreatedAt:              acc.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:              acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 	if acc.CreatedBy != nil {
 		resp.CreatedByName = acc.CreatedBy.FullName
@@ -534,6 +534,31 @@ func (a *App) validateAccountCredentials(account *whatsapp.Account) (*whatsapp.C
 	}
 	a.Log.Info("Account credentials validated successfully", "phone_id", account.PhoneID, "provider", account.Provider)
 	return result, nil
+}
+
+// PersistAiSensyToken encrypts and stores a refreshed AiSensy JWT on the
+// matching WhatsApp account so tokens survive process restarts.
+func (a *App) PersistAiSensyToken(ctx context.Context, projectID, token string) error {
+	if projectID == "" || token == "" {
+		return fmt.Errorf("project_id and token are required")
+	}
+	enc, err := crypto.Encrypt(token, a.Config.App.EncryptionKey)
+	if err != nil {
+		return fmt.Errorf("encrypt aisensy token: %w", err)
+	}
+
+	var account models.WhatsAppAccount
+	if err := a.DB.WithContext(ctx).
+		Where("aisensy_project_id = ? AND provider = ?", projectID, "aisensy").
+		First(&account).Error; err != nil {
+		return fmt.Errorf("find aisensy account: %w", err)
+	}
+
+	if err := a.DB.WithContext(ctx).Model(&account).Update("aisensy_token", enc).Error; err != nil {
+		return fmt.Errorf("update aisensy token: %w", err)
+	}
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+	return nil
 }
 
 // SubscribeApp subscribes the app to webhooks for the WhatsApp Business Account.

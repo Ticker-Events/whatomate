@@ -172,7 +172,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			mediaID := req.MediaID
 			if mediaID == "" && len(req.MediaData) > 0 {
 				var err error
-				mediaID, err = client.UploadMedia(sendCtx, waAccount, req.MediaData, req.MediaMimeType, req.MediaFilename)
+				mediaID, err = a.resolveOutgoingMediaRef(sendCtx, req.Account, req.MediaData, req.MediaMimeType, req.MediaFilename)
 				if err != nil {
 					return "", fmt.Errorf("failed to upload media: %w", err)
 				}
@@ -844,8 +844,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 
 		// Upload to provider if we have raw data (options 2 & 3)
 		if len(headerMediaData) > 0 {
-			waAcct := a.toWhatsAppAccount(account)
-			mediaID, err := a.getMessagingClient(account).UploadMedia(context.Background(), waAcct, headerMediaData, headerMimeType, "header")
+			mediaID, err := a.resolveOutgoingMediaRef(context.Background(), account, headerMediaData, headerMimeType, "header")
 			if err != nil {
 				a.Log.Error("Failed to upload template header media", "error", err)
 				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload header media to WhatsApp", nil, "")

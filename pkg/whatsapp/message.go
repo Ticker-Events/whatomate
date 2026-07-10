@@ -391,7 +391,12 @@ func BuildTemplateComponents(bodyParams map[string]string, headerType, headerMed
 	// Add header component if media is provided
 	if headerMediaID != "" {
 		mediaType := strings.ToLower(headerType) // "image", "video", "document"
-		mediaObj := map[string]any{"id": headerMediaID}
+		var mediaObj map[string]any
+		if strings.HasPrefix(headerMediaID, "https://") || strings.HasPrefix(headerMediaID, "http://") {
+			mediaObj = map[string]any{"link": headerMediaID}
+		} else {
+			mediaObj = map[string]any{"id": headerMediaID}
+		}
 		if mediaType == "document" && headerMediaFilename != "" {
 			mediaObj["filename"] = headerMediaFilename
 		}

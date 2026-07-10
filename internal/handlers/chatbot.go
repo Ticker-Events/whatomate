@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,6 +32,10 @@ type ChatbotSettingsResponse struct {
 	AIModel                      string            `json:"ai_model"`
 	AIMaxTokens                  int               `json:"ai_max_tokens"`
 	AISystemPrompt               string            `json:"ai_system_prompt"`
+	AICommerceEnabled            bool              `json:"ai_commerce_enabled"`
+	AICommerceMCPURL             string            `json:"ai_commerce_mcp_url"`
+	AICommerceStoreID            string            `json:"ai_commerce_store_id"`
+	AICommerceMCPAPIKeySet       bool              `json:"ai_commerce_mcp_api_key_set"`
 	// SLA Settings
 	SLAEnabled             bool     `json:"sla_enabled"`
 	SLAResponseMinutes     int      `json:"sla_response_minutes"`
@@ -171,11 +176,15 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AssignToSameAgent:            settings.AgentAssignment.AssignToSameAgent,
 		AgentCurrentConversationOnly: settings.AgentAssignment.CurrentConversationOnly,
 		// AI
-		AIEnabled:      settings.AI.Enabled,
-		AIProvider:     settings.AI.Provider,
-		AIModel:        settings.AI.Model,
-		AIMaxTokens:    settings.AI.MaxTokens,
-		AISystemPrompt: settings.AI.SystemPrompt,
+		AIEnabled:              settings.AI.Enabled,
+		AIProvider:             settings.AI.Provider,
+		AIModel:                settings.AI.Model,
+		AIMaxTokens:            settings.AI.MaxTokens,
+		AISystemPrompt:         settings.AI.SystemPrompt,
+		AICommerceEnabled:      settings.AI.CommerceEnabled,
+		AICommerceMCPURL:       settings.AI.CommerceMCPURL,
+		AICommerceStoreID:      settings.AI.CommerceStoreID,
+		AICommerceMCPAPIKeySet: strings.TrimSpace(settings.AI.CommerceMCPAPIKey) != "",
 		// SLA Settings
 		SLAEnabled:             settings.SLA.Enabled,
 		SLAResponseMinutes:     settings.SLA.ResponseMinutes,
@@ -256,11 +265,14 @@ func chatbotSLASnapshot(s *models.ChatbotSettings) map[string]any {
 // change the activity log should surface.
 func chatbotAISnapshot(s *models.ChatbotSettings) map[string]any {
 	return map[string]any{
-		"ai_enabled":       s.AI.Enabled,
-		"ai_provider":      s.AI.Provider,
-		"ai_model":         s.AI.Model,
-		"ai_max_tokens":    s.AI.MaxTokens,
-		"ai_system_prompt": s.AI.SystemPrompt,
+		"ai_enabled":           s.AI.Enabled,
+		"ai_provider":          s.AI.Provider,
+		"ai_model":             s.AI.Model,
+		"ai_max_tokens":        s.AI.MaxTokens,
+		"ai_system_prompt":     s.AI.SystemPrompt,
+		"ai_commerce_enabled":  s.AI.CommerceEnabled,
+		"ai_commerce_mcp_url":  s.AI.CommerceMCPURL,
+		"ai_commerce_store_id": s.AI.CommerceStoreID,
 	}
 }
 
@@ -290,6 +302,10 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AIModel                      *string            `json:"ai_model"`
 		AIMaxTokens                  *int               `json:"ai_max_tokens"`
 		AISystemPrompt               *string            `json:"ai_system_prompt"`
+		AICommerceEnabled            *bool              `json:"ai_commerce_enabled"`
+		AICommerceMCPURL             *string            `json:"ai_commerce_mcp_url"`
+		AICommerceMCPAPIKey          *string            `json:"ai_commerce_mcp_api_key"`
+		AICommerceStoreID            *string            `json:"ai_commerce_store_id"`
 		// SLA Settings
 		SLAEnabled             *bool     `json:"sla_enabled"`
 		SLAResponseMinutes     *int      `json:"sla_response_minutes"`
@@ -349,7 +365,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.ClientReminderMessage != nil || req.ClientAutoCloseMinutes != nil ||
 		req.ClientAutoCloseMessage != nil
 	aiTouched := req.AIEnabled != nil || req.AIProvider != nil || req.AIAPIKey != nil ||
-		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil
+		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil ||
+		req.AICommerceEnabled != nil || req.AICommerceMCPURL != nil ||
+		req.AICommerceMCPAPIKey != nil || req.AICommerceStoreID != nil
 
 	// Update fields if provided
 	if req.Enabled != nil {
@@ -425,6 +443,18 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.AISystemPrompt != nil {
 		settings.AI.SystemPrompt = *req.AISystemPrompt
+	}
+	if req.AICommerceEnabled != nil {
+		settings.AI.CommerceEnabled = *req.AICommerceEnabled
+	}
+	if req.AICommerceMCPURL != nil {
+		settings.AI.CommerceMCPURL = strings.TrimRight(strings.TrimSpace(*req.AICommerceMCPURL), "/")
+	}
+	if req.AICommerceMCPAPIKey != nil && *req.AICommerceMCPAPIKey != "" {
+		settings.AI.CommerceMCPAPIKey = *req.AICommerceMCPAPIKey
+	}
+	if req.AICommerceStoreID != nil {
+		settings.AI.CommerceStoreID = strings.TrimSpace(*req.AICommerceStoreID)
 	}
 
 	// SLA Settings

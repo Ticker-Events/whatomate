@@ -115,54 +115,15 @@ func (c *Client) DownloadMedia(ctx context.Context, mediaURL string, accessToken
 	return data, nil
 }
 
-// UploadMedia uploads media to AiSensy via its media upload endpoint.
-// AiSensy's Direct API accepts the same multipart upload format as Meta.
+// UploadMedia is not supported by AiSensy Direct API. AiSensy fetches outbound
+// media from a publicly accessible HTTPS URL — callers must host the file
+// (e.g. S3/Spaces) and pass that URL to Send*Message / template headers.
 func (c *Client) UploadMedia(ctx context.Context, account *whatsapp.Account, data []byte, mimeType, filename string) (string, error) {
-	token, err := c.getToken(ctx, account)
-	if err != nil {
-		return "", fmt.Errorf("failed to get aisensy token for upload: %w", err)
-	}
-
-	// AiSensy uses the same /media endpoint pattern as Meta but under their base URL
-	url := fmt.Sprintf("%s/media/", c.baseURL)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
-	if err != nil {
-		return "", fmt.Errorf("failed to create upload request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", mimeType)
-	if filename != "" {
-		req.Header.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	}
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("media upload failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read upload response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", parseAPIError(resp.StatusCode, respBody)
-	}
-
-	var result struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse upload response: %w", err)
-	}
-
-	return result.ID, nil
+	return "", fmt.Errorf("aisensy does not support binary media upload; provide a publicly accessible HTTPS URL")
 }
 
 // ResumableUpload is not supported for AiSensy (returns ErrNotSupported).
-// Template header media should be uploaded via UploadMedia instead.
+// Template header samples for AiSensy should use a public HTTPS media link.
 func (c *Client) ResumableUpload(ctx context.Context, account *whatsapp.Account, data []byte, mimeType, filename string) (string, error) {
 	return "", ErrNotSupported
 }

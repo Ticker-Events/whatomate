@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -27,6 +29,46 @@ func (a *App) getMediaStoragePath() string {
 func (a *App) ensureMediaDir(subdir string) error {
 	path := filepath.Join(a.getMediaStoragePath(), subdir)
 	return os.MkdirAll(path, 0755)
+}
+
+// resolveOutgoingMediaRef prepares media for sending via the account's provider.
+// Meta accounts upload bytes and return a media ID. AiSensy requires a publicly
+// accessible HTTPS URL, so we host the file on S3/Spaces and return a presigned link.
+func (a *App) resolveOutgoingMediaRef(ctx context.Context, account *models.WhatsAppAccount, data []byte, mimeType, filename string) (string, error) {
+	if account != nil && account.IsAiSensy() {
+		return a.uploadAiSensyMediaLink(ctx, data, mimeType, filename)
+	}
+	waAccount := a.toWhatsAppAccount(account)
+	return a.getMessagingClient(account).UploadMedia(ctx, waAccount, data, mimeType, filename)
+}
+
+// uploadAiSensyMediaLink stores media on S3 and returns a time-limited HTTPS URL
+// that AiSensy can fetch when delivering the message.
+func (a *App) uploadAiSensyMediaLink(ctx context.Context, data []byte, mimeType, filename string) (string, error) {
+	if a.S3Client == nil {
+		return "", fmt.Errorf("aisensy media requires S3/Spaces storage (configure [storage] type=s3)")
+	}
+
+	ext := getExtensionFromMimeType(mimeType)
+	if ext == "" {
+		if dot := strings.LastIndex(filename, "."); dot >= 0 {
+			ext = filename[dot:]
+		} else {
+			ext = ".bin"
+		}
+	}
+	safeName := sanitizeFilename(filename)
+	if safeName == "" {
+		safeName = "file" + ext
+	}
+	key := fmt.Sprintf("aisensy-media/%s/%s", uuid.New().String(), safeName)
+
+	url, err := a.S3Client.UploadAndPresign(ctx, key, bytes.NewReader(data), mimeType, time.Hour)
+	if err != nil {
+		return "", fmt.Errorf("upload media to S3 for aisensy: %w", err)
+	}
+	a.Log.Info("AiSensy media hosted on S3", "key", key, "size", len(data))
+	return url, nil
 }
 
 // getExtensionFromMimeType returns file extension based on mime type

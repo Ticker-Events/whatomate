@@ -857,6 +857,13 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 			ctx.session.SessionData = models.JSONB{}
 		}
 		maps.Copy(ctx.session.SessionData, ctx.flowResponseData)
+		a.Log.Info("WhatsApp Flow response merged into session",
+			"session_id", ctx.session.ID,
+			"node_id", node.ID,
+			"flow_id", stringFromConfig(node.Config, "flow_id"),
+			"parsed_fields", ctx.flowResponseData,
+			"session_data", ctx.session.SessionData,
+		)
 		return nodeOutcome{outcome: "default"}, nil
 	}
 

@@ -5,8 +5,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+)
+
+const (
+	slaLockKey = "whatomate:sla:lock"
+	slaLockTTL = 90 * time.Second // must exceed the processing interval
 )
 
 // SLAProcessor handles periodic SLA checks and escalations
@@ -14,6 +20,7 @@ type SLAProcessor struct {
 	app      *App
 	interval time.Duration
 	stopCh   chan struct{}
+	lockID   string
 }
 
 // NewSLAProcessor creates a new SLA processor
@@ -22,12 +29,13 @@ func NewSLAProcessor(app *App, interval time.Duration) *SLAProcessor {
 		app:      app,
 		interval: interval,
 		stopCh:   make(chan struct{}),
+		lockID:   uuid.New().String(),
 	}
 }
 
 // Start begins the SLA processing loop
 func (p *SLAProcessor) Start(ctx context.Context) {
-	p.app.Log.Info("SLA processor started", "interval", p.interval)
+	p.app.Log.Info("SLA processor started", "interval", p.interval, "lock_id", p.lockID)
 
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
@@ -36,14 +44,73 @@ func (p *SLAProcessor) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			p.app.Log.Info("SLA processor stopped by context")
+			p.releaseLock()
 			return
 		case <-p.stopCh:
 			p.app.Log.Info("SLA processor stopped")
+			p.releaseLock()
 			return
 		case <-ticker.C:
+			if !p.tryAcquireOrRenewLock(ctx) {
+				p.app.Log.Debug("SLA processor skipped; another instance holds the lock")
+				continue
+			}
 			p.processStaleTransfers()
 		}
 	}
+}
+
+// tryAcquireOrRenewLock ensures only one API instance runs SLA work.
+func (p *SLAProcessor) tryAcquireOrRenewLock(ctx context.Context) bool {
+	if p.app.Redis == nil {
+		return true
+	}
+
+	ok, err := p.app.Redis.SetNX(ctx, slaLockKey, p.lockID, slaLockTTL).Result()
+	if err != nil {
+		p.app.Log.Error("Failed to acquire SLA lock", "error", err)
+		return false
+	}
+	if ok {
+		return true
+	}
+
+	current, err := p.app.Redis.Get(ctx, slaLockKey).Result()
+	if err == redis.Nil {
+		ok, err = p.app.Redis.SetNX(ctx, slaLockKey, p.lockID, slaLockTTL).Result()
+		if err != nil {
+			p.app.Log.Error("Failed to re-acquire SLA lock", "error", err)
+			return false
+		}
+		return ok
+	}
+	if err != nil {
+		p.app.Log.Error("Failed to read SLA lock", "error", err)
+		return false
+	}
+	if current != p.lockID {
+		return false
+	}
+
+	if err := p.app.Redis.Expire(ctx, slaLockKey, slaLockTTL).Err(); err != nil {
+		p.app.Log.Error("Failed to renew SLA lock", "error", err)
+		return false
+	}
+	return true
+}
+
+func (p *SLAProcessor) releaseLock() {
+	if p.app.Redis == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	current, err := p.app.Redis.Get(ctx, slaLockKey).Result()
+	if err != nil || current != p.lockID {
+		return
+	}
+	_ = p.app.Redis.Del(ctx, slaLockKey).Err()
 }
 
 // Stop stops the SLA processor
