@@ -10,6 +10,7 @@ bin/
 
 # Config with secrets
 config.toml
+digitalocean/k8s/**/secrets.yaml
 
 # Test binary, built with `go test -c`
 *.test

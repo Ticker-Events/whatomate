@@ -67,10 +67,13 @@ const (
 
 // BroadcastMessage represents a message to be broadcast to clients
 type BroadcastMessage struct {
-	OrgID     uuid.UUID
-	UserID    uuid.UUID // Optional: only send to specific user
-	ContactID uuid.UUID // Optional: only send to users viewing this contact
-	Message   WSMessage
+	OrgID     uuid.UUID `json:"org_id"`
+	UserID    uuid.UUID `json:"user_id"`     // Optional: only send to specific user
+	ContactID uuid.UUID `json:"contact_id"` // Optional: only send to users viewing this contact
+	Message   WSMessage `json:"message"`
+	// OriginID identifies the process that published this message over Redis.
+	// Empty for local-only delivery. Used to skip echo on the publishing instance.
+	OriginID string `json:"origin_id,omitempty"`
 }
 
 // AuthPayload is the payload for auth messages from client

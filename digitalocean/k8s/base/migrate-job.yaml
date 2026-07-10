@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agent-migrate
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: do-registry
+      containers:
+        - name: migrate
+          image: registry.digitalocean.com/tiqr/tiqr-agent:latest
+          imagePullPolicy: Always
+          command: ["./whatomate"]
+          args: ["migrate", "-config", "/app/config.toml"]
+          envFrom:
+            - configMapRef:
+                name: agent-config
+            - secretRef:
+                name: agent-secrets
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.toml
+              subPath: config.toml
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          secret:
+            secretName: agent-config-toml

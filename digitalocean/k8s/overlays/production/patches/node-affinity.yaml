@@ -1,0 +1,15 @@
+# Pin all tiqr-agent workloads to the dedicated agent node pool.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unused
+spec:
+  template:
+    spec:
+      nodeSelector:
+        tiqr.events/workload: agent
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: agent
+          effect: NoSchedule

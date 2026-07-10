@@ -1,12 +1,18 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 
 	"github.com/google/uuid"
 	"github.com/zerodha/logf"
 )
+
+// Broadcaster publishes WebSocket envelopes to other API instances.
+type Broadcaster interface {
+	PublishWSBroadcast(ctx context.Context, payload []byte) error
+}
 
 // Hub maintains the set of active clients and broadcasts messages to them
 type Hub struct {
@@ -27,6 +33,12 @@ type Hub struct {
 
 	// logger
 	log logf.Logger
+
+	// optional Redis publisher for cross-instance fan-out
+	publisher Broadcaster
+
+	// unique ID for this process; used to ignore Redis echoes of our own publishes
+	instanceID string
 }
 
 // NewHub creates a new Hub instance
@@ -37,7 +49,18 @@ func NewHub(log logf.Logger) *Hub {
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		log:        log,
+		instanceID: uuid.New().String(),
 	}
+}
+
+// InstanceID returns this hub's process identity for Redis fan-out.
+func (h *Hub) InstanceID() string {
+	return h.instanceID
+}
+
+// SetPublisher enables Redis pub/sub fan-out of broadcasts to other API instances.
+func (h *Hub) SetPublisher(publisher Broadcaster) {
+	h.publisher = publisher
 }
 
 // Run starts the hub's main loop
@@ -168,13 +191,49 @@ func (h *Hub) broadcastMessage(msg BroadcastMessage) {
 	}
 }
 
-// Broadcast sends a message to the broadcast channel
+// Broadcast sends a message to local clients and fans out via Redis when configured.
 func (h *Hub) Broadcast(msg BroadcastMessage) {
+	h.DeliverLocal(msg)
+	h.publishRemote(msg)
+}
+
+// DeliverLocal enqueues a message for local clients only (no Redis publish).
+// Used for Redis-received fan-out and campaign-stats subscriber delivery.
+func (h *Hub) DeliverLocal(msg BroadcastMessage) {
 	select {
 	case h.broadcast <- msg:
 	default:
 		h.log.Warn("Broadcast channel full, dropping message")
 	}
+}
+
+func (h *Hub) publishRemote(msg BroadcastMessage) {
+	if h.publisher == nil {
+		return
+	}
+	msg.OriginID = h.instanceID
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		h.log.Error("Failed to marshal WebSocket fan-out message", "error", err)
+		return
+	}
+	if err := h.publisher.PublishWSBroadcast(context.Background(), payload); err != nil {
+		h.log.Error("Failed to fan-out WebSocket broadcast", "error", err)
+	}
+}
+
+// HandleRemoteBroadcast delivers a Redis fan-out payload to local clients,
+// ignoring echoes from this instance.
+func (h *Hub) HandleRemoteBroadcast(payload []byte) {
+	var msg BroadcastMessage
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		h.log.Error("Failed to unmarshal WebSocket fan-out message", "error", err)
+		return
+	}
+	if msg.OriginID != "" && msg.OriginID == h.instanceID {
+		return
+	}
+	h.DeliverLocal(msg)
 }
 
 // BroadcastToOrg sends a message to all clients in an organization

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
@@ -49,9 +50,19 @@ func (c *Client) SendTextMessage(ctx context.Context, account *whatsapp.Account,
 	return c.sendMessage(ctx, account, payload)
 }
 
+// mediaRef builds an image/video/audio/document object. AiSensy requires a
+// publicly accessible HTTPS URL (link); Meta-style media IDs are only used
+// when the ref is not a URL.
+func mediaRef(ref string) map[string]any {
+	if strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "http://") {
+		return map[string]any{"link": ref}
+	}
+	return map[string]any{"id": ref}
+}
+
 // SendImageMessage sends an image message via AiSensy.
 func (c *Client) SendImageMessage(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, mediaID, caption string) (string, error) {
-	img := map[string]any{"id": mediaID}
+	img := mediaRef(mediaID)
 	if caption != "" {
 		img["caption"] = caption
 	}
@@ -67,7 +78,7 @@ func (c *Client) SendImageMessage(ctx context.Context, account *whatsapp.Account
 
 // SendVideoMessage sends a video message via AiSensy.
 func (c *Client) SendVideoMessage(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, mediaID, caption string) (string, error) {
-	vid := map[string]any{"id": mediaID}
+	vid := mediaRef(mediaID)
 	if caption != "" {
 		vid["caption"] = caption
 	}
@@ -87,7 +98,7 @@ func (c *Client) SendAudioMessage(ctx context.Context, account *whatsapp.Account
 		"messaging_product": "whatsapp",
 		"recipient_type":    "individual",
 		"type":              "audio",
-		"audio":             map[string]any{"id": mediaID},
+		"audio":             mediaRef(mediaID),
 	}
 	rcpt.SetOnPayload(payload)
 	return c.sendMessage(ctx, account, payload)
@@ -95,7 +106,7 @@ func (c *Client) SendAudioMessage(ctx context.Context, account *whatsapp.Account
 
 // SendDocumentMessage sends a document message via AiSensy.
 func (c *Client) SendDocumentMessage(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, mediaID, filename, caption string) (string, error) {
-	doc := map[string]any{"id": mediaID}
+	doc := mediaRef(mediaID)
 	if filename != "" {
 		doc["filename"] = filename
 	}

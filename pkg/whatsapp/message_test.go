@@ -777,6 +777,16 @@ func TestBuildTemplateComponents_ImageHeaderOmitsFilename(t *testing.T) {
 	assert.False(t, hasFilename, "image headers must not include filename")
 }
 
+func TestBuildTemplateComponents_URLHeaderUsesLink(t *testing.T) {
+	components := whatsapp.BuildTemplateComponents(nil, "IMAGE", "https://cdn.example.com/photo.jpg", "photo.jpg")
+	require.Len(t, components, 1)
+	params := components[0]["parameters"].([]map[string]any)
+	img := params[0]["image"].(map[string]any)
+	assert.Equal(t, "https://cdn.example.com/photo.jpg", img["link"])
+	_, hasID := img["id"]
+	assert.False(t, hasID)
+}
+
 func TestBuildTemplateComponents_DocumentHeaderEmptyFilename(t *testing.T) {
 	// If no filename was supplied, don't include the key — better than sending
 	// an empty string Meta might reject.
