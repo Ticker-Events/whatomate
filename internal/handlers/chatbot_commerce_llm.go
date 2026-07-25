@@ -14,7 +14,9 @@ import (
 // generateAIResponseWithCommerce runs a tool-calling loop when commerce is configured;
 // otherwise falls through to the existing single-shot providers.
 func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string) (string, error) {
+	// Build context from AIContext entries, then append product-card instructions + cart.
 	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
+	contextData = augmentAIContextWithProducts(contextData, session)
 	rt := a.newCommerceRuntime(settings, session)
 
 	if rt != nil {

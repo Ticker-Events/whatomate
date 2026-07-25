@@ -50,6 +50,7 @@ type OutgoingMessageRequest struct {
 	Buttons         []whatsapp.Button // For button/list messages
 	ButtonText      string            // For CTA URL button
 	URL             string            // For CTA URL button
+	HeaderImageURL  string            // Optional image header link for button/list interactive messages
 
 	// voice_call interactive (WhatsApp Business Calling)
 	DisplayText      string // Button face label
@@ -196,7 +197,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			case "voice_call":
 				return client.SendVoiceCallButton(sendCtx, waAccount, rcpt, req.BodyText, req.DisplayText, req.TTLMinutes, req.VoiceCallPayload)
 			default: // "button" or "list"
-				return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons)
+				return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, req.HeaderImageURL)
 			}
 
 		case models.MessageTypeTemplate:
@@ -401,11 +402,15 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 		for i, btn := range req.Buttons {
 			buttons[i] = map[string]string{"id": btn.ID, "title": btn.Title}
 		}
-		return models.JSONB{
+		out := models.JSONB{
 			"type":    "button",
 			"body":    req.BodyText,
 			"buttons": buttons,
 		}
+		if req.HeaderImageURL != "" {
+			out["header_image_url"] = req.HeaderImageURL
+		}
+		return out
 	}
 }
 

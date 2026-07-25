@@ -196,6 +196,88 @@ func TestClient_SendInteractiveButtons_ButtonTruncation(t *testing.T) {
 	assert.Len(t, reply["title"], 20)
 }
 
+func TestClient_SendInteractiveButtons_ImageHeader(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"messages": []map[string]string{{"id": "wamid.test"}},
+		})
+	}))
+	defer server.Close()
+
+	log := testutil.NopLogger()
+	client := whatsapp.NewWithTimeout(log, 5*time.Second)
+	client.HTTPClient = &http.Client{
+		Transport: &testServerTransport{serverURL: server.URL},
+	}
+
+	account := &whatsapp.Account{
+		PhoneID:     "123456789",
+		BusinessID:  "987654321",
+		APIVersion:  "v21.0",
+		AccessToken: "test-token",
+	}
+	ctx := testutil.TestContext(t)
+
+	imageURL := "https://cdn.example.com/shoe.jpg"
+	buttons := []whatsapp.Button{{ID: "add_to_cart_SKU1", Title: "Add to Cart"}}
+
+	_, err := client.SendInteractiveButtons(ctx, account, whatsapp.Recipient{Phone: "1234567890"}, "Shoe\n$49", buttons, imageURL)
+	require.NoError(t, err)
+
+	interactive := capturedBody["interactive"].(map[string]any)
+	assert.Equal(t, "button", interactive["type"])
+
+	header := interactive["header"].(map[string]any)
+	assert.Equal(t, "image", header["type"])
+	img := header["image"].(map[string]any)
+	assert.Equal(t, imageURL, img["link"])
+	_, hasFilename := img["filename"]
+	assert.False(t, hasFilename, "image headers must not include filename")
+}
+
+func TestClient_SendInteractiveButtons_NoImageHeaderWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"messages": []map[string]string{{"id": "wamid.test"}},
+		})
+	}))
+	defer server.Close()
+
+	log := testutil.NopLogger()
+	client := whatsapp.NewWithTimeout(log, 5*time.Second)
+	client.HTTPClient = &http.Client{
+		Transport: &testServerTransport{serverURL: server.URL},
+	}
+
+	account := &whatsapp.Account{
+		PhoneID:     "123456789",
+		BusinessID:  "987654321",
+		APIVersion:  "v21.0",
+		AccessToken: "test-token",
+	}
+	ctx := testutil.TestContext(t)
+
+	buttons := []whatsapp.Button{{ID: "1", Title: "OK"}}
+	_, err := client.SendInteractiveButtons(ctx, account, whatsapp.Recipient{Phone: "1234567890"}, "Hi", buttons, "")
+	require.NoError(t, err)
+
+	interactive := capturedBody["interactive"].(map[string]any)
+	_, hasHeader := interactive["header"]
+	assert.False(t, hasHeader)
+}
+
 func TestClient_SendTemplateMessage(t *testing.T) {
 	t.Parallel()
 
