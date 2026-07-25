@@ -28,7 +28,7 @@ type MockWhatsAppClient struct {
 
 	// Configurable behavior
 	SendTextMessageFunc        func(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, text string) (string, error)
-	SendInteractiveButtonsFunc func(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, body string, buttons []whatsapp.Button) (string, error)
+	SendInteractiveButtonsFunc func(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, body string, buttons []whatsapp.Button, headerImageURL ...string) (string, error)
 	SendTemplateMessageFunc    func(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, template, lang string, components []map[string]any) (string, error)
 	SendImageMessageFunc       func(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, mediaID, caption string) (string, error)
 	SendDocumentMessageFunc    func(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, mediaID, filename, caption string) (string, error)
@@ -81,7 +81,7 @@ func (m *MockWhatsAppClient) SendTextMessage(ctx context.Context, account *whats
 }
 
 // SendInteractiveButtons mocks sending an interactive message.
-func (m *MockWhatsAppClient) SendInteractiveButtons(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, body string, buttons []whatsapp.Button) (string, error) {
+func (m *MockWhatsAppClient) SendInteractiveButtons(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, body string, buttons []whatsapp.Button, headerImageURL ...string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -89,17 +89,21 @@ func (m *MockWhatsAppClient) SendInteractiveButtons(ctx context.Context, account
 		return "", m.Error
 	}
 
+	content := map[string]any{"body": body, "buttons": buttons}
+	if len(headerImageURL) > 0 && headerImageURL[0] != "" {
+		content["header_image_url"] = headerImageURL[0]
+	}
 	msgID := m.nextMessageID()
 	m.SentMessages = append(m.SentMessages, MockSentMessage{
 		Type:        "interactive",
 		PhoneNumber: rcpt.Phone,
-		Content:     map[string]any{"body": body, "buttons": buttons},
+		Content:     content,
 		Account:     account,
 		MessageID:   msgID,
 	})
 
 	if m.SendInteractiveButtonsFunc != nil {
-		return m.SendInteractiveButtonsFunc(ctx, account, rcpt, body, buttons)
+		return m.SendInteractiveButtonsFunc(ctx, account, rcpt, body, buttons, headerImageURL...)
 	}
 	return msgID, nil
 }

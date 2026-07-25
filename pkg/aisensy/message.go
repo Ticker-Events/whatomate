@@ -125,7 +125,8 @@ func (c *Client) SendDocumentMessage(ctx context.Context, account *whatsapp.Acco
 
 // SendInteractiveButtons sends an interactive message with buttons or a list.
 // If buttons ≤ 3, sends button format; if 4-10, sends list format.
-func (c *Client) SendInteractiveButtons(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText string, buttons []whatsapp.Button) (string, error) {
+// Optional headerImageURL (first variadic arg) adds an image header via link.
+func (c *Client) SendInteractiveButtons(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText string, buttons []whatsapp.Button, headerImageURL ...string) (string, error) {
 	if len(buttons) == 0 {
 		return "", fmt.Errorf("at least one button is required")
 	}
@@ -168,6 +169,15 @@ func (c *Client) SendInteractiveButtons(ctx context.Context, account *whatsapp.A
 				"sections": []map[string]any{
 					{"title": "Options", "rows": rows},
 				},
+			},
+		}
+	}
+
+	if len(headerImageURL) > 0 && headerImageURL[0] != "" {
+		interactive["header"] = map[string]any{
+			"type": "image",
+			"image": map[string]any{
+				"link": headerImageURL[0],
 			},
 		}
 	}
