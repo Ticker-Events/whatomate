@@ -403,6 +403,11 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// Log incoming message to session
 	a.logSessionMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check")
 
+	// Product card "Add to Cart" taps update session cart and stop further routing.
+	if a.handleAddToCartTap(account, contact, session, buttonID) {
+		return
+	}
+
 	// Check for transfer keyword BEFORE sending greeting (transfer takes priority)
 	keywordResponse, keywordMatched := a.matchKeywordRules(account.OrganizationID, account.Name, messageText)
 	if keywordMatched && keywordResponse.ResponseType == models.ResponseTypeTransfer {
@@ -525,7 +530,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 			// Fall through to default response
 		} else if aiResponse != "" {
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
-			if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
+			if err := a.sendAIResponse(account, contact, session, aiResponse); err != nil {
 				a.Log.Error("Failed to send AI response", "error", err, "contact", contact.PhoneNumber)
 			}
 			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")

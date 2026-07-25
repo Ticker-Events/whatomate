@@ -53,9 +53,10 @@ func (c *Client) SendTextMessage(ctx context.Context, account *Account, rcpt Rec
 	return messageID, nil
 }
 
-// SendInteractiveButtons sends an interactive message with buttons or list
-// If buttons <= 3, sends as buttons; if 4-10, sends as list
-func (c *Client) SendInteractiveButtons(ctx context.Context, account *Account, rcpt Recipient, bodyText string, buttons []Button) (string, error) {
+// SendInteractiveButtons sends an interactive message with buttons or list.
+// If buttons <= 3, sends as buttons; if 4-10, sends as list.
+// Optional headerImageURL (first variadic arg) adds an image header via link.
+func (c *Client) SendInteractiveButtons(ctx context.Context, account *Account, rcpt Recipient, bodyText string, buttons []Button, headerImageURL ...string) (string, error) {
 	if len(buttons) == 0 {
 		return "", fmt.Errorf("at least one button is required")
 	}
@@ -118,6 +119,15 @@ func (c *Client) SendInteractiveButtons(ctx context.Context, account *Account, r
 						"rows":  rows,
 					},
 				},
+			},
+		}
+	}
+
+	if len(headerImageURL) > 0 && headerImageURL[0] != "" {
+		interactive["header"] = map[string]any{
+			"type": "image",
+			"image": map[string]any{
+				"link": headerImageURL[0],
 			},
 		}
 	}
