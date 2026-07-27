@@ -19,7 +19,12 @@ func TestClientSearchProducts(t *testing.T) {
 		assert.Equal(t, "tea", r.URL.Query().Get("search"))
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"results": []map[string]any{
-				{"id": 2, "name": "Green Tea", "min_price": 50, "options": []any{}},
+				{
+					"id": 2, "name": "Green Tea", "min_price": 50, "options": []any{},
+					"images": []any{
+						map[string]any{"id": 1, "image": "https://cdn.example.com/tea.jpg"},
+					},
+				},
 			},
 		})
 	}))
@@ -31,6 +36,17 @@ func TestClientSearchProducts(t *testing.T) {
 	require.Len(t, products, 1)
 	assert.Equal(t, "Green Tea", products[0].Name)
 	assert.Equal(t, 0.5, products[0].MinPrice) // 50 paise → ₹0.50
+	assert.Equal(t, "https://cdn.example.com/tea.jpg", products[0].ImageURL)
+}
+
+func TestExtractProductImageURL(t *testing.T) {
+	assert.Equal(t, "", ticker.ExtractProductImageURL(nil))
+	assert.Equal(t, "", ticker.ExtractProductImageURL(map[string]any{}))
+	assert.Equal(t, "https://cdn.example.com/a.jpg", ticker.ExtractProductImageURL(map[string]any{
+		"images": []any{
+			map[string]any{"image": "https://cdn.example.com/a.jpg"},
+		},
+	}))
 }
 
 func TestClientCreateOrderError(t *testing.T) {

@@ -403,8 +403,16 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// Log incoming message to session
 	a.logSessionMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check")
 
-	// Product card "Add to Cart" taps update session cart and stop further routing.
-	if a.handleAddToCartTap(account, contact, session, buttonID) {
+	// Commerce button taps (cart, checkout) stop further routing.
+	if a.handleCommerceButtonTap(account, contact, session, settings, buttonID) {
+		return
+	}
+
+	// Checkout conversation steps and cart quantity replies.
+	if a.handleCheckoutConversation(account, contact, session, settings, messageText, buttonID) {
+		return
+	}
+	if a.handleCartQuantityReply(account, contact, session, messageText) {
 		return
 	}
 
