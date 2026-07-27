@@ -207,6 +207,7 @@ func TestIsCheckoutButton(t *testing.T) {
 	t.Parallel()
 
 	assert.True(t, IsCheckoutButton("checkout"))
+	assert.True(t, IsCheckoutButton("checkout_explore"))
 	assert.True(t, IsCheckoutButton("checkout_confirm"))
 	assert.False(t, IsCheckoutButton("add_to_cart_1"))
 }

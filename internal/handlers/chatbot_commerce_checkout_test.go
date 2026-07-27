@@ -153,3 +153,161 @@ func TestParseDeliveryAddressText_Labeled(t *testing.T) {
 	assert.Equal(t, "560100", addr["pincode"])
 	assert.Equal(t, "India", addr["country"])
 }
+
+func TestCheckoutBuyerMeta_IncludesShippingAddress(t *testing.T) {
+	t.Parallel()
+
+	st := &checkoutState{
+		Email:        "a@b.com",
+		DeliveryMode: "DELIVERY_TO_LOCATION",
+		NewAddress: map[string]any{
+			"name":           "Roopak",
+			"phone":          "9876543210",
+			"email":          "a@b.com",
+			"address_line_1": "B2-803",
+			"city":           "Bengaluru",
+			"state":          "Karnataka",
+			"country":        "India",
+			"pincode":        "560100",
+		},
+	}
+	meta := checkoutBuyerMeta(st, nil)
+	assert.Equal(t, "a@b.com", meta["email"])
+	assert.Equal(t, "Roopak", meta["name"])
+	shipping, ok := meta["shipping_address"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "B2-803", shipping["address_line_1"])
+	assert.Equal(t, "560100", shipping["pincode"])
+	_, hasEmail := shipping["email"]
+	assert.False(t, hasEmail, "write-only email should not be in display address")
+	billing, ok := meta["billing_address"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Bengaluru", billing["city"])
+}
+
+func TestExtractQtyFromText(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, 2, extractQtyFromText("2"))
+	assert.Equal(t, 2, extractQtyFromText("change, i want 2"))
+	assert.Equal(t, 2, extractQtyFromText("I want 2 products"))
+	assert.Equal(t, 0, extractQtyFromText("i want to update the cart"))
+	assert.Equal(t, 0, parsePositiveInt("560100"))
+}
+
+func TestIsCheckoutEditExitIntent(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, isCheckoutEditExitIntent("i want to update the cart"))
+	assert.True(t, isCheckoutEditExitIntent("change, i want 2"))
+	assert.True(t, isCheckoutEditExitIntent("explore more"))
+	assert.True(t, isCheckoutEditExitIntent("cancel checkout"))
+	assert.False(t, isCheckoutEditExitIntent("anroopak@gmail.com"))
+	assert.False(t, isCheckoutEditExitIntent("I want 2 products")) // qty phrase, not exit
+}
+
+func TestIsCheckoutQtyPhrase(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, isCheckoutQtyPhrase("I want 2 products"))
+	assert.True(t, isCheckoutQtyPhrase("make it 3"))
+	assert.False(t, isCheckoutQtyPhrase("hello there"))
+	assert.False(t, isCheckoutQtyPhrase("2")) // bare int handled separately
+}
+
+func TestSoleCartOptionID(t *testing.T) {
+	t.Parallel()
+
+	single := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"7": map[string]any{"qty": 1, "product": map[string]any{"option_name": "A"}},
+		},
+	}}
+	id, ok := soleCartOptionID(single)
+	require.True(t, ok)
+	assert.Equal(t, 7, id)
+
+	multi := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"7": map[string]any{"qty": 1},
+			"8": map[string]any{"qty": 2},
+		},
+	}}
+	_, ok = soleCartOptionID(multi)
+	assert.False(t, ok)
+}
+
+func TestCheckoutQtyUpdate_LeavesEmailStep(t *testing.T) {
+	t.Parallel()
+
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"7": map[string]any{
+				"qty": 1,
+				"product": map[string]any{"option_name": "Linea Pearl Chain", "price": 1.0},
+			},
+		},
+	}}
+	setCheckoutState(session, &checkoutState{Step: "email", NewAddress: map[string]any{}})
+
+	require.True(t, setCartLineQty(session, "7", 2))
+	st := getCheckoutState(session)
+	require.NotNil(t, st)
+	assert.Equal(t, "email", st.Step)
+	assert.Equal(t, 2, anyToInt(normalizeCartMap(session.SessionData[cartKey])["7"]["qty"]))
+}
+
+func TestCheckoutEditExit_ClearsCheckoutKeepsCart(t *testing.T) {
+	t.Parallel()
+
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"7": map[string]any{"qty": 1, "product": map[string]any{"option_name": "A"}},
+		},
+	}}
+	setCheckoutState(session, &checkoutState{Step: "email", Email: "a@b.com", NewAddress: map[string]any{}})
+	require.NotNil(t, getCheckoutState(session))
+
+	clearCheckoutState(session)
+	optID, ok := soleCartOptionID(session)
+	require.True(t, ok)
+	setCartPendingOption(session, optID)
+
+	assert.Nil(t, getCheckoutState(session))
+	assert.Equal(t, "7", getCartPendingOptionID(session))
+	assert.False(t, cartIsEmpty(session))
+}
+
+func TestConfirmStepHelpers_DoNotTreatRandomAsYes(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, isCheckoutConfirmYes("I want 2 products"))
+	assert.False(t, isCheckoutConfirmYes("maybe later"))
+	assert.True(t, isCheckoutConfirmYes("yes"))
+	assert.True(t, isCheckoutConfirmYes("confirm"))
+	assert.True(t, isCheckoutCancelText("cancel"))
+}
+
+func TestMultiLineCart_BareNumberDoesNotUpdate(t *testing.T) {
+	t.Parallel()
+
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"7": map[string]any{"qty": 1},
+			"8": map[string]any{"qty": 1},
+		},
+	}}
+	_, ok := soleCartOptionID(session)
+	assert.False(t, ok)
+	// Without a sole line, qty update must not guess which line to change.
+	assert.Equal(t, 1, anyToInt(normalizeCartMap(session.SessionData[cartKey])["7"]["qty"]))
+	assert.Equal(t, 1, anyToInt(normalizeCartMap(session.SessionData[cartKey])["8"]["qty"]))
+}
+
+func TestCheckoutButtonIDs_IncludeExplore(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "checkout_explore", checkoutExploreButtonID)
+	assert.True(t, IsCheckoutButton(checkoutExploreButtonID))
+	assert.True(t, IsCheckoutButton(checkoutButtonID))
+}

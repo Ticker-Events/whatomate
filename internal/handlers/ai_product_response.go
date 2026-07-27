@@ -823,5 +823,6 @@ func formatAddToCartAck(optionName string, qty int) string {
 func (a *App) sendCheckoutButtonPrompt(account *models.WhatsAppAccount, contact *models.Contact) {
 	_ = a.sendAndSaveInteractiveButtons(account, contact, "Ready to place your order?", []map[string]any{
 		{"id": checkoutButtonID, "title": "Checkout"},
+		{"id": checkoutExploreButtonID, "title": "Explore more"},
 	})
 }
