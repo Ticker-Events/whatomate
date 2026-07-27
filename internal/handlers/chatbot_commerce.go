@@ -21,19 +21,24 @@ const (
 CRITICAL — live catalog/orders:
 - For ANY question about products, catalog, prices, stock, options, or "what do you sell/have", you MUST call search_products (and get_product when you need detail) BEFORE answering.
 - Never say you cannot retrieve products unless a tool returned an error. Do not invent a catalog from memory or static context.
+- Never suggest alternative products or categories unless those exact products/categories appeared in tool results from this conversation.
+- If search_products returns matches, show them as whatsapp_product cards (max 5). Do not claim the catalog is empty when products were returned.
+- Only show products that have at least one option in tool results. Zero-option products are filtered server-side — never recommend them.
 - Static FAQ/context is secondary; tool results are the source of truth for products and orders.
 
 Prices:
 - Tool results already convert MCP amounts from paise to rupees. Quote every price/amount as ₹X.XX (Indian Rupees). Never show raw paise or divide again.
 
 Memory — use the conversation history:
-- Remember product, product_option id, quantity, email, phone, and delivery mode already provided. Do NOT re-ask for details the user already gave.
+- Remember product_option id, quantity, email, phone, and delivery mode already provided. Do NOT re-ask for details the user already gave.
+- The Current Cart section lists product_option ids already in the cart — use those for ordering.
+- If checkout is in progress (user tapped Checkout), do not start a parallel order flow.
 - Short replies like "2", "yes", "pickup", or an email address answer your last question — interpret them in that context.
 - Only ask for the next missing field needed to place the order.
 
 Tools:
-- search_products: find products by query (or list items with an empty/broad query).
-- get_product: fetch full details for a product id.
+- search_products: find products by query (or list items with an empty/broad query). Results include image_url when available — use that exact URL in whatsapp_product cards. When recommending products to the user, show at most 5 (top matches only).
+- get_product: fetch full details for a product id (includes image_url / images).
 - get_order_status: look up an order by its uuid (internal id).
 - create_order: place an order ONLY after the user explicitly confirms a summary you showed them. Always pass confirmed=true only after that confirmation.
 
@@ -278,10 +283,11 @@ func (a *App) toolSearchProducts(ctx context.Context, rt *commerceRuntime, argsJ
 	if args.Limit > 50 {
 		args.Limit = 50
 	}
-	products, err := rt.Client.SearchProducts(ctx, rt.StoreID, args.Query, args.Limit)
+	products, _, _, err := a.searchProductsWithFallback(ctx, rt, args.Query, args.Limit)
 	if err != nil {
 		return nil, err
 	}
+
 	// Object wrapper: Gemini functionResponse.response must be a JSON object, not an array.
 	// Prices are already converted from paise to rupees by the ticker client.
 	return map[string]any{
@@ -289,6 +295,147 @@ func (a *App) toolSearchProducts(ctx context.Context, rt *commerceRuntime, argsJ
 		"currency": "INR",
 		"products": products,
 	}, nil
+}
+
+// searchProductsWithFallback retries empty catalog searches with singularized
+// query variants, then falls back to local substring matching. MCP list_products
+// often misses plurals (e.g. "jhumkas" vs "Vedika Jhumka", "cuffs" vs "bamboo Cuff").
+func (a *App) searchProductsWithFallback(ctx context.Context, rt *commerceRuntime, query string, limit int) ([]ticker.ProductSummary, string, string, error) {
+	variants := productSearchQueryVariants(query)
+	var lastErr error
+	for _, q := range variants {
+		products, err := rt.Client.SearchProducts(ctx, rt.StoreID, q, limit)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if len(products) > 0 {
+			strategy := "api"
+			if !strings.EqualFold(strings.TrimSpace(q), strings.TrimSpace(query)) {
+				strategy = "api_singular"
+			}
+			return filterProductsWithOptions(products), q, strategy, nil
+		}
+	}
+	if lastErr != nil && strings.TrimSpace(query) == "" {
+		return nil, query, "error", lastErr
+	}
+
+	// Local substring fallback against a broader page when every API variant is empty.
+	if strings.TrimSpace(query) != "" {
+		all, err := rt.Client.SearchProducts(ctx, rt.StoreID, "", 50)
+		if err != nil {
+			if lastErr != nil {
+				return nil, query, "error", lastErr
+			}
+			return nil, query, "error", err
+		}
+		matched := filterProductsByQuery(all, variants, limit)
+		if len(matched) > 0 {
+			return filterProductsWithOptions(matched), query, "local_substring", nil
+		}
+		return nil, query, "empty", nil
+	}
+	if lastErr != nil {
+		return nil, query, "error", lastErr
+	}
+	return nil, query, "empty", nil
+}
+
+// productSearchQueryVariants returns the original query plus simple English
+// singular forms so "jhumkas"/"cuffs" can match "Jhumka"/"Cuff".
+func productSearchQueryVariants(query string) []string {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return []string{""}
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 4)
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		key := strings.ToLower(s)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, s)
+	}
+	add(q)
+	add(singularizeSearchToken(q))
+	// Also singularize the last word of multi-word queries ("top jhumkas").
+	parts := strings.Fields(q)
+	if len(parts) > 1 {
+		last := singularizeSearchToken(parts[len(parts)-1])
+		add(last)
+		parts[len(parts)-1] = last
+		add(strings.Join(parts, " "))
+	}
+	return out
+}
+
+func singularizeSearchToken(token string) string {
+	t := strings.TrimSpace(token)
+	lower := strings.ToLower(t)
+	switch {
+	case len(lower) <= 3:
+		return t
+	case strings.HasSuffix(lower, "ies") && len(lower) > 4:
+		return t[:len(t)-3] + "y"
+	case strings.HasSuffix(lower, "sses") || strings.HasSuffix(lower, "shes") || strings.HasSuffix(lower, "ches") || strings.HasSuffix(lower, "xes") || strings.HasSuffix(lower, "zes"):
+		return t[:len(t)-2]
+	case strings.HasSuffix(lower, "ses") && len(lower) > 4:
+		return t[:len(t)-2]
+	case strings.HasSuffix(lower, "s") && !strings.HasSuffix(lower, "ss"):
+		return t[:len(t)-1]
+	default:
+		return t
+	}
+}
+
+func filterProductsByQuery(products []ticker.ProductSummary, variants []string, limit int) []ticker.ProductSummary {
+	if limit <= 0 {
+		limit = 20
+	}
+	needles := make([]string, 0, len(variants))
+	for _, v := range variants {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if v != "" {
+			needles = append(needles, v)
+		}
+	}
+	if len(needles) == 0 {
+		return nil
+	}
+	out := make([]ticker.ProductSummary, 0, limit)
+	for _, p := range products {
+		hay := strings.ToLower(p.Name + " " + p.Description)
+		for _, n := range needles {
+			if strings.Contains(hay, n) {
+				out = append(out, p)
+				break
+			}
+		}
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func filterProductsWithOptions(products []ticker.ProductSummary) []ticker.ProductSummary {
+	if len(products) == 0 {
+		return products
+	}
+	out := make([]ticker.ProductSummary, 0, len(products))
+	for _, p := range products {
+		if len(p.Options) > 0 {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (a *App) toolGetProduct(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
@@ -326,18 +473,24 @@ func (a *App) toolGetOrderStatus(ctx context.Context, rt *commerceRuntime, argsJ
 }
 
 func (a *App) toolCreateOrder(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
-	var args struct {
-		Confirmed     bool             `json:"confirmed"`
-		Items         []map[string]any `json:"items"`
-		Email         string           `json:"email"`
-		PhoneNumber   string           `json:"phone_number"`
-		DeliveryMode  string           `json:"delivery_mode"`
-		NewAddress    map[string]any   `json:"new_address"`
-		BuyerMetaData map[string]any   `json:"buyer_meta_data"`
-	}
+	var args createOrderArgs
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
+	return placeCommerceOrder(ctx, rt, args)
+}
+
+type createOrderArgs struct {
+	Confirmed     bool             `json:"confirmed"`
+	Items         []map[string]any `json:"items"`
+	Email         string           `json:"email"`
+	PhoneNumber   string           `json:"phone_number"`
+	DeliveryMode  string           `json:"delivery_mode"`
+	NewAddress    map[string]any   `json:"new_address"`
+	BuyerMetaData map[string]any   `json:"buyer_meta_data"`
+}
+
+func placeCommerceOrder(ctx context.Context, rt *commerceRuntime, args createOrderArgs) (map[string]any, error) {
 	if !args.Confirmed {
 		return nil, fmt.Errorf("create_order requires confirmed=true after the user confirms the order summary")
 	}
@@ -378,7 +531,6 @@ func (a *App) toolCreateOrder(ctx context.Context, rt *commerceRuntime, argsJSON
 		BuyerMetaData: args.BuyerMetaData,
 	}
 
-	// Guest delivery requires new_address with email.
 	if deliveryMode == "DELIVERY_TO_LOCATION" && req.NewAddress == nil {
 		return nil, fmt.Errorf("new_address is required for DELIVERY_TO_LOCATION")
 	}
@@ -457,6 +609,9 @@ func convertProductMoneyToRupees(raw map[string]any) map[string]any {
 		out["options"] = converted
 	}
 	out["currency"] = "INR"
+	if img := ticker.ExtractProductImageURL(out); img != "" {
+		out["image_url"] = img
+	}
 	return out
 }
 

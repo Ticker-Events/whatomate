@@ -346,7 +346,7 @@ func (a *App) generateGoogleWithTools(settings *models.ChatbotSettings, session 
 			// Gemini often answers catalog questions in plain text; force a tool call once.
 			fcMode = map[string]any{
 				"mode":                 "ANY",
-				"allowedFunctionNames": []string{"search_products", "get_product", "get_order_status"},
+				"allowedFunctionNames": []string{"search_products"},
 			}
 		}
 		payload := map[string]any{
@@ -417,7 +417,8 @@ func (a *App) generateGoogleWithTools(settings *models.ChatbotSettings, session 
 
 		if len(functionCalls) == 0 {
 			text := strings.TrimSpace(strings.Join(textParts, "\n"))
-			if !forceCatalogTools && round == 0 && looksLikeCommerceCatalogQuery(userMessage) {
+			isCatalogQuery := looksLikeCommerceCatalogQuery(userMessage)
+			if !forceCatalogTools && round == 0 && isCatalogQuery {
 				a.Log.Info("commerce google skipped tools on catalog query; retrying with forced tool mode",
 					"response_preview", truncateForLog(text, 120),
 				)
@@ -482,6 +483,7 @@ func looksLikeCommerceCatalogQuery(msg string) bool {
 		"product", "products", "catalog", "price", "prices", "stock",
 		"buy", "order", "sell", "selling", "available", "availability",
 		"option", "sku", "what do you have", "what all", "menu", "item", "items",
+		"show me", "send me", "your top", "do you have", "have any",
 	}
 	for _, k := range keywords {
 		if strings.Contains(m, k) {

@@ -49,6 +49,7 @@ type ProductSummary struct {
 	ID          int             `json:"id"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
+	ImageURL    string          `json:"image_url,omitempty"`
 	MinPrice    float64         `json:"min_price"`
 	MRP         float64         `json:"mrp,omitempty"`
 	Type        string          `json:"type,omitempty"`
@@ -195,12 +196,36 @@ func PaiseToRupees(paise float64) float64 {
 	return paise / 100
 }
 
+// ExtractProductImageURL returns the first HTTPS product image from a ticker
+// product payload (images[].image), or empty when none is present.
+func ExtractProductImageURL(raw map[string]any) string {
+	if raw == nil {
+		return ""
+	}
+	images, ok := raw["images"].([]any)
+	if !ok || len(images) == 0 {
+		return ""
+	}
+	for _, item := range images {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		url := strings.TrimSpace(asString(m["image"]))
+		if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
+			return url
+		}
+	}
+	return ""
+}
+
 // CompactProduct builds a tool-friendly product summary with prices in rupees.
 func CompactProduct(raw map[string]any) ProductSummary {
 	p := ProductSummary{
 		ID:          asInt(raw["id"]),
 		Name:        asString(raw["name"]),
 		Description: asString(raw["description"]),
+		ImageURL:    ExtractProductImageURL(raw),
 		MinPrice:    PaiseToRupees(asFloat(raw["min_price"])),
 		MRP:         PaiseToRupees(asFloat(raw["mrp"])),
 		Type:        asString(raw["type"]),

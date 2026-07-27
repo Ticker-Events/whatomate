@@ -134,6 +134,11 @@ func TestSearchProductsTool(t *testing.T) {
 						{ID: 11, Name: "250g", Price: price, StockStatus: "in_stock"},
 					},
 				},
+				{
+					ID:       2,
+					Name:     "Empty Product",
+					MinPrice: 5,
+				},
 			}, nil
 		},
 	}
@@ -146,6 +151,7 @@ func TestSearchProductsTool(t *testing.T) {
 	require.NotContains(t, out, `"error"`)
 	assert.Contains(t, out, `"products"`)
 	assert.Contains(t, out, "Coffee Beans")
+	assert.NotContains(t, out, "Empty Product")
 	assert.Contains(t, out, `"id":11`)
 	assert.Contains(t, out, `"price":1.99`)
 	assert.Contains(t, out, `"currency":"INR"`)
