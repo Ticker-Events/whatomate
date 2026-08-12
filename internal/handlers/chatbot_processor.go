@@ -483,31 +483,26 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	}
 
 	// Send greeting message for new sessions (only if no flow was triggered)
-	if isNewSession && settings.DefaultResponse != "" {
-		a.Log.Info("New session - sending greeting message", "contact", contact.PhoneNumber)
-		if len(settings.GreetingButtons) > 0 {
-			greetingButtons := make([]map[string]any, 0)
-			for _, btn := range settings.GreetingButtons {
-				if btnMap, ok := btn.(map[string]any); ok {
-					greetingButtons = append(greetingButtons, btnMap)
+	if isNewSession {
+		if commerceConfigured(settings.AI) {
+			a.Log.Info("New session - sending commerce welcome", "contact", contact.PhoneNumber)
+			welcome, err := a.getOrRefreshCommerceWelcome(settings, session, false)
+			if err != nil || strings.TrimSpace(welcome) == "" {
+				a.Log.Warn("Commerce welcome unavailable; falling back to default greeting",
+					"error", errString(err), "contact", contact.PhoneNumber)
+				if settings.DefaultResponse != "" {
+					a.sendStaticGreeting(account, contact, session, settings)
 				}
+				return
 			}
-			if len(greetingButtons) > 0 {
-				if err := a.sendAndSaveInteractiveButtons(account, contact, settings.DefaultResponse, greetingButtons); err != nil {
-					a.Log.Error("Failed to send greeting buttons", "error", err, "contact", contact.PhoneNumber)
-				}
-			} else {
-				if err := a.sendAndSaveTextMessage(account, contact, settings.DefaultResponse); err != nil {
-					a.Log.Error("Failed to send greeting message", "error", err, "contact", contact.PhoneNumber)
-				}
-			}
-		} else {
-			if err := a.sendAndSaveTextMessage(account, contact, settings.DefaultResponse); err != nil {
-				a.Log.Error("Failed to send greeting message", "error", err, "contact", contact.PhoneNumber)
-			}
+			a.sendGreetingText(account, contact, session, welcome, settings.GreetingButtons)
+			return
 		}
-		a.logSessionMessage(session.ID, models.DirectionOutgoing, settings.DefaultResponse, "greeting")
-		return // After greeting, don't process further for new sessions
+		if settings.DefaultResponse != "" {
+			a.Log.Info("New session - sending greeting message", "contact", contact.PhoneNumber)
+			a.sendStaticGreeting(account, contact, session, settings)
+			return // After greeting, don't process further for new sessions
+		}
 	}
 
 	// Handle non-transfer keyword matches (transfer was already handled above)
@@ -673,6 +668,33 @@ func (a *App) matchKeywordRules(orgID uuid.UUID, accountName, messageText string
 
 // sendAndSaveTextMessage sends a text message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
+func (a *App) sendStaticGreeting(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
+	a.sendGreetingText(account, contact, session, settings.DefaultResponse, settings.GreetingButtons)
+}
+
+func (a *App) sendGreetingText(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, text string, buttons models.JSONBArray) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	greetingButtons := make([]map[string]any, 0)
+	for _, btn := range buttons {
+		if btnMap, ok := btn.(map[string]any); ok {
+			greetingButtons = append(greetingButtons, btnMap)
+		}
+	}
+	if len(greetingButtons) > 0 {
+		if err := a.sendAndSaveInteractiveButtons(account, contact, text, greetingButtons); err != nil {
+			a.Log.Error("Failed to send greeting buttons", "error", err, "contact", contact.PhoneNumber)
+		}
+	} else if err := a.sendAndSaveTextMessage(account, contact, text); err != nil {
+		a.Log.Error("Failed to send greeting message", "error", err, "contact", contact.PhoneNumber)
+	}
+	if session != nil {
+		a.logSessionMessage(session.ID, models.DirectionOutgoing, text, "greeting")
+	}
+}
+
 func (a *App) sendAndSaveTextMessage(account *models.WhatsAppAccount, contact *models.Contact, message string) error {
 	ctx := context.Background()
 	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{

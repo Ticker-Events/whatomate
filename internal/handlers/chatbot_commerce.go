@@ -16,6 +16,7 @@ import (
 const (
 	commerceMaxToolRounds  = 5
 	commerceMaxResultBytes = 12 * 1024
+	commerceWelcomeTTL     = time.Hour
 	commerceSystemAddendum = `You are a sales assistant for this store only. Keep replies short for WhatsApp.
 
 CRITICAL — live catalog/orders:
@@ -37,6 +38,8 @@ Memory — use the conversation history:
 - Only ask for the next missing field needed to place the order.
 
 Tools:
+- get_store: fetch the store name and description (use for welcome / about-the-store).
+- list_categories: list product collections/categories for the store.
 - search_products: find products by query (or list items with an empty/broad query). Results include image_url when available — use that exact URL in whatsapp_product cards. When recommending products to the user, show at most 5 (top matches only).
 - get_product: fetch full details for a product id (includes image_url / images).
 - get_order_status: look up an order by its uuid (internal id).
@@ -49,12 +52,27 @@ Ordering rules:
 - Prefer PICKUP_FROM_STORE when the user has no delivery address.
 - Never invent stock or prices — rely on tool data.
 - After a successful order, share display_uid (the customer-facing order number) — never share uuid to the user. If payment_url is present, share that link so they can pay.`
+
+	commerceWelcomeInstruction = `Write the store's first WhatsApp welcome message for a new shopper.
+
+Before writing, you MUST call get_store and list_categories (in that order) and use only those tool results.
+
+Reply with ONE short message only (about 3–5 short sentences):
+1. Warm greeting that names the store.
+2. One crisp line on what they sell (from the store description).
+3. Mention a few collection/category names if available (do not invent any).
+4. Briefly say you can help browse products, check prices, place orders, and track order status.
+5. Invite them to say what they are looking for.
+
+Rules: plain text only — no whatsapp_product cards, no markdown fences, no policies, no bullet spam. Keep it welcoming and crisp.`
 )
 
 // commerceBackend is the storefront data source for LLM commerce tools (MCP).
 type commerceBackend interface {
 	SearchProducts(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error)
 	GetProduct(ctx context.Context, productID string) (map[string]any, error)
+	GetStore(ctx context.Context, storeID string) (map[string]any, error)
+	ListCategories(ctx context.Context, storeID string) ([]map[string]any, error)
 	GetOrder(ctx context.Context, orderUUID string) (map[string]any, error)
 	CreateOrder(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
 }
@@ -104,6 +122,28 @@ func buildCommerceSystemPrompt(base, contextData string) string {
 // commerceToolDefs returns OpenAI-style tool definitions (also mapped for other providers).
 func commerceToolDefs() []map[string]any {
 	return []map[string]any{
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "get_store",
+				"description": "Get the configured store's name and description. Call before writing a welcome or about-the-store reply.",
+				"parameters": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "list_categories",
+				"description": "List product collections/categories for the configured store.",
+				"parameters": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+		},
 		{
 			"type": "function",
 			"function": map[string]any{
@@ -247,6 +287,10 @@ func (a *App) executeCommerceTool(rt *commerceRuntime, name, argsJSON string) st
 		err    error
 	)
 	switch name {
+	case "get_store":
+		result, err = a.toolGetStore(ctx, rt)
+	case "list_categories":
+		result, err = a.toolListCategories(ctx, rt)
 	case "search_products":
 		result, err = a.toolSearchProducts(ctx, rt, argsJSON)
 	case "get_product":
@@ -269,6 +313,25 @@ func (a *App) executeCommerceTool(rt *commerceRuntime, name, argsJSON string) st
 		return toolErrorJSON(err.Error())
 	}
 	return truncateJSON(result, commerceMaxResultBytes)
+}
+
+func (a *App) toolGetStore(ctx context.Context, rt *commerceRuntime) (any, error) {
+	store, err := rt.Client.GetStore(ctx, rt.StoreID)
+	if err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+func (a *App) toolListCategories(ctx context.Context, rt *commerceRuntime) (any, error) {
+	categories, err := rt.Client.ListCategories(ctx, rt.StoreID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"count":      len(categories),
+		"categories": categories,
+	}, nil
 }
 
 func (a *App) toolSearchProducts(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
@@ -676,4 +739,66 @@ func asToolInt(v any) int {
 	default:
 		return 0
 	}
+}
+
+func commerceWelcomeFresh(ai models.AIConfig) bool {
+	msg := strings.TrimSpace(ai.CommerceWelcomeMessage)
+	if msg == "" || ai.CommerceWelcomeGeneratedAt == nil {
+		return false
+	}
+	return time.Since(*ai.CommerceWelcomeGeneratedAt) < commerceWelcomeTTL
+}
+
+func commerceWelcomeStale(ai models.AIConfig) bool {
+	msg := strings.TrimSpace(ai.CommerceWelcomeMessage)
+	if msg == "" {
+		return true
+	}
+	return !commerceWelcomeFresh(ai)
+}
+
+func clearCommerceWelcome(ai *models.AIConfig) {
+	if ai == nil {
+		return
+	}
+	ai.CommerceWelcomeMessage = ""
+	ai.CommerceWelcomeGeneratedAt = nil
+}
+
+// getOrRefreshCommerceWelcome returns a cached welcome when fresh, otherwise
+// regenerates via the commerce tool loop and persists the result on settings.
+func (a *App) getOrRefreshCommerceWelcome(settings *models.ChatbotSettings, session *models.ChatbotSession, force bool) (string, error) {
+	if settings == nil || !commerceConfigured(settings.AI) {
+		return "", fmt.Errorf("commerce is not configured")
+	}
+	if !force && commerceWelcomeFresh(settings.AI) {
+		return strings.TrimSpace(settings.AI.CommerceWelcomeMessage), nil
+	}
+
+	reply, err := a.generateAIResponse(settings, session, commerceWelcomeInstruction)
+	if err != nil {
+		return "", err
+	}
+	reply = strings.TrimSpace(stripWhatsAppProductFences(reply))
+	if reply == "" {
+		return "", fmt.Errorf("empty welcome response from AI")
+	}
+
+	now := time.Now().UTC()
+	settings.AI.CommerceWelcomeMessage = reply
+	settings.AI.CommerceWelcomeGeneratedAt = &now
+	if err := a.DB.Model(settings).Updates(map[string]any{
+		"ai_commerce_welcome_message":      reply,
+		"ai_commerce_welcome_generated_at": now,
+	}).Error; err != nil {
+		return "", fmt.Errorf("persist welcome: %w", err)
+	}
+	a.InvalidateChatbotSettingsCache(settings.OrganizationID)
+	return reply, nil
+}
+
+// stripWhatsAppProductFences removes product-card blocks so welcome text stays plain.
+func stripWhatsAppProductFences(raw string) string {
+	cleaned := whatsappProductFenceRE.ReplaceAllString(raw, "")
+	return strings.TrimSpace(cleaned)
 }

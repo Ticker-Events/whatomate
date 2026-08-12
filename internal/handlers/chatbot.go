@@ -36,6 +36,9 @@ type ChatbotSettingsResponse struct {
 	AICommerceMCPURL             string            `json:"ai_commerce_mcp_url"`
 	AICommerceStoreID            string            `json:"ai_commerce_store_id"`
 	AICommerceMCPAPIKeySet       bool              `json:"ai_commerce_mcp_api_key_set"`
+	AICommerceWelcomeMessage     string            `json:"ai_commerce_welcome_message"`
+	AICommerceWelcomeGeneratedAt *time.Time        `json:"ai_commerce_welcome_generated_at"`
+	AICommerceWelcomeStale       bool              `json:"ai_commerce_welcome_stale"`
 	// SLA Settings
 	SLAEnabled             bool     `json:"sla_enabled"`
 	SLAResponseMinutes     int      `json:"sla_response_minutes"`
@@ -185,6 +188,9 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AICommerceMCPURL:       settings.AI.CommerceMCPURL,
 		AICommerceStoreID:      settings.AI.CommerceStoreID,
 		AICommerceMCPAPIKeySet: strings.TrimSpace(settings.AI.CommerceMCPAPIKey) != "",
+		AICommerceWelcomeMessage: settings.AI.CommerceWelcomeMessage,
+		AICommerceWelcomeGeneratedAt: settings.AI.CommerceWelcomeGeneratedAt,
+		AICommerceWelcomeStale: commerceWelcomeStale(settings.AI),
 		// SLA Settings
 		SLAEnabled:             settings.SLA.Enabled,
 		SLAResponseMinutes:     settings.SLA.ResponseMinutes,
@@ -265,14 +271,16 @@ func chatbotSLASnapshot(s *models.ChatbotSettings) map[string]any {
 // change the activity log should surface.
 func chatbotAISnapshot(s *models.ChatbotSettings) map[string]any {
 	return map[string]any{
-		"ai_enabled":           s.AI.Enabled,
-		"ai_provider":          s.AI.Provider,
-		"ai_model":             s.AI.Model,
-		"ai_max_tokens":        s.AI.MaxTokens,
-		"ai_system_prompt":     s.AI.SystemPrompt,
-		"ai_commerce_enabled":  s.AI.CommerceEnabled,
-		"ai_commerce_mcp_url":  s.AI.CommerceMCPURL,
-		"ai_commerce_store_id": s.AI.CommerceStoreID,
+		"ai_enabled":                     s.AI.Enabled,
+		"ai_provider":                    s.AI.Provider,
+		"ai_model":                       s.AI.Model,
+		"ai_max_tokens":                  s.AI.MaxTokens,
+		"ai_system_prompt":               s.AI.SystemPrompt,
+		"ai_commerce_enabled":            s.AI.CommerceEnabled,
+		"ai_commerce_mcp_url":            s.AI.CommerceMCPURL,
+		"ai_commerce_store_id":           s.AI.CommerceStoreID,
+		"ai_commerce_welcome_message":    s.AI.CommerceWelcomeMessage,
+		"ai_commerce_welcome_generated_at": s.AI.CommerceWelcomeGeneratedAt,
 	}
 }
 
@@ -426,6 +434,10 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 
 	// AI Settings
+	prevCommerceEnabled := settings.AI.CommerceEnabled
+	prevCommerceMCPURL := settings.AI.CommerceMCPURL
+	prevCommerceStoreID := settings.AI.CommerceStoreID
+
 	if req.AIEnabled != nil {
 		settings.AI.Enabled = *req.AIEnabled
 	}
@@ -455,6 +467,11 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.AICommerceStoreID != nil {
 		settings.AI.CommerceStoreID = strings.TrimSpace(*req.AICommerceStoreID)
+	}
+	if settings.AI.CommerceEnabled != prevCommerceEnabled ||
+		settings.AI.CommerceMCPURL != prevCommerceMCPURL ||
+		settings.AI.CommerceStoreID != prevCommerceStoreID {
+		clearCommerceWelcome(&settings.AI)
 	}
 
 	// SLA Settings
@@ -562,6 +579,39 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 
 	return r.SendEnvelope(map[string]any{
 		"message": "Settings updated successfully",
+	})
+}
+
+// RefreshCommerceWelcome regenerates the cached AI commerce welcome message.
+func (a *App) RefreshCommerceWelcome(r *fastglue.Request) error {
+	orgID, err := a.getOrgID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	var settings models.ChatbotSettings
+	if err := a.DB.Where("organization_id = ? AND whats_app_account = ?", orgID, "").First(&settings).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Chatbot settings not found", nil, "")
+	}
+	if !commerceConfigured(settings.AI) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Commerce tools are not configured", nil, "")
+	}
+	if !settings.AI.Enabled || strings.TrimSpace(string(settings.AI.Provider)) == "" || strings.TrimSpace(settings.AI.APIKey) == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "AI provider must be configured to generate a welcome message", nil, "")
+	}
+
+	welcome, err := a.getOrRefreshCommerceWelcome(&settings, nil, true)
+	if err != nil {
+		a.Log.Error("Failed to refresh commerce welcome", "error", err, "org", orgID)
+		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Failed to generate welcome message", map[string]any{
+			"error": err.Error(),
+		}, "")
+	}
+
+	return r.SendEnvelope(map[string]any{
+		"ai_commerce_welcome_message":      welcome,
+		"ai_commerce_welcome_generated_at": settings.AI.CommerceWelcomeGeneratedAt,
+		"ai_commerce_welcome_stale":        false,
 	})
 }
 

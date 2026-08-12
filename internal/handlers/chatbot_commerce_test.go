@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
@@ -20,11 +21,13 @@ func testApp() *App {
 }
 
 type stubCommerceBackend struct {
-	searchFn   func(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error)
-	getFn      func(ctx context.Context, productID string) (map[string]any, error)
-	orderFn    func(ctx context.Context, orderUUID string) (map[string]any, error)
-	createFn   func(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
-	lastCreate ticker.CreateOrderRequest
+	searchFn     func(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error)
+	getFn        func(ctx context.Context, productID string) (map[string]any, error)
+	storeFn      func(ctx context.Context, storeID string) (map[string]any, error)
+	categoriesFn func(ctx context.Context, storeID string) ([]map[string]any, error)
+	orderFn      func(ctx context.Context, orderUUID string) (map[string]any, error)
+	createFn     func(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
+	lastCreate   ticker.CreateOrderRequest
 }
 
 func (s *stubCommerceBackend) SearchProducts(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error) {
@@ -39,6 +42,20 @@ func (s *stubCommerceBackend) GetProduct(ctx context.Context, productID string) 
 		return s.getFn(ctx, productID)
 	}
 	return nil, fmt.Errorf("get_product not stubbed")
+}
+
+func (s *stubCommerceBackend) GetStore(ctx context.Context, storeID string) (map[string]any, error) {
+	if s.storeFn != nil {
+		return s.storeFn(ctx, storeID)
+	}
+	return nil, fmt.Errorf("get_store not stubbed")
+}
+
+func (s *stubCommerceBackend) ListCategories(ctx context.Context, storeID string) ([]map[string]any, error) {
+	if s.categoriesFn != nil {
+		return s.categoriesFn(ctx, storeID)
+	}
+	return nil, fmt.Errorf("list_categories not stubbed")
 }
 
 func (s *stubCommerceBackend) GetOrder(ctx context.Context, orderUUID string) (map[string]any, error) {
@@ -261,4 +278,49 @@ func TestStubCreateOrderJSONRoundTrip(t *testing.T) {
 	b, err := json.Marshal(map[string]any{"order": body})
 	require.NoError(t, err)
 	assert.Contains(t, string(b), `"store":1`)
+}
+
+func TestToolGetStoreAndListCategories(t *testing.T) {
+	stub := &stubCommerceBackend{
+		storeFn: func(ctx context.Context, storeID string) (map[string]any, error) {
+			assert.Equal(t, "21", storeID)
+			return map[string]any{"id": 21, "name": "Demo", "description": "Handmade"}, nil
+		},
+		categoriesFn: func(ctx context.Context, storeID string) ([]map[string]any, error) {
+			assert.Equal(t, "21", storeID)
+			return []map[string]any{{"id": 1, "name": "Earrings"}}, nil
+		},
+	}
+	app := testApp()
+	rt := &commerceRuntime{Client: stub, StoreID: "21"}
+
+	storeOut := app.executeCommerceTool(rt, "get_store", `{}`)
+	assert.Contains(t, storeOut, `"name":"Demo"`)
+
+	catOut := app.executeCommerceTool(rt, "list_categories", `{}`)
+	assert.Contains(t, catOut, `"Earrings"`)
+	assert.Contains(t, catOut, `"count":1`)
+}
+
+func TestCommerceWelcomeFresh(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-2 * time.Hour)
+	assert.False(t, commerceWelcomeFresh(models.AIConfig{}))
+	assert.True(t, commerceWelcomeFresh(models.AIConfig{
+		CommerceWelcomeMessage:     "Hi!",
+		CommerceWelcomeGeneratedAt: &now,
+	}))
+	assert.False(t, commerceWelcomeFresh(models.AIConfig{
+		CommerceWelcomeMessage:     "Hi!",
+		CommerceWelcomeGeneratedAt: &old,
+	}))
+	assert.True(t, commerceWelcomeStale(models.AIConfig{
+		CommerceWelcomeMessage:     "Hi!",
+		CommerceWelcomeGeneratedAt: &old,
+	}))
+}
+
+func TestStripWhatsAppProductFences(t *testing.T) {
+	raw := "Welcome!\n```whatsapp_product\n{\"title\":\"x\"}\n```\nAsk away."
+	assert.Equal(t, "Welcome!\n\nAsk away.", stripWhatsAppProductFences(raw))
 }

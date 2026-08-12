@@ -118,6 +118,83 @@ func (c *Client) GetProduct(ctx context.Context, productID string) (map[string]a
 	return m, nil
 }
 
+// GetStore maps to MCP get_store and returns a compact store summary for the LLM.
+func (c *Client) GetStore(ctx context.Context, storeID string) (map[string]any, error) {
+	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
+	if err != nil || sid <= 0 {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	raw, err := c.callTool(ctx, "get_store", map[string]any{"store_id": sid})
+	if err != nil {
+		return nil, err
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected get_store result type %T", raw)
+	}
+	return CompactStore(m), nil
+}
+
+// ListCategories maps to MCP list_categories and returns compact category rows.
+func (c *Client) ListCategories(ctx context.Context, storeID string) ([]map[string]any, error) {
+	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
+	if err != nil || sid <= 0 {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	raw, err := c.callTool(ctx, "list_categories", map[string]any{"store_id": sid})
+	if err != nil {
+		return nil, err
+	}
+	items, err := asObjectList(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, CompactCategory(item))
+	}
+	return out, nil
+}
+
+// CompactStore keeps only fields useful for a short store intro.
+func CompactStore(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	if id, ok := m["id"]; ok {
+		out["id"] = id
+	}
+	if name, ok := m["name"]; ok {
+		out["name"] = name
+	}
+	if desc, ok := m["description"]; ok {
+		out["description"] = desc
+	}
+	if modes, ok := m["delivery_modes"]; ok {
+		out["delivery_modes"] = modes
+	}
+	return out
+}
+
+// CompactCategory keeps id/name/description for collection listings.
+func CompactCategory(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	if id, ok := m["id"]; ok {
+		out["id"] = id
+	}
+	if name, ok := m["name"]; ok {
+		out["name"] = name
+	}
+	if desc, ok := m["description"]; ok && desc != nil && fmt.Sprint(desc) != "" {
+		out["description"] = desc
+	}
+	return out
+}
+
 // GetOrder maps to MCP get_order.
 func (c *Client) GetOrder(ctx context.Context, orderUUID string) (map[string]any, error) {
 	orderUUID = strings.TrimSpace(orderUUID)

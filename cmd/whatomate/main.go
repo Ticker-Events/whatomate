@@ -765,6 +765,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Chatbot Settings
 	g.GET("/api/chatbot/settings", app.GetChatbotSettings)
 	g.PUT("/api/chatbot/settings", app.UpdateChatbotSettings)
+	g.POST("/api/chatbot/settings/commerce-welcome/refresh", app.RefreshCommerceWelcome)
 
 	// Keyword Rules
 	g.GET("/api/chatbot/keywords", app.ListKeywordRules)

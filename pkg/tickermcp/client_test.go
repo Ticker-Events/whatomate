@@ -83,3 +83,37 @@ func TestNormalizeJSONRawMessage(t *testing.T) {
 	require.True(t, ok)
 	assert.EqualValues(t, 1, m["a"])
 }
+
+func TestCompactStore(t *testing.T) {
+	out := CompactStore(map[string]any{
+		"id":             float64(7),
+		"name":           "Demo Store",
+		"description":    "Handmade goods",
+		"delivery_modes": []any{"PICKUP_FROM_STORE"},
+		"logo":           "https://example.com/logo.png",
+		"cover_image":    "https://example.com/cover.png",
+	})
+	assert.Equal(t, map[string]any{
+		"id":             float64(7),
+		"name":           "Demo Store",
+		"description":    "Handmade goods",
+		"delivery_modes": []any{"PICKUP_FROM_STORE"},
+	}, out)
+	assert.NotContains(t, out, "logo")
+}
+
+func TestCompactCategory(t *testing.T) {
+	out := CompactCategory(map[string]any{
+		"id":          float64(3),
+		"name":        "Earrings",
+		"description": "Studs and jhumkas",
+		"image":       "https://example.com/cat.png",
+		"tags":        []any{"jewelry"},
+	})
+	assert.Equal(t, map[string]any{
+		"id":          float64(3),
+		"name":        "Earrings",
+		"description": "Studs and jhumkas",
+	}, out)
+	assert.NotContains(t, out, "image")
+}

@@ -344,6 +344,7 @@ export const chatbotService = {
   // Settings
   getSettings: () => api.get('/chatbot/settings'),
   updateSettings: (data: any) => api.put('/chatbot/settings', data),
+  refreshCommerceWelcome: () => api.post('/chatbot/settings/commerce-welcome/refresh'),
 
   // Keywords
   listKeywords: (params?: { search?: string; page?: number; limit?: number }) =>

@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { PageHeader, AuditLogPanel } from '@/components/shared'
 import { toast } from 'vue-sonner'
-import { Bot, Loader2, Brain, Plus, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users } from 'lucide-vue-next'
+import { Bot, Loader2, Brain, Plus, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users, RefreshCw } from 'lucide-vue-next'
 import { chatbotService } from '@/services/api'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
@@ -134,11 +134,15 @@ const aiSettings = ref({
   ai_commerce_enabled: false,
   ai_commerce_mcp_url: '',
   ai_commerce_mcp_api_key: '',
-  ai_commerce_store_id: ''
+  ai_commerce_store_id: '',
+  ai_commerce_welcome_message: '',
+  ai_commerce_welcome_generated_at: '' as string | null,
+  ai_commerce_welcome_stale: true
 })
 
 const isAIEnabled = ref(false)
 const isAICommerceEnabled = ref(false)
+const isRefreshingWelcome = ref(false)
 
 const aiProviders = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
@@ -253,7 +257,10 @@ onMounted(async () => {
         ai_commerce_enabled: aiCommerceEnabledValue,
         ai_commerce_mcp_url: chatbotData.settings.ai_commerce_mcp_url || chatbotData.settings.ai_commerce_base_url || '',
         ai_commerce_mcp_api_key: '',
-        ai_commerce_store_id: chatbotData.settings.ai_commerce_store_id || ''
+        ai_commerce_store_id: chatbotData.settings.ai_commerce_store_id || '',
+        ai_commerce_welcome_message: chatbotData.settings.ai_commerce_welcome_message || '',
+        ai_commerce_welcome_generated_at: chatbotData.settings.ai_commerce_welcome_generated_at || null,
+        ai_commerce_welcome_stale: chatbotData.settings.ai_commerce_welcome_stale !== false
       }
 
       const slaEnabledValue = chatbotData.settings.sla_enabled === true
@@ -371,12 +378,49 @@ async function saveAISettings() {
     toast.success(t('chatbotSettings.aiSettingsSaved'))
     aiSettings.value.ai_api_key = ''
     aiSettings.value.ai_commerce_mcp_api_key = ''
+    // Commerce URL/store changes clear the cached welcome — reload those fields.
+    try {
+      const { data } = await chatbotService.getSettings()
+      const chatbotData = data.data || data
+      if (chatbotData.settings) {
+        aiSettings.value.ai_commerce_welcome_message = chatbotData.settings.ai_commerce_welcome_message || ''
+        aiSettings.value.ai_commerce_welcome_generated_at = chatbotData.settings.ai_commerce_welcome_generated_at || null
+        aiSettings.value.ai_commerce_welcome_stale = chatbotData.settings.ai_commerce_welcome_stale !== false
+      }
+    } catch {
+      // non-fatal
+    }
     refreshActivityLog(aiLogKey)
   } catch (error) {
     toast.error(t('chatbotSettings.aiSaveFailed'))
   } finally {
     isSubmitting.value = false
   }
+}
+
+async function refreshCommerceWelcome() {
+  if (isRefreshingWelcome.value) return
+  isRefreshingWelcome.value = true
+  try {
+    const { data } = await chatbotService.refreshCommerceWelcome()
+    const payload = data.data || data
+    aiSettings.value.ai_commerce_welcome_message = payload.ai_commerce_welcome_message || ''
+    aiSettings.value.ai_commerce_welcome_generated_at = payload.ai_commerce_welcome_generated_at || null
+    aiSettings.value.ai_commerce_welcome_stale = payload.ai_commerce_welcome_stale === true
+    toast.success(t('chatbotSettings.commerceWelcomeRefreshed'))
+  } catch (error: any) {
+    const msg = error?.response?.data?.message || t('chatbotSettings.commerceWelcomeRefreshFailed')
+    toast.error(msg)
+  } finally {
+    isRefreshingWelcome.value = false
+  }
+}
+
+function formatWelcomeGeneratedAt(value: string | null | undefined): string {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString()
 }
 
 async function saveSLASettings() {
@@ -1018,6 +1062,37 @@ function removeEscalationUser(userId: string) {
                       />
                       <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceStoreIdHint') }}</p>
                     </div>
+
+                    <div class="space-y-2 rounded-md border p-3">
+                      <div class="flex items-start justify-between gap-3">
+                        <div>
+                          <p class="font-medium">{{ $t('chatbotSettings.commerceWelcomeTitle') }}</p>
+                          <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.commerceWelcomeDesc') }}</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          :disabled="isRefreshingWelcome || isSubmitting"
+                          @click="refreshCommerceWelcome"
+                        >
+                          <Loader2 v-if="isRefreshingWelcome" class="mr-2 h-4 w-4 animate-spin" />
+                          <RefreshCw v-else class="mr-2 h-4 w-4" />
+                          {{ $t('chatbotSettings.commerceWelcomeRefresh') }}
+                        </Button>
+                      </div>
+                      <Textarea
+                        :model-value="aiSettings.ai_commerce_welcome_message || $t('chatbotSettings.commerceWelcomeEmpty')"
+                        readonly
+                        :rows="4"
+                        class="resize-none bg-muted/40"
+                      />
+                      <p v-if="aiSettings.ai_commerce_welcome_generated_at" class="text-xs text-muted-foreground">
+                        {{ $t('chatbotSettings.commerceWelcomeGeneratedAt', { time: formatWelcomeGeneratedAt(aiSettings.ai_commerce_welcome_generated_at) }) }}
+                        <span v-if="aiSettings.ai_commerce_welcome_stale"> · {{ $t('chatbotSettings.commerceWelcomeStale') }}</span>
+                      </p>
+                    </div>
+
                     <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMaxTokensHint') }}</p>
                   </div>
                 </div>
