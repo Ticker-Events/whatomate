@@ -42,7 +42,7 @@ Tools:
 - list_categories: list product collections/categories for the store.
 - search_products: find products by query (or list items with an empty/broad query). Results include image_url when available — use that exact URL in whatsapp_product cards. When recommending products to the user, show at most 5 (top matches only).
 - get_product: fetch full details for a product id (includes image_url / images).
-- get_order_status: look up an order by its uuid (internal id).
+- get_order_status: look up order status for this WhatsApp customer. Omit order_id for their latest order; pass order_id (customer order number / display_uid) when they provide it.
 - create_order: place an order ONLY after the user explicitly confirms a summary you showed them. Always pass confirmed=true only after that confirmation.
 
 Ordering rules:
@@ -51,7 +51,12 @@ Ordering rules:
 - For DELIVERY_TO_LOCATION, collect new_address (name, phone, address_line_1, city, state, country, pincode, email) and latitude/longitude in buyer_meta_data when needed for delivery radius.
 - Prefer PICKUP_FROM_STORE when the user has no delivery address.
 - Never invent stock or prices — rely on tool data.
-- After a successful order, share display_uid (the customer-facing order number) — never share uuid to the user. If payment_url is present, share that link so they can pay.`
+- After a successful order, share display_uid (the customer-facing order number) — never share uuid to the user. If payment_url is present, share that link so they can pay.
+
+Order status:
+- When the user asks about order status, tracking, or "my order", call get_order_status without order_id first.
+- Pass order_id only when the user gives their order number (display_uid, e.g. ST-260710-000001).
+- Never ask for or mention internal uuid.`
 
 	commerceWelcomeInstruction = `Write the store's first WhatsApp welcome message for a new shopper.
 
@@ -74,6 +79,7 @@ type commerceBackend interface {
 	GetStore(ctx context.Context, storeID string) (map[string]any, error)
 	ListCategories(ctx context.Context, storeID string) ([]map[string]any, error)
 	GetOrder(ctx context.Context, orderUUID string) (map[string]any, error)
+	LookupOrderStatus(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
 	CreateOrder(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
 }
 
@@ -185,16 +191,15 @@ func commerceToolDefs() []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        "get_order_status",
-				"description": "Get status for an existing order by uuid.",
+				"description": "Get order status for the WhatsApp customer. Omit order_id to return their latest order at this store; pass order_id (customer order number / display_uid) when they provide it.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"order_uuid": map[string]any{
+						"order_id": map[string]any{
 							"type":        "string",
-							"description": "Order uuid returned when the order was created.",
+							"description": "Customer-facing order number (display_uid), e.g. ST-260710-000001. Omit to fetch their latest order.",
 						},
 					},
-					"required": []string{"order_uuid"},
 				},
 			},
 		},
@@ -520,15 +525,18 @@ func (a *App) toolGetProduct(ctx context.Context, rt *commerceRuntime, argsJSON 
 
 func (a *App) toolGetOrderStatus(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
 	var args struct {
-		OrderUUID string `json:"order_uuid"`
+		OrderID string `json:"order_id"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return nil, fmt.Errorf("invalid arguments: %w", err)
+	if argsJSON != "" {
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
 	}
-	if args.OrderUUID == "" {
-		return nil, fmt.Errorf("order_uuid is required")
+	phone := strings.TrimSpace(rt.PhoneNumber)
+	if phone == "" {
+		return nil, fmt.Errorf("customer phone is required for order status lookup")
 	}
-	raw, err := rt.Client.GetOrder(ctx, args.OrderUUID)
+	raw, err := rt.Client.LookupOrderStatus(ctx, rt.StoreID, phone, strings.TrimSpace(args.OrderID))
 	if err != nil {
 		return nil, err
 	}
@@ -613,7 +621,6 @@ func placeCommerceOrder(ctx context.Context, rt *commerceRuntime, args createOrd
 func compactOrderStatus(raw map[string]any) map[string]any {
 	out := map[string]any{
 		"display_uid": raw["display_uid"],
-		"uuid":        raw["uuid"], // internal; use for get_order_status only — do not show to user
 		"status":      raw["status"],
 		"amount":      ticker.PaiseToRupees(asToolFloat(raw["amount"])),
 		"currency":    "INR",

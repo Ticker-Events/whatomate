@@ -21,13 +21,14 @@ func testApp() *App {
 }
 
 type stubCommerceBackend struct {
-	searchFn     func(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error)
-	getFn        func(ctx context.Context, productID string) (map[string]any, error)
-	storeFn      func(ctx context.Context, storeID string) (map[string]any, error)
-	categoriesFn func(ctx context.Context, storeID string) ([]map[string]any, error)
-	orderFn      func(ctx context.Context, orderUUID string) (map[string]any, error)
-	createFn     func(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
-	lastCreate   ticker.CreateOrderRequest
+	searchFn       func(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error)
+	getFn          func(ctx context.Context, productID string) (map[string]any, error)
+	storeFn        func(ctx context.Context, storeID string) (map[string]any, error)
+	categoriesFn   func(ctx context.Context, storeID string) ([]map[string]any, error)
+	orderFn        func(ctx context.Context, orderUUID string) (map[string]any, error)
+	lookupStatusFn func(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
+	createFn       func(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
+	lastCreate     ticker.CreateOrderRequest
 }
 
 func (s *stubCommerceBackend) SearchProducts(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error) {
@@ -63,6 +64,13 @@ func (s *stubCommerceBackend) GetOrder(ctx context.Context, orderUUID string) (m
 		return s.orderFn(ctx, orderUUID)
 	}
 	return nil, fmt.Errorf("get_order not stubbed")
+}
+
+func (s *stubCommerceBackend) LookupOrderStatus(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error) {
+	if s.lookupStatusFn != nil {
+		return s.lookupStatusFn(ctx, storeID, phoneNumber, orderID)
+	}
+	return nil, fmt.Errorf("lookup_order_status not stubbed")
 }
 
 func (s *stubCommerceBackend) CreateOrder(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error) {
@@ -244,6 +252,8 @@ func TestBuildCommerceSystemPrompt(t *testing.T) {
 	assert.Contains(t, p, "FAQ: hours 9-5")
 	assert.Contains(t, p, "confirmed=true")
 	assert.Contains(t, p, "display_uid")
+	assert.Contains(t, p, "get_order_status")
+	assert.Contains(t, p, "Never ask for or mention internal uuid")
 	assert.Contains(t, p, "₹")
 }
 
@@ -265,6 +275,63 @@ func TestCompactOrderCreateResultUsesDisplayUIDAndPaymentURL(t *testing.T) {
 	assert.Equal(t, 250.5, out["amount"])
 	assert.Equal(t, "https://pay.example/go", out["payment_url"])
 	assert.Equal(t, "INR", out["currency"])
+	assert.NotContains(t, out, "uuid")
+}
+
+func TestGetOrderStatusLatestWithoutOrderID(t *testing.T) {
+	stub := &stubCommerceBackend{
+		lookupStatusFn: func(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error) {
+			assert.Equal(t, "42", storeID)
+			assert.Equal(t, "919876543210", phoneNumber)
+			assert.Empty(t, orderID)
+			return map[string]any{
+				"display_uid": "ST-260710-000001",
+				"status":      "CONFIRMED",
+				"amount":      10000,
+			}, nil
+		},
+	}
+	app := testApp()
+	rt := &commerceRuntime{Client: stub, StoreID: "42", PhoneNumber: "919876543210"}
+	out := app.executeCommerceTool(rt, "get_order_status", `{}`)
+	assert.Contains(t, out, `"display_uid":"ST-260710-000001"`)
+	assert.Contains(t, out, `"status":"CONFIRMED"`)
+}
+
+func TestGetOrderStatusWithOrderID(t *testing.T) {
+	stub := &stubCommerceBackend{
+		lookupStatusFn: func(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error) {
+			assert.Equal(t, "ST-260710-000099", orderID)
+			return map[string]any{
+				"display_uid": "ST-260710-000099",
+				"status":      "IN_TRANSIT",
+				"amount":      5000,
+			}, nil
+		},
+	}
+	app := testApp()
+	rt := &commerceRuntime{Client: stub, StoreID: "42", PhoneNumber: "919876543210"}
+	out := app.executeCommerceTool(rt, "get_order_status", `{"order_id":"ST-260710-000099"}`)
+	assert.Contains(t, out, `"display_uid":"ST-260710-000099"`)
+}
+
+func TestGetOrderStatusRequiresPhone(t *testing.T) {
+	app := testApp()
+	rt := &commerceRuntime{Client: &stubCommerceBackend{}, StoreID: "42"}
+	out := app.executeCommerceTool(rt, "get_order_status", `{}`)
+	assert.Contains(t, out, "customer phone is required")
+}
+
+func TestGetOrderStatusUnauthorizedError(t *testing.T) {
+	stub := &stubCommerceBackend{
+		lookupStatusFn: func(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error) {
+			return nil, fmt.Errorf("Order not found")
+		},
+	}
+	app := testApp()
+	rt := &commerceRuntime{Client: stub, StoreID: "42", PhoneNumber: "919876543210"}
+	out := app.executeCommerceTool(rt, "get_order_status", `{"order_id":"ST-000"}`)
+	assert.Contains(t, out, "Order not found")
 }
 
 func TestStubCreateOrderJSONRoundTrip(t *testing.T) {
