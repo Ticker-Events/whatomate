@@ -32,7 +32,7 @@ onMounted(async () => {
       if (user.role?.name === 'agent') {
         router.push('/analytics/agents')
       } else {
-        router.push('/')
+        router.push('/dashboard')
       }
     }, 1000)
   } catch (error: any) {
