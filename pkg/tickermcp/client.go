@@ -195,6 +195,35 @@ func CompactCategory(m map[string]any) map[string]any {
 	return out
 }
 
+// LookupOrderStatus maps to MCP lookup_order_status (phone-verified buyer lookup).
+func (c *Client) LookupOrderStatus(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error) {
+	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
+	if err != nil || sid <= 0 {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	phoneNumber = strings.TrimSpace(phoneNumber)
+	if phoneNumber == "" {
+		return nil, fmt.Errorf("phone_number is required")
+	}
+	args := map[string]any{
+		"store_id":     sid,
+		"phone_number": phoneNumber,
+	}
+	orderID = strings.TrimSpace(orderID)
+	if orderID != "" {
+		args["order_display_id"] = orderID
+	}
+	raw, err := c.callTool(ctx, "lookup_order_status", args)
+	if err != nil {
+		return nil, err
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected lookup_order_status result type %T", raw)
+	}
+	return m, nil
+}
+
 // GetOrder maps to MCP get_order.
 func (c *Client) GetOrder(ctx context.Context, orderUUID string) (map[string]any, error) {
 	orderUUID = strings.TrimSpace(orderUUID)
