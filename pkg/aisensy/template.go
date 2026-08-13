@@ -17,11 +17,25 @@ func (c *Client) SubmitTemplate(ctx context.Context, account *whatsapp.Account, 
 	directRoot := strings.TrimSuffix(c.baseURL, "/api")
 	url := fmt.Sprintf("%s/wa_template", directRoot)
 
+	components, err := buildTemplateComponents(template)
+	if err != nil {
+		return "", err
+	}
+
 	payload := map[string]any{
 		"name":       template.Name,
 		"category":   template.Category,
 		"language":   template.Language,
-		"components": buildTemplateComponents(template),
+		"components": components,
+	}
+	// Match Meta Cloud API: named body/header params need parameter_format=NAMED.
+	if strings.ToUpper(template.Category) != "AUTHENTICATION" {
+		isNamedParams := template.ParameterFormat == "named" ||
+			whatsapp.HasNamedParams(template.BodyContent) ||
+			whatsapp.HasNamedParams(template.HeaderContent)
+		if isNamedParams {
+			payload["parameter_format"] = "NAMED"
+		}
 	}
 
 	respBody, err := c.doRequest(ctx, http.MethodPost, url, payload, account)
@@ -85,40 +99,10 @@ func (c *Client) DeleteTemplate(ctx context.Context, account *whatsapp.Account, 
 }
 
 // buildTemplateComponents converts a TemplateSubmission into a Meta-compatible
-// components array for the AiSensy API.
-func buildTemplateComponents(t *whatsapp.TemplateSubmission) []map[string]any {
-	var components []map[string]any
-
-	if t.HeaderType != "" && t.HeaderType != "NONE" {
-		header := map[string]any{"type": "HEADER", "format": t.HeaderType}
-		if t.HeaderType == "TEXT" && t.HeaderContent != "" {
-			header["text"] = t.HeaderContent
-		}
-		components = append(components, header)
+// components array for the AiSensy API, including example/sample text for variables.
+func buildTemplateComponents(t *whatsapp.TemplateSubmission) ([]map[string]any, error) {
+	if strings.ToUpper(t.Category) == "AUTHENTICATION" {
+		return whatsapp.BuildAuthComponents(t), nil
 	}
-
-	if t.BodyContent != "" {
-		body := map[string]any{"type": "BODY", "text": t.BodyContent}
-		components = append(components, body)
-	}
-
-	if t.FooterContent != "" {
-		components = append(components, map[string]any{
-			"type": "FOOTER",
-			"text": t.FooterContent,
-		})
-	}
-
-	if len(t.Buttons) > 0 {
-		buttons := make([]any, 0, len(t.Buttons))
-		for _, btn := range t.Buttons {
-			buttons = append(buttons, btn)
-		}
-		components = append(components, map[string]any{
-			"type":    "BUTTONS",
-			"buttons": buttons,
-		})
-	}
-
-	return components
+	return whatsapp.BuildStandardComponents(t)
 }
