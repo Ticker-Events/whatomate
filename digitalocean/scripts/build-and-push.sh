@@ -12,30 +12,15 @@ UI_IMAGE="${UI_IMAGE:-$REGISTRY/$UI_IMAGE_NAME:$TAG}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=lib-ui-firebase-build.sh
+source "$ROOT/digitalocean/scripts/lib-ui-firebase-build.sh"
+
 echo "Building $API_IMAGE ..."
 docker build -t "$API_IMAGE" -t "$REGISTRY/$API_IMAGE_NAME:latest" .
 
 echo "Building $UI_IMAGE ..."
 UI_BUILD_ARGS=()
-if [[ -n "${VITE_FIREBASE_CONFIG:-}" ]]; then
-  UI_BUILD_ARGS+=(--build-arg "VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG")
-else
-  UI_ENV_FILE="${UI_ENV_FILE:-}"
-  if [[ -z "$UI_ENV_FILE" ]]; then
-    if [[ -f "$ROOT/frontend/.env.production" ]]; then
-      UI_ENV_FILE="$ROOT/frontend/.env.production"
-    elif [[ -f "$ROOT/frontend/.env" ]]; then
-      UI_ENV_FILE="$ROOT/frontend/.env"
-    fi
-  fi
-  if [[ -n "$UI_ENV_FILE" && -f "$UI_ENV_FILE" ]]; then
-    value=$(grep -E '^VITE_FIREBASE_CONFIG=' "$UI_ENV_FILE" | head -1 | cut -d= -f2- || true)
-    if [[ -n "$value" ]]; then
-      UI_BUILD_ARGS+=(--build-arg "VITE_FIREBASE_CONFIG=$value")
-    fi
-  fi
-fi
-if [[ ${#UI_BUILD_ARGS[@]} -gt 0 ]]; then
+if append_ui_firebase_build_args UI_BUILD_ARGS "$ROOT"; then
   echo "UI Firebase config: enabled"
 else
   echo "Warning: VITE_FIREBASE_CONFIG not set — Firestore real-time chat will be disabled in the UI"

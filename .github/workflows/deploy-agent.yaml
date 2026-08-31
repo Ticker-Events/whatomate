@@ -120,9 +120,12 @@ jobs:
           API_IMAGE="$REGISTRY/$API_IMAGE_NAME"
           UI_IMAGE="$REGISTRY/$UI_IMAGE_NAME"
           docker build -t "$API_IMAGE:$IMAGE_TAG" -t "$API_IMAGE:latest" .
+          source digitalocean/scripts/lib-ui-firebase-build.sh
           UI_BUILD_ARGS=()
-          if [[ -n "${VITE_FIREBASE_CONFIG:-}" ]]; then
-            UI_BUILD_ARGS+=(--build-arg "VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG")
+          if append_ui_firebase_build_args UI_BUILD_ARGS "$GITHUB_WORKSPACE"; then
+            echo "UI Firebase config: enabled"
+          else
+            echo "Warning: VITE_FIREBASE_CONFIG not set — Firestore real-time chat will be disabled in the UI"
           fi
           docker build "${UI_BUILD_ARGS[@]}" \
             -t "$UI_IMAGE:$IMAGE_TAG" -t "$UI_IMAGE:latest" \
