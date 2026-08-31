@@ -115,11 +115,18 @@ jobs:
       - name: Build and push images
         env:
           IMAGE_TAG: ${{ github.sha }}
+          VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
         run: |
           API_IMAGE="$REGISTRY/$API_IMAGE_NAME"
           UI_IMAGE="$REGISTRY/$UI_IMAGE_NAME"
           docker build -t "$API_IMAGE:$IMAGE_TAG" -t "$API_IMAGE:latest" .
-          docker build -t "$UI_IMAGE:$IMAGE_TAG" -t "$UI_IMAGE:latest" -f frontend/Dockerfile frontend/
+          UI_BUILD_ARGS=()
+          if [[ -n "${VITE_FIREBASE_CONFIG:-}" ]]; then
+            UI_BUILD_ARGS+=(--build-arg "VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG")
+          fi
+          docker build "${UI_BUILD_ARGS[@]}" \
+            -t "$UI_IMAGE:$IMAGE_TAG" -t "$UI_IMAGE:latest" \
+            -f frontend/Dockerfile frontend/
           docker push "$API_IMAGE:$IMAGE_TAG"
           docker push "$API_IMAGE:latest"
           docker push "$UI_IMAGE:$IMAGE_TAG"

@@ -12,6 +12,10 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Firebase client config (baked into the SPA at build time)
+ARG VITE_FIREBASE_CONFIG
+ENV VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG
+
 # Build the application
 RUN npm run build
 
