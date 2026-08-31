@@ -12,12 +12,13 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Firebase client config (baked into the SPA at build time)
-ARG VITE_FIREBASE_CONFIG
-ENV VITE_FIREBASE_CONFIG=$VITE_FIREBASE_CONFIG
-
-# Build the application
-RUN npm run build
+# Firebase client config (baked into the SPA at build time).
+# Passed base64-encoded to avoid shell quoting issues with JSON in docker build-arg.
+ARG VITE_FIREBASE_CONFIG_B64
+RUN if [ -n "$VITE_FIREBASE_CONFIG_B64" ]; then \
+      export VITE_FIREBASE_CONFIG="$(printf '%s' "$VITE_FIREBASE_CONFIG_B64" | base64 -d)"; \
+    fi; \
+    npm run build
 
 # Production stage
 FROM nginx:alpine
