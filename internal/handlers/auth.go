@@ -562,3 +562,30 @@ func (a *App) GetWSToken(r *fastglue.Request) error {
 
 	return r.SendEnvelope(map[string]string{"token": signed})
 }
+
+// GetFirebaseToken returns a Firebase custom token for Firestore real-time listeners.
+func (a *App) GetFirebaseToken(r *fastglue.Request) error {
+	if a.Firestore == nil || !a.Firestore.Enabled() {
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Firebase is not configured", nil, "")
+	}
+
+	userID, ok := r.RequestCtx.UserValue("user_id").(uuid.UUID)
+	if !ok {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	orgID, ok := r.RequestCtx.UserValue("organization_id").(uuid.UUID)
+	if !ok {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	token, err := a.Firestore.CreateCustomToken(ctx, userID, orgID)
+	if err != nil {
+		a.Log.Error("Failed to generate Firebase token", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to generate token", nil, "")
+	}
+
+	return r.SendEnvelope(map[string]string{"token": token})
+}

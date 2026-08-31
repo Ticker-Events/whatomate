@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
-	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
@@ -152,6 +151,11 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		return nil, fmt.Errorf("failed to create message: %w", err)
 	}
 
+	// Sync to Firestore before send/status updates so the document exists for patches.
+	if opts.BroadcastWebSocket {
+		a.broadcastNewMessage(req.Account.OrganizationID, msg, req.Contact)
+	}
+
 	// 2. Define the send function based on message type
 	sendFn := func(sendCtx context.Context) (string, error) {
 		waAccount := a.toWhatsAppAccount(req.Account)
@@ -238,11 +242,6 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	} else {
 		wamid, err := sendFn(ctx)
 		a.finalizeMessageSend(msg, req, opts, wamid, err)
-	}
-
-	// 4. Immediate actions (before send completes for async)
-	if opts.BroadcastWebSocket {
-		a.broadcastNewMessage(req.Account.OrganizationID, msg, req.Contact)
 	}
 
 	if opts.TrackSLA {
@@ -427,17 +426,9 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
 
-		// Broadcast failure status via WebSocket so frontend updates immediately
-		if opts.BroadcastWebSocket && a.WSHub != nil {
-			a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
-				Type: websocket.TypeStatusUpdate,
-				Payload: map[string]any{
-					"message_id":    msg.ID,
-					"contact_id":    req.Contact.ID,
-					"status":        models.MessageStatusFailed,
-					"error_message": errMsg,
-				},
-			})
+		// Sync failure status to Firestore so frontend updates immediately
+		if opts.BroadcastWebSocket {
+			a.syncMessageStatusToFirestore(msg.ID, models.MessageStatusFailed, errMsg)
 		}
 		return
 	}
@@ -453,17 +444,9 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		a.dispatchMessageSentWebhook(req.Account, req.Contact, msg)
 	}
 
-	// Broadcast status update via WebSocket
-	if opts.BroadcastWebSocket && a.WSHub != nil {
-		a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
-			Type: websocket.TypeStatusUpdate,
-			Payload: map[string]any{
-				"message_id": msg.ID,
-				"contact_id": req.Contact.ID,
-				"status":     models.MessageStatusSent,
-				"wamid":      wamid,
-			},
-		})
+	// Sync status update to Firestore
+	if opts.BroadcastWebSocket {
+		a.syncMessageStatusToFirestore(msg.ID, models.MessageStatusSent, "")
 	}
 
 	// Mark the contact's incoming messages as read once a chatbot reply has
@@ -474,65 +457,9 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 	}
 }
 
-// broadcastNewMessage broadcasts a new message via WebSocket
+// broadcastNewMessage syncs a new message to Firestore for real-time UI updates.
 func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact *models.Contact) {
-	if a.WSHub == nil {
-		return
-	}
-
-	var assignedUserIDStr string
-	if contact.AssignedUserID != nil {
-		assignedUserIDStr = contact.AssignedUserID.String()
-	}
-	profileName := contact.ProfileName
-	if a.ShouldMaskPhoneNumbers(orgID) {
-		profileName = utils.MaskIfPhoneNumber(profileName)
-	}
-
-	payload := map[string]any{
-		"id":               msg.ID.String(),
-		"contact_id":       contact.ID.String(),
-		"assigned_user_id": assignedUserIDStr,
-		"profile_name":     profileName,
-		"direction":        msg.Direction,
-		"message_type":     msg.MessageType,
-		"content":          map[string]string{"body": msg.Content},
-		"media_url":        msg.MediaURL,
-		"media_mime_type":  msg.MediaMimeType,
-		"media_filename":   msg.MediaFilename,
-		"interactive_data": msg.InteractiveData,
-		"status":           msg.Status,
-		"wamid":            msg.WhatsAppMessageID,
-		"created_at":       msg.CreatedAt,
-		"updated_at":       msg.UpdatedAt,
-		"is_reply":         msg.IsReply,
-	}
-
-	// Add interactive data
-	if msg.InteractiveData != nil {
-		payload["interactive_data"] = msg.InteractiveData
-	}
-
-	// Add reply context
-	if msg.IsReply && msg.ReplyToMessageID != nil {
-		payload["reply_to_message_id"] = msg.ReplyToMessageID.String()
-
-		// Include reply preview for UI
-		var replyToMsg models.Message
-		if err := a.DB.First(&replyToMsg, msg.ReplyToMessageID).Error; err == nil {
-			payload["reply_to_message"] = map[string]any{
-				"id":           replyToMsg.ID.String(),
-				"content":      map[string]string{"body": replyToMsg.Content},
-				"message_type": replyToMsg.MessageType,
-				"direction":    replyToMsg.Direction,
-			}
-		}
-	}
-
-	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
-		Type:    websocket.TypeNewMessage,
-		Payload: payload,
-	})
+	a.syncMessageToFirestore(orgID, msg, contact)
 }
 
 // broadcastReactionUpdate broadcasts a reaction update via WebSocket

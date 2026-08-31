@@ -14,6 +14,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { wsService } from '@/services/websocket'
+import { firestoreService } from '@/services/firestore'
 import { authService } from '@/services/api'
 import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
@@ -44,6 +45,8 @@ onMounted(() => {
         return null
       }
     })
+
+    firestoreService.connect()
   }
 })
 

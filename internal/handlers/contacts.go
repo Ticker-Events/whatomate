@@ -519,6 +519,8 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 
 	a.DB.Model(contact).Update("is_read", true)
 
+	a.syncContactUnreadResetToFirestore(orgID, contactID)
+
 	if len(unreadMessages) > 0 && contact.WhatsAppAccount != "" {
 		if account, err := a.resolveWhatsAppAccount(orgID, contact.WhatsAppAccount); err == nil {
 			if account.AutoReadReceipt {
