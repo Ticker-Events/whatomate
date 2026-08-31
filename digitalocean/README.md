@@ -33,7 +33,8 @@ bash digitalocean/scripts/02-setup-registry-ns.sh
 # 3. Create secrets from the example
 cp digitalocean/k8s/overlays/production/secrets.example.yaml \
    digitalocean/k8s/overlays/production/secrets.yaml
-# Edit secrets.yaml: Managed Postgres host/password, JWT, encryption_key, admin password
+# Edit secrets.yaml: Managed Postgres host/password, JWT, encryption_key, admin password,
+# and [firebase].credentials (service account JSON for Firestore sync).
 kubectl apply -f digitalocean/k8s/overlays/production/secrets.yaml
 
 # 4. DNS: point agent.tiqr.store A/CNAME at the same ingress LoadBalancer IP
@@ -42,7 +43,15 @@ kubectl apply -f digitalocean/k8s/overlays/production/secrets.yaml
 
 ## Build and deploy
 
+Firebase client config for the UI is **baked into the SPA at Docker build time** (not a runtime k8s env var). Set `VITE_FIREBASE_CONFIG` before building the UI image — minified JSON on one line:
+
 ```bash
+# Option A: copy and fill frontend/.env.production (gitignored)
+cp frontend/.env.production.example frontend/.env.production
+
+# Option B: export (also used by CI via GitHub secret VITE_FIREBASE_CONFIG)
+export VITE_FIREBASE_CONFIG='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}'
+
 bash digitalocean/scripts/build-and-push.sh
 bash digitalocean/scripts/deploy.sh
 ```
@@ -79,4 +88,7 @@ digitalocean/
 
 ## CI
 
-`.github/workflows/deploy-agent.yaml` runs tests, then builds and deploys on every push to `tiqr-main` (and via workflow_dispatch). Requires secret `DIGITALOCEAN_ACCESS_TOKEN`.
+`.github/workflows/deploy-agent.yaml` runs tests, then builds and deploys on every push to `tiqr-main` (and via workflow_dispatch). Requires secrets:
+
+- `DIGITALOCEAN_ACCESS_TOKEN`
+- `VITE_FIREBASE_CONFIG` — minified Firebase web app config JSON (UI build)
