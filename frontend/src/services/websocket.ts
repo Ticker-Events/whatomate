@@ -3,7 +3,6 @@ import { useTransfersStore } from '@/stores/transfers'
 import { useCallingStore } from '@/stores/calling'
 import { useAuthStore } from '@/stores/auth'
 import { useNotesStore } from '@/stores/notes'
-import { contactsService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import router from '@/router'
 
@@ -21,7 +20,7 @@ function playNotificationSound() {
   })
 }
 
-// Show toast notification with click handler
+// Show toast notification with click handler (used by call/transfer alerts)
 function showNotification(title: string, body: string, contactId: string) {
   toast.info(title, {
     description: body,
@@ -43,8 +42,6 @@ function showNotification(title: string, body: string, contactId: string) {
 
 // WebSocket message types
 const WS_TYPE_AUTH = 'auth'
-const WS_TYPE_NEW_MESSAGE = 'new_message'
-const WS_TYPE_STATUS_UPDATE = 'status_update'
 const WS_TYPE_SET_CONTACT = 'set_contact'
 const WS_TYPE_PING = 'ping'
 const WS_TYPE_PONG = 'pong'
@@ -178,12 +175,6 @@ class WebSocketService {
       const store = useContactsStore()
 
       switch (message.type) {
-        case WS_TYPE_NEW_MESSAGE:
-          this.handleNewMessage(store, message.payload)
-          break
-        case WS_TYPE_STATUS_UPDATE:
-          this.handleStatusUpdate(store, message.payload)
-          break
         case WS_TYPE_AGENT_TRANSFER:
           this.handleAgentTransfer(message.payload)
           break
@@ -247,97 +238,6 @@ class WebSocketService {
     } catch {
       // Failed to parse message, ignore
     }
-  }
-
-  private handleNewMessage(store: ReturnType<typeof useContactsStore>, payload: any) {
-    // Check if this message is for the current contact
-    const currentContact = store.currentContact
-    const isViewingThisContact = currentContact && payload.contact_id === currentContact.id
-
-    if (isViewingThisContact) {
-      // Add message to the store
-      store.addMessage({
-        id: payload.id,
-        contact_id: payload.contact_id,
-        direction: payload.direction,
-        message_type: payload.message_type,
-        content: payload.content,
-        media_url: payload.media_url,
-        media_mime_type: payload.media_mime_type,
-        media_filename: payload.media_filename,
-        interactive_data: payload.interactive_data,
-        status: payload.status,
-        wamid: payload.wamid,
-        error_message: payload.error_message,
-        is_reply: payload.is_reply,
-        reply_to_message_id: payload.reply_to_message_id,
-        reply_to_message: payload.reply_to_message,
-        reactions: payload.reactions,
-        created_at: payload.created_at,
-        updated_at: payload.updated_at
-      })
-    }
-
-    // Show toast notification for incoming messages if:
-    // 1. Message is incoming (from customer, not chatbot/agent)
-    // 2. Current user is assigned to this contact
-    // 3. User has new_message_alerts enabled
-    // 4. User is not currently viewing this contact
-    if (payload.direction === 'incoming' && !isViewingThisContact) {
-      const authStore = useAuthStore()
-      const currentUserId = authStore.user?.id
-      const settings = authStore.userSettings
-
-      // Check if user is assigned to this contact
-      const isAssignedToUser = payload.assigned_user_id === currentUserId
-
-      // Check if new message alerts are enabled (default to true if not set)
-      const alertsEnabled = settings.new_message_alerts !== false
-
-      if (isAssignedToUser && alertsEnabled) {
-        const senderName = payload.profile_name || 'Unknown'
-        const messagePreview = payload.content?.body || 'New message'
-        const preview = messagePreview.length > 50
-          ? messagePreview.substring(0, 50) + '...'
-          : messagePreview
-        const contactId = payload.contact_id
-
-        // Play notification sound and show browser notification
-        playNotificationSound()
-        showNotification(senderName, preview, contactId)
-      }
-    }
-
-    // If the user is actively viewing this contact, mark messages read on
-    // the server before refetching so the unread badge stays at zero
-    // (otherwise the new message comes back as unread and the sidebar flashes
-    // a count for a chat that's already open). See issue #280.
-    // Use currentContact.id (already validated, from our /contacts response)
-    // rather than the WS payload value to avoid pushing untrusted data into
-    // a request URL.
-    // Skip the call when the message already arrived as 'read' — the backend
-    // pre-marks chatbot-handled messages at save time, and re-marking just
-    // touches DB rows that are already in the right state.
-    // Also skip when the agent isn't actually looking — that includes both
-    // tab-hidden (different browser tab) and window-unfocused (browser is
-    // visible but agent is in another OS window). Firing markRead in those
-    // cases would send a WhatsApp read receipt to the customer (blue ticks)
-    // for a message no one has read. The mark fires when the user comes
-    // back instead (handled in ChatView's focus/visibility listeners).
-    const alreadyRead = payload.status === 'read'
-    const userActive = typeof document === 'undefined'
-      || (document.visibilityState === 'visible' && document.hasFocus())
-    if (isViewingThisContact && currentContact && payload.direction === 'incoming' && !alreadyRead && userActive) {
-      contactsService.markRead(currentContact.id)
-        .catch(() => { /* non-critical, will resync on next chat-open */ })
-        .finally(() => store.fetchContacts())
-    } else {
-      store.fetchContacts()
-    }
-  }
-
-  private handleStatusUpdate(store: ReturnType<typeof useContactsStore>, payload: any) {
-    store.updateMessageStatus(payload.message_id, payload.status, payload.error_message)
   }
 
   private handleReactionUpdate(store: ReturnType<typeof useContactsStore>, payload: any) {

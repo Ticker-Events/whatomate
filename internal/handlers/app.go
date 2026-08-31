@@ -17,6 +17,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/pkg/aisensy"
+	firestoresync "github.com/shridarpatil/whatomate/pkg/firestore"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -47,6 +48,8 @@ type App struct {
 	TTS *tts.PiperTTS
 	// S3Client for serving call recording presigned URLs (nil when not configured)
 	S3Client *storage.S3Client
+	// Firestore syncs chat messages and contacts for real-time UI updates (nil when not configured)
+	Firestore *firestoresync.Client
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
 }

@@ -130,6 +130,7 @@ api.interceptors.response.use(
 // API service methods
 export const authService = {
   getWSToken: () => api.get('/auth/ws-token'),
+  getFirebaseToken: () => api.get('/auth/firebase-token'),
 }
 
 export const usersService = {

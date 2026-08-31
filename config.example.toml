@@ -123,3 +123,7 @@ webhook_secret = ""  # Shared HMAC secret for AiSensy webhook signature verifica
 email = "admin@admin.com"
 password = "admin"
 full_name = "Admin"
+
+# Firebase Firestore (real-time chat sync)
+[firebase]
+credentials = ""  # Service account JSON string, or set WHATOMATE_FIREBASE_CREDENTIALS env var

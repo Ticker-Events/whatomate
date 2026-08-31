@@ -1707,10 +1707,15 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		"whats_app_account":    account.Name,
 		"last_inbound_at":      now,
 	})
+	contact.LastMessageAt = &now
+	contact.LastInboundAt = &now
+	contact.LastMessagePreview = preview
+	contact.IsRead = false
+	contact.WhatsAppAccount = account.Name
 
 	a.Log.Info("Saved incoming message", "message_id", message.ID, "contact_id", contact.ID, "media_url", message.MediaURL)
 
-	// Broadcast new message via WebSocket
+	// Sync new message to Firestore
 	a.broadcastNewMessage(account.OrganizationID, &message, contact)
 
 	// Dispatch webhook for incoming message

@@ -343,6 +343,32 @@ export const useContactsStore = defineStore('contacts', () => {
     accountFilter.value = null
   }
 
+  function applyContactFirestoreUpdate(contact: Contact) {
+    const existingIndex = contacts.value.findIndex(c => c.id === contact.id)
+    if (existingIndex >= 0) {
+      contacts.value[existingIndex] = {
+        ...contacts.value[existingIndex],
+        ...contact,
+        // Preserve list fields not synced to Firestore
+        tags: contacts.value[existingIndex].tags?.length ? contacts.value[existingIndex].tags : contact.tags,
+        metadata: contacts.value[existingIndex].metadata || contact.metadata
+      }
+      // Re-sort by bumping updated contact to correct position via sort in computed
+    } else {
+      contacts.value.unshift(contact)
+      contactsTotal.value += 1
+    }
+
+    if (currentContact.value?.id === contact.id) {
+      currentContact.value = {
+        ...currentContact.value,
+        ...contact,
+        tags: currentContact.value.tags,
+        metadata: currentContact.value.metadata
+      }
+    }
+  }
+
   function updateMessageReactions(messageId: string, reactions: Reaction[]) {
     const message = messages.value.find(m => m.id === messageId)
     if (message) {
@@ -399,6 +425,7 @@ export const useContactsStore = defineStore('contacts', () => {
     sendTemplate,
     addMessage,
     updateMessageStatus,
+    applyContactFirestoreUpdate,
     setCurrentContact,
     clearMessages,
     setAccountFilter,

@@ -24,6 +24,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/internal/worker"
 	"github.com/shridarpatil/whatomate/pkg/aisensy"
+	firestoresync "github.com/shridarpatil/whatomate/pkg/firestore"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -242,6 +243,15 @@ func runServer(args []string) {
 	// Initialize CallManager (per-org calling_enabled DB setting controls access)
 	app.CallManager = calling.NewManager(&cfg.Calling, s3Client, db, rdb, waClient, wsHub, assigner, lo)
 	app.S3Client = s3Client
+
+	// Initialize Firestore for real-time chat sync (optional)
+	fsClient, err := firestoresync.Init(context.Background(), cfg.Firebase.Credentials, lo)
+	if err != nil {
+		lo.Warn("Failed to initialize Firestore client", "error", err)
+	} else {
+		app.Firestore = fsClient
+	}
+
 	lo.Info("Call manager initialized")
 
 	// Initialize TTS if configured (requires piper binary + model)
@@ -345,6 +355,10 @@ func runServer(args []string) {
 	lo.Info("Stopping WebSocket fan-out subscriber...")
 	app.StopWSBroadcastSubscriber()
 	lo.Info("WebSocket fan-out subscriber stopped")
+
+	if app.Firestore != nil {
+		_ = app.Firestore.Close()
+	}
 
 	// Stop SLA processor
 	lo.Info("Stopping SLA processor...")
@@ -547,6 +561,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/auth/logout", app.Logout)
 	g.POST("/api/auth/switch-org", app.SwitchOrg)
 	g.GET("/api/auth/ws-token", app.GetWSToken)
+	g.GET("/api/auth/firebase-token", app.GetFirebaseToken)
 
 	// SSO routes (public, optionally rate-limited)
 	g.GET("/api/auth/sso/providers", app.GetPublicSSOProviders)

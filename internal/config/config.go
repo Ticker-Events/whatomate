@@ -25,6 +25,13 @@ type Config struct {
 	Cookie       CookieConfig       `koanf:"cookie"`
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
+	Firebase     FirebaseConfig     `koanf:"firebase"`
+}
+
+// FirebaseConfig holds Firebase Admin SDK settings for Firestore real-time sync.
+type FirebaseConfig struct {
+	// Credentials is the service account JSON (same format as FIREBASE_CREDENTIALS in ticker-events).
+	Credentials string `koanf:"credentials"`
 }
 
 // AiSensyConfig holds AiSensy Direct API configuration.

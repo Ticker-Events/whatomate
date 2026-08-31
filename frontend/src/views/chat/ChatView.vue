@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { wsService } from '@/services/websocket'
+import { firestoreService } from '@/services/firestore'
 import { contactsService, chatbotService, messagesService, customActionsService, accountsService, cannedResponsesService, getRequestHeaders, type CustomAction, type ActionResult, type CannedResponse } from '@/services/api'
 import { useTagsStore } from '@/stores/tags'
 import { TagBadge } from '@/components/ui/tag-badge'
@@ -486,6 +487,7 @@ function onUserActive() {
 
 onUnmounted(() => {
   wsService.setCurrentContact(null)
+  firestoreService.setViewingContact(null)
   // Clear current contact when leaving chat view so notifications work on other pages
   contactsStore.setCurrentContact(null)
   notesStore.clearNotes()
@@ -537,6 +539,7 @@ watch(contactId, async (newId) => {
     await selectContact(newId)
   } else {
     wsService.setCurrentContact(null)
+    firestoreService.setViewingContact(null)
     contactsStore.setCurrentContact(null)
     contactsStore.clearMessages()
     notesStore.clearNotes()
@@ -603,6 +606,7 @@ async function selectContact(id: string) {
 
     // Tell WebSocket server which contact we're viewing
     wsService.setCurrentContact(id)
+    firestoreService.setViewingContact(id)
     // Wait for DOM to render messages before scrolling
     await nextTick()
     // Load media for messages after messages are fetched
