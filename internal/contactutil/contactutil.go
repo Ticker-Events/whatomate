@@ -1,9 +1,12 @@
 package contactutil
 
 import (
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // GetOrCreateContact finds or creates a contact for the given phone number.
@@ -11,63 +14,76 @@ import (
 //   - Normalizes phone (strips leading "+")
 //   - Tries both normalized and +prefix forms
 //   - Updates profile name if changed
-//   - Handles race conditions on create by re-fetching
+//   - Handles race conditions on create via upsert + re-fetch
 //   - Restores soft-deleted contacts if found
 //
 // Returns the contact, whether it was newly created, and any error.
 func GetOrCreateContact(db *gorm.DB, orgID uuid.UUID, phoneNumber, profileName string) (*models.Contact, bool, error) {
-	// Normalize phone number (remove + prefix if present)
-	normalizedPhone := phoneNumber
-	if len(normalizedPhone) > 0 && normalizedPhone[0] == '+' {
-		normalizedPhone = normalizedPhone[1:]
+	normalizedPhone := normalizePhone(phoneNumber)
+	if normalizedPhone == "" {
+		return nil, false, gorm.ErrInvalidData
 	}
 
-	// Try to find existing contact with normalized phone (including soft-deleted)
-	var contact models.Contact
-	if err := db.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, normalizedPhone).First(&contact).Error; err == nil {
-		// Restore if soft-deleted
-		if contact.DeletedAt.Valid {
-			db.Unscoped().Model(&contact).Update("deleted_at", nil)
-			contact.DeletedAt.Valid = false
-		}
-		// Update profile name if changed
-		if profileName != "" && contact.ProfileName != profileName {
-			db.Model(&contact).Update("profile_name", profileName)
-		}
-		return &contact, false, nil
+	if contact, found, err := findExistingContact(db, orgID, normalizedPhone, profileName); found {
+		return contact, false, err
 	}
 
-	// Also try with + prefix (contacts may have been stored with it)
-	if err := db.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, "+"+normalizedPhone).First(&contact).Error; err == nil {
-		// Restore if soft-deleted
-		if contact.DeletedAt.Valid {
-			db.Unscoped().Model(&contact).Update("deleted_at", nil)
-			contact.DeletedAt.Valid = false
-		}
-		if profileName != "" && contact.ProfileName != profileName {
-			db.Model(&contact).Update("profile_name", profileName)
-		}
-		return &contact, false, nil
-	}
-
-	// Create new contact
-	contact = models.Contact{
+	contact := models.Contact{
 		BaseModel:      models.BaseModel{ID: uuid.New()},
 		OrganizationID: orgID,
 		PhoneNumber:    normalizedPhone,
 		ProfileName:    profileName,
 	}
-	if err := db.Create(&contact).Error; err != nil {
-		// Race condition: another goroutine may have created the contact
-		if err2 := db.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, normalizedPhone).First(&contact).Error; err2 == nil {
-			// Restore if soft-deleted
-			if contact.DeletedAt.Valid {
-				db.Unscoped().Model(&contact).Update("deleted_at", nil)
-				contact.DeletedAt.Valid = false
-			}
-			return &contact, false, nil
+
+	result := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "organization_id"}, {Name: "phone_number"}},
+		DoNothing: true,
+	}).Create(&contact)
+	if result.Error != nil {
+		if existing, found, err := findExistingContact(db, orgID, normalizedPhone, profileName); found {
+			return existing, false, err
 		}
-		return nil, false, err
+		return nil, false, result.Error
 	}
+
+	if result.RowsAffected == 0 {
+		existing, found, err := findExistingContact(db, orgID, normalizedPhone, profileName)
+		if !found {
+			return nil, false, gorm.ErrRecordNotFound
+		}
+		return existing, false, err
+	}
+
 	return &contact, true, nil
+}
+
+func normalizePhone(phoneNumber string) string {
+	phone := strings.TrimSpace(phoneNumber)
+	if strings.HasPrefix(phone, "+") {
+		phone = phone[1:]
+	}
+	return phone
+}
+
+func findExistingContact(db *gorm.DB, orgID uuid.UUID, normalizedPhone, profileName string) (*models.Contact, bool, error) {
+	for _, phone := range []string{normalizedPhone, "+" + normalizedPhone} {
+		var contact models.Contact
+		if err := db.Unscoped().Where("organization_id = ? AND phone_number = ?", orgID, phone).First(&contact).Error; err != nil {
+			continue
+		}
+		return finalizeContact(db, &contact, profileName)
+	}
+	return nil, false, nil
+}
+
+func finalizeContact(db *gorm.DB, contact *models.Contact, profileName string) (*models.Contact, bool, error) {
+	if contact.DeletedAt.Valid {
+		db.Unscoped().Model(contact).Update("deleted_at", nil)
+		contact.DeletedAt.Valid = false
+	}
+	if profileName != "" && contact.ProfileName != profileName {
+		db.Model(contact).Update("profile_name", profileName)
+		contact.ProfileName = profileName
+	}
+	return contact, true, nil
 }
