@@ -116,6 +116,9 @@ export const useContactsStore = defineStore('contacts', () => {
 
   async function fetchContacts(params?: { search?: string; page?: number; limit?: number; tags?: string }) {
     isLoading.value = true
+    contacts.value = []
+    contactsTotal.value = 0
+    contactsPage.value = 1
     try {
       const tagsParam = selectedTags.value.length > 0 ? selectedTags.value.join(',') : undefined
       const response = await contactsService.list({
@@ -345,6 +348,15 @@ export const useContactsStore = defineStore('contacts', () => {
     accountFilter.value = null
   }
 
+  function clearContacts() {
+    contacts.value = []
+    currentContact.value = null
+    contactsPage.value = 1
+    contactsTotal.value = 0
+    clearMessages()
+    replyingTo.value = null
+  }
+
   function applyContactFirestoreUpdate(contact: Contact) {
     const existingIndex = contacts.value.findIndex(c => c.id === contact.id)
     if (existingIndex >= 0) {
@@ -429,6 +441,7 @@ export const useContactsStore = defineStore('contacts', () => {
     updateMessageStatus,
     applyContactFirestoreUpdate,
     setCurrentContact,
+    clearContacts,
     clearMessages,
     setAccountFilter,
     setReplyingTo,

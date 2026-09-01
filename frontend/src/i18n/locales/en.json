@@ -766,7 +766,8 @@
     "createDesc": "Create a new organization to manage a separate workspace.",
     "namePlaceholder": "Organization name",
     "created": "Organization created",
-    "createFailed": "Failed to create organization"
+    "createFailed": "Failed to create organization",
+    "switchFailed": "Failed to switch organization"
   },
   "tags": {
     "title": "Tags",
