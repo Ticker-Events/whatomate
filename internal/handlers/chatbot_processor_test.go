@@ -579,6 +579,50 @@ func TestSaveIncomingMessage_TextMessage(t *testing.T) {
 	assert.NotNil(t, dbContact.LastMessageAt)
 	assert.Equal(t, "Hello from test", dbContact.LastMessagePreview)
 	assert.False(t, dbContact.IsRead)
+	assert.False(t, dbContact.IsClosed)
+	require.NotNil(t, dbContact.AwaitingReplySince)
+}
+
+func TestSaveIncomingMessage_DoesNotResetExistingClock(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	started := time.Now().Add(-10 * time.Minute).UTC().Truncate(time.Microsecond)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"awaiting_reply_since": started,
+		"is_closed":            false,
+	}).Error)
+	require.NoError(t, app.DB.First(contact, contact.ID).Error)
+
+	app.saveIncomingMessage(account, contact, "wamid."+uuid.New().String()[:16], "text", "follow up", nil, "")
+
+	var dbContact models.Contact
+	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)
+	assert.False(t, dbContact.IsClosed)
+	require.NotNil(t, dbContact.AwaitingReplySince)
+	assert.True(t, started.Equal(dbContact.AwaitingReplySince.UTC()))
+}
+
+func TestSaveIncomingMessage_ReopensClosedWithFreshClock(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	oldClock := time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"is_closed":            true,
+		"awaiting_reply_since": oldClock,
+	}).Error)
+	require.NoError(t, app.DB.First(contact, contact.ID).Error)
+
+	before := time.Now()
+	app.saveIncomingMessage(account, contact, "wamid."+uuid.New().String()[:16], "text", "new question", nil, "")
+
+	var dbContact models.Contact
+	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)
+	assert.False(t, dbContact.IsClosed)
+	require.NotNil(t, dbContact.AwaitingReplySince)
+	assert.False(t, oldClock.Equal(dbContact.AwaitingReplySince.UTC()))
+	assert.True(t, !dbContact.AwaitingReplySince.Before(before.Add(-time.Second)))
 }
 
 func TestSaveIncomingMessage_WithMedia(t *testing.T) {
@@ -743,4 +787,3 @@ func TestMatchFlowTrigger_Match(t *testing.T) {
 // =============================================================================
 // evaluateExpression (package-level, not on App)
 // =============================================================================
-

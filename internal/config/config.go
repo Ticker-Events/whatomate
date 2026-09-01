@@ -29,6 +29,7 @@ type Config struct {
 	Cookie       CookieConfig       `koanf:"cookie"`
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
+	Firebase     FirebaseConfig     `koanf:"firebase"`
 }
 
 type TTSConfig struct {
@@ -182,6 +183,13 @@ type RateLimitConfig struct {
 	TrustProxy          bool `koanf:"trust_proxy"`
 	APIMaxRequests      int  `koanf:"api_max_requests"`
 	APIWindowSeconds    int  `koanf:"api_window_seconds"`
+}
+
+// FirebaseConfig projects contacts to Firestore for tiqr.store manage chat.
+// Empty ProjectID disables the writer.
+type FirebaseConfig struct {
+	ProjectID       string `koanf:"project_id"`
+	CredentialsFile string `koanf:"credentials_file"`
 }
 
 // Load loads configuration from file and environment variables

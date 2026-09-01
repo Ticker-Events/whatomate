@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -1575,13 +1576,21 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		preview = "[" + msgType + "]"
 	}
 
-	a.DB.Model(contact).Updates(map[string]any{
+	contact.LastMessageAt = &now
+	contact.LastMessagePreview = preview
+	contact.IsRead = false
+	contact.WhatsAppAccount = account.Name
+	contact.LastInboundAt = &now
+	updates := map[string]any{
 		"last_message_at":      now,
 		"last_message_preview": preview,
 		"is_read":              false,
 		"whats_app_account":    account.Name,
 		"last_inbound_at":      now,
-	})
+	}
+	maps.Copy(updates, contactutil.ApplyConversationWait(contact, true, now))
+	a.DB.Model(contact).Updates(updates)
+	a.syncContactToFirestore(contact)
 
 	a.Log.Info("Saved incoming message", "message_id", message.ID, "contact_id", contact.ID, "media_url", message.MediaURL)
 
@@ -1649,4 +1658,3 @@ func (a *App) isWithinBusinessHours(businessHours models.JSONBArray) bool {
 	// If no matching day found, assume outside business hours
 	return false
 }
-

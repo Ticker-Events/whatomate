@@ -128,3 +128,9 @@ udp_port_max = 10100          # WebRTC UDP port range end
 email = "admin@admin.com"
 password = "admin"
 full_name = "Admin"
+
+# Optional Firestore projection of contacts for tiqr.store manage chat.
+# Leave project_id empty to disable. credentials_file is a Google service-account JSON path.
+[firebase]
+project_id = ""
+credentials_file = ""

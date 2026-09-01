@@ -82,6 +82,9 @@ GET /api/contacts/{id}
       "custom_field": "value"
     },
     "last_message_at": "2024-01-01T12:00:00Z",
+    "last_inbound_at": "2024-01-01T12:00:00Z",
+    "is_closed": false,
+    "awaiting_reply_since": "2024-01-01T12:00:00Z",
     "created_at": "2024-01-01T00:00:00Z"
   }
 }
@@ -138,9 +141,25 @@ PUT /api/contacts/{id}
   "name": "John Smith",
   "metadata": {
     "custom_field": "updated_value"
-  }
+  },
+  "is_closed": true
 }
 ```
+
+`is_closed` is optional. Setting it only toggles whether the conversation is closed; it does **not** start or clear `awaiting_reply_since`.
+
+### First-response wait
+
+Each contact tracks whether the conversation is waiting for a store reply:
+
+| Event | `is_closed` | `awaiting_reply_since` |
+| --- | --- | --- |
+| Inbound message | `false` (reopen) | Set if empty **or** the chat was closed; otherwise keep |
+| Outbound message (agent or bot) | `true` (auto-close) | Cleared |
+| Manual close (`is_closed: true`) | `true` | Left in place so reopen can resume the wait |
+| Manual reopen (`is_closed: false`) | `false` | Unchanged |
+
+When Firestore contact sync is configured (`[firebase]` in config), these fields are projected onto `contacts/{id}` for the tiqr.store inbox.
 
 ### Response
 

@@ -1683,3 +1683,62 @@ func TestApp_AssignContact_AssignUserFromDifferentOrg(t *testing.T) {
 	// User from a different org should not be found
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
 }
+
+func TestApp_UpdateContact_ClosesWithoutClearingClock(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	clock := time.Now().UTC().Truncate(time.Microsecond)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("awaiting_reply_since", clock).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"is_closed": true})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+
+	err := app.UpdateContact(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data handlers.ContactResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	assert.True(t, resp.Data.IsClosed)
+	require.NotNil(t, resp.Data.AwaitingReplySince)
+	assert.True(t, clock.Equal(resp.Data.AwaitingReplySince.UTC()))
+
+	var dbContact models.Contact
+	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)
+	assert.True(t, dbContact.IsClosed)
+	require.NotNil(t, dbContact.AwaitingReplySince)
+	assert.True(t, clock.Equal(dbContact.AwaitingReplySince.UTC()))
+}
+
+func TestApp_UpdateContact_ReopensWithoutChangingClock(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	clock := time.Now().UTC().Truncate(time.Microsecond)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"is_closed":            true,
+		"awaiting_reply_since": clock,
+	}).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"is_closed": false})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+
+	err := app.UpdateContact(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var dbContact models.Contact
+	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)
+	assert.False(t, dbContact.IsClosed)
+	require.NotNil(t, dbContact.AwaitingReplySince)
+	assert.True(t, clock.Equal(dbContact.AwaitingReplySince.UTC()))
+}

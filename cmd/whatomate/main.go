@@ -15,6 +15,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/database"
+	"github.com/shridarpatil/whatomate/internal/firestoresync"
 	"github.com/shridarpatil/whatomate/internal/frontend"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
@@ -88,6 +89,20 @@ Deployment Scenarios:
   All-in-one:    whatomate server
   Separate:      whatomate server -workers 0  (on API server)
                  whatomate worker -workers 4  (on worker server)`)
+}
+
+func attachContactStore(app *handlers.App, cfg *config.Config, lo logf.Logger) {
+	store, err := firestoresync.New(context.Background(), cfg.Firebase)
+	if err != nil {
+		lo.Warn("Firestore contact sync disabled", "error", err)
+		return
+	}
+	if store == nil {
+		lo.Info("Firestore contact sync not configured")
+		return
+	}
+	app.ContactStore = store
+	lo.Info("Firestore contact sync enabled", "project_id", cfg.Firebase.ProjectID)
 }
 
 // ============================================================================
@@ -208,6 +223,7 @@ func runServer(args []string) {
 		Queue:      jobQueue,
 		HTTPClient: httpClient,
 	}
+	attachContactStore(app, cfg, lo)
 
 	// Initialize S3 client for call recordings (optional)
 	var s3Client *storage.S3Client

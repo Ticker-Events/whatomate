@@ -837,6 +837,8 @@ func TestApp_SendOutgoingMessage_ContactLastMessageUpdated(t *testing.T) {
 	require.NoError(t, app.DB.First(&updatedContact, contact.ID).Error)
 	assert.NotNil(t, updatedContact.LastMessageAt)
 	assert.Equal(t, "This is a test message for preview", updatedContact.LastMessagePreview)
+	assert.True(t, updatedContact.IsClosed)
+	assert.Nil(t, updatedContact.AwaitingReplySince)
 }
 
 func TestApp_SendOutgoingMessage_MediaPreview(t *testing.T) {

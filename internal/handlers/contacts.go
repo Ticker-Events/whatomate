@@ -38,6 +38,8 @@ type ContactResponse struct {
 	AssignedUserID     *uuid.UUID `json:"assigned_user_id,omitempty"`
 	WhatsAppAccount    string     `json:"whatsapp_account,omitempty"`
 	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"`
+	IsClosed           bool       `json:"is_closed"`
+	AwaitingReplySince *time.Time `json:"awaiting_reply_since,omitempty"`
 	ServiceWindowOpen  bool       `json:"service_window_open"`
 	MarketingOptOut    bool       `json:"marketing_opt_out"`
 	CreatedAt          time.Time  `json:"created_at"`
@@ -1452,6 +1454,7 @@ type UpdateContactRequest struct {
 	Metadata           *map[string]any `json:"metadata"`
 	AssignedUserID     *uuid.UUID      `json:"assigned_user_id"`
 	ClearAssignedAgent *bool           `json:"clear_assigned_agent"`
+	IsClosed           *bool           `json:"is_closed"`
 }
 
 // UpdateContact updates an existing contact
@@ -1511,6 +1514,9 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 		}
 		updates["assigned_user_id"] = req.AssignedUserID
 	}
+	if req.IsClosed != nil {
+		updates["is_closed"] = *req.IsClosed
+	}
 
 	if len(updates) == 0 {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "No fields to update", nil, "")
@@ -1523,6 +1529,7 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 
 	// Reload contact
 	a.DB.First(contact, contactID)
+	a.syncContactToFirestore(contact)
 
 	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
 		"contact", contact.ID, models.AuditActionUpdated, &oldContact, contact)
@@ -1609,6 +1616,8 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		AssignedUserID:     contact.AssignedUserID,
 		WhatsAppAccount:    contact.WhatsAppAccount,
 		LastInboundAt:      contact.LastInboundAt,
+		IsClosed:           contact.IsClosed,
+		AwaitingReplySince: contact.AwaitingReplySince,
 		ServiceWindowOpen:  serviceWindowOpen,
 		MarketingOptOut:    contact.MarketingOptOut,
 		CreatedAt:          contact.CreatedAt,

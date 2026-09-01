@@ -11,6 +11,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/assignment"
 	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
@@ -42,8 +43,15 @@ type App struct {
 	TTS *tts.PiperTTS
 	// S3Client for serving call recording presigned URLs (nil when not configured)
 	S3Client *storage.S3Client
+	// ContactStore projects contacts to Firestore for the tiqr.store inbox (nil when disabled)
+	ContactStore ContactStore
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
+}
+
+// ContactStore writes Whatomate contacts to the Firestore projection.
+type ContactStore interface {
+	SyncContact(ctx context.Context, contact *models.Contact) error
 }
 
 // WaitForBackgroundTasks blocks until all background goroutines complete.

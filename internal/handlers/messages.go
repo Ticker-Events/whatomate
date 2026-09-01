@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -575,10 +576,16 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 
 // updateContactLastMessage updates contact's last_message_at and preview
 func (a *App) updateContactLastMessage(contact *models.Contact, preview string) {
-	a.DB.Model(contact).Updates(map[string]any{
-		"last_message_at":      time.Now(),
+	now := time.Now()
+	contact.LastMessageAt = &now
+	contact.LastMessagePreview = preview
+	updates := map[string]any{
+		"last_message_at":      now,
 		"last_message_preview": preview,
-	})
+	}
+	maps.Copy(updates, contactutil.ApplyConversationWait(contact, false, now))
+	a.DB.Model(contact).Updates(updates)
+	a.syncContactToFirestore(contact)
 }
 
 // getMessagePreview returns a preview string for the message

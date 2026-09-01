@@ -292,26 +292,26 @@ func (CustomAction) TableName() string {
 // WhatsAppAccount represents a WhatsApp Business Account
 type WhatsAppAccount struct {
 	BaseModel
-	OrganizationID     uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
-	Name               string     `gorm:"size:100;uniqueIndex:idx_wa_org_name;not null" json:"name"` // Unique per org, used as reference
-	AppID              string     `gorm:"size:100" json:"app_id"`                                    // Meta App ID
-	PhoneID            string     `gorm:"size:100;not null" json:"phone_id"`
-	BusinessID         string     `gorm:"size:100;not null" json:"business_id"`
-	AccessToken        string     `gorm:"type:text;not null" json:"-"` // encrypted
-	AppSecret          string     `gorm:"size:255" json:"-"`           // Meta App Secret for webhook signature verification
-	WebhookVerifyToken string     `gorm:"size:255" json:"webhook_verify_token"`
-	APIVersion         string     `gorm:"size:20;default:'v21.0'" json:"api_version"`
-	IsDefaultIncoming  bool       `gorm:"default:false" json:"is_default_incoming"`
-	IsDefaultOutgoing  bool       `gorm:"default:false" json:"is_default_outgoing"`
-	AutoReadReceipt    bool       `gorm:"default:false" json:"auto_read_receipt"`
+	OrganizationID     uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
+	Name               string    `gorm:"size:100;uniqueIndex:idx_wa_org_name;not null" json:"name"` // Unique per org, used as reference
+	AppID              string    `gorm:"size:100" json:"app_id"`                                    // Meta App ID
+	PhoneID            string    `gorm:"size:100;not null" json:"phone_id"`
+	BusinessID         string    `gorm:"size:100;not null" json:"business_id"`
+	AccessToken        string    `gorm:"type:text;not null" json:"-"` // encrypted
+	AppSecret          string    `gorm:"size:255" json:"-"`           // Meta App Secret for webhook signature verification
+	WebhookVerifyToken string    `gorm:"size:255" json:"webhook_verify_token"`
+	APIVersion         string    `gorm:"size:20;default:'v21.0'" json:"api_version"`
+	IsDefaultIncoming  bool      `gorm:"default:false" json:"is_default_incoming"`
+	IsDefaultOutgoing  bool      `gorm:"default:false" json:"is_default_outgoing"`
+	AutoReadReceipt    bool      `gorm:"default:false" json:"auto_read_receipt"`
 	// BusinessCallingEnabled gates outbound voice_call interactive buttons.
 	// Set to true only after Meta enrolls this number in the WhatsApp Business
 	// Calling API. Used by the canned-response editor to disable the Call
 	// button option, and by the send path to refuse voice_call sends.
 	BusinessCallingEnabled bool       `gorm:"default:false" json:"business_calling_enabled"`
-	Status             string     `gorm:"size:20;default:'active'" json:"status"`
-	CreatedByID        *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
-	UpdatedByID        *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
+	Status                 string     `gorm:"size:20;default:'active'" json:"status"`
+	CreatedByID            *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
+	UpdatedByID            *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
@@ -353,6 +353,10 @@ type Contact struct {
 	Tags               JSONBArray `gorm:"type:jsonb;default:'[]'" json:"tags"`
 	Metadata           JSONB      `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"` // When customer last sent a message (for 24h window tracking)
+
+	// First-response wait: open unanswered inbound until a store reply or manual close.
+	IsClosed           bool       `gorm:"default:false" json:"is_closed"`
+	AwaitingReplySince *time.Time `json:"awaiting_reply_since,omitempty"`
 
 	// Marketing opt-out (from Meta user_preferences webhook)
 	MarketingOptOut bool `gorm:"default:false" json:"marketing_opt_out"`
@@ -422,7 +426,7 @@ type Template struct {
 	Category        string     `gorm:"size:50" json:"category"`                 // MARKETING, UTILITY, AUTHENTICATION
 	Status          string     `gorm:"size:20;default:'PENDING'" json:"status"` // PENDING, APPROVED, REJECTED
 	QualityRating   string     `gorm:"size:50;default:'UNKNOWN'" json:"quality_rating"`
-	HeaderType      string     `gorm:"size:20" json:"header_type"`              // TEXT, IMAGE, DOCUMENT, VIDEO
+	HeaderType      string     `gorm:"size:20" json:"header_type"` // TEXT, IMAGE, DOCUMENT, VIDEO
 	HeaderContent   string     `gorm:"type:text" json:"header_content"`
 	BodyContent     string     `gorm:"type:text;not null" json:"body_content"`
 	FooterContent   string     `gorm:"type:text" json:"footer_content"`
