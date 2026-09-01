@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/websocket"
@@ -59,6 +60,7 @@ type OutgoingMessageRequest struct {
 	// Template messages
 	Template            *models.Template
 	BodyParams          map[string]string // Parameter name -> value (supports both named and positional)
+	HeaderParams        map[string]string // Header-only param values; falls back to BodyParams if empty (used for TEXT headers with a {{var}})
 	HeaderMediaID       string            // WhatsApp media ID for template header (IMAGE/VIDEO/DOCUMENT)
 	HeaderMediaFilename string            // Filename — required by Meta for DOCUMENT headers
 	ButtonURLParams     map[string]string // Button index (as string) -> dynamic URL param value
@@ -208,7 +210,15 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			if req.Template == nil {
 				return "", fmt.Errorf("template is required for template messages")
 			}
-			components := whatsapp.BuildTemplateComponents(req.BodyParams, req.Template.HeaderType, req.HeaderMediaID, req.HeaderMediaFilename)
+			components, err := whatsapp.BuildTemplateComponents(
+				req.BodyParams,
+				req.Template.HeaderType, req.Template.HeaderContent,
+				req.HeaderParams,
+				req.HeaderMediaID, req.HeaderMediaFilename,
+			)
+			if err != nil {
+				return "", fmt.Errorf("failed to build template components: %w", err)
+			}
 			// Add auto-generated button components (Flow needs flow_token)
 			flowComponents := whatsapp.AutoButtonComponents(req.Template.Buttons)
 			components = append(components, flowComponents...)
@@ -499,10 +509,16 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 
 // updateContactLastMessage updates contact's last_message_at and preview
 func (a *App) updateContactLastMessage(contact *models.Contact, preview string) {
-	a.DB.Model(contact).Updates(map[string]any{
-		"last_message_at":      time.Now(),
+	now := time.Now()
+	contact.LastMessageAt = &now
+	contact.LastMessagePreview = preview
+	updates := map[string]any{
+		"last_message_at":      now,
 		"last_message_preview": preview,
-	})
+	}
+	maps.Copy(updates, contactutil.ApplyConversationWait(contact, false, now))
+	a.DB.Model(contact).Updates(updates)
+	a.syncContactToFirestore(contact)
 }
 
 // getMessagePreview returns a preview string for the message
@@ -563,6 +579,12 @@ type SendTemplateMessageRequest struct {
 	HeaderMediaID       string `json:"header_media_id"`       // Already-uploaded WhatsApp media ID
 	HeaderMediaURL      string `json:"header_media_url"`      // URL to download media from
 	HeaderMediaFilename string `json:"header_media_filename"` // Filename — required by Meta for DOCUMENT headers (#351)
+
+	// Header text parameter values for TEXT headers that contain a {{var}}.
+	// Meta only permits one variable in a TEXT header. Keyed by the variable's
+	// name (named templates) or by "1" (positional). Optional — if absent, the
+	// value is looked up in TemplateParams as a fallback.
+	HeaderParams map[string]string `json:"header_params"`
 }
 
 // SendTemplateMessage sends a template message to a contact or phone number.
@@ -610,6 +632,12 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		if v := form.Value["button_params"]; len(v) > 0 && v[0] != "" {
 			if err := json.Unmarshal([]byte(v[0]), &req.ButtonParams); err != nil {
 				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid button_params JSON", nil, "")
+			}
+		}
+		// Parse header_params from JSON string
+		if v := form.Value["header_params"]; len(v) > 0 && v[0] != "" {
+			if err := json.Unmarshal([]byte(v[0]), &req.HeaderParams); err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid header_params JSON", nil, "")
 			}
 		}
 		// Read header media file
@@ -740,6 +768,25 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		}
 	}
 
+	// Validate the header variable (TEXT headers only). Meta allows at most one
+	// variable in a TEXT header — surface a clean 400 if it's missing.
+	if template.HeaderType == "TEXT" {
+		headerNames := templateutil.ExtParamNames(template.HeaderContent)
+		if len(headerNames) > 1 {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+				fmt.Sprintf("Template header text contains %d variables; Meta allows at most 1", len(headerNames)),
+				nil, "")
+		}
+		if len(headerNames) == 1 {
+			name := headerNames[0]
+			if req.HeaderParams[name] == "" && req.TemplateParams[name] == "" {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest,
+					fmt.Sprintf("Missing header parameter %q. Pass it in header_params or template_params.", name),
+					nil, "")
+			}
+		}
+	}
+
 	// Resolve header media for templates with IMAGE/VIDEO/DOCUMENT headers.
 	// Priority: header_media_id > header_media_url > multipart header_file
 	var headerMediaID string
@@ -837,6 +884,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		Type:                models.MessageTypeTemplate,
 		Template:            &template,
 		BodyParams:          req.TemplateParams,
+		HeaderParams:        req.HeaderParams,
 		HeaderMediaID:       headerMediaID,
 		HeaderMediaFilename: headerMediaFilename,
 		MediaURL:            headerLocalPath,

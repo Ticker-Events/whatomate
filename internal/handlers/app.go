@@ -27,11 +27,11 @@ import (
 
 // App holds all dependencies for handlers
 type App struct {
-	Config            *config.Config
-	DB                *gorm.DB
-	Redis             *redis.Client
-	Log               logf.Logger
-	WhatsApp          *whatsapp.Client
+	Config   *config.Config
+	DB       *gorm.DB
+	Redis    *redis.Client
+	Log      logf.Logger
+	WhatsApp *whatsapp.Client
 	// AiSensy is the AiSensy Direct API client (nil when not configured).
 	AiSensy           *aisensy.Client
 	WSHub             *websocket.Hub

@@ -67,6 +67,17 @@ func TestResetContactUnread_NoOpWhenDisabled(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestSyncContact_NoOpWhenDisabled(t *testing.T) {
+	c, err := firestore.Init(t.Context(), "", testutil.NopLogger())
+	assert.NoError(t, err)
+
+	err = c.SyncContact(t.Context(), uuid.New(), &models.Contact{
+		BaseModel: models.BaseModel{ID: uuid.New()},
+		IsClosed:  true,
+	}, false)
+	assert.NoError(t, err)
+}
+
 func TestCreateCustomToken_ErrorWhenDisabled(t *testing.T) {
 	c, err := firestore.Init(t.Context(), "", testutil.NopLogger())
 	assert.NoError(t, err)

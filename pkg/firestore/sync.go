@@ -98,6 +98,8 @@ func (c *Client) syncContactFromMessage(ctx context.Context, orgID uuid.UUID, ms
 		contactData["lastInboundAt"] = msg.CreatedAt.UTC().Format(time.RFC3339)
 	}
 
+	applyConversationWaitFields(contactData, contact)
+
 	// Increment unread only for incoming messages that are not already read.
 	if msg.Direction == models.DirectionIncoming && msg.Status != models.MessageStatusRead {
 		contactData["unreadCount"] = firestore.Increment(1)
@@ -108,6 +110,60 @@ func (c *Client) syncContactFromMessage(ctx context.Context, orgID uuid.UUID, ms
 		return fmt.Errorf("firestore sync contact %s: %w", contact.ID, err)
 	}
 	return nil
+}
+
+// SyncContact merges contact summary fields without a new message.
+// Used after outbound last-message updates and manual close/reopen.
+func (c *Client) SyncContact(ctx context.Context, orgID uuid.UUID, contact *models.Contact, maskPhone bool) error {
+	if !c.Enabled() || contact == nil {
+		return nil
+	}
+
+	profileName := contact.ProfileName
+	phoneNumber := contact.PhoneNumber
+	if maskPhone {
+		profileName = utils.MaskIfPhoneNumber(profileName)
+		phoneNumber = utils.MaskPhoneNumber(phoneNumber)
+	}
+
+	contactData := map[string]any{
+		"organizationId":  orgID.String(),
+		"phoneNumber":     phoneNumber,
+		"profileName":     profileName,
+		"whatsappAccount": contact.WhatsAppAccount,
+	}
+	if contact.AssignedUserID != nil {
+		contactData["assignedUserId"] = contact.AssignedUserID.String()
+	}
+	if contact.LastMessageAt != nil {
+		contactData["lastMessageAt"] = contact.LastMessageAt.UTC().Format(time.RFC3339)
+	}
+	if contact.LastInboundAt != nil {
+		contactData["lastInboundAt"] = contact.LastInboundAt.UTC().Format(time.RFC3339)
+	}
+	applyConversationWaitFields(contactData, contact)
+
+	_, err := c.firestore.Collection(collectionContacts).Doc(contact.ID.String()).Set(ctx, contactData, firestore.MergeAll)
+	if err != nil {
+		return fmt.Errorf("firestore sync contact %s: %w", contact.ID, err)
+	}
+	return nil
+}
+
+// applyConversationWaitFields writes first-response SLA fields in camelCase so
+// they match the rest of the contact document. A nil clock is deleted so SLA
+// heat does not keep a stale timestamp after an outbound reply.
+func applyConversationWaitFields(data map[string]any, contact *models.Contact) {
+	if contact == nil {
+		return
+	}
+
+	data["isClosed"] = contact.IsClosed
+	if contact.AwaitingReplySince != nil {
+		data["awaitingReplySince"] = contact.AwaitingReplySince.UTC().Format(time.RFC3339)
+		return
+	}
+	data["awaitingReplySince"] = firestore.Delete
 }
 
 func buildMessageData(orgID uuid.UUID, msg *models.Message, contact *models.Contact, maskPhone bool) map[string]any {

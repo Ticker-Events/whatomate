@@ -48,6 +48,7 @@ import {
   Info,
 } from 'lucide-vue-next'
 import { getErrorMessage } from '@/lib/api-utils'
+import { getQualityBadgeClass, getQualityRatingLabel } from '@/lib/utils'
 
 interface WhatsAppAccount {
   id: string
@@ -76,6 +77,7 @@ interface Template {
   updated_by_name: string
   created_at: string
   updated_at: string
+  quality_rating?: string
 }
 
 const route = useRoute()
@@ -87,6 +89,7 @@ const bodyHint = 'Use {{1}}, {{2}} for positional or {{name}}, {{email}} for nam
 const mixedVariablesHint = 'Cannot mix positional ({{1}}, {{2}}) and named ({{name}}) variables. Use one type only.'
 const duplicateVariablesHint = 'Duplicate variables found. Each variable should appear only once in the template.'
 const variablePositionHint = 'Variables cannot be at the very start or end of the template body.'
+const headerTooManyVariablesHint = 'Meta allows at most one variable in a TEXT header.'
 
 const templateId = computed(() => route.params.id as string)
 const isNew = computed(() => templateId.value === 'new')
@@ -230,6 +233,13 @@ const hasVariableAtEdge = computed(() => {
   const body = form.value.body_content.trim()
   if (!body) return false
   return /^\{\{[^}]+\}\}/.test(body) || /\{\{[^}]+\}\}$/.test(body)
+})
+
+// Meta allows at most one variable in a TEXT header. Count unique names so
+// {{name}} … {{name}} (same variable referenced twice) still passes.
+const hasTooManyHeaderVariables = computed(() => {
+  if (form.value.header_type !== 'TEXT') return false
+  return new Set(headerVariables.value).size > 1
 })
 
 // Build sample_values array from form inputs
@@ -467,6 +477,10 @@ async function save() {
       toast.error(t('templates.variableAtEdge', 'Variables cannot be at the very start or end of the template body.'))
       return
     }
+    if (hasTooManyHeaderVariables.value) {
+      toast.error(t('templates.headerTooManyVariables', headerTooManyVariablesHint))
+      return
+    }
   }
   if (isAuthentication.value && form.value.code_expiration_minutes && (form.value.code_expiration_minutes < 1 || form.value.code_expiration_minutes > 90)) {
     toast.error(t('templates.invalidExpiration', 'Code expiration must be between 1 and 90 minutes'))
@@ -686,6 +700,9 @@ onMounted(async () => {
             <Badge v-if="!isNew && template?.status" :variant="statusVariant">
               {{ template.status }}
             </Badge>
+            <Badge v-if="!isNew && template?.quality_rating" :class="getQualityBadgeClass(template.quality_rating)">
+              {{ getQualityRatingLabel(template.quality_rating, t) }}
+            </Badge>
           </div>
           <ChevronDown class="h-4 w-4 text-muted-foreground transition-transform" :class="isDetailsOpen && 'rotate-180'" />
         </div>
@@ -760,6 +777,7 @@ onMounted(async () => {
         <div v-if="form.header_type === 'TEXT'" class="space-y-1.5">
           <Label class="text-xs" for="header-content">{{ $t('templates.headerContent', 'Header Content') }}</Label>
           <Input id="header-content" v-model="form.header_content" :disabled="!canWrite || !isEditable" />
+          <p v-if="hasTooManyHeaderVariables" class="text-xs text-destructive" v-text="headerTooManyVariablesHint" />
         </div>
 
         <!-- Header Media Upload for IMAGE/VIDEO/DOCUMENT -->
@@ -1222,6 +1240,12 @@ onMounted(async () => {
           <div class="flex justify-between">
             <span class="text-muted-foreground">{{ $t('templates.status', 'Status') }}:</span>
             <Badge :variant="statusVariant">{{ template.status }}</Badge>
+          </div>
+          <div v-if="template.quality_rating" class="flex justify-between">
+            <span class="text-muted-foreground">{{ $t('templates.qualityRating', 'Quality Rating') }}:</span>
+            <Badge :class="getQualityBadgeClass(template.quality_rating)">
+              {{ getQualityRatingLabel(template.quality_rating, t) }}
+            </Badge>
           </div>
           <div class="flex justify-between">
             <span class="text-muted-foreground">{{ $t('templates.category', 'Category') }}:</span>

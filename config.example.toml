@@ -113,6 +113,16 @@ udp_port_max = 10100          # WebRTC UDP port range end
 # username = "user"
 # credential = "password"
 
+# Option D: TURN with a shared secret (coturn "use-auth-secret" / TURN REST API).
+# When `secret` is set it takes priority over username/credential: short-lived
+# credentials are generated per request (username = expiry timestamp, credential
+# = base64(HMAC-SHA1(secret, username))). Match `secret` to coturn's
+# `static-auth-secret`. `credential_ttl` (seconds) sets lifetime (default 86400).
+# [[calling.ice_servers]]
+# urls = ["turn:your-turn-server.com:3478"]
+# secret = "your-coturn-static-auth-secret"
+# credential_ttl = 86400
+
 # AiSensy Direct API configuration (required for AiSensy provider accounts)
 [aisensy]
 base_url = "https://backend.aisensy.com/direct-apis/t1/api"
@@ -124,6 +134,7 @@ email = "admin@admin.com"
 password = "admin"
 full_name = "Admin"
 
-# Firebase Firestore (real-time chat sync)
+# Firebase Firestore (real-time chat sync). Empty credentials disables the writer.
+# Contact docs include isClosed and awaitingReplySince for the tiqr.store inbox.
 [firebase]
 credentials = ""  # Service account JSON string, or set WHATOMATE_FIREBASE_CREDENTIALS env var
