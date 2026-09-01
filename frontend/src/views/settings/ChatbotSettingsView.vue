@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { PageHeader, AuditLogPanel } from '@/components/shared'
 import { toast } from 'vue-sonner'
-import { Bot, Loader2, Brain, Plus, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users } from 'lucide-vue-next'
+import { Bot, Loader2, Brain, Plus, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users, RefreshCw } from 'lucide-vue-next'
 import { chatbotService } from '@/services/api'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
@@ -130,15 +130,24 @@ const aiSettings = ref({
   ai_api_key: '',
   ai_model: '',
   ai_max_tokens: 500,
-  ai_system_prompt: ''
+  ai_system_prompt: '',
+  ai_commerce_enabled: false,
+  ai_commerce_mcp_url: '',
+  ai_commerce_mcp_api_key: '',
+  ai_commerce_store_id: '',
+  ai_commerce_welcome_message: '',
+  ai_commerce_welcome_generated_at: '' as string | null,
+  ai_commerce_welcome_stale: true
 })
 
 const isAIEnabled = ref(false)
+const isAICommerceEnabled = ref(false)
+const isRefreshingWelcome = ref(false)
 
 const aiProviders = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
   { value: 'anthropic', label: 'Anthropic', models: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest', 'claude-3-opus-latest'] },
-  { value: 'google', label: 'Google AI', models: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'] }
+  { value: 'google', label: 'Google AI', models: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'] }
 ]
 
 const availableModels = computed(() => {
@@ -148,6 +157,10 @@ const availableModels = computed(() => {
 
 watch(isAIEnabled, (newValue) => {
   aiSettings.value.ai_enabled = newValue
+})
+
+watch(isAICommerceEnabled, (newValue) => {
+  aiSettings.value.ai_commerce_enabled = newValue
 })
 
 // SLA Settings
@@ -232,13 +245,22 @@ onMounted(async () => {
 
       const aiEnabledValue = chatbotData.settings.ai_enabled === true
       isAIEnabled.value = aiEnabledValue
+      const aiCommerceEnabledValue = chatbotData.settings.ai_commerce_enabled === true
+      isAICommerceEnabled.value = aiCommerceEnabledValue
       aiSettings.value = {
         ai_enabled: aiEnabledValue,
         ai_provider: chatbotData.settings.ai_provider || '',
         ai_api_key: '',
         ai_model: chatbotData.settings.ai_model || '',
         ai_max_tokens: chatbotData.settings.ai_max_tokens || 500,
-        ai_system_prompt: chatbotData.settings.ai_system_prompt || ''
+        ai_system_prompt: chatbotData.settings.ai_system_prompt || '',
+        ai_commerce_enabled: aiCommerceEnabledValue,
+        ai_commerce_mcp_url: chatbotData.settings.ai_commerce_mcp_url || chatbotData.settings.ai_commerce_base_url || '',
+        ai_commerce_mcp_api_key: '',
+        ai_commerce_store_id: chatbotData.settings.ai_commerce_store_id || '',
+        ai_commerce_welcome_message: chatbotData.settings.ai_commerce_welcome_message || '',
+        ai_commerce_welcome_generated_at: chatbotData.settings.ai_commerce_welcome_generated_at || null,
+        ai_commerce_welcome_stale: chatbotData.settings.ai_commerce_welcome_stale !== false
       }
 
       const slaEnabledValue = chatbotData.settings.sla_enabled === true
@@ -341,20 +363,64 @@ async function saveAISettings() {
       ai_provider: aiSettings.value.ai_provider,
       ai_model: aiSettings.value.ai_model,
       ai_max_tokens: aiSettings.value.ai_max_tokens,
-      ai_system_prompt: aiSettings.value.ai_system_prompt
+      ai_system_prompt: aiSettings.value.ai_system_prompt,
+      ai_commerce_enabled: aiSettings.value.ai_commerce_enabled,
+      ai_commerce_mcp_url: aiSettings.value.ai_commerce_mcp_url,
+      ai_commerce_store_id: aiSettings.value.ai_commerce_store_id
     }
     if (aiSettings.value.ai_api_key) {
       payload.ai_api_key = aiSettings.value.ai_api_key
     }
+    if (aiSettings.value.ai_commerce_mcp_api_key) {
+      payload.ai_commerce_mcp_api_key = aiSettings.value.ai_commerce_mcp_api_key
+    }
     await chatbotService.updateSettings(payload)
     toast.success(t('chatbotSettings.aiSettingsSaved'))
     aiSettings.value.ai_api_key = ''
+    aiSettings.value.ai_commerce_mcp_api_key = ''
+    // Commerce URL/store changes clear the cached welcome — reload those fields.
+    try {
+      const { data } = await chatbotService.getSettings()
+      const chatbotData = data.data || data
+      if (chatbotData.settings) {
+        aiSettings.value.ai_commerce_welcome_message = chatbotData.settings.ai_commerce_welcome_message || ''
+        aiSettings.value.ai_commerce_welcome_generated_at = chatbotData.settings.ai_commerce_welcome_generated_at || null
+        aiSettings.value.ai_commerce_welcome_stale = chatbotData.settings.ai_commerce_welcome_stale !== false
+      }
+    } catch {
+      // non-fatal
+    }
     refreshActivityLog(aiLogKey)
   } catch (error) {
     toast.error(t('chatbotSettings.aiSaveFailed'))
   } finally {
     isSubmitting.value = false
   }
+}
+
+async function refreshCommerceWelcome() {
+  if (isRefreshingWelcome.value) return
+  isRefreshingWelcome.value = true
+  try {
+    const { data } = await chatbotService.refreshCommerceWelcome()
+    const payload = data.data || data
+    aiSettings.value.ai_commerce_welcome_message = payload.ai_commerce_welcome_message || ''
+    aiSettings.value.ai_commerce_welcome_generated_at = payload.ai_commerce_welcome_generated_at || null
+    aiSettings.value.ai_commerce_welcome_stale = payload.ai_commerce_welcome_stale === true
+    toast.success(t('chatbotSettings.commerceWelcomeRefreshed'))
+  } catch (error: any) {
+    const msg = error?.response?.data?.message || t('chatbotSettings.commerceWelcomeRefreshFailed')
+    toast.error(msg)
+  } finally {
+    isRefreshingWelcome.value = false
+  }
+}
+
+function formatWelcomeGeneratedAt(value: string | null | undefined): string {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString()
 }
 
 async function saveSLASettings() {
@@ -953,6 +1019,81 @@ function removeEscalationUser(userId: string) {
                       :placeholder="$t('chatbotSettings.systemPromptPlaceholder') + '...'"
                       :rows="3"
                     />
+                  </div>
+
+                  <Separator />
+
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <p class="font-medium">{{ $t('chatbotSettings.enableCommerceTools') }}</p>
+                      <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.enableCommerceToolsDesc') }}</p>
+                    </div>
+                    <Switch
+                      :checked="isAICommerceEnabled"
+                      @update:checked="(val: boolean) => isAICommerceEnabled = val"
+                    />
+                  </div>
+
+                  <div v-if="isAICommerceEnabled" class="space-y-4">
+                    <div class="space-y-2">
+                      <Label>{{ $t('chatbotSettings.commerceMcpUrl') }}</Label>
+                      <Input
+                        v-model="aiSettings.ai_commerce_mcp_url"
+                        type="url"
+                        :placeholder="$t('chatbotSettings.commerceMcpUrlPlaceholder')"
+                      />
+                      <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMcpUrlHint') }}</p>
+                    </div>
+                    <div class="space-y-2">
+                      <Label>{{ $t('chatbotSettings.commerceMcpApiKey') }}</Label>
+                      <Input
+                        v-model="aiSettings.ai_commerce_mcp_api_key"
+                        type="password"
+                        :placeholder="$t('chatbotSettings.commerceMcpApiKeyPlaceholder')"
+                      />
+                      <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMcpApiKeyHint') }}</p>
+                    </div>
+                    <div class="space-y-2">
+                      <Label>{{ $t('chatbotSettings.commerceStoreId') }}</Label>
+                      <Input
+                        v-model="aiSettings.ai_commerce_store_id"
+                        :placeholder="$t('chatbotSettings.commerceStoreIdPlaceholder')"
+                        class="w-48"
+                      />
+                      <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceStoreIdHint') }}</p>
+                    </div>
+
+                    <div class="space-y-2 rounded-md border p-3">
+                      <div class="flex items-start justify-between gap-3">
+                        <div>
+                          <p class="font-medium">{{ $t('chatbotSettings.commerceWelcomeTitle') }}</p>
+                          <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.commerceWelcomeDesc') }}</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          :disabled="isRefreshingWelcome || isSubmitting"
+                          @click="refreshCommerceWelcome"
+                        >
+                          <Loader2 v-if="isRefreshingWelcome" class="mr-2 h-4 w-4 animate-spin" />
+                          <RefreshCw v-else class="mr-2 h-4 w-4" />
+                          {{ $t('chatbotSettings.commerceWelcomeRefresh') }}
+                        </Button>
+                      </div>
+                      <Textarea
+                        :model-value="aiSettings.ai_commerce_welcome_message || $t('chatbotSettings.commerceWelcomeEmpty')"
+                        readonly
+                        :rows="4"
+                        class="resize-none bg-muted/40"
+                      />
+                      <p v-if="aiSettings.ai_commerce_welcome_generated_at" class="text-xs text-muted-foreground">
+                        {{ $t('chatbotSettings.commerceWelcomeGeneratedAt', { time: formatWelcomeGeneratedAt(aiSettings.ai_commerce_welcome_generated_at) }) }}
+                        <span v-if="aiSettings.ai_commerce_welcome_stale"> · {{ $t('chatbotSettings.commerceWelcomeStale') }}</span>
+                      </p>
+                    </div>
+
+                    <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMaxTokensHint') }}</p>
                   </div>
                 </div>
 

@@ -521,6 +521,8 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 
 	a.DB.Model(contact).Update("is_read", true)
 
+	a.syncContactUnreadResetToFirestore(orgID, contactID)
+
 	if len(unreadMessages) > 0 && contact.WhatsAppAccount != "" {
 		if account, err := a.resolveWhatsAppAccount(orgID, contact.WhatsAppAccount); err == nil {
 			if account.AutoReadReceipt {
@@ -532,6 +534,7 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 					defer cancel()
 
 					waAccount := a.toWhatsAppAccount(account)
+					client := a.getMessagingClient(account)
 					for _, msg := range unreadMessages {
 						// Check if context was cancelled
 						if ctx.Err() != nil {
@@ -539,7 +542,7 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 							return
 						}
 						if msg.WhatsAppMessageID != "" {
-							if err := a.WhatsApp.MarkMessageRead(ctx, waAccount, msg.WhatsAppMessageID); err != nil {
+							if err := client.MarkMessageRead(ctx, waAccount, msg.WhatsAppMessageID); err != nil {
 								a.Log.Error("Failed to send read receipt", "error", err, "message_id", msg.WhatsAppMessageID)
 							}
 						}

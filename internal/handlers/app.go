@@ -16,6 +16,8 @@ import (
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	"github.com/shridarpatil/whatomate/pkg/aisensy"
+	firestoresync "github.com/shridarpatil/whatomate/pkg/firestore"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -25,14 +27,17 @@ import (
 
 // App holds all dependencies for handlers
 type App struct {
-	Config            *config.Config
-	DB                *gorm.DB
-	Redis             *redis.Client
-	Log               logf.Logger
-	WhatsApp          *whatsapp.Client
+	Config   *config.Config
+	DB       *gorm.DB
+	Redis    *redis.Client
+	Log      logf.Logger
+	WhatsApp *whatsapp.Client
+	// AiSensy is the AiSensy Direct API client (nil when not configured).
+	AiSensy           *aisensy.Client
 	WSHub             *websocket.Hub
 	Queue             queue.Queue
 	CampaignSubCancel context.CancelFunc
+	WSFanoutCancel    context.CancelFunc
 	// HTTPClient is a shared HTTP client with connection pooling for external API calls
 	HTTPClient *http.Client
 	// Assigner provides shared team-based agent assignment (used by both chat and call transfers)
@@ -43,15 +48,19 @@ type App struct {
 	TTS *tts.PiperTTS
 	// S3Client for serving call recording presigned URLs (nil when not configured)
 	S3Client *storage.S3Client
-	// ContactStore projects contacts to Firestore for the tiqr.store inbox (nil when disabled)
-	ContactStore ContactStore
+	// Firestore syncs chat messages and contacts for real-time UI updates (nil when not configured)
+	Firestore *firestoresync.Client
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
 }
 
-// ContactStore writes Whatomate contacts to the Firestore projection.
-type ContactStore interface {
-	SyncContact(ctx context.Context, contact *models.Contact) error
+// getMessagingClient returns the appropriate MessagingClient for the account.
+// AiSensy accounts use the AiSensy Direct API; all others use the Meta WhatsApp Cloud API.
+func (a *App) getMessagingClient(account *models.WhatsAppAccount) whatsapp.MessagingClient {
+	if account != nil && account.IsAiSensy() && a.AiSensy != nil {
+		return a.AiSensy
+	}
+	return a.WhatsApp
 }
 
 // WaitForBackgroundTasks blocks until all background goroutines complete.
@@ -118,6 +127,17 @@ func (a *App) HealthCheck(r *fastglue.Request) error {
 	})
 }
 
+// GetAppInfo returns public product branding from config (no auth).
+func (a *App) GetAppInfo(r *fastglue.Request) error {
+	name := "Whatomate"
+	if a.Config != nil && a.Config.App.Name != "" {
+		name = a.Config.App.Name
+	}
+	return r.SendEnvelope(map[string]string{
+		"name": name,
+	})
+}
+
 // ReadyCheck returns server readiness status
 func (a *App) ReadyCheck(r *fastglue.Request) error {
 	// Check database connection
@@ -162,16 +182,20 @@ func (a *App) StartCampaignStatsSubscriber() error {
 			"sent", update.SentCount,
 		)
 
-		// Broadcast to organization via WebSocket
-		a.WSHub.BroadcastToOrg(update.OrganizationID, websocket.WSMessage{
-			Type: websocket.TypeCampaignStatsUpdate,
-			Payload: map[string]any{
-				"campaign_id":     update.CampaignID,
-				"status":          update.Status,
-				"sent_count":      update.SentCount,
-				"delivered_count": update.DeliveredCount,
-				"read_count":      update.ReadCount,
-				"failed_count":    update.FailedCount,
+		// Local-only: every API instance already receives campaign stats from Redis.
+		// Using BroadcastToOrg would re-publish onto the WS fan-out channel and duplicate.
+		a.WSHub.DeliverLocal(websocket.BroadcastMessage{
+			OrgID: update.OrganizationID,
+			Message: websocket.WSMessage{
+				Type: websocket.TypeCampaignStatsUpdate,
+				Payload: map[string]any{
+					"campaign_id":     update.CampaignID,
+					"status":          update.Status,
+					"sent_count":      update.SentCount,
+					"delivered_count": update.DeliveredCount,
+					"read_count":      update.ReadCount,
+					"failed_count":    update.FailedCount,
+				},
 			},
 		})
 	})
@@ -185,10 +209,38 @@ func (a *App) StartCampaignStatsSubscriber() error {
 	return nil
 }
 
+// StartWSBroadcastSubscriber fans out WebSocket broadcasts across API instances via Redis.
+func (a *App) StartWSBroadcastSubscriber() error {
+	if a.WSHub == nil {
+		a.Log.Warn("WebSocket hub not initialized, skipping WS fan-out subscriber")
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	a.WSFanoutCancel = cancel
+
+	subscriber := queue.NewSubscriber(a.Redis, a.Log)
+	err := subscriber.SubscribeWSBroadcasts(ctx, a.WSHub.HandleRemoteBroadcast)
+	if err != nil {
+		cancel()
+		return err
+	}
+
+	a.Log.Info("WebSocket fan-out subscriber started")
+	return nil
+}
+
 // StopCampaignStatsSubscriber stops the campaign stats subscriber
 func (a *App) StopCampaignStatsSubscriber() {
 	if a.CampaignSubCancel != nil {
 		a.CampaignSubCancel()
+	}
+}
+
+// StopWSBroadcastSubscriber stops the cross-instance WebSocket fan-out subscriber
+func (a *App) StopWSBroadcastSubscriber() {
+	if a.WSFanoutCancel != nil {
+		a.WSFanoutCancel()
 	}
 }
 

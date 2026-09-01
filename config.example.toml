@@ -123,14 +123,18 @@ udp_port_max = 10100          # WebRTC UDP port range end
 # secret = "your-coturn-static-auth-secret"
 # credential_ttl = 86400
 
+# AiSensy Direct API configuration (required for AiSensy provider accounts)
+[aisensy]
+base_url = "https://backend.aisensy.com/direct-apis/t1/api"
+webhook_secret = ""  # Shared HMAC secret for AiSensy webhook signature verification
+
 # Default admin credentials (only used during initial setup when no users exist)
 [default_admin]
 email = "admin@admin.com"
 password = "admin"
 full_name = "Admin"
 
-# Optional Firestore projection of contacts for tiqr.store manage chat.
-# Leave project_id empty to disable. credentials_file is a Google service-account JSON path.
+# Firebase Firestore (real-time chat sync). Empty credentials disables the writer.
+# Contact docs include isClosed and awaitingReplySince for the tiqr.store inbox.
 [firebase]
-project_id = ""
-credentials_file = ""
+credentials = ""  # Service account JSON string, or set WHATOMATE_FIREBASE_CREDENTIALS env var

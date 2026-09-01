@@ -35,7 +35,8 @@ func (a *App) GetBusinessProfile(r *fastglue.Request) error {
 	ctx, cancel := context.WithTimeout(context.Background(), businessProfileHTTPTimeout)
 	defer cancel()
 
-	profile, err := a.WhatsApp.GetBusinessProfile(ctx, a.toWhatsAppAccount(account))
+	waAccount := a.toWhatsAppAccount(account)
+	profile, err := a.getMessagingClient(account).GetBusinessProfile(ctx, waAccount)
 	if err != nil {
 		a.Log.Error("Failed to get business profile", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to get business profile", nil, "")
@@ -69,14 +70,15 @@ func (a *App) UpdateBusinessProfile(r *fastglue.Request) error {
 	ctx, cancel := context.WithTimeout(context.Background(), businessProfileHTTPTimeout)
 	defer cancel()
 	waAccount := a.toWhatsAppAccount(account)
+	client := a.getMessagingClient(account)
 
-	if err := a.WhatsApp.UpdateBusinessProfile(ctx, waAccount, input); err != nil {
+	if err := client.UpdateBusinessProfile(ctx, waAccount, input); err != nil {
 		a.Log.Error("Failed to update business profile", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update business profile", nil, "")
 	}
 
 	// Re-fetch to ensure we have the latest state
-	profile, err := a.WhatsApp.GetBusinessProfile(ctx, waAccount)
+	profile, err := client.GetBusinessProfile(ctx, waAccount)
 	if err != nil {
 		// If re-fetch fails, just return success message
 		return r.SendEnvelope(map[string]string{"message": "Profile updated successfully"})
@@ -129,8 +131,9 @@ func (a *App) UpdateProfilePicture(r *fastglue.Request) error {
 	defer cancel()
 	waAccount := a.toWhatsAppAccount(account)
 
-	// Upload to Meta to get handle
-	handle, err := a.WhatsApp.UploadProfilePicture(ctx, waAccount, fileContent, fileHeader.Header.Get("Content-Type"))
+	// Upload to get handle
+	client := a.getMessagingClient(account)
+	handle, err := client.UploadProfilePicture(ctx, waAccount, fileContent, fileHeader.Header.Get("Content-Type"))
 	if err != nil {
 		a.Log.Error("Failed to upload profile picture", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload profile picture", nil, "")
@@ -142,7 +145,7 @@ func (a *App) UpdateProfilePicture(r *fastglue.Request) error {
 		ProfilePictureHandle: handle,
 	}
 
-	err = a.WhatsApp.UpdateBusinessProfile(ctx, waAccount, input)
+	err = client.UpdateBusinessProfile(ctx, waAccount, input)
 
 	if err != nil {
 		a.Log.Error("Failed to update profile request", "error", err)

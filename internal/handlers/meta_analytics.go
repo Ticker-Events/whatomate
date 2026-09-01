@@ -171,6 +171,17 @@ func (a *App) GetMetaAnalytics(r *fastglue.Request) error {
 	for i := range accounts {
 		a.decryptAccountSecrets(&accounts[i])
 		account := accounts[i]
+
+		// Meta Analytics is not available for AiSensy accounts
+		if account.IsAiSensy() {
+			results = append(results, MetaAnalyticsResponse{
+				AccountID:   account.ID.String(),
+				AccountName: account.Name,
+				Data:        nil,
+			})
+			continue
+		}
+
 		waAccount := a.toWhatsAppAccount(&account)
 
 		req := &whatsapp.AnalyticsRequest{

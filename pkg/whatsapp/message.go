@@ -55,9 +55,10 @@ func (c *Client) SendTextMessage(ctx context.Context, account *Account, rcpt Rec
 	return messageID, nil
 }
 
-// SendInteractiveButtons sends an interactive message with buttons or list
-// If buttons <= 3, sends as buttons; if 4-10, sends as list
-func (c *Client) SendInteractiveButtons(ctx context.Context, account *Account, rcpt Recipient, bodyText string, buttons []Button) (string, error) {
+// SendInteractiveButtons sends an interactive message with buttons or list.
+// If buttons <= 3, sends as buttons; if 4-10, sends as list.
+// Optional headerImageURL (first variadic arg) adds an image header via link.
+func (c *Client) SendInteractiveButtons(ctx context.Context, account *Account, rcpt Recipient, bodyText string, buttons []Button, headerImageURL ...string) (string, error) {
 	if len(buttons) == 0 {
 		return "", fmt.Errorf("at least one button is required")
 	}
@@ -120,6 +121,15 @@ func (c *Client) SendInteractiveButtons(ctx context.Context, account *Account, r
 						"rows":  rows,
 					},
 				},
+			},
+		}
+	}
+
+	if len(headerImageURL) > 0 && headerImageURL[0] != "" {
+		interactive["header"] = map[string]any{
+			"type": "image",
+			"image": map[string]any{
+				"link": headerImageURL[0],
 			},
 		}
 	}
@@ -457,7 +467,12 @@ func BuildTemplateComponents(
 	case "IMAGE", "VIDEO", "DOCUMENT":
 		if headerMediaID != "" {
 			mediaType := strings.ToLower(headerType)
-			mediaObj := map[string]any{"id": headerMediaID}
+			var mediaObj map[string]any
+			if strings.HasPrefix(headerMediaID, "https://") || strings.HasPrefix(headerMediaID, "http://") {
+				mediaObj = map[string]any{"link": headerMediaID}
+			} else {
+				mediaObj = map[string]any{"id": headerMediaID}
+			}
 			if mediaType == "document" && headerMediaFilename != "" {
 				mediaObj["filename"] = headerMediaFilename
 			}

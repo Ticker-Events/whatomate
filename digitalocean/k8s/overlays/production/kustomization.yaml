@@ -1,0 +1,40 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tiqr-agent
+
+resources:
+- namespace.yaml
+- ../../base
+- configmap.yaml
+- ingress.yaml
+
+patches:
+- path: patches/node-affinity.yaml
+  target:
+    kind: Deployment
+    name: agent-api
+- path: patches/node-affinity.yaml
+  target:
+    kind: Deployment
+    name: agent-worker
+- path: patches/node-affinity.yaml
+  target:
+    kind: Deployment
+    name: agent-ui
+- path: patches/node-affinity.yaml
+  target:
+    kind: Deployment
+    name: agent-redis
+- path: patches/node-affinity.yaml
+  target:
+    kind: Job
+    name: agent-migrate
+
+images:
+- name: registry.digitalocean.com/tiqr/tiqr-agent
+  newName: registry.digitalocean.com/tiqr/tiqr-agent
+  newTag: b4239b8
+- name: registry.digitalocean.com/tiqr/tiqr-agent-ui
+  newName: registry.digitalocean.com/tiqr/tiqr-agent-ui
+  newTag: b4239b8

@@ -205,15 +205,39 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		if msg.Interactive.NFMReply != nil {
 			messageText = msg.Interactive.NFMReply.Body
 			messageType = "nfm_reply"
+			nfm := msg.Interactive.NFMReply
 			// Parse the response JSON to extract form data
-			if msg.Interactive.NFMReply.ResponseJSON != "" {
+			if nfm.ResponseJSON != "" {
 				var responseData map[string]any
-				if err := json.Unmarshal([]byte(msg.Interactive.NFMReply.ResponseJSON), &responseData); err != nil {
-					a.Log.Error("Failed to parse flow response JSON", "error", err, "response_json", msg.Interactive.NFMReply.ResponseJSON)
+				if err := json.Unmarshal([]byte(nfm.ResponseJSON), &responseData); err != nil {
+					a.Log.Error("Failed to parse flow response JSON",
+						"error", err,
+						"message_id", msg.ID,
+						"from", msg.From,
+						"flow_name", nfm.Name,
+						"response_json", nfm.ResponseJSON,
+					)
 				} else {
 					flowResponseData = responseData
-					a.Log.Info("Parsed WhatsApp Flow response", "data", flowResponseData)
+					a.Log.Info("WhatsApp Flow response received",
+						"message_id", msg.ID,
+						"from", msg.From,
+						"contact_name", profileName,
+						"account", account.Name,
+						"flow_name", nfm.Name,
+						"body", nfm.Body,
+						"response_json", nfm.ResponseJSON,
+						"parsed_fields", flowResponseData,
+						"field_count", len(flowResponseData),
+					)
 				}
+			} else {
+				a.Log.Warn("WhatsApp Flow response missing response_json",
+					"message_id", msg.ID,
+					"from", msg.From,
+					"flow_name", nfm.Name,
+					"body", nfm.Body,
+				)
 			}
 		}
 	} else if msg.Type == "image" && msg.Image != nil {
@@ -380,6 +404,19 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// Log incoming message to session
 	a.logSessionMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check")
 
+	// Commerce button taps (cart, checkout) stop further routing.
+	if a.handleCommerceButtonTap(account, contact, session, settings, buttonID) {
+		return
+	}
+
+	// Checkout conversation steps and cart quantity replies.
+	if a.handleCheckoutConversation(account, contact, session, settings, messageText, buttonID) {
+		return
+	}
+	if a.handleCartQuantityReply(account, contact, session, messageText) {
+		return
+	}
+
 	// Check for transfer keyword BEFORE sending greeting (transfer takes priority)
 	keywordResponse, keywordMatched := a.matchKeywordRules(account.OrganizationID, account.Name, messageText)
 	if keywordMatched && keywordResponse.ResponseType == models.ResponseTypeTransfer {
@@ -447,31 +484,26 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	}
 
 	// Send greeting message for new sessions (only if no flow was triggered)
-	if isNewSession && settings.DefaultResponse != "" {
-		a.Log.Info("New session - sending greeting message", "contact", contact.PhoneNumber)
-		if len(settings.GreetingButtons) > 0 {
-			greetingButtons := make([]map[string]any, 0)
-			for _, btn := range settings.GreetingButtons {
-				if btnMap, ok := btn.(map[string]any); ok {
-					greetingButtons = append(greetingButtons, btnMap)
+	if isNewSession {
+		if commerceConfigured(settings.AI) {
+			a.Log.Info("New session - sending commerce welcome", "contact", contact.PhoneNumber)
+			welcome, err := a.getOrRefreshCommerceWelcome(settings, session, false)
+			if err != nil || strings.TrimSpace(welcome) == "" {
+				a.Log.Warn("Commerce welcome unavailable; falling back to default greeting",
+					"error", errString(err), "contact", contact.PhoneNumber)
+				if settings.DefaultResponse != "" {
+					a.sendStaticGreeting(account, contact, session, settings)
 				}
+				return
 			}
-			if len(greetingButtons) > 0 {
-				if err := a.sendAndSaveInteractiveButtons(account, contact, settings.DefaultResponse, greetingButtons); err != nil {
-					a.Log.Error("Failed to send greeting buttons", "error", err, "contact", contact.PhoneNumber)
-				}
-			} else {
-				if err := a.sendAndSaveTextMessage(account, contact, settings.DefaultResponse); err != nil {
-					a.Log.Error("Failed to send greeting message", "error", err, "contact", contact.PhoneNumber)
-				}
-			}
-		} else {
-			if err := a.sendAndSaveTextMessage(account, contact, settings.DefaultResponse); err != nil {
-				a.Log.Error("Failed to send greeting message", "error", err, "contact", contact.PhoneNumber)
-			}
+			a.sendGreetingText(account, contact, session, welcome, settings.GreetingButtons)
+			return
 		}
-		a.logSessionMessage(session.ID, models.DirectionOutgoing, settings.DefaultResponse, "greeting")
-		return // After greeting, don't process further for new sessions
+		if settings.DefaultResponse != "" {
+			a.Log.Info("New session - sending greeting message", "contact", contact.PhoneNumber)
+			a.sendStaticGreeting(account, contact, session, settings)
+			return // After greeting, don't process further for new sessions
+		}
 	}
 
 	// Handle non-transfer keyword matches (transfer was already handled above)
@@ -502,7 +534,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 			// Fall through to default response
 		} else if aiResponse != "" {
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
-			if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
+			if err := a.sendAIResponse(account, contact, session, aiResponse); err != nil {
 				a.Log.Error("Failed to send AI response", "error", err, "contact", contact.PhoneNumber)
 			}
 			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
@@ -637,6 +669,33 @@ func (a *App) matchKeywordRules(orgID uuid.UUID, accountName, messageText string
 
 // sendAndSaveTextMessage sends a text message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
+func (a *App) sendStaticGreeting(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
+	a.sendGreetingText(account, contact, session, settings.DefaultResponse, settings.GreetingButtons)
+}
+
+func (a *App) sendGreetingText(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, text string, buttons models.JSONBArray) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	greetingButtons := make([]map[string]any, 0)
+	for _, btn := range buttons {
+		if btnMap, ok := btn.(map[string]any); ok {
+			greetingButtons = append(greetingButtons, btnMap)
+		}
+	}
+	if len(greetingButtons) > 0 {
+		if err := a.sendAndSaveInteractiveButtons(account, contact, text, greetingButtons); err != nil {
+			a.Log.Error("Failed to send greeting buttons", "error", err, "contact", contact.PhoneNumber)
+		}
+	} else if err := a.sendAndSaveTextMessage(account, contact, text); err != nil {
+		a.Log.Error("Failed to send greeting message", "error", err, "contact", contact.PhoneNumber)
+	}
+	if session != nil {
+		a.logSessionMessage(session.ID, models.DirectionOutgoing, text, "greeting")
+	}
+}
+
 func (a *App) sendAndSaveTextMessage(account *models.WhatsAppAccount, contact *models.Contact, message string) error {
 	ctx := context.Background()
 	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
@@ -949,27 +1008,6 @@ type ApiResponse struct {
 	ResponseData map[string]any // Full API response data
 }
 
-// fetchApiResponse fetches a response from an external API, supporting message + buttons
-// and response_mapping for storing API data in session variables.
-//
-// Mirrors fetchAPIContext in seeding implicit variables (phone_number) so flow-step
-// API templates can interpolate {{phone_number}} just like AI-context API templates.
-func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string) (string, error) {
-	// Build context from AIContext entries
-	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
-
-	switch settings.AI.Provider {
-	case models.AIProviderOpenAI:
-		return a.generateOpenAIResponse(settings, session, userMessage, contextData)
-	case models.AIProviderAnthropic:
-		return a.generateAnthropicResponse(settings, session, userMessage, contextData)
-	case models.AIProviderGoogle:
-		return a.generateGoogleResponse(settings, session, userMessage, contextData)
-	default:
-		return "", fmt.Errorf("unsupported AI provider: %s", settings.AI.Provider)
-	}
-}
-
 // buildAIContext fetches and combines all AI context data
 func (a *App) buildAIContext(orgID uuid.UUID, session *models.ChatbotSession, userMessage string) string {
 	// Get WhatsApp account for cache key
@@ -1090,7 +1128,7 @@ func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
+		history := a.getSessionHistoryForAI(session.ID, effectiveAIHistoryLimit(settings), userMessage)
 		for _, msg := range history {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
@@ -1177,7 +1215,7 @@ func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, sessio
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
+		history := a.getSessionHistoryForAI(session.ID, effectiveAIHistoryLimit(settings), userMessage)
 		for _, msg := range history {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
@@ -1282,28 +1320,18 @@ func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
+		history := a.getSessionHistoryForAI(session.ID, effectiveAIHistoryLimit(settings), userMessage)
 		for _, msg := range history {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
 				role = "model"
 			}
-			contents = append(contents, map[string]any{
-				"role": role,
-				"parts": []map[string]string{
-					{"text": msg.Message},
-				},
-			})
+			contents = appendGeminiTurn(contents, role, msg.Message)
 		}
 	}
 
 	// Add current user message
-	contents = append(contents, map[string]any{
-		"role": "user",
-		"parts": []map[string]string{
-			{"text": userMessage},
-		},
-	})
+	contents = appendGeminiTurn(contents, "user", userMessage)
 
 	payload := map[string]any{
 		"contents": contents,
@@ -1388,6 +1416,9 @@ func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *
 // getSessionHistory retrieves recent messages from the session
 func (a *App) getSessionHistory(sessionID uuid.UUID, limit int) []models.ChatbotSessionMessage {
 	var messages []models.ChatbotSessionMessage
+	if limit <= 0 {
+		limit = 4
+	}
 	a.DB.Where("session_id = ?", sessionID).
 		Order("created_at DESC").
 		Limit(limit).
@@ -1399,6 +1430,100 @@ func (a *App) getSessionHistory(sessionID uuid.UUID, limit int) []models.Chatbot
 	}
 
 	return messages
+}
+
+// getSessionHistoryForAI returns prior turns for the model.
+// Incoming messages are logged before generateAIResponse runs, and callers also
+// append the current userMessage — so we drop a trailing inbound that matches
+// currentUserMessage to avoid duplicating it (and breaking Gemini role alternation).
+func (a *App) getSessionHistoryForAI(sessionID uuid.UUID, limit int, currentUserMessage string) []models.ChatbotSessionMessage {
+	if limit <= 0 {
+		limit = 4
+	}
+	messages := a.getSessionHistory(sessionID, limit+1)
+	if len(messages) == 0 {
+		return messages
+	}
+	last := messages[len(messages)-1]
+	if last.Direction == models.DirectionIncoming && last.Message == currentUserMessage {
+		messages = messages[:len(messages)-1]
+	}
+	if len(messages) > limit {
+		messages = messages[len(messages)-limit:]
+	}
+	return messages
+}
+
+// effectiveAIHistoryLimit returns how many prior session messages to send to the LLM.
+// Commerce checkout needs a longer window than the default of 4.
+func effectiveAIHistoryLimit(settings *models.ChatbotSettings) int {
+	limit := 4
+	if settings != nil && settings.AI.HistoryLimit > 0 {
+		limit = settings.AI.HistoryLimit
+	}
+	if settings != nil && commerceConfigured(settings.AI) && limit < 20 {
+		return 20
+	}
+	return limit
+}
+
+// appendGeminiTurn appends a Gemini content turn, merging into the previous turn
+// when the role repeats (Gemini requires strict user/model alternation).
+func appendGeminiTurn(contents []map[string]any, role, text string) []map[string]any {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return contents
+	}
+	if n := len(contents); n > 0 {
+		prev := contents[n-1]
+		if prevRole, _ := prev["role"].(string); prevRole == role {
+			prevText := geminiPartsText(prev["parts"])
+			merged := prevText
+			if merged != "" {
+				merged += "\n" + text
+			} else {
+				merged = text
+			}
+			contents[n-1] = map[string]any{
+				"role":  role,
+				"parts": []map[string]any{{"text": merged}},
+			}
+			return contents
+		}
+	}
+	return append(contents, map[string]any{
+		"role":  role,
+		"parts": []map[string]any{{"text": text}},
+	})
+}
+
+func geminiPartsText(partsAny any) string {
+	switch parts := partsAny.(type) {
+	case []map[string]any:
+		var b strings.Builder
+		for i, p := range parts {
+			if t, ok := p["text"].(string); ok && t != "" {
+				if i > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(t)
+			}
+		}
+		return b.String()
+	case []map[string]string:
+		var b strings.Builder
+		for i, p := range parts {
+			if t := p["text"]; t != "" {
+				if i > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(t)
+			}
+		}
+		return b.String()
+	default:
+		return ""
+	}
 }
 
 // Reaction represents a reaction on a message
@@ -1590,11 +1715,10 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 	}
 	maps.Copy(updates, contactutil.ApplyConversationWait(contact, true, now))
 	a.DB.Model(contact).Updates(updates)
-	a.syncContactToFirestore(contact)
 
 	a.Log.Info("Saved incoming message", "message_id", message.ID, "contact_id", contact.ID, "media_url", message.MediaURL)
 
-	// Broadcast new message via WebSocket
+	// Sync new message to Firestore
 	a.broadcastNewMessage(account.OrganizationID, &message, contact)
 
 	// Dispatch webhook for incoming message

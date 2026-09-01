@@ -113,12 +113,19 @@ type CredentialsValidationResult struct {
 	QualityRating          string
 	CodeVerificationStatus string
 	Warning                string
+	// Token is the provider-specific bearer token (e.g. AiSensy JWT). Empty for Meta accounts.
+	Token string
 }
 
 // ValidateCredentials validates WhatsApp account credentials with Meta API
 // It checks the phone number endpoint, business account endpoint, and verifies
 // that the phone number belongs to the specified business account
-func (c *Client) ValidateCredentials(ctx context.Context, phoneID, businessID, accessToken, apiVersion string) (*CredentialsValidationResult, error) {
+func (c *Client) ValidateCredentials(ctx context.Context, account *Account) (*CredentialsValidationResult, error) {
+	phoneID := account.PhoneID
+	businessID := account.BusinessID
+	accessToken := account.AccessToken
+	apiVersion := account.APIVersion
+
 	// 1. Validate PhoneID
 	phoneURL := fmt.Sprintf("%s/%s/%s?fields=display_phone_number,verified_name,code_verification_status,account_mode,quality_rating",
 		c.getBaseURL(), apiVersion, phoneID)

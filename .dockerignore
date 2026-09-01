@@ -1,0 +1,37 @@
+# Git / IDE
+.git
+.github
+.idea
+.vscode
+**/.DS_Store
+
+# Local deps and build output (installed/built inside the image)
+**/node_modules
+frontend/dist
+frontend/playwright-report
+frontend/test-results
+frontend/playwright/.cache
+
+# Local secrets and env
+config.toml
+digitalocean/k8s/**/secrets.yaml
+docker/.env
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+
+# Docs / tests not needed in the image
+docs
+*.md
+!README.md
+coverage
+*.out
+*.test
+bin
+tmp
+temp
+uploads
+audio
+test-results
+agent-transcripts

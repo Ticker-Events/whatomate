@@ -6,13 +6,24 @@ import (
 	"time"
 )
 
-// Account represents WhatsApp Business Account credentials
+// Account represents WhatsApp Business Account credentials.
+// Both Meta and AiSensy providers use this struct; the active fields depend on Provider.
 type Account struct {
+	// Meta fields
 	PhoneID     string
 	BusinessID  string
 	AppID       string
 	APIVersion  string
 	AccessToken string
+
+	// AiSensy fields (populated when Provider == "aisensy")
+	AiSensyEmail     string
+	AiSensyPassword  string
+	AiSensyProjectID string
+	AiSensyToken     string // cached JWT; refreshed automatically on 401
+
+	// Provider identifies the messaging backend: "meta" (default) or "aisensy"
+	Provider string
 }
 
 // Button represents an interactive button

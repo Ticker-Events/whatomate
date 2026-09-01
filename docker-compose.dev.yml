@@ -1,0 +1,118 @@
+# Development docker-compose
+#
+# Usage:
+#   Infrastructure only (run backend + frontend natively):
+#     docker compose -f docker-compose.dev.yml up db redis
+#
+#   Full stack in containers:
+#     docker compose -f docker-compose.dev.yml up
+#
+# Prerequisites for full-stack mode:
+#   - config.toml present at project root (cp config.example.toml config.toml)
+#   - config.toml must use  host = "db"  and  host = "redis"  for services
+#
+# For native dev (make run-migrate + npm run dev), edit config.toml to use
+# host = "localhost" for both db and redis, then run:
+#   docker compose -f docker-compose.dev.yml up db redis
+#   make run-migrate
+#   cd frontend && npm run dev
+
+services:
+  # PostgreSQL — exposed to host so native `go run` can also connect
+  db:
+    image: postgres:17-alpine
+    container_name: whatomate_dev_db
+    restart: unless-stopped
+    networks:
+      - whatomate_dev
+    ports:
+      - "127.0.0.1:15432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-whatomate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-whatomate}
+      POSTGRES_DB: ${POSTGRES_DB:-whatomate}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-whatomate} -d ${POSTGRES_DB:-whatomate}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+
+  # Redis — exposed to host so native `go run` can also connect
+  redis:
+    image: redis:7-alpine
+    container_name: whatomate_dev_redis
+    restart: unless-stopped
+    networks:
+      - whatomate_dev
+    ports:
+      - "127.0.0.1:16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - dev_redis_data:/data
+
+  # Go backend — live source mount, runs `go run` directly
+  # backend:
+  #   image: golang:1.23-alpine
+  #   container_name: whatomate_dev_backend
+  #   restart: unless-stopped
+  #   working_dir: /app
+  #   networks:
+  #     - whatomate_dev
+  #   ports:
+  #     - "8080:8080"
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   environment:
+  #     CGO_ENABLED: "0"
+  #     GOPATH: /go
+  #     GOMODCACHE: /go/pkg/mod
+  #   volumes:
+  #     - .:/app
+  #     - go_mod_cache:/go/pkg/mod
+  #     - go_build_cache:/root/.cache/go-build
+  #   command: >
+  #     sh -c "
+  #       apk add --no-cache git &&
+  #       go run ./cmd/whatomate/main.go server -config config.toml -migrate
+  #     "
+
+  # Vue frontend — hot-reload dev server (Vite)
+  # frontend:
+  #   image: node:22-alpine
+  #   container_name: whatomate_dev_frontend
+  #   restart: unless-stopped
+  #   working_dir: /app/frontend
+  #   networks:
+  #     - whatomate_dev
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     # Tell Vite to listen on all interfaces inside the container
+  #     VITE_HOST: "0.0.0.0"
+  #   volumes:
+  #     - .:/app
+  #     - frontend_node_modules:/app/frontend/node_modules
+  #   command: >
+  #     sh -c "
+  #       npm install &&
+  #       npm run dev -- --host 0.0.0.0 --port 3000
+  #     "
+
+networks:
+  whatomate_dev:
+
+volumes:
+  dev_postgres_data:
+  dev_redis_data:
+  go_mod_cache:
+  go_build_cache:
+  frontend_node_modules:

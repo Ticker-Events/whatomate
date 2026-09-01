@@ -22,6 +22,7 @@ const authStore = useAuthStore()
 interface WhatsAppAccount {
   id: string
   name: string
+  provider: string
   app_id: string
   phone_id: string
   business_id: string
@@ -162,8 +163,11 @@ async function confirmDelete() {
                   </RouterLink>
                 </template>
                 <template #cell-app_id="{ item: account }">
-                  <code v-if="account.app_id" class="text-xs bg-muted px-1.5 py-0.5 rounded">{{ account.app_id }}</code>
-                  <span v-else class="text-muted-foreground">—</span>
+                  <div class="flex flex-col gap-1">
+                    <Badge v-if="account.provider === 'aisensy'" variant="outline" class="text-[10px] border-violet-600 text-violet-500 w-fit">AiSensy</Badge>
+                    <code v-else-if="account.app_id" class="text-xs bg-muted px-1.5 py-0.5 rounded">{{ account.app_id }}</code>
+                    <span v-else class="text-muted-foreground">—</span>
+                  </div>
                 </template>
                 <template #cell-phone_id="{ item: account }">
                   <code class="text-xs bg-muted px-1.5 py-0.5 rounded">{{ account.phone_id }}</code>

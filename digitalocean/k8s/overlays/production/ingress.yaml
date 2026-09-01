@@ -1,0 +1,55 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - agent.tiqr.store
+      secretName: agent-tiqr-store-tls
+  rules:
+    - host: agent.tiqr.store
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: agent-api
+                port:
+                  number: 8080
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: agent-api
+                port:
+                  number: 8080
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: agent-api
+                port:
+                  number: 8080
+          - path: /ready
+            pathType: Prefix
+            backend:
+              service:
+                name: agent-api
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agent-ui
+                port:
+                  number: 80

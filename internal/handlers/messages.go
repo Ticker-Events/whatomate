@@ -14,7 +14,6 @@ import (
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
-	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
@@ -51,6 +50,7 @@ type OutgoingMessageRequest struct {
 	Buttons         []whatsapp.Button // For button/list messages
 	ButtonText      string            // For CTA URL button
 	URL             string            // For CTA URL button
+	HeaderImageURL  string            // Optional image header link for button/list interactive messages
 
 	// voice_call interactive (WhatsApp Business Calling)
 	DisplayText      string // Button face label
@@ -153,9 +153,15 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		return nil, fmt.Errorf("failed to create message: %w", err)
 	}
 
+	// Sync to Firestore before send/status updates so the document exists for patches.
+	if opts.BroadcastWebSocket {
+		a.broadcastNewMessage(req.Account.OrganizationID, msg, req.Contact)
+	}
+
 	// 2. Define the send function based on message type
 	sendFn := func(sendCtx context.Context) (string, error) {
 		waAccount := a.toWhatsAppAccount(req.Account)
+		client := a.getMessagingClient(req.Account)
 		rcpt := whatsapp.Recipient{Phone: req.Contact.PhoneNumber, BSUID: req.Contact.BSUID}
 
 		// Get reply-to message ID if this is a reply
@@ -166,14 +172,14 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 
 		switch req.Type {
 		case models.MessageTypeText:
-			return a.WhatsApp.SendTextMessage(sendCtx, waAccount, rcpt, req.Content, replyToMsgID)
+			return client.SendTextMessage(sendCtx, waAccount, rcpt, req.Content, replyToMsgID)
 
 		case models.MessageTypeImage, models.MessageTypeVideo, models.MessageTypeAudio, models.MessageTypeDocument:
 			// Upload media if MediaData is provided and MediaID is not set
 			mediaID := req.MediaID
 			if mediaID == "" && len(req.MediaData) > 0 {
 				var err error
-				mediaID, err = a.WhatsApp.UploadMedia(sendCtx, waAccount, req.MediaData, req.MediaMimeType, req.MediaFilename)
+				mediaID, err = a.resolveOutgoingMediaRef(sendCtx, req.Account, req.MediaData, req.MediaMimeType, req.MediaFilename)
 				if err != nil {
 					return "", fmt.Errorf("failed to upload media: %w", err)
 				}
@@ -181,23 +187,23 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			// Send the appropriate media type
 			switch req.Type {
 			case models.MessageTypeImage:
-				return a.WhatsApp.SendImageMessage(sendCtx, waAccount, rcpt, mediaID, req.Caption)
+				return client.SendImageMessage(sendCtx, waAccount, rcpt, mediaID, req.Caption)
 			case models.MessageTypeVideo:
-				return a.WhatsApp.SendVideoMessage(sendCtx, waAccount, rcpt, mediaID, req.Caption)
+				return client.SendVideoMessage(sendCtx, waAccount, rcpt, mediaID, req.Caption)
 			case models.MessageTypeAudio:
-				return a.WhatsApp.SendAudioMessage(sendCtx, waAccount, rcpt, mediaID)
+				return client.SendAudioMessage(sendCtx, waAccount, rcpt, mediaID)
 			default: // document
-				return a.WhatsApp.SendDocumentMessage(sendCtx, waAccount, rcpt, mediaID, req.MediaFilename, req.Caption)
+				return client.SendDocumentMessage(sendCtx, waAccount, rcpt, mediaID, req.MediaFilename, req.Caption)
 			}
 
 		case models.MessageTypeInteractive:
 			switch req.InteractiveType {
 			case "cta_url":
-				return a.WhatsApp.SendCTAURLButton(sendCtx, waAccount, rcpt, req.BodyText, req.ButtonText, req.URL)
+				return client.SendCTAURLButton(sendCtx, waAccount, rcpt, req.BodyText, req.ButtonText, req.URL)
 			case "voice_call":
-				return a.WhatsApp.SendVoiceCallButton(sendCtx, waAccount, rcpt, req.BodyText, req.DisplayText, req.TTLMinutes, req.VoiceCallPayload)
+				return client.SendVoiceCallButton(sendCtx, waAccount, rcpt, req.BodyText, req.DisplayText, req.TTLMinutes, req.VoiceCallPayload)
 			default: // "button" or "list"
-				return a.WhatsApp.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons)
+				return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, req.HeaderImageURL)
 			}
 
 		case models.MessageTypeTemplate:
@@ -219,13 +225,13 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			// Add URL/COPY_CODE button components with dynamic params
 			buttonComponents := whatsapp.ButtonURLParamsToComponents(req.ButtonURLParams, req.Template.Buttons)
 			components = append(components, buttonComponents...)
-			return a.WhatsApp.SendTemplateMessage(sendCtx, waAccount, rcpt, req.Template.Name, req.Template.Language, components)
+			return client.SendTemplateMessage(sendCtx, waAccount, rcpt, req.Template.Name, req.Template.Language, components)
 
 		case models.MessageTypeFlow:
 			if req.FlowID == "" {
 				return "", fmt.Errorf("flow ID is required for flow messages")
 			}
-			return a.WhatsApp.SendFlowMessage(sendCtx, waAccount, rcpt, req.FlowID, req.FlowHeader, req.BodyText, req.FlowCTA, req.FlowToken, req.FlowFirstScreen)
+			return client.SendFlowMessage(sendCtx, waAccount, rcpt, req.FlowID, req.FlowHeader, req.BodyText, req.FlowCTA, req.FlowToken, req.FlowFirstScreen)
 
 		default:
 			return "", fmt.Errorf("unsupported message type: %s", req.Type)
@@ -246,11 +252,6 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	} else {
 		wamid, err := sendFn(ctx)
 		a.finalizeMessageSend(msg, req, opts, wamid, err)
-	}
-
-	// 4. Immediate actions (before send completes for async)
-	if opts.BroadcastWebSocket {
-		a.broadcastNewMessage(req.Account.OrganizationID, msg, req.Contact)
 	}
 
 	if opts.TrackSLA {
@@ -410,11 +411,15 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 		for i, btn := range req.Buttons {
 			buttons[i] = map[string]string{"id": btn.ID, "title": btn.Title}
 		}
-		return models.JSONB{
+		out := models.JSONB{
 			"type":    "button",
 			"body":    req.BodyText,
 			"buttons": buttons,
 		}
+		if req.HeaderImageURL != "" {
+			out["header_image_url"] = req.HeaderImageURL
+		}
+		return out
 	}
 }
 
@@ -431,17 +436,9 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
 
-		// Broadcast failure status via WebSocket so frontend updates immediately
-		if opts.BroadcastWebSocket && a.WSHub != nil {
-			a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
-				Type: websocket.TypeStatusUpdate,
-				Payload: map[string]any{
-					"message_id":    msg.ID,
-					"contact_id":    req.Contact.ID,
-					"status":        models.MessageStatusFailed,
-					"error_message": errMsg,
-				},
-			})
+		// Sync failure status to Firestore so frontend updates immediately
+		if opts.BroadcastWebSocket {
+			a.syncMessageStatusToFirestore(msg.ID, models.MessageStatusFailed, errMsg)
 		}
 		return
 	}
@@ -457,17 +454,9 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		a.dispatchMessageSentWebhook(req.Account, req.Contact, msg)
 	}
 
-	// Broadcast status update via WebSocket
-	if opts.BroadcastWebSocket && a.WSHub != nil {
-		a.WSHub.BroadcastToOrg(req.Account.OrganizationID, websocket.WSMessage{
-			Type: websocket.TypeStatusUpdate,
-			Payload: map[string]any{
-				"message_id": msg.ID,
-				"contact_id": req.Contact.ID,
-				"status":     models.MessageStatusSent,
-				"wamid":      wamid,
-			},
-		})
+	// Sync status update to Firestore
+	if opts.BroadcastWebSocket {
+		a.syncMessageStatusToFirestore(msg.ID, models.MessageStatusSent, "")
 	}
 
 	// Mark the contact's incoming messages as read once a chatbot reply has
@@ -478,65 +467,9 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 	}
 }
 
-// broadcastNewMessage broadcasts a new message via WebSocket
+// broadcastNewMessage syncs a new message to Firestore for real-time UI updates.
 func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact *models.Contact) {
-	if a.WSHub == nil {
-		return
-	}
-
-	var assignedUserIDStr string
-	if contact.AssignedUserID != nil {
-		assignedUserIDStr = contact.AssignedUserID.String()
-	}
-	profileName := contact.ProfileName
-	if a.ShouldMaskPhoneNumbers(orgID) {
-		profileName = utils.MaskIfPhoneNumber(profileName)
-	}
-
-	payload := map[string]any{
-		"id":               msg.ID.String(),
-		"contact_id":       contact.ID.String(),
-		"assigned_user_id": assignedUserIDStr,
-		"profile_name":     profileName,
-		"direction":        msg.Direction,
-		"message_type":     msg.MessageType,
-		"content":          map[string]string{"body": msg.Content},
-		"media_url":        msg.MediaURL,
-		"media_mime_type":  msg.MediaMimeType,
-		"media_filename":   msg.MediaFilename,
-		"interactive_data": msg.InteractiveData,
-		"status":           msg.Status,
-		"wamid":            msg.WhatsAppMessageID,
-		"created_at":       msg.CreatedAt,
-		"updated_at":       msg.UpdatedAt,
-		"is_reply":         msg.IsReply,
-	}
-
-	// Add interactive data
-	if msg.InteractiveData != nil {
-		payload["interactive_data"] = msg.InteractiveData
-	}
-
-	// Add reply context
-	if msg.IsReply && msg.ReplyToMessageID != nil {
-		payload["reply_to_message_id"] = msg.ReplyToMessageID.String()
-
-		// Include reply preview for UI
-		var replyToMsg models.Message
-		if err := a.DB.First(&replyToMsg, msg.ReplyToMessageID).Error; err == nil {
-			payload["reply_to_message"] = map[string]any{
-				"id":           replyToMsg.ID.String(),
-				"content":      map[string]string{"body": replyToMsg.Content},
-				"message_type": replyToMsg.MessageType,
-				"direction":    replyToMsg.Direction,
-			}
-		}
-	}
-
-	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
-		Type:    websocket.TypeNewMessage,
-		Payload: payload,
-	})
+	a.syncMessageToFirestore(orgID, msg, contact)
 }
 
 // broadcastReactionUpdate broadcasts a reaction update via WebSocket
@@ -888,10 +821,9 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			headerMimeType = headerFileMimeType
 		}
 
-		// Upload to WhatsApp if we have raw data (options 2 & 3)
+		// Upload to provider if we have raw data (options 2 & 3)
 		if len(headerMediaData) > 0 {
-			waAcct := a.toWhatsAppAccount(account)
-			mediaID, err := a.WhatsApp.UploadMedia(context.Background(), waAcct, headerMediaData, headerMimeType, "header")
+			mediaID, err := a.resolveOutgoingMediaRef(context.Background(), account, headerMediaData, headerMimeType, "header")
 			if err != nil {
 				a.Log.Error("Failed to upload template header media", "error", err)
 				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload header media to WhatsApp", nil, "")

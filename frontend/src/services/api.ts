@@ -130,6 +130,7 @@ api.interceptors.response.use(
 // API service methods
 export const authService = {
   getWSToken: () => api.get('/auth/ws-token'),
+  getFirebaseToken: () => api.get('/auth/firebase-token'),
 }
 
 export const usersService = {
@@ -347,6 +348,7 @@ export const chatbotService = {
   // Settings
   getSettings: () => api.get('/chatbot/settings'),
   updateSettings: (data: any) => api.put('/chatbot/settings', data),
+  refreshCommerceWelcome: () => api.post('/chatbot/settings/commerce-welcome/refresh'),
 
   // Keywords
   listKeywords: (params?: { search?: string; page?: number; limit?: number }) =>

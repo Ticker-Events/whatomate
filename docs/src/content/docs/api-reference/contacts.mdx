@@ -159,7 +159,7 @@ Each contact tracks whether the conversation is waiting for a store reply:
 | Manual close (`is_closed: true`) | `true` | Left in place so reopen can resume the wait |
 | Manual reopen (`is_closed: false`) | `false` | Unchanged |
 
-When Firestore contact sync is configured (`[firebase]` in config), these fields are projected onto `contacts/{id}` for the tiqr.store inbox.
+When Firestore is configured (`[firebase].credentials`), these fields are projected onto `contacts/{id}` as camelCase `isClosed` and `awaitingReplySince` (the clock field is deleted when empty) so the tiqr.store inbox can read them.
 
 ### Response
 

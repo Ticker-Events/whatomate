@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -13,6 +14,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { wsService } from '@/services/websocket'
+import { firestoreService } from '@/services/firestore'
 import { authService } from '@/services/api'
 import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
@@ -25,6 +27,7 @@ useI18n() // Enable $t() in template
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const appStore = useAppStore()
 const isCollapsed = ref(false)
 const isMobileMenuOpen = ref(false)
 
@@ -42,6 +45,8 @@ onMounted(() => {
         return null
       }
     })
+
+    firestoreService.connect()
   }
 })
 
@@ -113,7 +118,7 @@ const handleLogout = async () => {
         <div class="h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
           <MessageSquare class="h-4 w-4 text-white" />
         </div>
-        <span class="font-semibold text-sm text-white light:text-gray-900">Whatomate</span>
+        <span class="font-semibold text-sm text-white light:text-gray-900">{{ appStore.displayName }}</span>
       </RouterLink>
       <Button
         variant="ghost"
@@ -157,7 +162,7 @@ const handleLogout = async () => {
             v-if="!isCollapsed"
             class="font-semibold text-sm text-white light:text-gray-900"
           >
-            Whatomate
+            {{ appStore.displayName }}
           </span>
         </RouterLink>
         <Button

@@ -22,6 +22,7 @@ type Config struct {
 	Redis        RedisConfig        `koanf:"redis"`
 	JWT          JWTConfig          `koanf:"jwt"`
 	WhatsApp     WhatsAppConfig     `koanf:"whatsapp"`
+	AiSensy      AiSensyConfig      `koanf:"aisensy"`
 	AI           AIConfig           `koanf:"ai"`
 	Storage      StorageConfig      `koanf:"storage"`
 	DefaultAdmin DefaultAdminConfig `koanf:"default_admin"`
@@ -30,6 +31,21 @@ type Config struct {
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
 	Firebase     FirebaseConfig     `koanf:"firebase"`
+}
+
+// FirebaseConfig holds Firebase Admin SDK settings for Firestore real-time sync.
+type FirebaseConfig struct {
+	// Credentials is the service account JSON (same format as FIREBASE_CREDENTIALS in ticker-events).
+	Credentials string `koanf:"credentials"`
+}
+
+// AiSensyConfig holds AiSensy Direct API configuration.
+type AiSensyConfig struct {
+	// BaseURL is the AiSensy Direct API base URL.
+	// Defaults to https://backend.aisensy.com/direct-apis/t1/api
+	BaseURL string `koanf:"base_url"`
+	// WebhookSecret is the HMAC-SHA256 shared secret used to verify AiSensy webhook signatures.
+	WebhookSecret string `koanf:"webhook_secret"`
 }
 
 type TTSConfig struct {
@@ -185,13 +201,6 @@ type RateLimitConfig struct {
 	APIWindowSeconds    int  `koanf:"api_window_seconds"`
 }
 
-// FirebaseConfig projects contacts to Firestore for tiqr.store manage chat.
-// Empty ProjectID disables the writer.
-type FirebaseConfig struct {
-	ProjectID       string `koanf:"project_id"`
-	CredentialsFile string `koanf:"credentials_file"`
-}
-
 // Load loads configuration from file and environment variables
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
@@ -270,6 +279,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.WhatsApp.BaseURL == "" {
 		cfg.WhatsApp.BaseURL = "https://graph.facebook.com"
+	}
+	if cfg.AiSensy.BaseURL == "" {
+		cfg.AiSensy.BaseURL = "https://backend.aisensy.com/direct-apis/t1/api"
 	}
 	if cfg.Storage.Type == "" {
 		cfg.Storage.Type = "local"

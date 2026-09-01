@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import { api } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,6 +13,7 @@ import { toast } from 'vue-sonner'
 import { MessageSquare, Loader2 } from 'lucide-vue-next'
 
 const { t } = useI18n()
+const appStore = useAppStore()
 
 interface SSOProvider {
   provider: string
@@ -100,7 +102,7 @@ const initiateSSO = (provider: string) => {
             <MessageSquare class="h-7 w-7 text-white" />
           </div>
         </div>
-        <h2 class="text-2xl font-bold text-white light:text-gray-900">{{ $t('auth.welcomeTitle') }}</h2>
+        <h2 class="text-2xl font-bold text-white light:text-gray-900">{{ $t('auth.welcomeTitle', { name: appStore.displayName }) }}</h2>
         <p class="text-white/50 light:text-gray-500">
           {{ $t('auth.welcomeSubtitle') }}
         </p>

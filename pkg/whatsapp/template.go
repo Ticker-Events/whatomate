@@ -44,9 +44,9 @@ func (c *Client) SubmitTemplate(ctx context.Context, account *Account, template 
 
 	// Authentication templates have a different component structure per Meta API
 	if strings.ToUpper(template.Category) == "AUTHENTICATION" {
-		components = c.buildAuthComponents(template)
+		components = BuildAuthComponents(template)
 	} else {
-		components, compErr = c.buildStandardComponents(template)
+		components, compErr = BuildStandardComponents(template)
 		if compErr != nil {
 			return "", compErr
 		}
@@ -69,7 +69,7 @@ func (c *Client) SubmitTemplate(ctx context.Context, account *Account, template 
 		}
 		// Add parameter_format for named parameters (only for create, not auth)
 		if strings.ToUpper(template.Category) != "AUTHENTICATION" {
-			isNamedParams := template.ParameterFormat == "named" || hasNamedParams(template.BodyContent)
+			isNamedParams := template.ParameterFormat == "named" || HasNamedParams(template.BodyContent)
 			if isNamedParams {
 				payload["parameter_format"] = "NAMED"
 			}
@@ -105,9 +105,9 @@ func (c *Client) SubmitTemplate(ctx context.Context, account *Account, template 
 	return result.ID, nil
 }
 
-// buildAuthComponents builds Meta API components for AUTHENTICATION templates.
+// BuildAuthComponents builds Meta API components for AUTHENTICATION templates.
 // Auth templates have fixed preset body text and use special fields instead of free text.
-func (c *Client) buildAuthComponents(template *TemplateSubmission) []map[string]any {
+func BuildAuthComponents(template *TemplateSubmission) []map[string]any {
 	components := []map[string]any{}
 
 	// BODY component — no text field, only add_security_recommendation
@@ -165,11 +165,12 @@ func (c *Client) buildAuthComponents(template *TemplateSubmission) []map[string]
 	return components
 }
 
-// buildStandardComponents builds Meta API components for MARKETING/UTILITY templates.
-func (c *Client) buildStandardComponents(template *TemplateSubmission) ([]map[string]any, error) {
+// BuildStandardComponents builds Meta API components for MARKETING/UTILITY templates,
+// including example/sample text required by Meta when the body or header has variables.
+func BuildStandardComponents(template *TemplateSubmission) ([]map[string]any, error) {
 	components := []map[string]any{}
 
-	isNamedParams := template.ParameterFormat == "named" || hasNamedParams(template.BodyContent)
+	isNamedParams := template.ParameterFormat == "named" || HasNamedParams(template.BodyContent)
 
 	// Header component (must come before BODY)
 	if template.HeaderType != "" && template.HeaderType != "NONE" {
@@ -481,8 +482,8 @@ func extractExamplesForComponent(sampleValues []any, componentType string) []str
 	return examples
 }
 
-// hasNamedParams checks if the body content uses named parameters (non-numeric)
-func hasNamedParams(content string) bool {
+// HasNamedParams checks if the content uses named parameters (non-numeric).
+func HasNamedParams(content string) bool {
 	// Extract all parameter names
 	matches := strings.Split(content, "{{")
 	for _, m := range matches[1:] { // Skip first part before any {{

@@ -13,50 +13,62 @@ import (
 	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 )
 
 // AccountRequest represents the request body for creating/updating an account
 type AccountRequest struct {
-	Name               string `json:"name" validate:"required"`
-	AppID              string `json:"app_id"`
-	PhoneID            string `json:"phone_id" validate:"required"`
-	BusinessID         string `json:"business_id" validate:"required"`
-	AccessToken        string `json:"access_token" validate:"required"`
-	AppSecret          string `json:"app_secret"` // Meta App Secret for webhook signature verification
-	WebhookVerifyToken string `json:"webhook_verify_token"`
-	APIVersion         string `json:"api_version"`
+	Name string `json:"name" validate:"required"`
+	// Provider selects the messaging backend: "meta" (default) or "aisensy"
+	Provider               string `json:"provider"`
+	AppID                  string `json:"app_id"`
+	PhoneID                string `json:"phone_id" validate:"required"`
+	BusinessID             string `json:"business_id"`
+	AccessToken            string `json:"access_token"`
+	AppSecret              string `json:"app_secret"` // Meta App Secret for webhook signature verification
+	WebhookVerifyToken     string `json:"webhook_verify_token"`
+	APIVersion             string `json:"api_version"`
 	IsDefaultIncoming      bool   `json:"is_default_incoming"`
 	IsDefaultOutgoing      bool   `json:"is_default_outgoing"`
 	AutoReadReceipt        bool   `json:"auto_read_receipt"`
 	BusinessCallingEnabled bool   `json:"business_calling_enabled"`
+
+	// AiSensy-specific fields (required when Provider == "aisensy")
+	AiSensyEmail     string `json:"aisensy_email"`
+	AiSensyPassword  string `json:"aisensy_password"`
+	AiSensyProjectID string `json:"aisensy_project_id"`
 }
 
 // AccountResponse represents the response for an account (without sensitive data)
 type AccountResponse struct {
-	ID                 uuid.UUID  `json:"id"`
-	Name               string     `json:"name"`
-	AppID              string     `json:"app_id"`
-	PhoneID            string     `json:"phone_id"`
-	BusinessID         string     `json:"business_id"`
-	WebhookVerifyToken string     `json:"webhook_verify_token"`
-	APIVersion         string     `json:"api_version"`
+	ID                     uuid.UUID  `json:"id"`
+	Name                   string     `json:"name"`
+	Provider               string     `json:"provider"`
+	AppID                  string     `json:"app_id"`
+	PhoneID                string     `json:"phone_id"`
+	BusinessID             string     `json:"business_id"`
+	WebhookVerifyToken     string     `json:"webhook_verify_token"`
+	APIVersion             string     `json:"api_version"`
 	IsDefaultIncoming      bool       `json:"is_default_incoming"`
 	IsDefaultOutgoing      bool       `json:"is_default_outgoing"`
 	AutoReadReceipt        bool       `json:"auto_read_receipt"`
 	BusinessCallingEnabled bool       `json:"business_calling_enabled"`
 	Status                 string     `json:"status"`
-	HasAccessToken     bool       `json:"has_access_token"`
-	HasAppSecret       bool       `json:"has_app_secret"`
-	PhoneNumber        string     `json:"phone_number,omitempty"`
-	DisplayName        string     `json:"display_name,omitempty"`
-	CreatedByID        *uuid.UUID `json:"created_by_id,omitempty"`
-	CreatedByName      string     `json:"created_by_name,omitempty"`
-	UpdatedByID        *uuid.UUID `json:"updated_by_id,omitempty"`
-	UpdatedByName      string     `json:"updated_by_name,omitempty"`
-	CreatedAt          string     `json:"created_at"`
-	UpdatedAt          string     `json:"updated_at"`
+	HasAccessToken         bool       `json:"has_access_token"`
+	HasAppSecret           bool       `json:"has_app_secret"`
+	AiSensyEmail           string     `json:"aisensy_email,omitempty"`
+	AiSensyProjectID       string     `json:"aisensy_project_id,omitempty"`
+	HasAiSensyPassword     bool       `json:"has_aisensy_password"`
+	PhoneNumber            string     `json:"phone_number,omitempty"`
+	DisplayName            string     `json:"display_name,omitempty"`
+	CreatedByID            *uuid.UUID `json:"created_by_id,omitempty"`
+	CreatedByName          string     `json:"created_by_name,omitempty"`
+	UpdatedByID            *uuid.UUID `json:"updated_by_id,omitempty"`
+	UpdatedByName          string     `json:"updated_by_name,omitempty"`
+	CreatedAt              string     `json:"created_at"`
+	UpdatedAt              string     `json:"updated_at"`
 }
 
 // ListAccounts returns all WhatsApp accounts for the organization
@@ -95,9 +107,21 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		return nil
 	}
 
-	// Validate required fields
-	if req.Name == "" || req.PhoneID == "" || req.BusinessID == "" || req.AccessToken == "" {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Name, phone_id, business_id, and access_token are required", nil, "")
+	// Normalize provider
+	provider := req.Provider
+	if provider == "" {
+		provider = "meta"
+	}
+
+	// Validate required fields based on provider
+	if req.Name == "" || req.PhoneID == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name and phone_id are required", nil, "")
+	}
+	if provider == "meta" && (req.BusinessID == "" || req.AccessToken == "") {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "business_id and access_token are required for Meta accounts", nil, "")
+	}
+	if provider == "aisensy" && (req.AiSensyEmail == "" || req.AiSensyPassword == "" || req.AiSensyProjectID == "") {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "aisensy_email, aisensy_password, and aisensy_project_id are required for AiSensy accounts", nil, "")
 	}
 
 	// Generate webhook verify token if not provided
@@ -123,24 +147,33 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		a.Log.Error("Failed to encrypt app secret", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
 	}
+	encAiSensyPassword, err := crypto.Encrypt(req.AiSensyPassword, encKey)
+	if err != nil {
+		a.Log.Error("Failed to encrypt aisensy password", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create account", nil, "")
+	}
 
 	account := models.WhatsAppAccount{
-		OrganizationID:     orgID,
-		Name:               req.Name,
-		AppID:              req.AppID,
-		PhoneID:            req.PhoneID,
-		BusinessID:         req.BusinessID,
-		AccessToken:        encAccessToken,
-		AppSecret:          encAppSecret,
-		WebhookVerifyToken: webhookVerifyToken,
-		APIVersion:         apiVersion,
+		OrganizationID:         orgID,
+		Name:                   req.Name,
+		Provider:               provider,
+		AppID:                  req.AppID,
+		PhoneID:                req.PhoneID,
+		BusinessID:             req.BusinessID,
+		AccessToken:            encAccessToken,
+		AppSecret:              encAppSecret,
+		WebhookVerifyToken:     webhookVerifyToken,
+		APIVersion:             apiVersion,
 		IsDefaultIncoming:      req.IsDefaultIncoming,
 		IsDefaultOutgoing:      req.IsDefaultOutgoing,
 		AutoReadReceipt:        req.AutoReadReceipt,
 		BusinessCallingEnabled: req.BusinessCallingEnabled,
 		Status:                 "active",
-		CreatedByID:        &userID,
-		UpdatedByID:        &userID,
+		CreatedByID:            &userID,
+		UpdatedByID:            &userID,
+		AiSensyEmail:           req.AiSensyEmail,
+		AiSensyPassword:        encAiSensyPassword,
+		AiSensyProjectID:       req.AiSensyProjectID,
 	}
 
 	// If this is set as default, unset other defaults
@@ -251,6 +284,20 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	if req.APIVersion != "" {
 		account.APIVersion = req.APIVersion
 	}
+	if req.AiSensyEmail != "" {
+		account.AiSensyEmail = req.AiSensyEmail
+	}
+	if req.AiSensyPassword != "" {
+		enc, err := crypto.Encrypt(req.AiSensyPassword, a.Config.App.EncryptionKey)
+		if err != nil {
+			a.Log.Error("Failed to encrypt aisensy password", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account", nil, "")
+		}
+		account.AiSensyPassword = enc
+	}
+	if req.AiSensyProjectID != "" {
+		account.AiSensyProjectID = req.AiSensyProjectID
+	}
 	account.AutoReadReceipt = req.AutoReadReceipt
 	account.BusinessCallingEnabled = req.BusinessCallingEnabled
 
@@ -347,11 +394,22 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 	}
 
 	// Use the comprehensive validation function
-	if err := a.validateAccountCredentials(account.PhoneID, account.BusinessID, account.AccessToken, account.APIVersion); err != nil {
+	validationResult, err := a.validateAccountCredentials(account.ToWAAccount())
+	if err != nil {
 		a.Log.Error("Account test failed", "error", err, "account", account.Name)
 		return r.SendEnvelope(map[string]any{
 			"success": false,
 			"error":   fmt.Sprintf("Account credential validation failed: %s", err.Error()),
+		})
+	}
+
+	// AiSensy accounts have no Meta access token — skip the Graph API call.
+	if account.Provider == "aisensy" {
+		return r.SendEnvelope(map[string]any{
+			"success":              true,
+			"verified_name":        validationResult.VerifiedName,
+			"display_phone_number": validationResult.PhoneNumber,
+			"access_token":         validationResult.Token,
 		})
 	}
 
@@ -459,25 +517,33 @@ func (a *App) fetchMetaJSON(url, accessToken string) (map[string]any, int, error
 // Helper functions
 
 func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
+	provider := acc.Provider
+	if provider == "" {
+		provider = "meta"
+	}
 	resp := AccountResponse{
-		ID:                 acc.ID,
-		Name:               acc.Name,
-		AppID:              acc.AppID,
-		PhoneID:            acc.PhoneID,
-		BusinessID:         acc.BusinessID,
-		WebhookVerifyToken: acc.WebhookVerifyToken,
-		APIVersion:         acc.APIVersion,
+		ID:                     acc.ID,
+		Name:                   acc.Name,
+		Provider:               provider,
+		AppID:                  acc.AppID,
+		PhoneID:                acc.PhoneID,
+		BusinessID:             acc.BusinessID,
+		WebhookVerifyToken:     acc.WebhookVerifyToken,
+		APIVersion:             acc.APIVersion,
 		IsDefaultIncoming:      acc.IsDefaultIncoming,
 		IsDefaultOutgoing:      acc.IsDefaultOutgoing,
 		AutoReadReceipt:        acc.AutoReadReceipt,
 		BusinessCallingEnabled: acc.BusinessCallingEnabled,
 		Status:                 acc.Status,
-		HasAccessToken:     acc.AccessToken != "",
-		HasAppSecret:       acc.AppSecret != "",
-		CreatedByID:        acc.CreatedByID,
-		UpdatedByID:        acc.UpdatedByID,
-		CreatedAt:          acc.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:          acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		HasAccessToken:         acc.AccessToken != "",
+		HasAppSecret:           acc.AppSecret != "",
+		AiSensyEmail:           acc.AiSensyEmail,
+		AiSensyProjectID:       acc.AiSensyProjectID,
+		HasAiSensyPassword:     acc.AiSensyPassword != "",
+		CreatedByID:            acc.CreatedByID,
+		UpdatedByID:            acc.UpdatedByID,
+		CreatedAt:              acc.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:              acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 	if acc.CreatedBy != nil {
 		resp.CreatedByName = acc.CreatedBy.FullName
@@ -494,14 +560,43 @@ func generateVerifyToken() string {
 	return hex.EncodeToString(bytes)
 }
 
-// validateAccountCredentials validates WhatsApp account credentials with Meta API
-func (a *App) validateAccountCredentials(phoneID, businessID, accessToken, apiVersion string) error {
+// validateAccountCredentials validates WhatsApp account credentials with the appropriate provider.
+func (a *App) validateAccountCredentials(account *whatsapp.Account) (*whatsapp.CredentialsValidationResult, error) {
 	ctx := context.Background()
-	_, err := a.WhatsApp.ValidateCredentials(ctx, phoneID, businessID, accessToken, apiVersion)
-	if err != nil {
-		return err
+	var client whatsapp.MessagingClient = a.WhatsApp
+	if account.Provider == "aisensy" && a.AiSensy != nil {
+		client = a.AiSensy
 	}
-	a.Log.Info("Account credentials validated successfully", "phone_id", phoneID, "business_id", businessID)
+	result, err := client.ValidateCredentials(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	a.Log.Info("Account credentials validated successfully", "phone_id", account.PhoneID, "provider", account.Provider)
+	return result, nil
+}
+
+// PersistAiSensyToken encrypts and stores a refreshed AiSensy JWT on the
+// matching WhatsApp account so tokens survive process restarts.
+func (a *App) PersistAiSensyToken(ctx context.Context, projectID, token string) error {
+	if projectID == "" || token == "" {
+		return fmt.Errorf("project_id and token are required")
+	}
+	enc, err := crypto.Encrypt(token, a.Config.App.EncryptionKey)
+	if err != nil {
+		return fmt.Errorf("encrypt aisensy token: %w", err)
+	}
+
+	var account models.WhatsAppAccount
+	if err := a.DB.WithContext(ctx).
+		Where("aisensy_project_id = ? AND provider = ?", projectID, "aisensy").
+		First(&account).Error; err != nil {
+		return fmt.Errorf("find aisensy account: %w", err)
+	}
+
+	if err := a.DB.WithContext(ctx).Model(&account).Update("aisensy_token", enc).Error; err != nil {
+		return fmt.Errorf("update aisensy token: %w", err)
+	}
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
 	return nil
 }
 
@@ -525,7 +620,7 @@ func (a *App) SubscribeApp(r *fastglue.Request) error {
 
 	// Subscribe the app to webhooks
 	ctx := context.Background()
-	if err := a.WhatsApp.SubscribeApp(ctx, a.toWhatsAppAccount(account)); err != nil {
+	if err := a.getMessagingClient(account).SubscribeApp(ctx, a.toWhatsAppAccount(account)); err != nil {
 		a.Log.Error("Failed to subscribe app to webhooks", "error", err, "account", account.Name)
 		return r.SendEnvelope(map[string]any{
 			"success": false,

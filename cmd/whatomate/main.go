@@ -15,7 +15,6 @@ import (
 	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/database"
-	"github.com/shridarpatil/whatomate/internal/firestoresync"
 	"github.com/shridarpatil/whatomate/internal/frontend"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
@@ -24,6 +23,8 @@ import (
 	"github.com/shridarpatil/whatomate/internal/tts"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/internal/worker"
+	"github.com/shridarpatil/whatomate/pkg/aisensy"
+	firestoresync "github.com/shridarpatil/whatomate/pkg/firestore"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -46,6 +47,8 @@ func main() {
 		runServer(os.Args[2:])
 	case "worker":
 		runWorker(os.Args[2:])
+	case "migrate":
+		runMigrate(os.Args[2:])
 	case "version":
 		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
 	case "help", "-h", "--help":
@@ -66,6 +69,7 @@ Usage:
 Commands:
   server    Start the API server (with optional embedded workers)
   worker    Start background workers only (no API server)
+  migrate   Run database migrations and exit
   version   Show version information
   help      Show this help message
 
@@ -78,31 +82,21 @@ Worker Options:
   -config string    Path to config file (default "config.toml")
   -workers int      Number of workers to run (default 1)
 
+Migrate Options:
+  -config string    Path to config file (default "config.toml")
+
 Examples:
   whatomate server                     # API + 1 embedded worker
   whatomate server -workers 0          # API only (no workers)
   whatomate server -workers 4          # API + 4 embedded workers
   whatomate server -migrate            # Run migrations and start server
+  whatomate migrate                    # Run migrations and exit
   whatomate worker -workers 4          # 4 workers only (no API)
 
 Deployment Scenarios:
   All-in-one:    whatomate server
   Separate:      whatomate server -workers 0  (on API server)
                  whatomate worker -workers 4  (on worker server)`)
-}
-
-func attachContactStore(app *handlers.App, cfg *config.Config, lo logf.Logger) {
-	store, err := firestoresync.New(context.Background(), cfg.Firebase)
-	if err != nil {
-		lo.Warn("Firestore contact sync disabled", "error", err)
-		return
-	}
-	if store == nil {
-		lo.Info("Firestore contact sync not configured")
-		return
-	}
-	app.ContactStore = store
-	lo.Info("Firestore contact sync enabled", "project_id", cfg.Firebase.ProjectID)
 }
 
 // ============================================================================
@@ -196,8 +190,12 @@ func runServer(args []string) {
 	// Initialize WhatsApp client
 	waClient := whatsapp.NewWithBaseURL(lo, cfg.WhatsApp.BaseURL)
 
+	// Initialize AiSensy client
+	aiSensyClient := aisensy.New(cfg.AiSensy, lo)
+
 	// Initialize WebSocket hub
 	wsHub := websocket.NewHub(lo)
+	wsHub.SetPublisher(queue.NewPublisher(rdb, lo))
 	go wsHub.Run()
 	lo.Info("WebSocket hub started")
 
@@ -219,21 +217,22 @@ func runServer(args []string) {
 		Redis:      rdb,
 		Log:        lo,
 		WhatsApp:   waClient,
+		AiSensy:    aiSensyClient,
 		WSHub:      wsHub,
 		Queue:      jobQueue,
 		HTTPClient: httpClient,
 	}
-	attachContactStore(app, cfg, lo)
+	aiSensyClient.PersistToken = app.PersistAiSensyToken
 
-	// Initialize S3 client for call recordings (optional)
+	// Initialize S3 client when bucket is configured (call recordings + AiSensy media links)
 	var s3Client *storage.S3Client
-	if cfg.Calling.RecordingEnabled && cfg.Storage.S3Bucket != "" {
+	if cfg.Storage.S3Bucket != "" {
 		var err error
 		s3Client, err = storage.NewS3Client(&cfg.Storage)
 		if err != nil {
-			lo.Warn("Failed to initialize S3 client for recordings, recording disabled", "error", err)
+			lo.Warn("Failed to initialize S3 client", "error", err)
 		} else {
-			lo.Info("S3 client initialized for call recordings", "bucket", cfg.Storage.S3Bucket)
+			lo.Info("S3 client initialized", "bucket", cfg.Storage.S3Bucket)
 		}
 	}
 
@@ -244,6 +243,15 @@ func runServer(args []string) {
 	// Initialize CallManager (per-org calling_enabled DB setting controls access)
 	app.CallManager = calling.NewManager(&cfg.Calling, s3Client, db, rdb, waClient, wsHub, assigner, lo)
 	app.S3Client = s3Client
+
+	// Initialize Firestore for real-time chat sync (optional)
+	fsClient, err := firestoresync.Init(context.Background(), cfg.Firebase.Credentials, lo)
+	if err != nil {
+		lo.Warn("Failed to initialize Firestore client", "error", err)
+	} else {
+		app.Firestore = fsClient
+	}
+
 	lo.Info("Call manager initialized")
 
 	// Initialize TTS if configured (requires piper binary + model)
@@ -260,6 +268,11 @@ func runServer(args []string) {
 	// Start campaign stats subscriber for real-time WebSocket updates from worker
 	if err := app.StartCampaignStatsSubscriber(); err != nil {
 		lo.Error("Failed to start campaign stats subscriber", "error", err)
+	}
+
+	// Fan out WebSocket broadcasts across API replicas
+	if err := app.StartWSBroadcastSubscriber(); err != nil {
+		lo.Error("Failed to start WebSocket fan-out subscriber", "error", err)
 	}
 
 	// Parse allowed origins for CORS
@@ -280,7 +293,9 @@ func runServer(args []string) {
 		ReadTimeout:        time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout:       time.Duration(cfg.Server.WriteTimeout) * time.Second,
 		MaxRequestBodySize: 15 * 1024 * 1024,
-		Name:               "Whatomate",
+		// Cookie-based JWT auth can push request headers past fasthttp's 4 KB default.
+		ReadBufferSize: 64 * 1024,
+		Name:           "Whatomate",
 	}
 
 	// Start server in goroutine
@@ -337,6 +352,14 @@ func runServer(args []string) {
 	app.StopCampaignStatsSubscriber()
 	lo.Info("Campaign stats subscriber stopped")
 
+	lo.Info("Stopping WebSocket fan-out subscriber...")
+	app.StopWSBroadcastSubscriber()
+	lo.Info("WebSocket fan-out subscriber stopped")
+
+	if app.Firestore != nil {
+		_ = app.Firestore.Close()
+	}
+
 	// Stop SLA processor
 	lo.Info("Stopping SLA processor...")
 	slaCancel()
@@ -359,6 +382,45 @@ func runServer(args []string) {
 		lo.Error("Server shutdown error", "error", err)
 	}
 	lo.Info("Server stopped")
+}
+
+// ============================================================================
+// MIGRATE COMMAND
+// ============================================================================
+
+func runMigrate(args []string) {
+	migrateFlags := flag.NewFlagSet("migrate", flag.ExitOnError)
+	configPath := migrateFlags.String("config", "config.toml", "Path to config file")
+	_ = migrateFlags.Parse(args)
+
+	lo := logf.New(logf.Opts{
+		EnableColor:     true,
+		Level:           logf.InfoLevel,
+		TimestampFormat: "2006-01-02 15:04:05",
+		DefaultFields:   []any{"app", "whatomate-migrate"},
+	})
+
+	lo.Info("Running Whatomate migrations...", "version", Version)
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		lo.Fatal("Failed to load config", "error", err)
+	}
+
+	db, err := database.NewPostgres(&cfg.Database, cfg.App.Debug)
+	if err != nil {
+		lo.Fatal("Failed to connect to database", "error", err)
+	}
+	lo.Info("Connected to PostgreSQL")
+
+	if err := database.RunMigrationWithProgress(db, &cfg.DefaultAdmin); err != nil {
+		lo.Fatal("Migration failed", "error", err)
+	}
+	if err := handlers.BackfillChatbotFlowGraph(db, lo); err != nil {
+		lo.Fatal("Chatbot flow graph backfill failed", "error", err)
+	}
+
+	lo.Info("Migrations completed successfully")
 }
 
 // ============================================================================
@@ -470,6 +532,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Health check
 	g.GET("/health", app.HealthCheck)
 	g.GET("/ready", app.ReadyCheck)
+	g.GET("/api/app", app.GetAppInfo)
 
 	// Auth routes (public, optionally rate-limited)
 	if cfg.RateLimit.Enabled {
@@ -498,6 +561,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/auth/logout", app.Logout)
 	g.POST("/api/auth/switch-org", app.SwitchOrg)
 	g.GET("/api/auth/ws-token", app.GetWSToken)
+	g.GET("/api/auth/firebase-token", app.GetFirebaseToken)
 
 	// SSO routes (public, optionally rate-limited)
 	g.GET("/api/auth/sso/providers", app.GetPublicSSOProviders)
@@ -530,7 +594,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		}
 		path := string(r.RequestCtx.Path())
 		// Skip auth for public routes
-		if path == "/health" || path == "/ready" ||
+		if path == "/health" || path == "/ready" || path == "/api/app" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||
 			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" {
 			return r
@@ -716,6 +780,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Chatbot Settings
 	g.GET("/api/chatbot/settings", app.GetChatbotSettings)
 	g.PUT("/api/chatbot/settings", app.UpdateChatbotSettings)
+	g.POST("/api/chatbot/settings/commerce-welcome/refresh", app.RefreshCommerceWelcome)
 
 	// Keyword Rules
 	g.GET("/api/chatbot/keywords", app.ListKeywordRules)

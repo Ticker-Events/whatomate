@@ -436,7 +436,7 @@ func (a *App) SubmitTemplate(r *fastglue.Request) error {
 	})
 }
 
-// submitTemplateToMeta submits a template to Meta's API (creates new or updates existing)
+// submitTemplateToMeta submits a template to the configured provider (Meta or AiSensy).
 func (a *App) submitTemplateToMeta(account *models.WhatsAppAccount, template *models.Template) (string, error) {
 	waAccount := a.toWhatsAppAccount(account)
 
@@ -456,7 +456,7 @@ func (a *App) submitTemplateToMeta(account *models.WhatsAppAccount, template *mo
 	}
 
 	ctx := context.Background()
-	return a.WhatsApp.SubmitTemplate(ctx, waAccount, submission)
+	return a.getMessagingClient(account).SubmitTemplate(ctx, waAccount, submission)
 }
 
 // SyncTemplates syncs templates from Meta API
@@ -579,15 +579,15 @@ func (a *App) fetchTemplatesFromMeta(account *models.WhatsAppAccount) ([]whatsap
 	waAccount := a.toWhatsAppAccount(account)
 
 	ctx := context.Background()
-	return a.WhatsApp.FetchTemplates(ctx, waAccount)
+	return a.getMessagingClient(account).FetchTemplates(ctx, waAccount)
 }
 
 func (a *App) deleteTemplateFromMeta(account *models.WhatsAppAccount, templateName string) {
 	waAccount := a.toWhatsAppAccount(account)
 
 	ctx := context.Background()
-	if err := a.WhatsApp.DeleteTemplate(ctx, waAccount, templateName); err != nil {
-		a.Log.Error("Failed to delete template from Meta", "error", err, "template", templateName)
+	if err := a.getMessagingClient(account).DeleteTemplate(ctx, waAccount, templateName); err != nil {
+		a.Log.Error("Failed to delete template from provider", "error", err, "template", templateName)
 	}
 }
 
@@ -718,10 +718,10 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 
 	// Perform resumable upload to get handle
 	ctx := context.Background()
-	handle, err := a.WhatsApp.ResumableUpload(ctx, waAccount, fileData, mimeType, fileHeader.Filename)
+	handle, err := a.getMessagingClient(account).ResumableUpload(ctx, waAccount, fileData, mimeType, fileHeader.Filename)
 	if err != nil {
 		a.Log.Error("Failed to upload template media", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Failed to upload media to Meta", nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Failed to upload media to provider", nil, "")
 	}
 
 	return r.SendEnvelope(map[string]any{
