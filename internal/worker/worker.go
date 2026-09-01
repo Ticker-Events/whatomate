@@ -77,8 +77,8 @@ func (w *Worker) persistAiSensyToken(ctx context.Context, projectID, token strin
 		return fmt.Errorf("encrypt aisensy token: %w", err)
 	}
 	res := w.DB.WithContext(ctx).Model(&models.WhatsAppAccount{}).
-		Where("aisensy_project_id = ? AND provider = ?", projectID, "aisensy").
-		Update("aisensy_token", enc)
+		Where(&models.WhatsAppAccount{AiSensyProjectID: projectID, Provider: "aisensy"}).
+		Update("AiSensyToken", enc)
 	if res.Error != nil {
 		return res.Error
 	}

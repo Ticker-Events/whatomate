@@ -588,12 +588,12 @@ func (a *App) PersistAiSensyToken(ctx context.Context, projectID, token string) 
 
 	var account models.WhatsAppAccount
 	if err := a.DB.WithContext(ctx).
-		Where("aisensy_project_id = ? AND provider = ?", projectID, "aisensy").
+		Where(&models.WhatsAppAccount{AiSensyProjectID: projectID, Provider: "aisensy"}).
 		First(&account).Error; err != nil {
 		return fmt.Errorf("find aisensy account: %w", err)
 	}
 
-	if err := a.DB.WithContext(ctx).Model(&account).Update("aisensy_token", enc).Error; err != nil {
+	if err := a.DB.WithContext(ctx).Model(&account).Update("AiSensyToken", enc).Error; err != nil {
 		return fmt.Errorf("update aisensy token: %w", err)
 	}
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
