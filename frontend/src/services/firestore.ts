@@ -11,6 +11,7 @@ import { getFirebaseAuth, getFirebaseDB, isFirebaseConfigured } from '@/lib/fire
 import { useContactsStore, type Contact, type Message } from '@/stores/contacts'
 import { useAuthStore } from '@/stores/auth'
 import { authService, contactsService } from '@/services/api'
+import { getActiveOrganizationId } from '@/lib/organization'
 import { toast } from 'vue-sonner'
 import router from '@/router'
 
@@ -138,7 +139,7 @@ class FirestoreService {
 
   private subscribeToContacts() {
     const authStore = useAuthStore()
-    const orgId = authStore.organizationId
+    const orgId = getActiveOrganizationId(authStore.organizationId)
     if (!orgId) return
 
     this.unsubscribeContacts()
@@ -152,6 +153,9 @@ class FirestoreService {
       const store = useContactsStore()
       snapshot.docChanges().forEach((change) => {
         const data = change.doc.data() as Record<string, any>
+        if (data.organizationId && data.organizationId !== orgId) {
+          return
+        }
         const partial = mapFirestoreContact(change.doc.id, data)
         if (change.type === 'removed') {
           return
@@ -163,7 +167,7 @@ class FirestoreService {
 
   private subscribeToMessages(contactId: string) {
     const authStore = useAuthStore()
-    const orgId = authStore.organizationId
+    const orgId = getActiveOrganizationId(authStore.organizationId)
     if (!orgId) return
 
     this.unsubscribeMessages()
@@ -181,6 +185,9 @@ class FirestoreService {
 
       snapshot.docChanges().forEach((change) => {
         const data = change.doc.data() as Record<string, any>
+        if (data.organizationId && data.organizationId !== orgId) {
+          return
+        }
         const message = mapFirestoreMessage(change.doc.id, data)
 
         if (change.type === 'added') {

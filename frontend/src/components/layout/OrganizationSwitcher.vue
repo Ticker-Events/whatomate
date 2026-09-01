@@ -14,6 +14,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { organizationsService } from '@/services/api'
+import { firestoreService } from '@/services/firestore'
+import { useContactsStore } from '@/stores/contacts'
 import { toast } from 'vue-sonner'
 import { Building2, Plus, Loader2 } from 'lucide-vue-next'
 
@@ -72,19 +74,18 @@ watch(() => authStore.user?.is_super_admin, async (superAdmin) => {
 
 const handleOrgChange = async (value: string | number | bigint | Record<string, any> | null) => {
   if (!value || typeof value !== 'string') return
+  if (value === currentOrgId.value) return
 
-  if (isSuperAdmin.value) {
-    // Super admins: set localStorage header and reload
-    organizationsStore.selectOrganization(value)
-    window.location.reload()
-  } else {
-    // Multi-org users: call switchOrg API for new JWT tokens, then reload
-    try {
-      await authStore.switchOrg(value)
-      window.location.reload()
-    } catch {
-      // If switch fails, don't reload
+  try {
+    await authStore.switchOrg(value)
+    if (isSuperAdmin.value) {
+      organizationsStore.selectOrganization(value)
     }
+    firestoreService.disconnect()
+    useContactsStore().clearContacts()
+    window.location.reload()
+  } catch {
+    toast.error(t('organizations.switchFailed'))
   }
 }
 
