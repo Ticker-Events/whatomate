@@ -488,6 +488,13 @@ When a conversation is transferred:
 3. The agent can respond and manage the conversation
 4. When done, the agent can resume chatbot processing
 
+Firestore `contacts/{id}` is updated on transfer create, resume, and SLA expire:
+
+- `chatbotPaused` — `true` while an agent transfer is active
+- `activeTransferId` — the active transfer UUID; deleted when the chatbot resumes
+
+Existing transfers created before this field existed will not show paused state until a new pause, resume, or expire writes the document.
+
 ### Transfer Triggers
 
 Transfers can be initiated in three ways:

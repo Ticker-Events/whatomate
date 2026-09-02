@@ -5,6 +5,7 @@ import (
 	"time"
 
 	gfirestore "cloud.google.com/go/firestore"
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/stretchr/testify/assert"
 )
@@ -34,4 +35,33 @@ func TestApplyConversationWaitFields_NilContact(t *testing.T) {
 	applyConversationWaitFields(data, nil)
 	assert.Equal(t, true, data["keep"])
 	assert.NotContains(t, data, "isClosed")
+}
+
+func TestApplyChatbotPausedFields_PausedWritesTransferID(t *testing.T) {
+	transferID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	data := map[string]any{}
+	applyChatbotPausedFields(data, true, &transferID)
+
+	assert.Equal(t, true, data["chatbotPaused"])
+	assert.Equal(t, transferID.String(), data["activeTransferId"])
+}
+
+func TestApplyChatbotPausedFields_UnpausedDeletesTransferID(t *testing.T) {
+	data := map[string]any{}
+	applyChatbotPausedFields(data, false, nil)
+
+	assert.Equal(t, false, data["chatbotPaused"])
+	assert.Equal(t, gfirestore.Delete, data["activeTransferId"])
+}
+
+func TestApplyChatbotPausedFields_PausedWithoutTransferIDDeletesID(t *testing.T) {
+	data := map[string]any{}
+	applyChatbotPausedFields(data, true, nil)
+
+	assert.Equal(t, true, data["chatbotPaused"])
+	assert.Equal(t, gfirestore.Delete, data["activeTransferId"])
+}
+
+func TestApplyChatbotPausedFields_NilData(t *testing.T) {
+	applyChatbotPausedFields(nil, true, nil)
 }

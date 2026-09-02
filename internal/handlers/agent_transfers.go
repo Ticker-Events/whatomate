@@ -112,6 +112,16 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 	// Query params
 	status := string(r.RequestCtx.QueryArgs().Peek("status"))
 	teamIDStr := string(r.RequestCtx.QueryArgs().Peek("team_id"))
+	contactIDStr := string(r.RequestCtx.QueryArgs().Peek("contact_id"))
+
+	var contactIDFilter *uuid.UUID
+	if contactIDStr != "" {
+		parsed, err := uuid.Parse(contactIDStr)
+		if err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid contact_id", nil, "")
+		}
+		contactIDFilter = &parsed
+	}
 
 	// Pagination params
 	limit := 100 // Default limit
@@ -191,6 +201,10 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 		query = query.Where("agent_transfers.status = ?", status)
 	}
 
+	if contactIDFilter != nil {
+		query = query.Where("agent_transfers.contact_id = ?", *contactIDFilter)
+	}
+
 	// Filter by team if provided
 	if teamIDStr != "" {
 		if teamIDStr == "general" {
@@ -232,6 +246,9 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 	countQuery := a.DB.Table("agent_transfers").Where("agent_transfers.organization_id = ?", orgID)
 	if status != "" {
 		countQuery = countQuery.Where("agent_transfers.status = ?", status)
+	}
+	if contactIDFilter != nil {
+		countQuery = countQuery.Where("agent_transfers.contact_id = ?", *contactIDFilter)
 	}
 	if teamIDStr != "" {
 		if teamIDStr == "general" {
@@ -517,6 +534,8 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create transfer", nil, "")
 	}
 
+	a.syncContactChatbotPausedToFirestore(orgID, contactID, &transfer.ID, true)
+
 	// When AssignToSameAgent is enabled and no agent is already assigned,
 	// set the contact's assigned agent for future chat routing.
 	// Skip if already assigned to preserve a manually set relationship manager.
@@ -653,6 +672,8 @@ func (a *App) ResumeFromTransfer(r *fastglue.Request) error {
 		a.Log.Error("Failed to resume transfer", "error", err, "transfer_id", transfer.ID)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to resume transfer", nil, "")
 	}
+
+	a.syncContactChatbotPausedToFirestore(orgID, transfer.ContactID, nil, false)
 
 	// Clear chatbot tracking so client inactivity SLA doesn't trigger after transfer is closed
 	a.ClearContactChatbotTracking(transfer.ContactID)
@@ -1192,6 +1213,8 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 	if err := a.DB.Create(transfer).Error; err != nil {
 		return err
 	}
+
+	a.syncContactChatbotPausedToFirestore(transfer.OrganizationID, transfer.ContactID, &transfer.ID, true)
 
 	// Update contact assignment if agent assigned, but only when AssignToSameAgent
 	// is enabled and no relationship manager is already set. Active transfers
