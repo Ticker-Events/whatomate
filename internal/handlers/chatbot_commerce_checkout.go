@@ -10,20 +10,23 @@ import (
 
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
+	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
 
 const (
-	checkoutSessionKey       = "checkout"
-	checkoutButtonID         = "checkout"
-	checkoutExploreButtonID  = "checkout_explore"
-	checkoutConfirmButtonID  = "checkout_confirm"
-	checkoutCancelButtonID   = "checkout_cancel"
-	checkoutPickupButtonID   = "checkout_delivery_pickup"
-	checkoutDeliveryButtonID = "checkout_delivery_ship"
-	cartPendingOptionKey     = "cart_pending_option_id"
-	checkoutLocationPrompt   = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
-	checkoutAddressPrompt    = "Please provide your full delivery address, including your name, phone number, street address, city, state, country, and pincode."
-	checkoutExploreAck       = "No problem — keep browsing. Your cart is saved. Tap Checkout when you're ready."
+	checkoutSessionKey           = "checkout"
+	checkoutButtonID             = "checkout"
+	checkoutExploreButtonID      = "checkout_explore"
+	checkoutConfirmButtonID      = "checkout_confirm"
+	checkoutCancelButtonID       = "checkout_cancel"
+	checkoutPickupButtonID       = "checkout_delivery_pickup"
+	checkoutDeliveryButtonID     = "checkout_delivery_ship"
+	cartPendingOptionKey         = "cart_pending_option_id"
+	checkoutLocationPrompt       = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
+	checkoutAddressPrompt        = "Please provide your full delivery address, including your name, phone number, street address, city, state, country, and pincode."
+	checkoutAddressMessageBody   = "Thanks for your order! Tell us what address you'd like this order delivered to."
+	checkoutExploreAck           = "No problem — keep browsing. Your cart is saved. Tap Checkout when you're ready."
+	whatsappAddressIncapableCode = 1026
 )
 
 var (
@@ -218,6 +221,9 @@ func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, cont
 	}
 	st.DeliveryMode = mode
 	if mode == "DELIVERY_TO_LOCATION" {
+		if st.NewAddress == nil {
+			st.NewAddress = map[string]any{}
+		}
 		if contact != nil {
 			if contact.ProfileName != "" {
 				st.NewAddress["name"] = contact.ProfileName
@@ -227,7 +233,9 @@ func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, cont
 			}
 		}
 		st.NewAddress["email"] = st.Email
-		st.NewAddress["country"] = "India"
+		if country := a.storeAddressCountry(session, settings); country != "" {
+			st.NewAddress["country"] = country
+		}
 
 		if a.storeRequiresLocationBasedDelivery(session, settings) {
 			st.Step = "location"
@@ -242,14 +250,14 @@ func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, cont
 			return
 		}
 
-		// Flag off (default): text address only — deliver to all locations.
+		// Flag off (default): collect address (WhatsApp form for India stores).
 		st.Step = "address"
 		st.HasLocation = false
 		st.DeliveryZone = ""
 		st.ShippingFeePaise = 0
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
-		_ = a.sendAndSaveTextMessage(account, contact, checkoutAddressPrompt)
+		a.promptCheckoutAddress(account, contact, session, settings, st)
 		return
 	}
 	st.Step = "confirm"
@@ -284,6 +292,129 @@ func (a *App) storeRequiresLocationBasedDelivery(session *models.ChatbotSession,
 	}
 }
 
+func isCheckoutAddressStep(step string) bool {
+	switch step {
+	case "address", "address_line_1", "city", "state", "pincode":
+		return true
+	default:
+		return false
+	}
+}
+
+func isIndiaStoreCountry(country string) bool {
+	c := strings.ToUpper(strings.TrimSpace(country))
+	return c == "IN" || c == "INDIA"
+}
+
+// isIndiaWhatsAppNumber reports whether phone is an Indian WhatsApp id:
+// country code 91 followed by a 10-digit mobile ([6-9]…).
+func isIndiaWhatsAppNumber(phone string) bool {
+	d := digitsOnly(phone)
+	if len(d) != 12 || !strings.HasPrefix(d, "91") {
+		return false
+	}
+	return d[2] >= '6' && d[2] <= '9'
+}
+
+func (a *App) canSendAddressMessage(session *models.ChatbotSession, settings *models.ChatbotSettings, contact *models.Contact) bool {
+	if contact == nil {
+		return false
+	}
+	return a.storeCountryIsIndia(session, settings) && isIndiaWhatsAppNumber(contact.PhoneNumber)
+}
+
+func (a *App) commerceStoreMap(session *models.ChatbotSession, settings *models.ChatbotSettings) map[string]any {
+	rt := a.newCommerceRuntime(settings, session)
+	if rt == nil || rt.Client == nil {
+		return nil
+	}
+	store, err := rt.Client.GetStore(context.Background(), rt.StoreID)
+	if err != nil || store == nil {
+		a.Log.Warn("get_store for checkout address failed", "error", err)
+		return nil
+	}
+	return store
+}
+
+func (a *App) storeCountryIsIndia(session *models.ChatbotSession, settings *models.ChatbotSettings) bool {
+	store := a.commerceStoreMap(session, settings)
+	if store == nil {
+		return false
+	}
+	return isIndiaStoreCountry(asString(store["country"]))
+}
+
+func (a *App) storeAddressCountry(session *models.ChatbotSession, settings *models.ChatbotSettings) string {
+	store := a.commerceStoreMap(session, settings)
+	if store == nil {
+		return ""
+	}
+	country := strings.TrimSpace(asString(store["country"]))
+	if isIndiaStoreCountry(country) {
+		return "India"
+	}
+	return country
+}
+
+func (a *App) promptCheckoutAddress(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
+	a.promptCheckoutAddressForm(account, contact, session, settings, st, nil, nil)
+}
+
+func (a *App) promptCheckoutAddressForm(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, extraValues, validationErrors map[string]string) {
+	if a.canSendAddressMessage(session, settings, contact) {
+		params := whatsapp.AddressMessageParams{
+			Country:          "IN",
+			Values:           addressMessagePrefill(contact, st, extraValues),
+			ValidationErrors: validationErrors,
+		}
+		if err := a.sendAndSaveAddressMessage(account, contact, checkoutAddressMessageBody, params); err != nil {
+			a.Log.Warn("address_message send failed; falling back to text", "error", err)
+			_ = a.sendAndSaveTextMessage(account, contact, checkoutAddressPrompt)
+		}
+		return
+	}
+	_ = a.sendAndSaveTextMessage(account, contact, checkoutAddressPrompt)
+}
+
+func (a *App) repromptCheckoutAddressInvalid(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, parsed map[string]any) {
+	if a.canSendAddressMessage(session, settings, contact) {
+		errs := map[string]string{}
+		if asString(parsed["pincode"]) == "" || indianPINRE.FindString(asString(parsed["pincode"])) == "" {
+			errs["in_pin_code"] = "Please enter a valid 6-digit pin code."
+		}
+		if asString(parsed["address_line_1"]) == "" {
+			errs["address"] = "Please enter your street address."
+		}
+		if len(errs) == 0 {
+			errs["address"] = "Please complete your delivery address."
+		}
+		a.promptCheckoutAddressForm(account, contact, session, settings, st, newAddressToMetaValues(parsed), errs)
+		return
+	}
+	_ = a.sendAndSaveTextMessage(account, contact, "Thanks — please include your street address and a 6-digit pincode.\n\n"+checkoutAddressPrompt)
+}
+
+func (a *App) handleCheckoutAddressMessage(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, nfmName string, responseData map[string]any) bool {
+	if !strings.EqualFold(strings.TrimSpace(nfmName), "address_message") {
+		return false
+	}
+	st := getCheckoutState(session)
+	if st == nil || !isCheckoutAddressStep(st.Step) {
+		return false
+	}
+	parsed := mapAddressMessageToNewAddress(extractAddressMessageValues(responseData), contact, st)
+	if !deliveryAddressComplete(parsed) {
+		a.repromptCheckoutAddressInvalid(account, contact, session, settings, st, parsed)
+		return true
+	}
+	st.NewAddress = parsed
+	st.Step = "confirm"
+	setCheckoutState(session, st)
+	_ = a.persistSessionData(session)
+	a.sendOrderConfirmPrompt(account, contact, session)
+	return true
+}
+
 func (a *App) sendOrderConfirmPrompt(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession) {
 	st := getCheckoutState(session)
 	msg := formatOrderConfirmSummary(session, st)
@@ -304,12 +435,12 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 
 	text := strings.TrimSpace(messageText)
 	if text == "" {
-		a.repromptCheckoutStep(account, contact, session, st)
+		a.repromptCheckoutStep(account, contact, session, settings, st)
 		return true
 	}
 
 	// Qty / edit intents take priority over step validation so users can fix the cart mid-checkout.
-	if a.handleCheckoutCartEditIntent(account, contact, session, st, text) {
+	if a.handleCheckoutCartEditIntent(account, contact, session, settings, st, text) {
 		return true
 	}
 
@@ -344,8 +475,8 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 	case "address", "address_line_1", "city", "state", "pincode":
 		// Single full-address reply (legacy multi-step keys still accepted mid-session).
 		parsed := parseDeliveryAddressText(text, contact, st)
-		if asString(parsed["pincode"]) == "" || asString(parsed["address_line_1"]) == "" {
-			_ = a.sendAndSaveTextMessage(account, contact, "Thanks — please include your street address and a 6-digit pincode.\n\n"+checkoutAddressPrompt)
+		if !deliveryAddressComplete(parsed) {
+			a.repromptCheckoutAddressInvalid(account, contact, session, settings, st, parsed)
 			return true
 		}
 		st.NewAddress = parsed
@@ -363,7 +494,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		a.sendOrderConfirmPrompt(account, contact, session)
 		return true
 	default:
-		a.repromptCheckoutStep(account, contact, session, st)
+		a.repromptCheckoutStep(account, contact, session, settings, st)
 		return true
 	}
 }
@@ -429,17 +560,17 @@ func (a *App) handleCheckoutLocationPin(account *models.WhatsAppAccount, contact
 		ack = fmt.Sprintf("We can deliver there. Delivery fee: %s.", formatPriceINR(ticker.PaiseToRupees(float64(feePaise))))
 	}
 	_ = a.sendAndSaveTextMessage(account, contact, ack)
-	_ = a.sendAndSaveTextMessage(account, contact, checkoutAddressPrompt)
+	a.promptCheckoutAddress(account, contact, session, settings, st)
 	return true
 }
 
 // handleCheckoutCartEditIntent handles qty updates and exit-to-browse during checkout.
 // Returns true when the message was consumed as a cart-edit intent.
-func (a *App) handleCheckoutCartEditIntent(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, st *checkoutState, text string) bool {
+func (a *App) handleCheckoutCartEditIntent(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, text string) bool {
 	if isCheckoutEditExitIntent(text) {
 		qty := extractQtyFromText(text)
 		if qty > 0 {
-			return a.applyCheckoutQtyOrPause(account, contact, session, st, qty)
+			return a.applyCheckoutQtyOrPause(account, contact, session, settings, st, qty)
 		}
 		a.exitCheckoutToBrowse(account, contact, session, "Checkout paused. Your cart is still saved — update it or keep browsing, then tap Checkout when you're ready.", true)
 		return true
@@ -447,13 +578,13 @@ func (a *App) handleCheckoutCartEditIntent(account *models.WhatsAppAccount, cont
 
 	// Bare positive integer → qty for sole cart line.
 	if qty := parsePositiveInt(text); qty > 0 {
-		return a.applyCheckoutQtyOrPause(account, contact, session, st, qty)
+		return a.applyCheckoutQtyOrPause(account, contact, session, settings, st, qty)
 	}
 
 	// Phrases that include a quantity (e.g. "i want 2", "change to 2").
 	if isCheckoutQtyPhrase(text) {
 		if qty := extractQtyFromText(text); qty > 0 {
-			return a.applyCheckoutQtyOrPause(account, contact, session, st, qty)
+			return a.applyCheckoutQtyOrPause(account, contact, session, settings, st, qty)
 		}
 	}
 
@@ -464,7 +595,7 @@ func (a *App) handleCheckoutCartEditIntent(account *models.WhatsAppAccount, cont
 	return false
 }
 
-func (a *App) applyCheckoutQtyOrPause(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, st *checkoutState, qty int) bool {
+func (a *App) applyCheckoutQtyOrPause(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, qty int) bool {
 	optID, ok := soleCartOptionID(session)
 	if !ok {
 		clearCheckoutState(session)
@@ -482,7 +613,7 @@ func (a *App) applyCheckoutQtyOrPause(account *models.WhatsAppAccount, contact *
 	_ = a.persistSessionData(session)
 	name := cartOptionName(session, optKey)
 	_ = a.sendAndSaveTextMessage(account, contact, fmt.Sprintf("Updated quantity to %d for %s.\n\n%s", qty, name, formatCheckoutCartSummary(session)))
-	a.repromptCheckoutStep(account, contact, session, st)
+	a.repromptCheckoutStep(account, contact, session, settings, st)
 	return true
 }
 
@@ -503,7 +634,7 @@ func (a *App) exitCheckoutToBrowse(account *models.WhatsAppAccount, contact *mod
 	a.sendCheckoutButtonPrompt(account, contact)
 }
 
-func (a *App) repromptCheckoutStep(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, st *checkoutState) {
+func (a *App) repromptCheckoutStep(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
 	if st == nil {
 		return
 	}
@@ -515,7 +646,7 @@ func (a *App) repromptCheckoutStep(account *models.WhatsAppAccount, contact *mod
 	case "location":
 		_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
 	case "address", "address_line_1", "city", "state", "pincode":
-		_ = a.sendAndSaveTextMessage(account, contact, checkoutAddressPrompt)
+		a.promptCheckoutAddress(account, contact, session, settings, st)
 	case "confirm":
 		a.sendOrderConfirmPrompt(account, contact, session)
 	default:
@@ -614,6 +745,152 @@ func isCheckoutCancelText(text string) bool {
 	default:
 		return false
 	}
+}
+
+func deliveryAddressComplete(addr map[string]any) bool {
+	if asString(addr["address_line_1"]) == "" {
+		return false
+	}
+	pin := asString(addr["pincode"])
+	return pin != "" && indianPINRE.FindString(pin) != ""
+}
+
+func extractAddressMessageValues(responseData map[string]any) map[string]any {
+	if responseData == nil {
+		return map[string]any{}
+	}
+	if inner, ok := responseData["values"].(map[string]any); ok && inner != nil {
+		return inner
+	}
+	return responseData
+}
+
+func mapValueString(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	switch v := m[key].(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		return strings.TrimSpace(strconv.FormatFloat(v, 'f', -1, 64))
+	default:
+		return asString(v)
+	}
+}
+
+func joinNonEmpty(sep string, parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, sep)
+}
+
+func newAddressToMetaValues(addr map[string]any) map[string]string {
+	out := map[string]string{}
+	if v := asString(addr["name"]); v != "" {
+		out["name"] = v
+	}
+	if v := asString(addr["phone"]); v != "" {
+		out["phone_number"] = v
+	}
+	if v := asString(addr["pincode"]); v != "" {
+		out["in_pin_code"] = v
+	}
+	if v := asString(addr["city"]); v != "" {
+		out["city"] = v
+	}
+	if v := asString(addr["state"]); v != "" {
+		out["state"] = v
+	}
+	if v := asString(addr["address_line_1"]); v != "" {
+		out["address"] = v
+	}
+	if v := asString(addr["landmark"]); v != "" {
+		out["landmark_area"] = v
+	}
+	return out
+}
+
+func addressMessagePrefill(contact *models.Contact, st *checkoutState, extra map[string]string) map[string]string {
+	out := map[string]string{}
+	if contact != nil {
+		if contact.ProfileName != "" {
+			out["name"] = contact.ProfileName
+		}
+		if contact.PhoneNumber != "" {
+			out["phone_number"] = contact.PhoneNumber
+		}
+	}
+	if st != nil && st.NewAddress != nil {
+		for k, v := range newAddressToMetaValues(st.NewAddress) {
+			if v != "" {
+				out[k] = v
+			}
+		}
+	}
+	for k, v := range extra {
+		if strings.TrimSpace(v) != "" {
+			out[k] = strings.TrimSpace(v)
+		}
+	}
+	return out
+}
+
+func mapAddressMessageToNewAddress(values map[string]any, contact *models.Contact, st *checkoutState) map[string]any {
+	out := map[string]any{}
+	if st != nil && st.NewAddress != nil {
+		for k, v := range st.NewAddress {
+			out[k] = v
+		}
+	}
+	if contact != nil {
+		if asString(out["name"]) == "" && contact.ProfileName != "" {
+			out["name"] = contact.ProfileName
+		}
+		if asString(out["phone"]) == "" && contact.PhoneNumber != "" {
+			out["phone"] = contact.PhoneNumber
+		}
+	}
+	if st != nil && st.Email != "" {
+		out["email"] = st.Email
+	}
+	if v := mapValueString(values, "name"); v != "" {
+		out["name"] = v
+	}
+	if v := mapValueString(values, "phone_number"); v != "" {
+		out["phone"] = v
+	}
+	if v := mapValueString(values, "in_pin_code"); v != "" {
+		out["pincode"] = v
+	}
+	if v := mapValueString(values, "city"); v != "" {
+		out["city"] = v
+	}
+	if v := mapValueString(values, "state"); v != "" {
+		out["state"] = v
+	}
+	if v := mapValueString(values, "landmark_area"); v != "" {
+		out["landmark"] = v
+	}
+	line := joinNonEmpty(", ",
+		mapValueString(values, "house_number"),
+		mapValueString(values, "floor_number"),
+		mapValueString(values, "tower_number"),
+		mapValueString(values, "building_name"),
+		mapValueString(values, "address"),
+	)
+	if line != "" {
+		out["address_line_1"] = line
+	}
+	if asString(out["country"]) == "" {
+		out["country"] = "India"
+	}
+	return out
 }
 
 // parseDeliveryAddressText builds a new_address map from a single free-form reply.

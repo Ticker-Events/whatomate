@@ -45,12 +45,13 @@ type OutgoingMessageRequest struct {
 	Caption       string
 
 	// Interactive messages
-	InteractiveType string            // "button", "list", "cta_url", "voice_call", "location_request"
+	InteractiveType string            // "button", "list", "cta_url", "voice_call", "location_request", "address_message"
 	BodyText        string            // Body text for interactive messages
 	Buttons         []whatsapp.Button // For button/list messages
 	ButtonText      string            // For CTA URL button
 	URL             string            // For CTA URL button
 	HeaderImageURL  string            // Optional image header link for button/list interactive messages
+	AddressMessage  whatsapp.AddressMessageParams
 
 	// voice_call interactive (WhatsApp Business Calling)
 	DisplayText      string // Button face label
@@ -204,6 +205,8 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 				return client.SendVoiceCallButton(sendCtx, waAccount, rcpt, req.BodyText, req.DisplayText, req.TTLMinutes, req.VoiceCallPayload)
 			case "location_request":
 				return client.SendLocationRequest(sendCtx, waAccount, rcpt, req.BodyText)
+			case "address_message":
+				return client.SendAddressMessage(sendCtx, waAccount, rcpt, req.BodyText, req.AddressMessage)
 			default: // "button" or "list"
 				return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, req.HeaderImageURL)
 			}
@@ -391,6 +394,16 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 			"type": "location_request",
 			"body": req.BodyText,
 		}
+	case "address_message":
+		out := models.JSONB{
+			"type":    "address_message",
+			"body":    req.BodyText,
+			"country": req.AddressMessage.Country,
+		}
+		if len(req.AddressMessage.Values) > 0 {
+			out["values"] = req.AddressMessage.Values
+		}
+		return out
 	case "voice_call":
 		// Don't store the payload — it carries server-only context (the
 		// originating agent id) and the chat history doesn't need it.

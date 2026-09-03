@@ -213,6 +213,39 @@ func (c *Client) SendLocationRequest(ctx context.Context, account *whatsapp.Acco
 	return c.sendMessage(ctx, account, payload)
 }
 
+// SendAddressMessage sends an interactive address_message via AiSensy.
+func (c *Client) SendAddressMessage(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText string, params whatsapp.AddressMessageParams) (string, error) {
+	if strings.TrimSpace(bodyText) == "" {
+		return "", fmt.Errorf("body text is required")
+	}
+	country := strings.TrimSpace(params.Country)
+	if country == "" {
+		return "", fmt.Errorf("country is required")
+	}
+	parameters := map[string]any{"country": country}
+	if len(params.Values) > 0 {
+		parameters["values"] = params.Values
+	}
+	if len(params.ValidationErrors) > 0 {
+		parameters["validation_errors"] = params.ValidationErrors
+	}
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"recipient_type":    "individual",
+		"type":              "interactive",
+		"interactive": map[string]any{
+			"type": "address_message",
+			"body": map[string]any{"text": bodyText},
+			"action": map[string]any{
+				"name":       "address_message",
+				"parameters": parameters,
+			},
+		},
+	}
+	rcpt.SetOnPayload(payload)
+	return c.sendMessage(ctx, account, payload)
+}
+
 // SendCTAURLButton sends an interactive CTA URL button message via AiSensy.
 func (c *Client) SendCTAURLButton(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText, buttonText, url string) (string, error) {
 	if len(buttonText) > 20 {

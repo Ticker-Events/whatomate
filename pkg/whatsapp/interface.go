@@ -13,6 +13,7 @@ type MessagingClient interface {
 	SendDocumentMessage(ctx context.Context, account *Account, rcpt Recipient, mediaID, filename, caption string) (string, error)
 	SendInteractiveButtons(ctx context.Context, account *Account, rcpt Recipient, bodyText string, buttons []Button, headerImageURL ...string) (string, error)
 	SendLocationRequest(ctx context.Context, account *Account, rcpt Recipient, bodyText string) (string, error)
+	SendAddressMessage(ctx context.Context, account *Account, rcpt Recipient, bodyText string, params AddressMessageParams) (string, error)
 	SendCTAURLButton(ctx context.Context, account *Account, rcpt Recipient, bodyText, buttonText, url string) (string, error)
 	SendVoiceCallButton(ctx context.Context, account *Account, rcpt Recipient, bodyText, displayText string, ttlMinutes int, payload string) (string, error)
 	SendTemplateMessage(ctx context.Context, account *Account, rcpt Recipient, templateName, languageCode string, components []map[string]any) (string, error)

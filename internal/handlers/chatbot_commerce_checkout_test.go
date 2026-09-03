@@ -104,7 +104,7 @@ func TestHandleCartQuantityReplyLogic(t *testing.T) {
 		SessionData: models.JSONB{
 			cartKey: map[string]any{
 				"7": map[string]any{
-					"qty": 1,
+					"qty":     1,
 					"product": map[string]any{"option_name": "Medium"},
 				},
 			},
@@ -320,7 +320,7 @@ func TestCheckoutQtyUpdate_LeavesEmailStep(t *testing.T) {
 	session := &models.ChatbotSession{SessionData: models.JSONB{
 		cartKey: map[string]any{
 			"7": map[string]any{
-				"qty": 1,
+				"qty":     1,
 				"product": map[string]any{"option_name": "Linea Pearl Chain", "price": 1.0},
 			},
 		},
@@ -387,4 +387,112 @@ func TestCheckoutButtonIDs_IncludeExplore(t *testing.T) {
 	assert.Equal(t, "checkout_explore", checkoutExploreButtonID)
 	assert.True(t, IsCheckoutButton(checkoutExploreButtonID))
 	assert.True(t, IsCheckoutButton(checkoutButtonID))
+}
+
+func TestIsIndiaStoreCountry(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, isIndiaStoreCountry("IN"))
+	assert.True(t, isIndiaStoreCountry("in"))
+	assert.True(t, isIndiaStoreCountry("India"))
+	assert.True(t, isIndiaStoreCountry(" india "))
+	assert.False(t, isIndiaStoreCountry("US"))
+	assert.False(t, isIndiaStoreCountry(""))
+	assert.False(t, isIndiaStoreCountry("AE"))
+}
+
+func TestIsIndiaWhatsAppNumber(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, isIndiaWhatsAppNumber("919876543210"))
+	assert.True(t, isIndiaWhatsAppNumber("+91 98765 43210"))
+	assert.True(t, isIndiaWhatsAppNumber("+919876543210"))
+	assert.False(t, isIndiaWhatsAppNumber(""))
+	assert.False(t, isIndiaWhatsAppNumber("9876543210"))
+	assert.False(t, isIndiaWhatsAppNumber("6581234567"))
+	assert.False(t, isIndiaWhatsAppNumber("6512345678"))
+	assert.False(t, isIndiaWhatsAppNumber("911234567890")) // 91 + landline-like 1…
+}
+
+func TestMapAddressMessageToNewAddress(t *testing.T) {
+	t.Parallel()
+
+	values := map[string]any{
+		"name":          "CUSTOMER_NAME",
+		"phone_number":  "+919876543210",
+		"in_pin_code":   "400063",
+		"house_number":  "B2",
+		"floor_number":  "8",
+		"building_name": "Cello Triumph",
+		"address":       "IB Patel Rd",
+		"landmark_area": "Goregaon",
+		"city":          "Mumbai",
+		"state":         "Maharashtra",
+	}
+	st := &checkoutState{Email: "a@b.com", NewAddress: map[string]any{}}
+	addr := mapAddressMessageToNewAddress(values, nil, st)
+	assert.Equal(t, "CUSTOMER_NAME", addr["name"])
+	assert.Equal(t, "+919876543210", addr["phone"])
+	assert.Equal(t, "400063", addr["pincode"])
+	assert.Equal(t, "Mumbai", addr["city"])
+	assert.Equal(t, "Maharashtra", addr["state"])
+	assert.Equal(t, "Goregaon", addr["landmark"])
+	assert.Equal(t, "a@b.com", addr["email"])
+	assert.Equal(t, "India", addr["country"])
+	assert.Contains(t, asString(addr["address_line_1"]), "IB Patel Rd")
+	assert.Contains(t, asString(addr["address_line_1"]), "Cello Triumph")
+	assert.True(t, deliveryAddressComplete(addr))
+}
+
+func TestExtractAddressMessageValues_Nested(t *testing.T) {
+	t.Parallel()
+
+	raw := map[string]any{
+		"saved_address_id": "address1",
+		"values": map[string]any{
+			"in_pin_code": "400063",
+			"city":        "Mumbai",
+		},
+	}
+	vals := extractAddressMessageValues(raw)
+	assert.Equal(t, "400063", vals["in_pin_code"])
+	assert.Equal(t, "Mumbai", vals["city"])
+	assert.NotContains(t, vals, "saved_address_id")
+}
+
+func TestDeliveryAddressComplete(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, deliveryAddressComplete(map[string]any{"address_line_1": "Street"}))
+	assert.False(t, deliveryAddressComplete(map[string]any{"pincode": "560100"}))
+	assert.False(t, deliveryAddressComplete(map[string]any{"address_line_1": "Street", "pincode": "000000"}))
+	assert.True(t, deliveryAddressComplete(map[string]any{"address_line_1": "Street", "pincode": "560100"}))
+}
+
+func TestHandleCheckoutAddressMessage_IgnoresOtherNFM(t *testing.T) {
+	t.Parallel()
+
+	session := &models.ChatbotSession{
+		BaseModel:   models.BaseModel{ID: uuid.New()},
+		SessionData: models.JSONB{},
+	}
+	setCheckoutState(session, &checkoutState{Step: "address", NewAddress: map[string]any{}})
+	app := testApp()
+	assert.False(t, app.handleCheckoutAddressMessage(nil, nil, session, nil, "some_flow", map[string]any{}))
+	assert.Equal(t, "address", getCheckoutState(session).Step)
+}
+
+func TestHandleCheckoutAddressMessage_IgnoresWhenNotAddressStep(t *testing.T) {
+	t.Parallel()
+
+	session := &models.ChatbotSession{
+		BaseModel:   models.BaseModel{ID: uuid.New()},
+		SessionData: models.JSONB{},
+	}
+	setCheckoutState(session, &checkoutState{Step: "email", NewAddress: map[string]any{}})
+	app := testApp()
+	assert.False(t, app.handleCheckoutAddressMessage(nil, nil, session, nil, "address_message", map[string]any{
+		"values": map[string]any{"in_pin_code": "560100", "address": "Street"},
+	}))
+	assert.Equal(t, "email", getCheckoutState(session).Step)
 }
