@@ -395,6 +395,41 @@ func TestClient_SendTemplateMessage(t *testing.T) {
 	}
 }
 
+func TestClient_SendLocationRequest(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"messages": []map[string]string{{"id": "wamid.loc1"}},
+		})
+	}))
+	defer server.Close()
+
+	log := testutil.NopLogger()
+	client := whatsapp.NewWithTimeout(log, 5*time.Second)
+	client.HTTPClient = &http.Client{
+		Transport: &testServerTransport{serverURL: server.URL},
+	}
+	account := &whatsapp.Account{
+		PhoneID:     "123456789",
+		BusinessID:  "987654321",
+		APIVersion:  "v21.0",
+		AccessToken: "test-token",
+	}
+	msgID, err := client.SendLocationRequest(testutil.TestContext(t), account, whatsapp.Recipient{Phone: "919999999999"}, "Share your pin")
+	require.NoError(t, err)
+	assert.Equal(t, "wamid.loc1", msgID)
+	interactive, ok := capturedBody["interactive"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "location_request_message", interactive["type"])
+	action, ok := interactive["action"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "send_location", action["name"])
+}
+
 func TestClient_SendCTAURLButton(t *testing.T) {
 	t.Parallel()
 

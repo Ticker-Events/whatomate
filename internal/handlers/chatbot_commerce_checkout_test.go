@@ -160,6 +160,9 @@ func TestCheckoutBuyerMeta_IncludesShippingAddress(t *testing.T) {
 	st := &checkoutState{
 		Email:        "a@b.com",
 		DeliveryMode: "DELIVERY_TO_LOCATION",
+		HasLocation:  true,
+		Latitude:     12.97,
+		Longitude:    77.59,
 		NewAddress: map[string]any{
 			"name":           "Roopak",
 			"phone":          "9876543210",
@@ -174,6 +177,8 @@ func TestCheckoutBuyerMeta_IncludesShippingAddress(t *testing.T) {
 	meta := checkoutBuyerMeta(st, nil)
 	assert.Equal(t, "a@b.com", meta["email"])
 	assert.Equal(t, "Roopak", meta["name"])
+	assert.Equal(t, 12.97, meta["latitude"])
+	assert.Equal(t, 77.59, meta["longitude"])
 	shipping, ok := meta["shipping_address"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "B2-803", shipping["address_line_1"])
@@ -183,6 +188,78 @@ func TestCheckoutBuyerMeta_IncludesShippingAddress(t *testing.T) {
 	billing, ok := meta["billing_address"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Bengaluru", billing["city"])
+}
+
+func TestFormatOrderConfirmSummary_IncludesDeliveryFee(t *testing.T) {
+	t.Parallel()
+
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"1": map[string]any{
+				"qty": 1,
+				"product": map[string]any{
+					"option_name": "Tea",
+					"price":       100.0,
+				},
+			},
+		},
+	}}
+	st := &checkoutState{
+		Email:            "a@b.com",
+		DeliveryMode:     "DELIVERY_TO_LOCATION",
+		DeliveryZone:     "paid",
+		ShippingFeePaise: 5000,
+		NewAddress: map[string]any{
+			"address_line_1": "B2",
+			"city":           "Bengaluru",
+			"state":          "KA",
+			"pincode":        "560100",
+		},
+	}
+	msg := formatOrderConfirmSummary(session, st)
+	assert.Contains(t, msg, "Delivery fee: ₹50.00")
+	assert.Contains(t, msg, "Estimated total: ₹150.00")
+}
+
+func TestFormatOrderSuccessMessage_IncludesDeliveryFee(t *testing.T) {
+	t.Parallel()
+
+	msg := formatOrderSuccessMessage(map[string]any{
+		"display_uid":  "ORD-1",
+		"amount":       150.0,
+		"shipping_fee": 50.0,
+		"payment_url":  "https://pay.example",
+	})
+	assert.Contains(t, msg, "Delivery fee: ₹50.00")
+	assert.Contains(t, msg, "Total: ₹150.00")
+}
+
+func TestCheckoutStateRoundTrip_LocationFields(t *testing.T) {
+	t.Parallel()
+
+	session := &models.ChatbotSession{
+		BaseModel:   models.BaseModel{ID: uuid.New()},
+		SessionData: models.JSONB{},
+	}
+	setCheckoutState(session, &checkoutState{
+		Step:             "location",
+		Email:            "a@b.com",
+		DeliveryMode:     "DELIVERY_TO_LOCATION",
+		Latitude:         12.9,
+		Longitude:        77.6,
+		HasLocation:      true,
+		DeliveryZone:     "paid",
+		ShippingFeePaise: 2500,
+		NewAddress:       map[string]any{"city": "Bengaluru"},
+	})
+	st := getCheckoutState(session)
+	require.NotNil(t, st)
+	assert.Equal(t, "location", st.Step)
+	assert.True(t, st.HasLocation)
+	assert.Equal(t, 12.9, st.Latitude)
+	assert.Equal(t, 77.6, st.Longitude)
+	assert.Equal(t, "paid", st.DeliveryZone)
+	assert.Equal(t, int64(2500), st.ShippingFeePaise)
 }
 
 func TestExtractQtyFromText(t *testing.T) {

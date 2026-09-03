@@ -192,6 +192,27 @@ func (c *Client) SendInteractiveButtons(ctx context.Context, account *whatsapp.A
 	return c.sendMessage(ctx, account, payload)
 }
 
+// SendLocationRequest sends an interactive location_request_message via AiSensy.
+func (c *Client) SendLocationRequest(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText string) (string, error) {
+	if strings.TrimSpace(bodyText) == "" {
+		return "", fmt.Errorf("body text is required")
+	}
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"recipient_type":    "individual",
+		"type":              "interactive",
+		"interactive": map[string]any{
+			"type": "location_request_message",
+			"body": map[string]any{"text": bodyText},
+			"action": map[string]any{
+				"name": "send_location",
+			},
+		},
+	}
+	rcpt.SetOnPayload(payload)
+	return c.sendMessage(ctx, account, payload)
+}
+
 // SendCTAURLButton sends an interactive CTA URL button message via AiSensy.
 func (c *Client) SendCTAURLButton(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText, buttonText, url string) (string, error) {
 	if len(buttonText) > 20 {

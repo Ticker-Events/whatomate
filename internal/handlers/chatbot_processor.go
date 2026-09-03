@@ -409,6 +409,13 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		return
 	}
 
+	// Location pin during checkout (before text handlers treat JSON as address).
+	if msg.Type == "location" && msg.Location != nil {
+		if a.handleCheckoutLocationPin(account, contact, session, settings, msg.Location.Latitude, msg.Location.Longitude) {
+			return
+		}
+	}
+
 	// Checkout conversation steps and cart quantity replies.
 	if a.handleCheckoutConversation(account, contact, session, settings, messageText, buttonID) {
 		return
@@ -805,6 +812,19 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 	}
 
 	return nil
+}
+
+// sendAndSaveLocationRequest asks the user to share a WhatsApp location pin.
+func (a *App) sendAndSaveLocationRequest(account *models.WhatsAppAccount, contact *models.Contact, bodyText string) error {
+	ctx := context.Background()
+	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
+		Account:         account,
+		Contact:         contact,
+		Type:            models.MessageTypeInteractive,
+		InteractiveType: "location_request",
+		BodyText:        bodyText,
+	}, ChatbotSendOptions())
+	return err
 }
 
 // sendAndSaveCTAURLButton sends a CTA URL button message and saves it to the database

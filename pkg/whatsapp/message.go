@@ -165,6 +165,54 @@ func (c *Client) SendInteractiveButtons(ctx context.Context, account *Account, r
 	return messageID, nil
 }
 
+// SendLocationRequest sends an interactive location_request_message so the user
+// can share a GPS pin via WhatsApp's "Send location" button.
+func (c *Client) SendLocationRequest(ctx context.Context, account *Account, rcpt Recipient, bodyText string) (string, error) {
+	if strings.TrimSpace(bodyText) == "" {
+		return "", fmt.Errorf("body text is required")
+	}
+
+	interactive := map[string]any{
+		"type": "location_request_message",
+		"body": map[string]any{
+			"text": bodyText,
+		},
+		"action": map[string]any{
+			"name": "send_location",
+		},
+	}
+
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"recipient_type":    "individual",
+		"type":              "interactive",
+		"interactive":       interactive,
+	}
+	rcpt.SetOnPayload(payload)
+
+	url := c.buildMessagesURL(account)
+	c.Log.Debug("Sending location request message", "phone", rcpt.Phone)
+
+	respBody, err := c.doRequest(ctx, "POST", url, payload, account.AccessToken)
+	if err != nil {
+		c.Log.Error("Failed to send location request", "error", err, "phone", rcpt.Phone)
+		return "", fmt.Errorf("failed to send location request: %w", err)
+	}
+
+	var resp MetaAPIResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if len(resp.Messages) == 0 {
+		return "", fmt.Errorf("no message ID in response")
+	}
+
+	messageID := resp.Messages[0].ID
+	c.Log.Info("Location request sent", "message_id", messageID, "phone", rcpt.Phone)
+	return messageID, nil
+}
+
 // SendCTAURLButton sends an interactive message with a CTA URL button
 // This opens a URL when clicked instead of sending a reply
 func (c *Client) SendCTAURLButton(ctx context.Context, account *Account, rcpt Recipient, bodyText, buttonText, url string) (string, error) {
