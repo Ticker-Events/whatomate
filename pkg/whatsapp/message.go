@@ -219,17 +219,9 @@ func (c *Client) SendAddressMessage(ctx context.Context, account *Account, rcpt 
 	if strings.TrimSpace(bodyText) == "" {
 		return "", fmt.Errorf("body text is required")
 	}
-	country := strings.TrimSpace(params.Country)
-	if country == "" {
-		return "", fmt.Errorf("country is required")
-	}
-
-	parameters := map[string]any{"country": country}
-	if len(params.Values) > 0 {
-		parameters["values"] = params.Values
-	}
-	if len(params.ValidationErrors) > 0 {
-		parameters["validation_errors"] = params.ValidationErrors
+	paramJSON, err := EncodeAddressMessageParameters(params)
+	if err != nil {
+		return "", err
 	}
 
 	interactive := map[string]any{
@@ -239,7 +231,7 @@ func (c *Client) SendAddressMessage(ctx context.Context, account *Account, rcpt 
 		},
 		"action": map[string]any{
 			"name":       "address_message",
-			"parameters": parameters,
+			"parameters": paramJSON,
 		},
 	}
 

@@ -478,12 +478,15 @@ func TestClient_SendAddressMessage(t *testing.T) {
 	action, ok := interactive["action"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "address_message", action["name"])
-	params, ok := action["parameters"].(map[string]any)
-	require.True(t, ok)
+	paramStr, ok := action["parameters"].(string)
+	require.True(t, ok, "parameters must be a JSON string, not an object")
+	var params map[string]any
+	require.NoError(t, json.Unmarshal([]byte(paramStr), &params))
 	assert.Equal(t, "IN", params["country"])
 	values, ok := params["values"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Roopak", values["name"])
+	assert.Equal(t, "+919999999999", values["phone_number"])
 	errs, ok := params["validation_errors"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "We could not locate this pin code.", errs["in_pin_code"])
@@ -498,6 +501,23 @@ func TestClient_SendAddressMessage_RequiresCountry(t *testing.T) {
 	_, err := client.SendAddressMessage(testutil.TestContext(t), account, whatsapp.Recipient{Phone: "91"}, "Share address", whatsapp.AddressMessageParams{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "country is required")
+}
+
+func TestEncodeAddressMessageParameters_JSONString(t *testing.T) {
+	t.Parallel()
+
+	raw, err := whatsapp.EncodeAddressMessageParameters(whatsapp.AddressMessageParams{
+		Country: "IN",
+		Values:  map[string]string{"name": "A", "phone_number": ""},
+	})
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal([]byte(raw), &decoded))
+	assert.Equal(t, "IN", decoded["country"])
+	values, ok := decoded["values"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "A", values["name"])
+	assert.NotContains(t, values, "phone_number")
 }
 
 func TestClient_SendCTAURLButton(t *testing.T) {
