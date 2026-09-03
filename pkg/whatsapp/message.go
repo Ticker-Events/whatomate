@@ -219,7 +219,7 @@ func (c *Client) SendAddressMessage(ctx context.Context, account *Account, rcpt 
 	if strings.TrimSpace(bodyText) == "" {
 		return "", fmt.Errorf("body text is required")
 	}
-	paramJSON, err := EncodeAddressMessageParameters(params)
+	paramObj, err := EncodeAddressMessageParameters(params)
 	if err != nil {
 		return "", err
 	}
@@ -231,7 +231,7 @@ func (c *Client) SendAddressMessage(ctx context.Context, account *Account, rcpt 
 		},
 		"action": map[string]any{
 			"name":       "address_message",
-			"parameters": paramJSON,
+			"parameters": paramObj,
 		},
 	}
 
