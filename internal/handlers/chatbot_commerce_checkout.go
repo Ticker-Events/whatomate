@@ -178,9 +178,9 @@ func (a *App) handleCheckoutButtonTap(account *models.WhatsAppAccount, contact *
 	case checkoutExploreButtonID:
 		a.exitCheckoutToBrowse(account, contact, session, checkoutExploreAck, false)
 	case checkoutPickupButtonID:
-		a.handleCheckoutDeliveryChoice(account, contact, session, "PICKUP_FROM_STORE")
+		a.handleCheckoutDeliveryChoice(account, contact, session, settings, "PICKUP_FROM_STORE")
 	case checkoutDeliveryButtonID:
-		a.handleCheckoutDeliveryChoice(account, contact, session, "DELIVERY_TO_LOCATION")
+		a.handleCheckoutDeliveryChoice(account, contact, session, settings, "DELIVERY_TO_LOCATION")
 	case checkoutConfirmButtonID:
 		a.placeCheckoutOrder(account, contact, session, settings)
 	case checkoutCancelButtonID:
@@ -211,19 +211,13 @@ func (a *App) sendDeliveryModeButtons(account *models.WhatsAppAccount, contact *
 	})
 }
 
-func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, mode string) {
+func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, mode string) {
 	st := getCheckoutState(session)
 	if st == nil {
 		return
 	}
 	st.DeliveryMode = mode
 	if mode == "DELIVERY_TO_LOCATION" {
-		st.Step = "location"
-		st.HasLocation = false
-		st.Latitude = 0
-		st.Longitude = 0
-		st.DeliveryZone = ""
-		st.ShippingFeePaise = 0
 		if contact != nil {
 			if contact.ProfileName != "" {
 				st.NewAddress["name"] = contact.ProfileName
@@ -234,9 +228,28 @@ func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, cont
 		}
 		st.NewAddress["email"] = st.Email
 		st.NewAddress["country"] = "India"
+
+		if a.storeRequiresLocationBasedDelivery(session, settings) {
+			st.Step = "location"
+			st.HasLocation = false
+			st.Latitude = 0
+			st.Longitude = 0
+			st.DeliveryZone = ""
+			st.ShippingFeePaise = 0
+			setCheckoutState(session, st)
+			_ = a.persistSessionData(session)
+			_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
+			return
+		}
+
+		// Flag off (default): text address only — deliver to all locations.
+		st.Step = "address"
+		st.HasLocation = false
+		st.DeliveryZone = ""
+		st.ShippingFeePaise = 0
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
-		_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
+		_ = a.sendAndSaveTextMessage(account, contact, checkoutAddressPrompt)
 		return
 	}
 	st.Step = "confirm"
@@ -245,6 +258,30 @@ func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, cont
 	setCheckoutState(session, st)
 	_ = a.persistSessionData(session)
 	a.sendOrderConfirmPrompt(account, contact, session)
+}
+
+// storeRequiresLocationBasedDelivery reports whether the commerce store opts into
+// lat/lng delivery checks (Store.location_based_delivery). Defaults to false.
+func (a *App) storeRequiresLocationBasedDelivery(session *models.ChatbotSession, settings *models.ChatbotSettings) bool {
+	rt := a.newCommerceRuntime(settings, session)
+	if rt == nil || rt.Client == nil {
+		return false
+	}
+	store, err := rt.Client.GetStore(context.Background(), rt.StoreID)
+	if err != nil || store == nil {
+		a.Log.Warn("get_store for location_based_delivery failed; skipping pin check", "error", err)
+		return false
+	}
+	switch v := store["location_based_delivery"].(type) {
+	case bool:
+		return v
+	case float64:
+		return v != 0
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true") || v == "1"
+	default:
+		return false
+	}
 }
 
 func (a *App) sendOrderConfirmPrompt(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession) {
@@ -293,9 +330,9 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		lower := strings.ToLower(text)
 		switch {
 		case strings.Contains(lower, "pickup") || lower == "store pickup":
-			a.handleCheckoutDeliveryChoice(account, contact, session, "PICKUP_FROM_STORE")
+			a.handleCheckoutDeliveryChoice(account, contact, session, settings, "PICKUP_FROM_STORE")
 		case strings.Contains(lower, "deliver") || lower == "ship" || lower == "shipping":
-			a.handleCheckoutDeliveryChoice(account, contact, session, "DELIVERY_TO_LOCATION")
+			a.handleCheckoutDeliveryChoice(account, contact, session, settings, "DELIVERY_TO_LOCATION")
 		default:
 			a.sendDeliveryModeButtons(account, contact)
 		}

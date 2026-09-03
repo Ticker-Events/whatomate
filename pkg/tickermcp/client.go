@@ -195,7 +195,13 @@ func CompactStore(m map[string]any) map[string]any {
 	if modes, ok := m["delivery_modes"]; ok {
 		out["delivery_modes"] = modes
 	}
-	for _, key := range []string{"latitude", "longitude", "delivery_radius", "free_delivery_radius"} {
+	for _, key := range []string{
+		"latitude",
+		"longitude",
+		"delivery_radius",
+		"free_delivery_radius",
+		"location_based_delivery",
+	} {
 		if v, ok := m[key]; ok && v != nil {
 			out[key] = v
 		}

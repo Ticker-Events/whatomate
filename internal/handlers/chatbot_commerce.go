@@ -51,7 +51,7 @@ Tools:
 Ordering rules:
 - Use product_option ids from tool results (never invent ids or prices).
 - Collect: product option id(s), quantity, email, and delivery_mode (PICKUP_FROM_STORE or DELIVERY_TO_LOCATION).
-- For DELIVERY_TO_LOCATION, first ask the user to share their WhatsApp location pin, then call check_delivery_eligibility (or ensure lat/lng are verified). Collect new_address (name, phone, address_line_1, city, state, country, pincode, email) after delivery is confirmed, and put latitude/longitude in buyer_meta_data.
+- For DELIVERY_TO_LOCATION: if the store has location_based_delivery enabled, first ask for a WhatsApp location pin and call check_delivery_eligibility; then collect new_address. If location_based_delivery is off/absent, skip the pin and collect new_address only. Put latitude/longitude in buyer_meta_data when captured.
 - Prefer PICKUP_FROM_STORE when the user has no delivery address or is outside the delivery radius.
 - Never invent stock or prices — rely on tool data.
 - After a successful order, share display_uid (the customer-facing order number) — never share uuid to the user. If payment_url is present, share that link so they can pay.
