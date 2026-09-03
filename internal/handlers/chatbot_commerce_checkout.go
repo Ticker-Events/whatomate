@@ -823,7 +823,7 @@ func addressMessagePrefill(contact *models.Contact, st *checkoutState, extra map
 			out["name"] = contact.ProfileName
 		}
 		if contact.PhoneNumber != "" {
-			out["phone_number"] = contact.PhoneNumber
+			out["phone_number"] = indiaE164Phone(contact.PhoneNumber)
 		}
 	}
 	if st != nil && st.NewAddress != nil {
@@ -838,7 +838,25 @@ func addressMessagePrefill(contact *models.Contact, st *checkoutState, extra map
 			out[k] = strings.TrimSpace(v)
 		}
 	}
+	if v := out["phone_number"]; v != "" {
+		out["phone_number"] = indiaE164Phone(v)
+	}
 	return out
+}
+
+// indiaE164Phone formats an Indian WhatsApp id as Meta expects in address_message values.
+func indiaE164Phone(phone string) string {
+	d := digitsOnly(phone)
+	switch {
+	case len(d) == 12 && strings.HasPrefix(d, "91"):
+		return "+" + d
+	case len(d) == 10 && d[0] >= '6' && d[0] <= '9':
+		return "+91" + d
+	case d == "":
+		return ""
+	default:
+		return "+" + d
+	}
 }
 
 func mapAddressMessageToNewAddress(values map[string]any, contact *models.Contact, st *checkoutState) map[string]any {

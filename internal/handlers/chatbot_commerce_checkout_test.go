@@ -414,6 +414,15 @@ func TestIsIndiaWhatsAppNumber(t *testing.T) {
 	assert.False(t, isIndiaWhatsAppNumber("911234567890")) // 91 + landline-like 1…
 }
 
+func TestIndiaE164Phone(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "+919876543210", indiaE164Phone("919876543210"))
+	assert.Equal(t, "+919876543210", indiaE164Phone("+91 98765 43210"))
+	assert.Equal(t, "+919876543210", indiaE164Phone("9876543210"))
+	assert.Equal(t, "", indiaE164Phone(""))
+}
+
 func TestMapAddressMessageToNewAddress(t *testing.T) {
 	t.Parallel()
 

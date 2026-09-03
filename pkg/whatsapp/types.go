@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,44 @@ type AddressMessageParams struct {
 	Country          string            // ISO code; required by Meta (e.g. "IN")
 	Values           map[string]string // prefill: name, phone_number, city, ...
 	ValidationErrors map[string]string // field -> error text shown on the form
+}
+
+// EncodeAddressMessageParameters serializes action.parameters as a JSON string.
+// Meta and AiSensy reject a nested object here with (#131009) Parameter value is not valid.
+func EncodeAddressMessageParameters(params AddressMessageParams) (string, error) {
+	country := strings.TrimSpace(params.Country)
+	if country == "" {
+		return "", fmt.Errorf("country is required")
+	}
+	payload := map[string]any{"country": country}
+	if vals := compactStringMap(params.Values); len(vals) > 0 {
+		payload["values"] = vals
+	}
+	if errs := compactStringMap(params.ValidationErrors); len(errs) > 0 {
+		payload["validation_errors"] = errs
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func compactStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // MetaAPIResponse represents a successful API response from Meta
