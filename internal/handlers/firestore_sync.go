@@ -62,3 +62,27 @@ func (a *App) syncContactUnreadResetToFirestore(orgID, contactID uuid.UUID) {
 		}
 	}()
 }
+
+// syncContactChatbotPausedToFirestore writes chatbot pause state onto the contact document.
+func (a *App) syncContactChatbotPausedToFirestore(orgID, contactID uuid.UUID, transferID *uuid.UUID, paused bool) {
+	if a == nil || a.Firestore == nil || !a.Firestore.Enabled() {
+		return
+	}
+
+	var transferCopy *uuid.UUID
+	if transferID != nil {
+		id := *transferID
+		transferCopy = &id
+	}
+
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := a.Firestore.SyncContactChatbotPaused(ctx, orgID, contactID, transferCopy, paused); err != nil {
+			a.Log.Error("Failed to sync contact chatbot paused to Firestore", "error", err, "contact_id", contactID)
+		}
+	}()
+}

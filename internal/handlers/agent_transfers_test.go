@@ -149,6 +149,58 @@ func TestApp_ListAgentTransfers_FilterByStatus(t *testing.T) {
 	assert.Equal(t, models.TransferStatusActive, result.Data.Transfers[0].Status)
 }
 
+func TestApp_ListAgentTransfers_FilterByContactID(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	otherContact := testutil.CreateTestContact(t, app.DB, org.ID)
+	transfer := createTestTransfer(t, app, org.ID, contact.ID, account.Name, models.TransferStatusActive, nil)
+	_ = createTestTransfer(t, app, org.ID, otherContact.ID, account.Name, models.TransferStatusActive, nil)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetQueryParam(req, "status", models.TransferStatusActive)
+	testutil.SetQueryParam(req, "contact_id", contact.ID.String())
+
+	err := app.ListAgentTransfers(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var result struct {
+		Status string `json:"status"`
+		Data   struct {
+			Transfers  []handlers.AgentTransferResponse `json:"transfers"`
+			TotalCount int64                            `json:"total_count"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &result))
+
+	assert.Equal(t, "success", result.Status)
+	assert.Equal(t, int64(1), result.Data.TotalCount)
+	require.Len(t, result.Data.Transfers, 1)
+	assert.Equal(t, transfer.ID.String(), result.Data.Transfers[0].ID)
+	assert.Equal(t, contact.ID.String(), result.Data.Transfers[0].ContactID)
+}
+
+func TestApp_ListAgentTransfers_InvalidContactID(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetQueryParam(req, "contact_id", "not-a-uuid")
+
+	err := app.ListAgentTransfers(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+}
+
 func TestApp_ListAgentTransfers_AgentRoleFiltering(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)

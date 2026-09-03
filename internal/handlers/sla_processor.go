@@ -212,6 +212,8 @@ func (p *SLAProcessor) autoCloseExpiredTransfers(orgID uuid.UUID, settings model
 			continue
 		}
 
+		p.app.syncContactChatbotPausedToFirestore(transfer.OrganizationID, transfer.ContactID, nil, false)
+
 		closedCount++
 		p.app.Log.Info("Transfer auto-closed due to expiry",
 			"transfer_id", transfer.ID,

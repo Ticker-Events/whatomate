@@ -68,6 +68,26 @@ func (c *Client) ResetContactUnread(ctx context.Context, orgID, contactID uuid.U
 	return nil
 }
 
+// SyncContactChatbotPaused merges chatbot pause state onto a contact document.
+// When paused, activeTransferId is the agent transfer that is holding the bot.
+// When unpaused, activeTransferId is deleted so the inbox does not keep a stale id.
+func (c *Client) SyncContactChatbotPaused(ctx context.Context, orgID, contactID uuid.UUID, transferID *uuid.UUID, paused bool) error {
+	if !c.Enabled() {
+		return nil
+	}
+
+	data := map[string]any{
+		"organizationId": orgID.String(),
+	}
+	applyChatbotPausedFields(data, paused, transferID)
+
+	_, err := c.firestore.Collection(collectionContacts).Doc(contactID.String()).Set(ctx, data, firestore.MergeAll)
+	if err != nil {
+		return fmt.Errorf("firestore sync contact chatbot paused %s: %w", contactID, err)
+	}
+	return nil
+}
+
 func (c *Client) syncContactFromMessage(ctx context.Context, orgID uuid.UUID, msg *models.Message, contact *models.Contact, msgData map[string]any, maskPhone bool) error {
 	profileName := contact.ProfileName
 	phoneNumber := contact.PhoneNumber
@@ -164,6 +184,21 @@ func applyConversationWaitFields(data map[string]any, contact *models.Contact) {
 		return
 	}
 	data["awaitingReplySince"] = firestore.Delete
+}
+
+// applyChatbotPausedFields writes chatbot pause state in camelCase so it matches
+// the rest of the contact document. A nil transfer id is deleted when unpaused.
+func applyChatbotPausedFields(data map[string]any, paused bool, transferID *uuid.UUID) {
+	if data == nil {
+		return
+	}
+
+	data["chatbotPaused"] = paused
+	if paused && transferID != nil {
+		data["activeTransferId"] = transferID.String()
+		return
+	}
+	data["activeTransferId"] = firestore.Delete
 }
 
 func buildMessageData(orgID uuid.UUID, msg *models.Message, contact *models.Contact, maskPhone bool) map[string]any {
