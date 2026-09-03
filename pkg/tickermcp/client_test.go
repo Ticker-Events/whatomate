@@ -104,16 +104,18 @@ func TestCompactStore(t *testing.T) {
 
 func TestCompactCategory(t *testing.T) {
 	out := CompactCategory(map[string]any{
-		"id":          float64(3),
-		"name":        "Earrings",
-		"description": "Studs and jhumkas",
-		"image":       "https://example.com/cat.png",
-		"tags":        []any{"jewelry"},
+		"id":               float64(3),
+		"name":             "Earrings",
+		"description":      "Studs and jhumkas",
+		"listing_priority": float64(2),
+		"image":            "https://example.com/cat.png",
+		"tags":             []any{"jewelry"},
 	})
 	assert.Equal(t, map[string]any{
-		"id":          float64(3),
-		"name":        "Earrings",
-		"description": "Studs and jhumkas",
+		"id":               float64(3),
+		"name":             "Earrings",
+		"description":      "Studs and jhumkas",
+		"listing_priority": float64(2),
 	}, out)
 	assert.NotContains(t, out, "image")
 }

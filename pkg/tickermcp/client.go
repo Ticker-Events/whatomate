@@ -156,6 +156,27 @@ func (c *Client) ListCategories(ctx context.Context, storeID string) ([]map[stri
 	return out, nil
 }
 
+// CheckDeliveryEligibility maps to MCP check_delivery_eligibility.
+func (c *Client) CheckDeliveryEligibility(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error) {
+	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
+	if err != nil || sid <= 0 {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	raw, err := c.callTool(ctx, "check_delivery_eligibility", map[string]any{
+		"store_id":  sid,
+		"latitude":  latitude,
+		"longitude": longitude,
+	})
+	if err != nil {
+		return nil, err
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected check_delivery_eligibility result type %T", raw)
+	}
+	return m, nil
+}
+
 // CompactStore keeps only fields useful for a short store intro.
 func CompactStore(m map[string]any) map[string]any {
 	if m == nil {
@@ -174,10 +195,15 @@ func CompactStore(m map[string]any) map[string]any {
 	if modes, ok := m["delivery_modes"]; ok {
 		out["delivery_modes"] = modes
 	}
+	for _, key := range []string{"latitude", "longitude", "delivery_radius", "free_delivery_radius"} {
+		if v, ok := m[key]; ok && v != nil {
+			out[key] = v
+		}
+	}
 	return out
 }
 
-// CompactCategory keeps id/name/description for collection listings.
+// CompactCategory keeps id/name/description/listing_priority for collection listings.
 func CompactCategory(m map[string]any) map[string]any {
 	if m == nil {
 		return map[string]any{}
@@ -191,6 +217,9 @@ func CompactCategory(m map[string]any) map[string]any {
 	}
 	if desc, ok := m["description"]; ok && desc != nil && fmt.Sprint(desc) != "" {
 		out["description"] = desc
+	}
+	if prio, ok := m["listing_priority"]; ok && prio != nil {
+		out["listing_priority"] = prio
 	}
 	return out
 }

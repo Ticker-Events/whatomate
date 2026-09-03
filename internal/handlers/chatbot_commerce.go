@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,10 +15,12 @@ import (
 )
 
 const (
-	commerceMaxToolRounds  = 5
-	commerceMaxResultBytes = 12 * 1024
-	commerceWelcomeTTL     = time.Hour
-	commerceSystemAddendum = `You are a sales assistant for this store only. Keep replies short for WhatsApp.
+	commerceMaxToolRounds        = 5
+	commerceMaxResultBytes       = 12 * 1024
+	commerceWelcomeTTL           = time.Hour
+	commerceWelcomeMaxCategories = 10
+	commerceWelcomeMoreLabel     = "…and more categories"
+	commerceSystemAddendum       = `You are a sales assistant for this store only. Keep replies short for WhatsApp.
 
 CRITICAL — live catalog/orders:
 - For ANY question about products, catalog, prices, stock, options, or "what do you sell/have", you MUST call search_products (and get_product when you need detail) BEFORE answering.
@@ -48,8 +51,8 @@ Tools:
 Ordering rules:
 - Use product_option ids from tool results (never invent ids or prices).
 - Collect: product option id(s), quantity, email, and delivery_mode (PICKUP_FROM_STORE or DELIVERY_TO_LOCATION).
-- For DELIVERY_TO_LOCATION, collect new_address (name, phone, address_line_1, city, state, country, pincode, email) and latitude/longitude in buyer_meta_data when needed for delivery radius.
-- Prefer PICKUP_FROM_STORE when the user has no delivery address.
+- For DELIVERY_TO_LOCATION, first ask the user to share their WhatsApp location pin, then call check_delivery_eligibility (or ensure lat/lng are verified). Collect new_address (name, phone, address_line_1, city, state, country, pincode, email) after delivery is confirmed, and put latitude/longitude in buyer_meta_data.
+- Prefer PICKUP_FROM_STORE when the user has no delivery address or is outside the delivery radius.
 - Never invent stock or prices — rely on tool data.
 - After a successful order, share display_uid (the customer-facing order number) — never share uuid to the user. If payment_url is present, share that link so they can pay.
 
@@ -60,16 +63,16 @@ Order status:
 
 	commerceWelcomeInstruction = `Write the store's first WhatsApp welcome message for a new shopper.
 
-Before writing, you MUST call get_store and list_categories (in that order) and use only those tool results.
+Before writing, you MUST call get_store and use only that tool result for store facts.
+Do NOT call list_categories — collections are appended separately by the system.
 
-Reply with ONE short message only (about 3–5 short sentences):
+Reply with ONE short message only (about 2–4 short sentences):
 1. Warm greeting that names the store.
 2. One crisp line on what they sell (from the store description).
-3. Mention a few collection/category names if available (do not invent any).
-4. Briefly say you can help browse products, check prices, place orders, and track order status.
-5. Invite them to say what they are looking for.
+3. Briefly say you can help browse products, check prices, place orders, and track order status.
+4. Invite them to say what they are looking for.
 
-Rules: plain text only — no whatsapp_product cards, no markdown fences, no policies, no bullet spam. Keep it welcoming and crisp.`
+Rules: plain text only — no whatsapp_product cards, no markdown fences, no policies, no bullet lists, and do not name or list any collections/categories. Keep it welcoming and crisp.`
 )
 
 // commerceBackend is the storefront data source for LLM commerce tools (MCP).
@@ -81,6 +84,7 @@ type commerceBackend interface {
 	GetOrder(ctx context.Context, orderUUID string) (map[string]any, error)
 	LookupOrderStatus(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
 	CreateOrder(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
+	CheckDeliveryEligibility(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error)
 }
 
 // commerceRuntime holds per-request commerce tool context.
@@ -206,6 +210,21 @@ func commerceToolDefs() []map[string]any {
 		{
 			"type": "function",
 			"function": map[string]any{
+				"name":        "check_delivery_eligibility",
+				"description": "Verify whether a buyer latitude/longitude can be delivered. Returns deliverable, zone (free|paid|out_of_range|unconfigured), shipping_fee_paise, and a user-facing message. Call after the user shares a WhatsApp location pin.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"latitude":  map[string]any{"type": "number"},
+						"longitude": map[string]any{"type": "number"},
+					},
+					"required": []string{"latitude", "longitude"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
 				"name":        "create_order",
 				"description": "Place a guest order. Call only after the user confirms the order summary. Requires confirmed=true. On success, show display_uid and payment_url to the user (not uuid).",
 				"parameters": map[string]any{
@@ -302,6 +321,8 @@ func (a *App) executeCommerceTool(rt *commerceRuntime, name, argsJSON string) st
 		result, err = a.toolGetProduct(ctx, rt, argsJSON)
 	case "get_order_status":
 		result, err = a.toolGetOrderStatus(ctx, rt, argsJSON)
+	case "check_delivery_eligibility":
+		result, err = a.toolCheckDeliveryEligibility(ctx, rt, argsJSON)
 	case "create_order":
 		result, err = a.toolCreateOrder(ctx, rt, argsJSON)
 	default:
@@ -543,6 +564,31 @@ func (a *App) toolGetOrderStatus(ctx context.Context, rt *commerceRuntime, argsJ
 	return compactOrderStatus(raw), nil
 }
 
+func (a *App) toolCheckDeliveryEligibility(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
+	var args struct {
+		Latitude  float64 `json:"latitude"`
+		Longitude float64 `json:"longitude"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %w", err)
+	}
+	if args.Latitude == 0 && args.Longitude == 0 {
+		return nil, fmt.Errorf("latitude and longitude are required")
+	}
+	result, err := rt.Client.CheckDeliveryEligibility(ctx, rt.StoreID, args.Latitude, args.Longitude)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]any, len(result)+1)
+	for k, v := range result {
+		out[k] = v
+	}
+	if fee, ok := result["shipping_fee_paise"]; ok {
+		out["shipping_fee"] = ticker.PaiseToRupees(asToolFloat(fee))
+	}
+	return out, nil
+}
+
 func (a *App) toolCreateOrder(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
 	var args createOrderArgs
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
@@ -640,6 +686,9 @@ func compactOrderStatus(raw map[string]any) map[string]any {
 func compactOrderCreateResult(raw map[string]any) map[string]any {
 	out := compactOrderStatus(raw)
 	out["id"] = raw["id"]
+	if _, ok := raw["shipping_fee"]; ok {
+		out["shipping_fee"] = ticker.PaiseToRupees(asToolFloat(raw["shipping_fee"]))
+	}
 	return out
 }
 
@@ -773,7 +822,8 @@ func clearCommerceWelcome(ai *models.AIConfig) {
 }
 
 // getOrRefreshCommerceWelcome returns a cached welcome when fresh, otherwise
-// regenerates via the commerce tool loop and persists the result on settings.
+// regenerates via the commerce tool loop, appends a category bullet list, and
+// persists the result on settings.
 func (a *App) getOrRefreshCommerceWelcome(settings *models.ChatbotSettings, session *models.ChatbotSession, force bool) (string, error) {
 	if settings == nil || !commerceConfigured(settings.AI) {
 		return "", fmt.Errorf("commerce is not configured")
@@ -791,6 +841,19 @@ func (a *App) getOrRefreshCommerceWelcome(settings *models.ChatbotSettings, sess
 		return "", fmt.Errorf("empty welcome response from AI")
 	}
 
+	rt := a.newCommerceRuntime(settings, session)
+	if rt != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		categories, catErr := rt.Client.ListCategories(ctx, rt.StoreID)
+		cancel()
+		if catErr != nil {
+			a.Log.Warn("commerce welcome: list_categories failed; sending greeting without list",
+				"error", catErr.Error(), "store_id", rt.StoreID)
+		} else {
+			reply = appendCommerceWelcomeCategories(reply, categories)
+		}
+	}
+
 	now := time.Now().UTC()
 	settings.AI.CommerceWelcomeMessage = reply
 	settings.AI.CommerceWelcomeGeneratedAt = &now
@@ -802,6 +865,72 @@ func (a *App) getOrRefreshCommerceWelcome(settings *models.ChatbotSettings, sess
 	}
 	a.InvalidateChatbotSettingsCache(settings.OrganizationID)
 	return reply, nil
+}
+
+// appendCommerceWelcomeCategories appends a priority-ordered bullet list of
+// collection names (max commerceWelcomeMaxCategories). When more exist, adds
+// commerceWelcomeMoreLabel after the list.
+func appendCommerceWelcomeCategories(greeting string, categories []map[string]any) string {
+	greeting = strings.TrimSpace(greeting)
+	list := formatCommerceWelcomeCategoryList(categories)
+	if list == "" {
+		return greeting
+	}
+	if greeting == "" {
+		return list
+	}
+	return greeting + "\n\n" + list
+}
+
+// formatCommerceWelcomeCategoryList builds the bullet block only (no greeting).
+// Categories are sorted by listing_priority ascending, then name.
+func formatCommerceWelcomeCategoryList(categories []map[string]any) string {
+	type catRow struct {
+		name     string
+		priority int
+	}
+	rows := make([]catRow, 0, len(categories))
+	for _, c := range categories {
+		if c == nil {
+			continue
+		}
+		name := strings.TrimSpace(fmt.Sprint(c["name"]))
+		if name == "" || name == "<nil>" {
+			continue
+		}
+		rows = append(rows, catRow{
+			name:     name,
+			priority: asToolInt(c["listing_priority"]),
+		})
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].priority != rows[j].priority {
+			return rows[i].priority < rows[j].priority
+		}
+		return strings.ToLower(rows[i].name) < strings.ToLower(rows[j].name)
+	})
+
+	total := len(rows)
+	limit := commerceWelcomeMaxCategories
+	if total < limit {
+		limit = total
+	}
+	var b strings.Builder
+	for i := 0; i < limit; i++ {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString("• ")
+		b.WriteString(rows[i].name)
+	}
+	if total > commerceWelcomeMaxCategories {
+		b.WriteByte('\n')
+		b.WriteString(commerceWelcomeMoreLabel)
+	}
+	return b.String()
 }
 
 // stripWhatsAppProductFences removes product-card blocks so welcome text stays plain.

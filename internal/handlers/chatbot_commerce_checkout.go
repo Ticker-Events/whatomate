@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -19,6 +21,7 @@ const (
 	checkoutPickupButtonID   = "checkout_delivery_pickup"
 	checkoutDeliveryButtonID = "checkout_delivery_ship"
 	cartPendingOptionKey     = "cart_pending_option_id"
+	checkoutLocationPrompt   = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
 	checkoutAddressPrompt    = "Please provide your full delivery address, including your name, phone number, street address, city, state, country, and pincode."
 	checkoutExploreAck       = "No problem — keep browsing. Your cart is saved. Tap Checkout when you're ready."
 )
@@ -32,10 +35,15 @@ var (
 )
 
 type checkoutState struct {
-	Step         string
-	Email        string
-	DeliveryMode string
-	NewAddress   map[string]any
+	Step             string
+	Email            string
+	DeliveryMode     string
+	NewAddress       map[string]any
+	Latitude         float64
+	Longitude        float64
+	HasLocation      bool
+	DeliveryZone     string
+	ShippingFeePaise int64
 }
 
 func getCheckoutState(session *models.ChatbotSession) *checkoutState {
@@ -56,6 +64,21 @@ func getCheckoutState(session *models.ChatbotSession) *checkoutState {
 	} else {
 		st.NewAddress = map[string]any{}
 	}
+	if lat, ok := anyToFloat64(raw["latitude"]); ok {
+		st.Latitude = lat
+	}
+	if lng, ok := anyToFloat64(raw["longitude"]); ok {
+		st.Longitude = lng
+	}
+	if has, ok := raw["has_location"].(bool); ok {
+		st.HasLocation = has
+	} else {
+		st.HasLocation = st.Latitude != 0 || st.Longitude != 0
+	}
+	st.DeliveryZone = asString(raw["delivery_zone"])
+	if fee, ok := anyToFloat64(raw["shipping_fee_paise"]); ok {
+		st.ShippingFeePaise = int64(fee)
+	}
 	if st.Step == "" {
 		return nil
 	}
@@ -74,10 +97,15 @@ func setCheckoutState(session *models.ChatbotSession, st *checkoutState) {
 		return
 	}
 	session.SessionData[checkoutSessionKey] = map[string]any{
-		"step":          st.Step,
-		"email":         st.Email,
-		"delivery_mode": st.DeliveryMode,
-		"new_address":   st.NewAddress,
+		"step":               st.Step,
+		"email":              st.Email,
+		"delivery_mode":      st.DeliveryMode,
+		"new_address":        st.NewAddress,
+		"latitude":           st.Latitude,
+		"longitude":          st.Longitude,
+		"has_location":       st.HasLocation,
+		"delivery_zone":      st.DeliveryZone,
+		"shipping_fee_paise": st.ShippingFeePaise,
 	}
 }
 
@@ -90,6 +118,27 @@ func clearCheckoutState(session *models.ChatbotSession) {
 func asString(v any) string {
 	s, _ := v.(string)
 	return strings.TrimSpace(s)
+}
+
+func anyToFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }
 
 // IsCheckoutButton reports commerce checkout interactive button ids.
@@ -169,7 +218,12 @@ func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, cont
 	}
 	st.DeliveryMode = mode
 	if mode == "DELIVERY_TO_LOCATION" {
-		st.Step = "address"
+		st.Step = "location"
+		st.HasLocation = false
+		st.Latitude = 0
+		st.Longitude = 0
+		st.DeliveryZone = ""
+		st.ShippingFeePaise = 0
 		if contact != nil {
 			if contact.ProfileName != "" {
 				st.NewAddress["name"] = contact.ProfileName
@@ -182,10 +236,12 @@ func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, cont
 		st.NewAddress["country"] = "India"
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
-		_ = a.sendAndSaveTextMessage(account, contact, checkoutAddressPrompt)
+		_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
 		return
 	}
 	st.Step = "confirm"
+	st.DeliveryZone = ""
+	st.ShippingFeePaise = 0
 	setCheckoutState(session, st)
 	_ = a.persistSessionData(session)
 	a.sendOrderConfirmPrompt(account, contact, session)
@@ -244,6 +300,10 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 			a.sendDeliveryModeButtons(account, contact)
 		}
 		return true
+	case "location":
+		_ = a.sendAndSaveTextMessage(account, contact, "Please use the Send location button to share your delivery pin.")
+		_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
+		return true
 	case "address", "address_line_1", "city", "state", "pincode":
 		// Single full-address reply (legacy multi-step keys still accepted mid-session).
 		parsed := parseDeliveryAddressText(text, contact, st)
@@ -269,6 +329,69 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		a.repromptCheckoutStep(account, contact, session, st)
 		return true
 	}
+}
+
+// handleCheckoutLocationPin processes a WhatsApp location share during the location checkout step.
+func (a *App) handleCheckoutLocationPin(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, lat, lng float64) bool {
+	st := getCheckoutState(session)
+	if st == nil || st.Step != "location" {
+		return false
+	}
+
+	rt := a.newCommerceRuntime(settings, session)
+	if rt == nil {
+		_ = a.sendAndSaveTextMessage(account, contact, "Checkout is not available right now. Please try again later.")
+		return true
+	}
+
+	ctx := context.Background()
+	result, err := rt.Client.CheckDeliveryEligibility(ctx, rt.StoreID, lat, lng)
+	if err != nil {
+		a.Log.Error("check_delivery_eligibility failed", "error", err)
+		_ = a.sendAndSaveTextMessage(account, contact, "We couldn’t verify delivery for that location right now. Please try sharing your location again.")
+		_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
+		return true
+	}
+
+	deliverable, _ := result["deliverable"].(bool)
+	msg := asString(result["message"])
+	zone := asString(result["zone"])
+	feePaise := int64(0)
+	if fee, ok := anyToFloat64(result["shipping_fee_paise"]); ok {
+		feePaise = int64(fee)
+	}
+
+	if !deliverable {
+		if msg == "" {
+			msg = "Sorry, we can’t deliver to this location yet. Please share a location closer to the store, or choose Store Pickup."
+		}
+		_ = a.sendAndSaveTextMessage(account, contact, msg)
+		a.sendDeliveryModeButtons(account, contact)
+		st.Step = "delivery_mode"
+		st.HasLocation = false
+		setCheckoutState(session, st)
+		_ = a.persistSessionData(session)
+		return true
+	}
+
+	st.Latitude = lat
+	st.Longitude = lng
+	st.HasLocation = true
+	st.DeliveryZone = zone
+	st.ShippingFeePaise = feePaise
+	st.Step = "address"
+	setCheckoutState(session, st)
+	_ = a.persistSessionData(session)
+
+	ack := "Thanks — we can deliver to that location."
+	if zone == "free" || feePaise == 0 {
+		ack = "Great news — delivery is free to that location."
+	} else if feePaise > 0 {
+		ack = fmt.Sprintf("We can deliver there. Delivery fee: %s.", formatPriceINR(ticker.PaiseToRupees(float64(feePaise))))
+	}
+	_ = a.sendAndSaveTextMessage(account, contact, ack)
+	_ = a.sendAndSaveTextMessage(account, contact, checkoutAddressPrompt)
+	return true
 }
 
 // handleCheckoutCartEditIntent handles qty updates and exit-to-browse during checkout.
@@ -350,6 +473,8 @@ func (a *App) repromptCheckoutStep(account *models.WhatsAppAccount, contact *mod
 		_ = a.sendAndSaveTextMessage(account, contact, "Please share your email address to continue checkout.")
 	case "delivery_mode":
 		a.sendDeliveryModeButtons(account, contact)
+	case "location":
+		_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
 	case "address", "address_line_1", "city", "state", "pincode":
 		_ = a.sendAndSaveTextMessage(account, contact, checkoutAddressPrompt)
 	case "confirm":
@@ -604,6 +729,10 @@ func checkoutBuyerMeta(st *checkoutState, contact *models.Contact) map[string]an
 	} else if contact != nil && contact.PhoneNumber != "" {
 		meta["phone"] = contact.PhoneNumber
 	}
+	if st.HasLocation {
+		meta["latitude"] = st.Latitude
+		meta["longitude"] = st.Longitude
+	}
 	if st.DeliveryMode == "DELIVERY_TO_LOCATION" && len(addr) > 0 {
 		// Copy without mutating session state; drop write-only email for display blob.
 		shipping := make(map[string]any, len(addr))
@@ -686,6 +815,13 @@ func formatOrderSuccessMessage(result map[string]any) string {
 	} else {
 		b.WriteString("Order placed!")
 	}
+	if fee, ok := anyToFloat64(result["shipping_fee"]); ok {
+		if fee > 0 {
+			fmt.Fprintf(&b, "\nDelivery fee: %s", formatPriceINR(fee))
+		} else {
+			b.WriteString("\nDelivery fee: Free")
+		}
+	}
 	if amount, ok := result["amount"].(float64); ok && amount > 0 {
 		fmt.Fprintf(&b, "\nTotal: %s", formatPriceINR(amount))
 	}
@@ -715,12 +851,13 @@ func formatCheckoutCartSummary(session *models.ChatbotSession) string {
 		total += lineTotal
 		fmt.Fprintf(&b, "- %s x%d — %s\n", name, qty, formatPriceINR(lineTotal))
 	}
-	fmt.Fprintf(&b, "\nEstimated total: %s", formatPriceINR(total))
+	fmt.Fprintf(&b, "\nSubtotal: %s", formatPriceINR(total))
 	return b.String()
 }
 
 func formatOrderConfirmSummary(session *models.ChatbotSession, st *checkoutState) string {
 	var b strings.Builder
+	cartSubtotal := checkoutCartSubtotal(session)
 	b.WriteString(formatCheckoutCartSummary(session))
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "Email: %s\n", st.Email)
@@ -730,6 +867,7 @@ func formatOrderConfirmSummary(session *models.ChatbotSession, st *checkoutState
 	}
 	if mode == "PICKUP_FROM_STORE" {
 		b.WriteString("Delivery: Store pickup\n")
+		b.WriteString("Delivery fee: Free (pickup)\n")
 	} else {
 		b.WriteString("Delivery: To your address\n")
 		if st.NewAddress != nil {
@@ -747,9 +885,33 @@ func formatOrderConfirmSummary(session *models.ChatbotSession, st *checkoutState
 				b.WriteString("\n")
 			}
 		}
+		if st.DeliveryZone == "free" || st.ShippingFeePaise == 0 {
+			b.WriteString("Delivery fee: Free\n")
+		} else {
+			fmt.Fprintf(&b, "Delivery fee: %s\n", formatPriceINR(ticker.PaiseToRupees(float64(st.ShippingFeePaise))))
+		}
+		grand := cartSubtotal + ticker.PaiseToRupees(float64(st.ShippingFeePaise))
+		fmt.Fprintf(&b, "Estimated total: %s\n", formatPriceINR(grand))
 	}
 	b.WriteString("\nConfirm your order?")
 	return b.String()
+}
+
+func checkoutCartSubtotal(session *models.ChatbotSession) float64 {
+	if session == nil || session.SessionData == nil {
+		return 0
+	}
+	cart := normalizeCartMap(session.SessionData[cartKey])
+	var total float64
+	for _, line := range cart {
+		meta, _ := line["product"].(map[string]any)
+		qty := anyToInt(line["qty"])
+		if qty < 1 {
+			qty = 1
+		}
+		total += cartLinePrice(meta) * float64(qty)
+	}
+	return total
 }
 
 func (a *App) handleCartQuantityReply(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, messageText string) bool {

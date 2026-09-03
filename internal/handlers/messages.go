@@ -45,7 +45,7 @@ type OutgoingMessageRequest struct {
 	Caption       string
 
 	// Interactive messages
-	InteractiveType string            // "button", "list", "cta_url", "voice_call"
+	InteractiveType string            // "button", "list", "cta_url", "voice_call", "location_request"
 	BodyText        string            // Body text for interactive messages
 	Buttons         []whatsapp.Button // For button/list messages
 	ButtonText      string            // For CTA URL button
@@ -202,6 +202,8 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 				return client.SendCTAURLButton(sendCtx, waAccount, rcpt, req.BodyText, req.ButtonText, req.URL)
 			case "voice_call":
 				return client.SendVoiceCallButton(sendCtx, waAccount, rcpt, req.BodyText, req.DisplayText, req.TTLMinutes, req.VoiceCallPayload)
+			case "location_request":
+				return client.SendLocationRequest(sendCtx, waAccount, rcpt, req.BodyText)
 			default: // "button" or "list"
 				return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, req.HeaderImageURL)
 			}
@@ -383,6 +385,11 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 			"body":        req.BodyText,
 			"button_text": req.ButtonText,
 			"url":         req.URL,
+		}
+	case "location_request":
+		return models.JSONB{
+			"type": "location_request",
+			"body": req.BodyText,
 		}
 	case "voice_call":
 		// Don't store the payload — it carries server-only context (the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,14 +22,15 @@ func testApp() *App {
 }
 
 type stubCommerceBackend struct {
-	searchFn       func(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error)
-	getFn          func(ctx context.Context, productID string) (map[string]any, error)
-	storeFn        func(ctx context.Context, storeID string) (map[string]any, error)
-	categoriesFn   func(ctx context.Context, storeID string) ([]map[string]any, error)
-	orderFn        func(ctx context.Context, orderUUID string) (map[string]any, error)
-	lookupStatusFn func(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
-	createFn       func(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
-	lastCreate     ticker.CreateOrderRequest
+	searchFn        func(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error)
+	getFn           func(ctx context.Context, productID string) (map[string]any, error)
+	storeFn         func(ctx context.Context, storeID string) (map[string]any, error)
+	categoriesFn    func(ctx context.Context, storeID string) ([]map[string]any, error)
+	orderFn         func(ctx context.Context, orderUUID string) (map[string]any, error)
+	lookupStatusFn  func(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
+	createFn        func(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
+	checkDeliveryFn func(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error)
+	lastCreate      ticker.CreateOrderRequest
 }
 
 func (s *stubCommerceBackend) SearchProducts(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error) {
@@ -79,6 +81,18 @@ func (s *stubCommerceBackend) CreateOrder(ctx context.Context, body ticker.Creat
 		return s.createFn(ctx, body)
 	}
 	return nil, fmt.Errorf("create_order not stubbed")
+}
+
+func (s *stubCommerceBackend) CheckDeliveryEligibility(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error) {
+	if s.checkDeliveryFn != nil {
+		return s.checkDeliveryFn(ctx, storeID, latitude, longitude)
+	}
+	return map[string]any{
+		"deliverable":        true,
+		"zone":               "unconfigured",
+		"shipping_fee_paise": 0,
+		"message":            "",
+	}, nil
 }
 
 func TestCommerceConfigured(t *testing.T) {
@@ -390,4 +404,60 @@ func TestCommerceWelcomeFresh(t *testing.T) {
 func TestStripWhatsAppProductFences(t *testing.T) {
 	raw := "Welcome!\n```whatsapp_product\n{\"title\":\"x\"}\n```\nAsk away."
 	assert.Equal(t, "Welcome!\n\nAsk away.", stripWhatsAppProductFences(raw))
+}
+
+func TestFormatCommerceWelcomeCategoryList(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		assert.Equal(t, "", formatCommerceWelcomeCategoryList(nil))
+		assert.Equal(t, "", formatCommerceWelcomeCategoryList([]map[string]any{}))
+		assert.Equal(t, "", formatCommerceWelcomeCategoryList([]map[string]any{
+			{"id": 1, "name": "  "},
+			nil,
+		}))
+	})
+
+	t.Run("sorts by listing_priority then name", func(t *testing.T) {
+		got := formatCommerceWelcomeCategoryList([]map[string]any{
+			{"name": "Zulu", "listing_priority": float64(0)},
+			{"name": "Alpha", "listing_priority": float64(0)},
+			{"name": "Featured", "listing_priority": float64(-1)},
+			{"name": "Last", "listing_priority": 5},
+		})
+		assert.Equal(t, "• Featured\n• Alpha\n• Zulu\n• Last", got)
+	})
+
+	t.Run("max ten with more categories", func(t *testing.T) {
+		cats := make([]map[string]any, 0, 12)
+		for i := 1; i <= 12; i++ {
+			cats = append(cats, map[string]any{
+				"name":             fmt.Sprintf("Cat %02d", i),
+				"listing_priority": i,
+			})
+		}
+		got := formatCommerceWelcomeCategoryList(cats)
+		lines := strings.Split(got, "\n")
+		require.Len(t, lines, 11) // 10 bullets + more
+		assert.Equal(t, "• Cat 01", lines[0])
+		assert.Equal(t, "• Cat 10", lines[9])
+		assert.Equal(t, commerceWelcomeMoreLabel, lines[10])
+		assert.NotContains(t, got, "Cat 11")
+	})
+
+	t.Run("exactly ten has no more line", func(t *testing.T) {
+		cats := make([]map[string]any, 0, 10)
+		for i := 1; i <= 10; i++ {
+			cats = append(cats, map[string]any{"name": fmt.Sprintf("C%d", i)})
+		}
+		got := formatCommerceWelcomeCategoryList(cats)
+		assert.NotContains(t, got, commerceWelcomeMoreLabel)
+		assert.Equal(t, 10, strings.Count(got, "• "))
+	})
+}
+
+func TestAppendCommerceWelcomeCategories(t *testing.T) {
+	assert.Equal(t, "Hello there", appendCommerceWelcomeCategories("Hello there", nil))
+	assert.Equal(t, "Hello there\n\n• Earrings", appendCommerceWelcomeCategories(
+		"Hello there",
+		[]map[string]any{{"name": "Earrings"}},
+	))
 }
