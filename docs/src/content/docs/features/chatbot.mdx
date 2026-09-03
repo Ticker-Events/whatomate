@@ -81,9 +81,9 @@ Configure when your chatbot is active and how it behaves outside business hours.
 
 When storefront (commerce) checkout asks for a delivery address:
 
-- If the **store country is India** (`IN`) **and** the customer's WhatsApp number is Indian (`91…`), WhatsApp's interactive `address_message` form is sent. The customer fills name, phone, pin code, street, city, and state in WhatsApp, and the reply is mapped into the order's `new_address`.
+- If the **store country is India** (`IN`) **and** the customer's WhatsApp number is Indian (`91…`), WhatsApp's interactive address form is sent (`interactive.type` = `native_flow`, `action.name` = `address_message`). The customer fills name, phone, pin code, street, city, and state in WhatsApp, and the reply is mapped into the order's `new_address`.
 - For **any other store country**, a **non-India WhatsApp number**, or if the store country cannot be loaded, the bot asks for the address as a normal text message.
-- If WhatsApp cannot show the form (error **1026 Receiver Incapable**), checkout falls back to the text prompt. Customers can also type an address even when the form was sent.
+- If WhatsApp rejects or cannot show the form (for example **1026 Receiver Incapable**, or send failures such as **131009**), checkout falls back to the text prompt. Customers can also type an address even when the form was sent.
 
 This form is only available for India businesses and India customers on WhatsApp.
 

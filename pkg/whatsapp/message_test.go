@@ -474,7 +474,7 @@ func TestClient_SendAddressMessage(t *testing.T) {
 	assert.Equal(t, "wamid.addr1", msgID)
 	interactive, ok := capturedBody["interactive"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "address_message", interactive["type"])
+	assert.Equal(t, "native_flow", interactive["type"])
 	action, ok := interactive["action"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "address_message", action["name"])
@@ -514,6 +514,22 @@ func TestEncodeAddressMessageParameters_Object(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "A", values["name"])
 	assert.NotContains(t, values, "phone_number")
+}
+
+func TestAddressMessageInteractive_NativeFlow(t *testing.T) {
+	t.Parallel()
+
+	interactive, err := whatsapp.AddressMessageInteractive("Share address", whatsapp.AddressMessageParams{
+		Country: "IN",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "native_flow", interactive["type"])
+	action, ok := interactive["action"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "address_message", action["name"])
+	params, ok := action["parameters"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "IN", params["country"])
 }
 
 func TestClient_SendCTAURLButton(t *testing.T) {
