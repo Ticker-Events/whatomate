@@ -86,18 +86,26 @@ func TestNormalizeJSONRawMessage(t *testing.T) {
 
 func TestCompactStore(t *testing.T) {
 	out := CompactStore(map[string]any{
-		"id":             float64(7),
-		"name":           "Demo Store",
-		"description":    "Handmade goods",
-		"delivery_modes": []any{"PICKUP_FROM_STORE"},
-		"logo":           "https://example.com/logo.png",
-		"cover_image":    "https://example.com/cover.png",
+		"id":                      float64(7),
+		"name":                    "Demo Store",
+		"description":             "Handmade goods",
+		"address":                 "Vadakara, Kozhikode",
+		"delivery_modes":          []any{"PICKUP_FROM_STORE"},
+		"delivery_radius":         float64(16),
+		"free_delivery_radius":    float64(8),
+		"location_based_delivery": true,
+		"logo":                    "https://example.com/logo.png",
+		"cover_image":             "https://example.com/cover.png",
 	})
 	assert.Equal(t, map[string]any{
-		"id":             float64(7),
-		"name":           "Demo Store",
-		"description":    "Handmade goods",
-		"delivery_modes": []any{"PICKUP_FROM_STORE"},
+		"id":                      float64(7),
+		"name":                    "Demo Store",
+		"description":             "Handmade goods",
+		"address":                 "Vadakara, Kozhikode",
+		"delivery_modes":          []any{"PICKUP_FROM_STORE"},
+		"delivery_radius":         float64(16),
+		"free_delivery_radius":    float64(8),
+		"location_based_delivery": true,
 	}, out)
 	assert.NotContains(t, out, "logo")
 }

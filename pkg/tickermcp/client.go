@@ -177,7 +177,7 @@ func (c *Client) CheckDeliveryEligibility(ctx context.Context, storeID string, l
 	return m, nil
 }
 
-// CompactStore keeps only fields useful for a short store intro.
+// CompactStore keeps name, description, address, delivery modes, and delivery radii.
 func CompactStore(m map[string]any) map[string]any {
 	if m == nil {
 		return map[string]any{}
@@ -196,6 +196,7 @@ func CompactStore(m map[string]any) map[string]any {
 		out["delivery_modes"] = modes
 	}
 	for _, key := range []string{
+		"address",
 		"latitude",
 		"longitude",
 		"delivery_radius",

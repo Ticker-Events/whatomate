@@ -41,11 +41,12 @@ Memory — use the conversation history:
 - Only ask for the next missing field needed to place the order.
 
 Tools:
-- get_store: fetch the store name and description (use for welcome / about-the-store).
+- get_store: fetch the store name, description, address, free_delivery_radius, and delivery_radius (use for welcome / about-the-store / out-of-range delivery replies).
 - list_categories: list product collections/categories for the store.
 - search_products: find products by query (or list items with an empty/broad query). Results include image_url when available — use that exact URL in whatsapp_product cards. When recommending products to the user, show at most 5 (top matches only).
 - get_product: fetch full details for a product id (includes image_url / images).
 - get_order_status: look up order status for this WhatsApp customer. Omit order_id for their latest order; pass order_id (customer order number / display_uid) when they provide it.
+- check_delivery_eligibility: after a WhatsApp location pin, check whether that lat/lng is deliverable. The tool message for out_of_range already includes store address and radii — share that message (or compose the same shape from get_store).
 - create_order: place an order ONLY after the user explicitly confirms a summary you showed them. Always pass confirmed=true only after that confirmation.
 
 Ordering rules:
@@ -53,6 +54,18 @@ Ordering rules:
 - Collect: product option id(s), quantity, email, and delivery_mode (PICKUP_FROM_STORE or DELIVERY_TO_LOCATION).
 - For DELIVERY_TO_LOCATION: if the store has location_based_delivery enabled, first ask for a WhatsApp location pin and call check_delivery_eligibility; then collect new_address. If location_based_delivery is off/absent, skip the pin and collect new_address only. Put latitude/longitude in buyer_meta_data when captured.
 - Prefer PICKUP_FROM_STORE when the user has no delivery address or is outside the delivery radius.
+- When check_delivery_eligibility returns deliverable=false or zone=out_of_range, tell the user they are outside the delivery area. Use get_store.address, get_store.free_delivery_radius (km), and get_store.delivery_radius (km) — never invent a location or radii. Shape the reply like:
+  Sorry, we're currently unable to deliver to this location.
+
+  Our store is located in {address}. We offer:
+
+  - Free delivery within {free_delivery_radius} km of our store
+  - Delivery up to {delivery_radius} km for an additional delivery fee
+
+  Please provide a location within our delivery radius, or choose Store Pickup as your preferred option.
+
+  Thank you for your understanding.
+  Do not copy the placeholder braces. If address is missing, still explain the radii without naming a city. If free_delivery_radius is missing or 0, omit the free-delivery line. Always offer Store Pickup as the alternative.
 - Never invent stock or prices — rely on tool data.
 - After a successful order, share display_uid (the customer-facing order number) — never share uuid to the user. If payment_url is present, share that link so they can pay.
 
@@ -136,7 +149,7 @@ func commerceToolDefs() []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        "get_store",
-				"description": "Get the configured store's name and description. Call before writing a welcome or about-the-store reply.",
+				"description": "Get the configured store's name, description, address, free_delivery_radius (km), and delivery_radius (km). Call before writing a welcome, about-the-store, or out-of-range delivery reply.",
 				"parameters": map[string]any{
 					"type":       "object",
 					"properties": map[string]any{},
@@ -586,7 +599,85 @@ func (a *App) toolCheckDeliveryEligibility(ctx context.Context, rt *commerceRunt
 	if fee, ok := result["shipping_fee_paise"]; ok {
 		out["shipping_fee"] = ticker.PaiseToRupees(asToolFloat(fee))
 	}
+	if deliveryEligibilityNeedsOutOfRangeCopy(out) {
+		store, storeErr := rt.Client.GetStore(ctx, rt.StoreID)
+		if storeErr != nil {
+			store = nil
+		}
+		out["message"] = formatOutOfRangeDeliveryMessage(store)
+	}
 	return out, nil
+}
+
+func deliveryEligibilityNeedsOutOfRangeCopy(result map[string]any) bool {
+	if result == nil {
+		return false
+	}
+	if asString(result["zone"]) == "out_of_range" {
+		return true
+	}
+	if v, ok := result["deliverable"]; ok {
+		if deliverable, isBool := v.(bool); isBool && !deliverable {
+			return true
+		}
+	}
+	return false
+}
+
+func radiusKmLabel(v any) string {
+	f, ok := anyToFloat64(v)
+	if !ok || f <= 0 {
+		return ""
+	}
+	if f == float64(int64(f)) {
+		return strconv.FormatInt(int64(f), 10)
+	}
+	return strconv.FormatFloat(f, 'f', 1, 64)
+}
+
+// formatOutOfRangeDeliveryMessage builds the WhatsApp copy shown when a pin
+// is outside delivery_radius. It uses store.address, free_delivery_radius,
+// and delivery_radius from get_store — never invents those values.
+func formatOutOfRangeDeliveryMessage(store map[string]any) string {
+	var b strings.Builder
+	b.WriteString("Sorry, we're currently unable to deliver to this location.")
+
+	address := ""
+	var freeLabel, maxLabel string
+	if store != nil {
+		address = asString(store["address"])
+		freeLabel = radiusKmLabel(store["free_delivery_radius"])
+		maxLabel = radiusKmLabel(store["delivery_radius"])
+	}
+
+	offers := make([]string, 0, 2)
+	if freeLabel != "" {
+		offers = append(offers, "- Free delivery within "+freeLabel+" km of our store")
+	}
+	if maxLabel != "" {
+		offers = append(offers, "- Delivery up to "+maxLabel+" km for an additional delivery fee")
+	}
+
+	if address != "" || len(offers) > 0 {
+		b.WriteString("\n\n")
+		if address != "" {
+			b.WriteString("Our store is located in ")
+			b.WriteString(address)
+			b.WriteString(".")
+			if len(offers) > 0 {
+				b.WriteString(" We offer:")
+			}
+		} else {
+			b.WriteString("We offer:")
+		}
+		if len(offers) > 0 {
+			b.WriteString("\n\n")
+			b.WriteString(strings.Join(offers, "\n"))
+		}
+	}
+
+	b.WriteString("\n\nPlease provide a location within our delivery radius, or choose Store Pickup as your preferred option.\n\nThank you for your understanding.")
+	return b.String()
 }
 
 func (a *App) toolCreateOrder(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {

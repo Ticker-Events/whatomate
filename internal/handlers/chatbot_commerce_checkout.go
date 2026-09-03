@@ -391,7 +391,6 @@ func (a *App) handleCheckoutLocationPin(account *models.WhatsAppAccount, contact
 	}
 
 	deliverable, _ := result["deliverable"].(bool)
-	msg := asString(result["message"])
 	zone := asString(result["zone"])
 	feePaise := int64(0)
 	if fee, ok := anyToFloat64(result["shipping_fee_paise"]); ok {
@@ -399,9 +398,12 @@ func (a *App) handleCheckoutLocationPin(account *models.WhatsAppAccount, contact
 	}
 
 	if !deliverable {
-		if msg == "" {
-			msg = "Sorry, we can’t deliver to this location yet. Please share a location closer to the store, or choose Store Pickup."
+		store, storeErr := rt.Client.GetStore(ctx, rt.StoreID)
+		if storeErr != nil {
+			a.Log.Warn("get_store for out-of-range delivery copy failed", "error", storeErr)
+			store = nil
 		}
+		msg := formatOutOfRangeDeliveryMessage(store)
 		_ = a.sendAndSaveTextMessage(account, contact, msg)
 		a.sendDeliveryModeButtons(account, contact)
 		st.Step = "delivery_mode"
