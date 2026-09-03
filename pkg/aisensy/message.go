@@ -218,7 +218,7 @@ func (c *Client) SendAddressMessage(ctx context.Context, account *whatsapp.Accou
 	if strings.TrimSpace(bodyText) == "" {
 		return "", fmt.Errorf("body text is required")
 	}
-	paramJSON, err := whatsapp.EncodeAddressMessageParameters(params)
+	paramObj, err := whatsapp.EncodeAddressMessageParameters(params)
 	if err != nil {
 		return "", err
 	}
@@ -231,7 +231,7 @@ func (c *Client) SendAddressMessage(ctx context.Context, account *whatsapp.Accou
 			"body": map[string]any{"text": bodyText},
 			"action": map[string]any{
 				"name":       "address_message",
-				"parameters": paramJSON,
+				"parameters": paramObj,
 			},
 		},
 	}

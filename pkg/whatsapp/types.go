@@ -43,12 +43,14 @@ type AddressMessageParams struct {
 	ValidationErrors map[string]string // field -> error text shown on the form
 }
 
-// EncodeAddressMessageParameters serializes action.parameters as a JSON string.
-// Meta and AiSensy reject a nested object here with (#131009) Parameter value is not valid.
-func EncodeAddressMessageParameters(params AddressMessageParams) (string, error) {
+// EncodeAddressMessageParameters builds the action.parameters object for a
+// WhatsApp Cloud API address_message interactive. Parameters must be a nested
+// object (map), NOT a JSON-encoded string — the On-Premises string format
+// causes (#131009) Parameter value is not valid on Cloud API / AiSensy.
+func EncodeAddressMessageParameters(params AddressMessageParams) (map[string]any, error) {
 	country := strings.TrimSpace(params.Country)
 	if country == "" {
-		return "", fmt.Errorf("country is required")
+		return nil, fmt.Errorf("country is required")
 	}
 	payload := map[string]any{"country": country}
 	if vals := compactStringMap(params.Values); len(vals) > 0 {
@@ -57,11 +59,7 @@ func EncodeAddressMessageParameters(params AddressMessageParams) (string, error)
 	if errs := compactStringMap(params.ValidationErrors); len(errs) > 0 {
 		payload["validation_errors"] = errs
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
+	return payload, nil
 }
 
 func compactStringMap(in map[string]string) map[string]string {
