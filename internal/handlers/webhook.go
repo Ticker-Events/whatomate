@@ -518,6 +518,10 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 
 	a.Log.Info("Updated message status", "message_id", message.ID, "status", statusValue)
 
+	if newStatus == models.MessageStatusFailed && len(errors) > 0 && errors[0].Code == whatsappAddressIncapableCode {
+		a.fallbackCheckoutAddressOnIncapable(&message)
+	}
+
 	// Update campaign stats and recipient status if this is a campaign message
 	if message.Metadata != nil {
 		if campaignID, ok := message.Metadata["campaign_id"].(string); ok && campaignID != "" {
@@ -665,4 +669,43 @@ func (a *App) processMarketingPreference(phoneNumberID, userPhone, bsuid, value 
 		"bsuid", bsuid,
 		"opt_out", optOut,
 	)
+}
+
+// fallbackCheckoutAddressOnIncapable sends the free-text address prompt when
+// WhatsApp drops an address_message (error 1026 Receiver Incapable).
+func (a *App) fallbackCheckoutAddressOnIncapable(message *models.Message) {
+	if message == nil || message.InteractiveData == nil {
+		return
+	}
+	typ, _ := message.InteractiveData["type"].(string)
+	if typ != "address_message" {
+		return
+	}
+
+	var session models.ChatbotSession
+	if err := a.DB.Where(
+		"contact_id = ? AND organization_id = ? AND whats_app_account = ? AND status = ?",
+		message.ContactID, message.OrganizationID, message.WhatsAppAccount, models.SessionStatusActive,
+	).Order("last_activity_at DESC").First(&session).Error; err != nil {
+		return
+	}
+	st := getCheckoutState(&session)
+	if st == nil || !isCheckoutAddressStep(st.Step) {
+		return
+	}
+
+	var contact models.Contact
+	if err := a.DB.First(&contact, "id = ?", message.ContactID).Error; err != nil {
+		return
+	}
+	var account models.WhatsAppAccount
+	if err := a.DB.Where("organization_id = ? AND name = ?", message.OrganizationID, message.WhatsAppAccount).First(&account).Error; err != nil {
+		return
+	}
+
+	a.Log.Info("address_message incapable; falling back to text prompt",
+		"contact_id", contact.ID,
+		"message_id", message.ID,
+	)
+	_ = a.sendAndSaveTextMessage(&account, &contact, checkoutAddressPrompt)
 }

@@ -213,6 +213,67 @@ func (c *Client) SendLocationRequest(ctx context.Context, account *Account, rcpt
 	return messageID, nil
 }
 
+// SendAddressMessage sends an interactive address_message so the user can
+// fill WhatsApp's India address form instead of typing a free-form address.
+func (c *Client) SendAddressMessage(ctx context.Context, account *Account, rcpt Recipient, bodyText string, params AddressMessageParams) (string, error) {
+	if strings.TrimSpace(bodyText) == "" {
+		return "", fmt.Errorf("body text is required")
+	}
+	country := strings.TrimSpace(params.Country)
+	if country == "" {
+		return "", fmt.Errorf("country is required")
+	}
+
+	parameters := map[string]any{"country": country}
+	if len(params.Values) > 0 {
+		parameters["values"] = params.Values
+	}
+	if len(params.ValidationErrors) > 0 {
+		parameters["validation_errors"] = params.ValidationErrors
+	}
+
+	interactive := map[string]any{
+		"type": "address_message",
+		"body": map[string]any{
+			"text": bodyText,
+		},
+		"action": map[string]any{
+			"name":       "address_message",
+			"parameters": parameters,
+		},
+	}
+
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"recipient_type":    "individual",
+		"type":              "interactive",
+		"interactive":       interactive,
+	}
+	rcpt.SetOnPayload(payload)
+
+	url := c.buildMessagesURL(account)
+	c.Log.Debug("Sending address message", "phone", rcpt.Phone)
+
+	respBody, err := c.doRequest(ctx, "POST", url, payload, account.AccessToken)
+	if err != nil {
+		c.Log.Error("Failed to send address message", "error", err, "phone", rcpt.Phone)
+		return "", fmt.Errorf("failed to send address message: %w", err)
+	}
+
+	var resp MetaAPIResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if len(resp.Messages) == 0 {
+		return "", fmt.Errorf("no message ID in response")
+	}
+
+	messageID := resp.Messages[0].ID
+	c.Log.Info("Address message sent", "message_id", messageID, "phone", rcpt.Phone)
+	return messageID, nil
+}
+
 // SendCTAURLButton sends an interactive message with a CTA URL button
 // This opens a URL when clicked instead of sending a reply
 func (c *Client) SendCTAURLButton(ctx context.Context, account *Account, rcpt Recipient, bodyText, buttonText, url string) (string, error) {

@@ -178,8 +178,9 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	buttonID := "" // Track button/list ID for conditional routing
 	var mediaInfo *MediaInfo
 
-	// Track flow response data for WhatsApp Flow forms
+	// Track flow response data for WhatsApp Flow forms (and address_message NFM replies)
 	var flowResponseData map[string]any
+	nfmName := ""
 
 	if msg.Type == "text" && msg.Text != nil {
 		messageText = msg.Text.Body
@@ -201,11 +202,15 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 			buttonID = msg.Interactive.ListReply.ID
 			messageType = "button_reply"
 		}
-		// Handle WhatsApp Flow reply (nfm_reply)
+		// Handle WhatsApp Flow / address_message reply (nfm_reply)
 		if msg.Interactive.NFMReply != nil {
-			messageText = msg.Interactive.NFMReply.Body
-			messageType = "nfm_reply"
 			nfm := msg.Interactive.NFMReply
+			nfmName = nfm.Name
+			messageType = "nfm_reply"
+			messageText = nfm.Body
+			if messageText == "" && nfm.Name == "address_message" {
+				messageText = "[address submitted]"
+			}
 			// Parse the response JSON to extract form data
 			if nfm.ResponseJSON != "" {
 				var responseData map[string]any
@@ -412,6 +417,13 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// Location pin during checkout (before text handlers treat JSON as address).
 	if msg.Type == "location" && msg.Location != nil {
 		if a.handleCheckoutLocationPin(account, contact, session, settings, msg.Location.Latitude, msg.Location.Longitude) {
+			return
+		}
+	}
+
+	// WhatsApp address form submission during checkout.
+	if messageType == "nfm_reply" {
+		if a.handleCheckoutAddressMessage(account, contact, session, settings, nfmName, flowResponseData) {
 			return
 		}
 	}
@@ -825,6 +837,33 @@ func (a *App) sendAndSaveLocationRequest(account *models.WhatsAppAccount, contac
 		BodyText:        bodyText,
 	}, ChatbotSendOptions())
 	return err
+}
+
+// sendAndSaveAddressMessage sends WhatsApp's India address form and saves it.
+// Returns an error if the Cloud API send fails so checkout can fall back to text.
+func (a *App) sendAndSaveAddressMessage(account *models.WhatsAppAccount, contact *models.Contact, bodyText string, params whatsapp.AddressMessageParams) error {
+	ctx := context.Background()
+	msg, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
+		Account:         account,
+		Contact:         contact,
+		Type:            models.MessageTypeInteractive,
+		InteractiveType: "address_message",
+		BodyText:        bodyText,
+		AddressMessage:  params,
+	}, ChatbotSendOptions())
+	if err != nil {
+		return err
+	}
+	if a.DB != nil && msg != nil {
+		var fresh models.Message
+		if dbErr := a.DB.First(&fresh, "id = ?", msg.ID).Error; dbErr == nil && fresh.Status == models.MessageStatusFailed {
+			if strings.TrimSpace(fresh.ErrorMessage) != "" {
+				return fmt.Errorf("%s", fresh.ErrorMessage)
+			}
+			return fmt.Errorf("address_message send failed")
+		}
+	}
+	return nil
 }
 
 // sendAndSaveCTAURLButton sends a CTA URL button message and saves it to the database

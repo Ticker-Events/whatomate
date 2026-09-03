@@ -34,6 +34,14 @@ type Button struct {
 	URL   string `json:"url,omitempty"`  // URL for type="url" buttons
 }
 
+// AddressMessageParams are optional prefill and validation fields for an
+// India address_message interactive (WhatsApp Cloud API).
+type AddressMessageParams struct {
+	Country          string            // ISO code; required by Meta (e.g. "IN")
+	Values           map[string]string // prefill: name, phone_number, city, ...
+	ValidationErrors map[string]string // field -> error text shown on the form
+}
+
 // MetaAPIResponse represents a successful API response from Meta
 type MetaAPIResponse struct {
 	Messages []struct {

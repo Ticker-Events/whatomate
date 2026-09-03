@@ -430,6 +430,76 @@ func TestClient_SendLocationRequest(t *testing.T) {
 	assert.Equal(t, "send_location", action["name"])
 }
 
+func TestClient_SendAddressMessage(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"messages": []map[string]string{{"id": "wamid.addr1"}},
+		})
+	}))
+	defer server.Close()
+
+	log := testutil.NopLogger()
+	client := whatsapp.NewWithTimeout(log, 5*time.Second)
+	client.HTTPClient = &http.Client{
+		Transport: &testServerTransport{serverURL: server.URL},
+	}
+	account := &whatsapp.Account{
+		PhoneID:     "123456789",
+		BusinessID:  "987654321",
+		APIVersion:  "v21.0",
+		AccessToken: "test-token",
+	}
+	msgID, err := client.SendAddressMessage(
+		testutil.TestContext(t),
+		account,
+		whatsapp.Recipient{Phone: "919999999999"},
+		"Share your delivery address",
+		whatsapp.AddressMessageParams{
+			Country: "IN",
+			Values: map[string]string{
+				"name":         "Roopak",
+				"phone_number": "+919999999999",
+			},
+			ValidationErrors: map[string]string{
+				"in_pin_code": "We could not locate this pin code.",
+			},
+		},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "wamid.addr1", msgID)
+	interactive, ok := capturedBody["interactive"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "address_message", interactive["type"])
+	action, ok := interactive["action"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "address_message", action["name"])
+	params, ok := action["parameters"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "IN", params["country"])
+	values, ok := params["values"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Roopak", values["name"])
+	errs, ok := params["validation_errors"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "We could not locate this pin code.", errs["in_pin_code"])
+}
+
+func TestClient_SendAddressMessage_RequiresCountry(t *testing.T) {
+	t.Parallel()
+
+	log := testutil.NopLogger()
+	client := whatsapp.NewWithTimeout(log, 5*time.Second)
+	account := &whatsapp.Account{PhoneID: "1", AccessToken: "t"}
+	_, err := client.SendAddressMessage(testutil.TestContext(t), account, whatsapp.Recipient{Phone: "91"}, "Share address", whatsapp.AddressMessageParams{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "country is required")
+}
+
 func TestClient_SendCTAURLButton(t *testing.T) {
 	t.Parallel()
 
