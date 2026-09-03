@@ -269,6 +269,8 @@ func TestBuildCommerceSystemPrompt(t *testing.T) {
 	assert.Contains(t, p, "get_order_status")
 	assert.Contains(t, p, "Never ask for or mention internal uuid")
 	assert.Contains(t, p, "₹")
+	assert.Contains(t, p, "get_store.address")
+	assert.Contains(t, p, "out_of_range")
 }
 
 func TestCompactOrderCreateResultUsesDisplayUIDAndPaymentURL(t *testing.T) {
@@ -452,6 +454,129 @@ func TestFormatCommerceWelcomeCategoryList(t *testing.T) {
 		assert.NotContains(t, got, commerceWelcomeMoreLabel)
 		assert.Equal(t, 10, strings.Count(got, "• "))
 	})
+}
+
+func TestCommerceSystemAddendumOutOfRangeGuidance(t *testing.T) {
+	assert.Contains(t, commerceSystemAddendum, "get_store.address")
+	assert.Contains(t, commerceSystemAddendum, "free_delivery_radius")
+	assert.Contains(t, commerceSystemAddendum, "delivery_radius")
+	assert.Contains(t, commerceSystemAddendum, "out_of_range")
+	assert.Contains(t, commerceSystemAddendum, "Store Pickup")
+}
+
+func TestFormatOutOfRangeDeliveryMessage(t *testing.T) {
+	t.Run("full store fields", func(t *testing.T) {
+		got := formatOutOfRangeDeliveryMessage(map[string]any{
+			"address":              "Vadakara, Kozhikode",
+			"free_delivery_radius": 8,
+			"delivery_radius":      16,
+		})
+		assert.Equal(t, strings.TrimSpace(`
+Sorry, we're currently unable to deliver to this location.
+
+Our store is located in Vadakara, Kozhikode. We offer:
+
+- Free delivery within 8 km of our store
+- Delivery up to 16 km for an additional delivery fee
+
+Please provide a location within our delivery radius, or choose Store Pickup as your preferred option.
+
+Thank you for your understanding.
+`), got)
+	})
+
+	t.Run("omits free line when radius is zero", func(t *testing.T) {
+		got := formatOutOfRangeDeliveryMessage(map[string]any{
+			"address":              "MG Road",
+			"free_delivery_radius": 0,
+			"delivery_radius":      float64(12),
+		})
+		assert.Contains(t, got, "Our store is located in MG Road.")
+		assert.Contains(t, got, "Delivery up to 12 km")
+		assert.NotContains(t, got, "Free delivery")
+	})
+
+	t.Run("omits city when address is missing", func(t *testing.T) {
+		got := formatOutOfRangeDeliveryMessage(map[string]any{
+			"free_delivery_radius": 5,
+			"delivery_radius":      10,
+		})
+		assert.NotContains(t, got, "Our store is located in")
+		assert.Contains(t, got, "We offer:")
+		assert.Contains(t, got, "Free delivery within 5 km")
+		assert.Contains(t, got, "Store Pickup")
+	})
+
+	t.Run("nil store still offers pickup", func(t *testing.T) {
+		got := formatOutOfRangeDeliveryMessage(nil)
+		assert.Contains(t, got, "unable to deliver")
+		assert.Contains(t, got, "Store Pickup")
+		assert.NotContains(t, got, "We offer:")
+		assert.NotContains(t, got, "located in")
+	})
+}
+
+func TestToolCheckDeliveryEligibilityOutOfRangeUsesStoreCopy(t *testing.T) {
+	stub := &stubCommerceBackend{
+		checkDeliveryFn: func(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error) {
+			assert.Equal(t, "21", storeID)
+			assert.Equal(t, 11.2, latitude)
+			assert.Equal(t, 75.8, longitude)
+			return map[string]any{
+				"deliverable":        false,
+				"zone":               "out_of_range",
+				"message":            "Sorry, we can’t deliver to this location yet.",
+				"shipping_fee_paise": 0,
+			}, nil
+		},
+		storeFn: func(ctx context.Context, storeID string) (map[string]any, error) {
+			assert.Equal(t, "21", storeID)
+			return map[string]any{
+				"address":              "Vadakara, Kozhikode",
+				"free_delivery_radius": 8,
+				"delivery_radius":      16,
+			}, nil
+		},
+	}
+	app := testApp()
+	rt := &commerceRuntime{Client: stub, StoreID: "21"}
+	out := app.executeCommerceTool(rt, "check_delivery_eligibility", `{"latitude":11.2,"longitude":75.8}`)
+	assert.Contains(t, out, "Vadakara, Kozhikode")
+	assert.Contains(t, out, "8 km")
+	assert.Contains(t, out, "16 km")
+	assert.Contains(t, out, "unable to deliver")
+	assert.NotContains(t, out, "we can’t deliver to this location yet")
+}
+
+func TestToolCheckDeliveryEligibilityInRangeKeepsToolMessage(t *testing.T) {
+	storeCalled := false
+	stub := &stubCommerceBackend{
+		checkDeliveryFn: func(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error) {
+			return map[string]any{
+				"deliverable":        true,
+				"zone":               "free",
+				"message":            "Free delivery to this location.",
+				"shipping_fee_paise": 0,
+			}, nil
+		},
+		storeFn: func(ctx context.Context, storeID string) (map[string]any, error) {
+			storeCalled = true
+			return map[string]any{"address": "Should not be used"}, nil
+		},
+	}
+	app := testApp()
+	rt := &commerceRuntime{Client: stub, StoreID: "21"}
+	out := app.executeCommerceTool(rt, "check_delivery_eligibility", `{"latitude":11.2,"longitude":75.8}`)
+	assert.Contains(t, out, "Free delivery to this location.")
+	assert.NotContains(t, out, "Should not be used")
+	assert.False(t, storeCalled)
+}
+
+func TestToolCheckDeliveryEligibilityRequiresCoords(t *testing.T) {
+	app := testApp()
+	rt := &commerceRuntime{Client: &stubCommerceBackend{}, StoreID: "21"}
+	out := app.executeCommerceTool(rt, "check_delivery_eligibility", `{}`)
+	assert.Contains(t, out, "latitude and longitude are required")
 }
 
 func TestAppendCommerceWelcomeCategories(t *testing.T) {
