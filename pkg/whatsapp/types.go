@@ -44,9 +44,7 @@ type AddressMessageParams struct {
 }
 
 // EncodeAddressMessageParameters builds the action.parameters object for a
-// WhatsApp Cloud API address_message interactive. Parameters must be a nested
-// object (map), NOT a JSON-encoded string — the On-Premises string format
-// causes (#131009) Parameter value is not valid on Cloud API / AiSensy.
+// WhatsApp address interactive. Cloud API expects a nested object here.
 func EncodeAddressMessageParameters(params AddressMessageParams) (map[string]any, error) {
 	country := strings.TrimSpace(params.Country)
 	if country == "" {
@@ -60,6 +58,30 @@ func EncodeAddressMessageParameters(params AddressMessageParams) (map[string]any
 		payload["validation_errors"] = errs
 	}
 	return payload, nil
+}
+
+// AddressMessageInteractive builds the interactive payload for an India/Singapore
+// address capture form.
+//
+// interactive.type must be "native_flow" (not "address_message"). Graph/AiSensy
+// reject type "address_message" with (#131009) Parameter value is not valid —
+// details typically say that interactive type is unsupported.
+func AddressMessageInteractive(bodyText string, params AddressMessageParams) (map[string]any, error) {
+	if strings.TrimSpace(bodyText) == "" {
+		return nil, fmt.Errorf("body text is required")
+	}
+	paramObj, err := EncodeAddressMessageParameters(params)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"type": "native_flow",
+		"body": map[string]any{"text": bodyText},
+		"action": map[string]any{
+			"name":       "address_message",
+			"parameters": paramObj,
+		},
+	}, nil
 }
 
 func compactStringMap(in map[string]string) map[string]string {

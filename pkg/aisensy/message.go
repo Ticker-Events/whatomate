@@ -213,12 +213,9 @@ func (c *Client) SendLocationRequest(ctx context.Context, account *whatsapp.Acco
 	return c.sendMessage(ctx, account, payload)
 }
 
-// SendAddressMessage sends an interactive address_message via AiSensy.
+// SendAddressMessage sends an interactive address form via AiSensy.
 func (c *Client) SendAddressMessage(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText string, params whatsapp.AddressMessageParams) (string, error) {
-	if strings.TrimSpace(bodyText) == "" {
-		return "", fmt.Errorf("body text is required")
-	}
-	paramObj, err := whatsapp.EncodeAddressMessageParameters(params)
+	interactive, err := whatsapp.AddressMessageInteractive(bodyText, params)
 	if err != nil {
 		return "", err
 	}
@@ -226,14 +223,7 @@ func (c *Client) SendAddressMessage(ctx context.Context, account *whatsapp.Accou
 		"messaging_product": "whatsapp",
 		"recipient_type":    "individual",
 		"type":              "interactive",
-		"interactive": map[string]any{
-			"type": "address_message",
-			"body": map[string]any{"text": bodyText},
-			"action": map[string]any{
-				"name":       "address_message",
-				"parameters": paramObj,
-			},
-		},
+		"interactive":       interactive,
 	}
 	rcpt.SetOnPayload(payload)
 	return c.sendMessage(ctx, account, payload)

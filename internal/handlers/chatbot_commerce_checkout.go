@@ -845,17 +845,17 @@ func addressMessagePrefill(contact *models.Contact, st *checkoutState, extra map
 }
 
 // indiaE164Phone formats an Indian WhatsApp id as Meta expects in address_message values.
+// Returns empty string when the number is not a valid Indian mobile E.164 value —
+// Meta rejects invalid phone_number prefills with (#131009).
 func indiaE164Phone(phone string) string {
 	d := digitsOnly(phone)
 	switch {
-	case len(d) == 12 && strings.HasPrefix(d, "91"):
+	case len(d) == 12 && strings.HasPrefix(d, "91") && d[2] >= '6' && d[2] <= '9':
 		return "+" + d
 	case len(d) == 10 && d[0] >= '6' && d[0] <= '9':
 		return "+91" + d
-	case d == "":
-		return ""
 	default:
-		return "+" + d
+		return ""
 	}
 }
 

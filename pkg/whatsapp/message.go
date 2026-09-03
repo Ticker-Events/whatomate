@@ -213,26 +213,12 @@ func (c *Client) SendLocationRequest(ctx context.Context, account *Account, rcpt
 	return messageID, nil
 }
 
-// SendAddressMessage sends an interactive address_message so the user can
+// SendAddressMessage sends an interactive address form so the user can
 // fill WhatsApp's India address form instead of typing a free-form address.
 func (c *Client) SendAddressMessage(ctx context.Context, account *Account, rcpt Recipient, bodyText string, params AddressMessageParams) (string, error) {
-	if strings.TrimSpace(bodyText) == "" {
-		return "", fmt.Errorf("body text is required")
-	}
-	paramObj, err := EncodeAddressMessageParameters(params)
+	interactive, err := AddressMessageInteractive(bodyText, params)
 	if err != nil {
 		return "", err
-	}
-
-	interactive := map[string]any{
-		"type": "address_message",
-		"body": map[string]any{
-			"text": bodyText,
-		},
-		"action": map[string]any{
-			"name":       "address_message",
-			"parameters": paramObj,
-		},
 	}
 
 	payload := map[string]any{
