@@ -104,9 +104,7 @@ func (c *Client) syncContactFromMessage(ctx context.Context, orgID uuid.UUID, ms
 		"lastMessageInfo": msgData,
 	}
 
-	if contact.AssignedUserID != nil {
-		contactData["assignedUserId"] = contact.AssignedUserID.String()
-	}
+	applyAssignedUserField(contactData, contact)
 	if contact.LastMessageAt != nil {
 		contactData["lastMessageAt"] = contact.LastMessageAt.UTC().Format(time.RFC3339)
 	} else {
@@ -152,9 +150,7 @@ func (c *Client) SyncContact(ctx context.Context, orgID uuid.UUID, contact *mode
 		"profileName":     profileName,
 		"whatsappAccount": contact.WhatsAppAccount,
 	}
-	if contact.AssignedUserID != nil {
-		contactData["assignedUserId"] = contact.AssignedUserID.String()
-	}
+	applyAssignedUserField(contactData, contact)
 	if contact.LastMessageAt != nil {
 		contactData["lastMessageAt"] = contact.LastMessageAt.UTC().Format(time.RFC3339)
 	}
@@ -184,6 +180,17 @@ func applyConversationWaitFields(data map[string]any, contact *models.Contact) {
 		return
 	}
 	data["awaitingReplySince"] = firestore.Delete
+}
+
+func applyAssignedUserField(data map[string]any, contact *models.Contact) {
+	if contact == nil || data == nil {
+		return
+	}
+	if contact.AssignedUserID != nil {
+		data["assignedUserId"] = contact.AssignedUserID.String()
+		return
+	}
+	data["assignedUserId"] = firestore.Delete
 }
 
 // applyChatbotPausedFields writes chatbot pause state in camelCase so it matches
@@ -221,9 +228,7 @@ func buildMessageData(orgID uuid.UUID, msg *models.Message, contact *models.Cont
 		"isReply":        msg.IsReply,
 	}
 
-	if contact.AssignedUserID != nil {
-		data["assignedUserId"] = contact.AssignedUserID.String()
-	}
+	applyAssignedUserField(data, contact)
 	if msg.MediaURL != "" {
 		data["mediaUrl"] = msg.MediaURL
 	}

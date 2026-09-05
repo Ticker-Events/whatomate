@@ -1169,6 +1169,9 @@ func (a *App) AssignContact(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to assign contact", nil, "")
 	}
 
+	a.DB.First(contact, contactID)
+	a.syncContactToFirestore(contact)
+
 	return r.SendEnvelope(map[string]any{
 		"message":          "Contact assigned successfully",
 		"assigned_user_id": req.UserID,
