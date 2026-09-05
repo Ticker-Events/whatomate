@@ -65,3 +65,25 @@ func TestApplyChatbotPausedFields_PausedWithoutTransferIDDeletesID(t *testing.T)
 func TestApplyChatbotPausedFields_NilData(t *testing.T) {
 	applyChatbotPausedFields(nil, true, nil)
 }
+
+func TestApplyAssignedUserField_WritesUserID(t *testing.T) {
+	userID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	data := map[string]any{}
+	applyAssignedUserField(data, &models.Contact{AssignedUserID: &userID})
+
+	assert.Equal(t, userID.String(), data["assignedUserId"])
+}
+
+func TestApplyAssignedUserField_DeletesWhenUnassigned(t *testing.T) {
+	data := map[string]any{}
+	applyAssignedUserField(data, &models.Contact{})
+
+	assert.Equal(t, gfirestore.Delete, data["assignedUserId"])
+}
+
+func TestApplyAssignedUserField_NilContact(t *testing.T) {
+	data := map[string]any{"keep": true}
+	applyAssignedUserField(data, nil)
+	assert.Equal(t, true, data["keep"])
+	assert.NotContains(t, data, "assignedUserId")
+}
