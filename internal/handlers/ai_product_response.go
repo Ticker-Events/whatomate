@@ -552,10 +552,12 @@ func (a *App) lookupCommerceProductSummary(ctx context.Context, account *models.
 	if err := a.DB.Where("organization_id = ?", account.OrganizationID).First(&settings).Error; err != nil {
 		return ticker.ProductSummary{}, false
 	}
+	settings.DecryptSecrets(a.Config.App.EncryptionKey)
 	rt := a.newCommerceRuntime(&settings, session)
 	if rt == nil || rt.Client == nil {
 		return ticker.ProductSummary{}, false
 	}
+	defer rt.Close()
 	raw, err := rt.Client.GetProduct(ctx, productID)
 	if err != nil {
 		a.Log.Debug("commerce get_product failed", "product_id", productID, "error", err)
@@ -663,6 +665,7 @@ func (a *App) handleAddToCartProductTap(account *models.WhatsAppAccount, contact
 		a.Log.Warn("add_to_cart without commerce runtime", "product_id", productID)
 		return
 	}
+	defer rt.Close()
 	raw, err := rt.Client.GetProduct(ctx, productID)
 	if err != nil {
 		a.Log.Warn("add_to_cart get_product failed", "product_id", productID, "error", err)
@@ -694,6 +697,7 @@ func (a *App) handleAddOptionTap(account *models.WhatsAppAccount, contact *model
 	if rt == nil {
 		return
 	}
+	defer rt.Close()
 	// Find product containing this option via cached offers or a broad search is expensive;
 	// stash pending product id on picker — store last picker product in session.
 	productID := getPendingPickerProductID(session)

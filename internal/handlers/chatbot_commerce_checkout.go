@@ -275,6 +275,7 @@ func (a *App) storeRequiresLocationBasedDelivery(session *models.ChatbotSession,
 	if rt == nil || rt.Client == nil {
 		return false
 	}
+	defer rt.Close()
 	store, err := rt.Client.GetStore(context.Background(), rt.StoreID)
 	if err != nil || store == nil {
 		a.Log.Warn("get_store for location_based_delivery failed; skipping pin check", "error", err)
@@ -328,6 +329,7 @@ func (a *App) commerceStoreMap(session *models.ChatbotSession, settings *models.
 	if rt == nil || rt.Client == nil {
 		return nil
 	}
+	defer rt.Close()
 	store, err := rt.Client.GetStore(context.Background(), rt.StoreID)
 	if err != nil || store == nil {
 		a.Log.Warn("get_store for checkout address failed", "error", err)
@@ -511,6 +513,7 @@ func (a *App) handleCheckoutLocationPin(account *models.WhatsAppAccount, contact
 		_ = a.sendAndSaveTextMessage(account, contact, "Checkout is not available right now. Please try again later.")
 		return true
 	}
+	defer rt.Close()
 
 	ctx := context.Background()
 	result, err := rt.Client.CheckDeliveryEligibility(ctx, rt.StoreID, lat, lng)
@@ -1097,6 +1100,7 @@ func (a *App) placeCheckoutOrder(account *models.WhatsAppAccount, contact *model
 		_ = a.sendAndSaveTextMessage(account, contact, "Checkout is not available right now. Please try again later.")
 		return
 	}
+	defer rt.Close()
 
 	items := cartOrderItems(session)
 	orderItems := make([]map[string]any, 0, len(items))

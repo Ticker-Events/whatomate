@@ -86,28 +86,36 @@ func TestNormalizeJSONRawMessage(t *testing.T) {
 
 func TestCompactStore(t *testing.T) {
 	out := CompactStore(map[string]any{
-		"id":                      float64(7),
-		"name":                    "Demo Store",
-		"description":             "Handmade goods",
-		"address":                 "Vadakara, Kozhikode",
-		"country":                 "IN",
-		"delivery_modes":          []any{"PICKUP_FROM_STORE"},
-		"delivery_radius":         float64(16),
-		"free_delivery_radius":    float64(8),
-		"location_based_delivery": true,
-		"logo":                    "https://example.com/logo.png",
-		"cover_image":             "https://example.com/cover.png",
+		"id":                        float64(7),
+		"name":                      "Demo Store",
+		"description":               "Handmade goods",
+		"address":                   "Vadakara, Kozhikode",
+		"country":                   "IN",
+		"delivery_modes":            []any{"PICKUP_FROM_STORE"},
+		"delivery_radius":           float64(16),
+		"free_delivery_radius":      float64(8),
+		"location_based_delivery":   true,
+		"commerce_contract_version": "1",
+		"capabilities": map[string]any{
+			"fulfillment_slots": false,
+		},
+		"logo":        "https://example.com/logo.png",
+		"cover_image": "https://example.com/cover.png",
 	})
 	assert.Equal(t, map[string]any{
-		"id":                      float64(7),
-		"name":                    "Demo Store",
-		"description":             "Handmade goods",
-		"address":                 "Vadakara, Kozhikode",
-		"country":                 "IN",
-		"delivery_modes":          []any{"PICKUP_FROM_STORE"},
-		"delivery_radius":         float64(16),
-		"free_delivery_radius":    float64(8),
-		"location_based_delivery": true,
+		"id":                        float64(7),
+		"name":                      "Demo Store",
+		"description":               "Handmade goods",
+		"address":                   "Vadakara, Kozhikode",
+		"country":                   "IN",
+		"delivery_modes":            []any{"PICKUP_FROM_STORE"},
+		"delivery_radius":           float64(16),
+		"free_delivery_radius":      float64(8),
+		"location_based_delivery":   true,
+		"commerce_contract_version": "1",
+		"capabilities": map[string]any{
+			"fulfillment_slots": false,
+		},
 	}, out)
 	assert.NotContains(t, out, "logo")
 }
@@ -128,4 +136,26 @@ func TestCompactCategory(t *testing.T) {
 		"listing_priority": float64(2),
 	}, out)
 	assert.NotContains(t, out, "image")
+}
+
+func TestCloneMapDoesNotShareNestedValues(t *testing.T) {
+	original := map[string]any{
+		"name":  "Demo",
+		"modes": []any{"PICKUP_FROM_STORE"},
+		"meta":  map[string]any{"country": "IN"},
+	}
+	cloned := cloneMap(original)
+
+	cloned["modes"].([]any)[0] = "DELIVERY_TO_LOCATION"
+	cloned["meta"].(map[string]any)["country"] = "US"
+
+	assert.Equal(t, "PICKUP_FROM_STORE", original["modes"].([]any)[0])
+	assert.Equal(t, "IN", original["meta"].(map[string]any)["country"])
+}
+
+func TestReadOnlyToolsAreSafeToRetry(t *testing.T) {
+	assert.True(t, isReadOnlyTool("get_store"))
+	assert.True(t, isReadOnlyTool("list_products"))
+	assert.False(t, isReadOnlyTool("create_order"))
+	assert.False(t, isReadOnlyTool("update_order"))
 }

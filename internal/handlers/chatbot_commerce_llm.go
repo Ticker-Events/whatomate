@@ -20,6 +20,7 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 	rt := a.newCommerceRuntime(settings, session)
 
 	if rt != nil {
+		defer rt.Close()
 		switch settings.AI.Provider {
 		case models.AIProviderOpenAI:
 			return a.generateOpenAIWithTools(settings, session, userMessage, contextData, rt)
