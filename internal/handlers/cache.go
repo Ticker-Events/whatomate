@@ -58,6 +58,7 @@ func (a *App) getChatbotSettingsCached(orgID uuid.UUID, whatsAppAccount string) 
 			// Restore secrets from the cache wrapper
 			cacheData.AI.APIKey = cacheData.AIAPIKey
 			cacheData.AI.CommerceMCPAPIKey = cacheData.CommerceMCPAPIKey
+			cacheData.DecryptSecrets(a.Config.App.EncryptionKey)
 			return &cacheData.ChatbotSettings, nil
 		}
 	}
@@ -83,6 +84,7 @@ func (a *App) getChatbotSettingsCached(orgID uuid.UUID, whatsAppAccount string) 
 		a.Redis.Set(ctx, cacheKey, data, settingsCacheTTL)
 	}
 
+	settings.DecryptSecrets(a.Config.App.EncryptionKey)
 	return &settings, nil
 }
 

@@ -134,6 +134,9 @@ func runServer(args []string) {
 	if cfg.JWT.Secret == "" {
 		lo.Warn("JWT secret is empty, using a random secret (tokens will not persist across restarts)")
 	}
+	if cfg.App.Environment == "production" && len(cfg.App.EncryptionKey) < 32 {
+		lo.Fatal("app.encryption_key must be at least 32 characters in production")
+	}
 
 	// Warn if debug mode is on in production
 	if cfg.App.Environment == "production" && cfg.App.Debug {
@@ -170,6 +173,9 @@ func runServer(args []string) {
 		// Idempotent — re-running is a no-op once every row is converted.
 		if err := handlers.BackfillChatbotFlowGraph(db, lo); err != nil {
 			lo.Fatal("Chatbot flow graph backfill failed", "error", err)
+		}
+		if err := database.EncryptLegacyChatbotSecrets(db, cfg.App.EncryptionKey); err != nil {
+			lo.Fatal("Chatbot secret encryption migration failed", "error", err)
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
+	appcrypto "github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
@@ -127,6 +128,45 @@ func AutoMigrate(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+// EncryptLegacyChatbotSecrets migrates plaintext AI credentials in place.
+// It is idempotent and runs inside one transaction so a partial rollout cannot
+// leave a mixture caused by an interrupted migration.
+func EncryptLegacyChatbotSecrets(db *gorm.DB, encryptionKey string) error {
+	if encryptionKey == "" {
+		return fmt.Errorf("app.encryption_key is required to encrypt chatbot secrets")
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var settings []models.ChatbotSettings
+		if err := tx.Find(&settings).Error; err != nil {
+			return fmt.Errorf("load chatbot settings: %w", err)
+		}
+
+		for i := range settings {
+			updates := map[string]any{}
+			for column, value := range map[string]string{
+				"ai_api_key":              settings[i].AI.APIKey,
+				"ai_commerce_mcp_api_key": settings[i].AI.CommerceMCPAPIKey,
+			} {
+				if value == "" || appcrypto.IsEncrypted(value) {
+					continue
+				}
+				encrypted, err := appcrypto.Encrypt(value, encryptionKey)
+				if err != nil {
+					return fmt.Errorf("encrypt %s for chatbot settings %s: %w", column, settings[i].ID, err)
+				}
+				updates[column] = encrypted
+			}
+			if len(updates) > 0 {
+				if err := tx.Model(&settings[i]).Updates(updates).Error; err != nil {
+					return fmt.Errorf("update chatbot settings %s: %w", settings[i].ID, err)
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // RunMigrationWithProgress runs migrations with a progress bar display

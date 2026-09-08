@@ -9,19 +9,32 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 )
 
-const defaultTimeout = 30 * time.Second
+const (
+	defaultTimeout = 30 * time.Second
+	storeCacheTTL  = 30 * time.Second
+)
 
 // Client calls tiqr-buyer MCP tools (list_products, get_product, create_order, get_order).
 type Client struct {
 	Endpoint   string
 	APIKey     string
 	HTTPClient *http.Client
+
+	mu         sync.Mutex
+	session    *mcp.ClientSession
+	storeCache map[string]storeCacheEntry
+}
+
+type storeCacheEntry struct {
+	value     map[string]any
+	expiresAt time.Time
 }
 
 // NewClient returns an MCP client for the given streamable-HTTP endpoint
@@ -44,7 +57,12 @@ func NewClient(endpoint, apiKey string, httpClient *http.Client) *Client {
 			},
 		}
 	}
-	return &Client{Endpoint: endpoint, APIKey: apiKey, HTTPClient: httpClient}
+	return &Client{
+		Endpoint:   endpoint,
+		APIKey:     apiKey,
+		HTTPClient: httpClient,
+		storeCache: make(map[string]storeCacheEntry),
+	}
 }
 
 type headerRoundTripper struct {
@@ -124,6 +142,15 @@ func (c *Client) GetStore(ctx context.Context, storeID string) (map[string]any, 
 	if err != nil || sid <= 0 {
 		return nil, fmt.Errorf("store_id is required")
 	}
+	cacheKey := strconv.Itoa(sid)
+	c.mu.Lock()
+	if cached, ok := c.storeCache[cacheKey]; ok && time.Now().Before(cached.expiresAt) {
+		value := cloneMap(cached.value)
+		c.mu.Unlock()
+		return value, nil
+	}
+	c.mu.Unlock()
+
 	raw, err := c.callTool(ctx, "get_store", map[string]any{"store_id": sid})
 	if err != nil {
 		return nil, err
@@ -132,7 +159,14 @@ func (c *Client) GetStore(ctx context.Context, storeID string) (map[string]any, 
 	if !ok {
 		return nil, fmt.Errorf("unexpected get_store result type %T", raw)
 	}
-	return CompactStore(m), nil
+	store := CompactStore(m)
+	c.mu.Lock()
+	c.storeCache[cacheKey] = storeCacheEntry{
+		value:     cloneMap(store),
+		expiresAt: time.Now().Add(storeCacheTTL),
+	}
+	c.mu.Unlock()
+	return store, nil
 }
 
 // ListCategories maps to MCP list_categories and returns compact category rows.
@@ -194,6 +228,12 @@ func CompactStore(m map[string]any) map[string]any {
 	}
 	if modes, ok := m["delivery_modes"]; ok {
 		out["delivery_modes"] = modes
+	}
+	if version, ok := m["commerce_contract_version"]; ok {
+		out["commerce_contract_version"] = version
+	}
+	if capabilities, ok := m["capabilities"]; ok {
+		out["capabilities"] = capabilities
 	}
 	for _, key := range []string{
 		"address",
@@ -312,35 +352,76 @@ func (c *Client) callTool(ctx context.Context, name string, args map[string]any)
 		return nil, fmt.Errorf("mcp client is not configured")
 	}
 
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "whatomate-commerce",
-		Version: "1.0.0",
-	}, nil)
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	transport := &mcp.StreamableClientTransport{
-		Endpoint:             c.Endpoint,
-		HTTPClient:           c.HTTPClient,
-		DisableStandaloneSSE: true, // FastMCP runs with stateless_http=True
-		MaxRetries:           -1,
+	result, err := c.callToolLocked(ctx, name, args)
+	if err != nil && isReadOnlyTool(name) {
+		c.closeSessionLocked()
+		result, err = c.callToolLocked(ctx, name, args)
 	}
-
-	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
-		return nil, fmt.Errorf("mcp connect: %w", err)
-	}
-	defer func() { _ = session.Close() }()
-
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      name,
-		Arguments: args,
-	})
-	if err != nil {
+		c.closeSessionLocked()
 		return nil, fmt.Errorf("mcp tool %s: %w", name, err)
 	}
 	if result.IsError {
 		return nil, fmt.Errorf("mcp tool %s failed: %s", name, toolErrorText(result))
 	}
 	return parseToolResult(result)
+}
+
+func (c *Client) callToolLocked(ctx context.Context, name string, args map[string]any) (*mcp.CallToolResult, error) {
+	if c.session == nil {
+		client := mcp.NewClient(&mcp.Implementation{
+			Name:    "whatomate-commerce",
+			Version: "1.0.0",
+		}, nil)
+		transport := &mcp.StreamableClientTransport{
+			Endpoint:             c.Endpoint,
+			HTTPClient:           c.HTTPClient,
+			DisableStandaloneSSE: true, // FastMCP runs with stateless_http=True
+			MaxRetries:           -1,
+		}
+		session, err := client.Connect(ctx, transport, nil)
+		if err != nil {
+			return nil, fmt.Errorf("mcp connect: %w", err)
+		}
+		c.session = session
+	}
+
+	return c.session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      name,
+		Arguments: args,
+	})
+}
+
+// Close releases the reusable MCP session. A later call can reconnect.
+func (c *Client) Close() error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closeSessionLocked()
+}
+
+func (c *Client) closeSessionLocked() error {
+	if c.session == nil {
+		return nil
+	}
+	err := c.session.Close()
+	c.session = nil
+	return err
+}
+
+func isReadOnlyTool(name string) bool {
+	switch name {
+	case "get_store", "list_categories", "list_products", "get_product",
+		"check_delivery_eligibility", "lookup_order_status", "get_order":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseToolResult(result *mcp.CallToolResult) (any, error) {
@@ -432,6 +513,26 @@ func normalizeJSON(v any) any {
 	default:
 		return v
 	}
+}
+
+func cloneMap(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		switch typed := value.(type) {
+		case map[string]any:
+			dst[key] = cloneMap(typed)
+		case []any:
+			items := make([]any, len(typed))
+			copy(items, typed)
+			dst[key] = items
+		default:
+			dst[key] = value
+		}
+	}
+	return dst
 }
 
 func asObjectList(v any) ([]map[string]any, error) {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
+	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -179,18 +180,18 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AssignToSameAgent:            settings.AgentAssignment.AssignToSameAgent,
 		AgentCurrentConversationOnly: settings.AgentAssignment.CurrentConversationOnly,
 		// AI
-		AIEnabled:              settings.AI.Enabled,
-		AIProvider:             settings.AI.Provider,
-		AIModel:                settings.AI.Model,
-		AIMaxTokens:            settings.AI.MaxTokens,
-		AISystemPrompt:         settings.AI.SystemPrompt,
-		AICommerceEnabled:      settings.AI.CommerceEnabled,
-		AICommerceMCPURL:       settings.AI.CommerceMCPURL,
-		AICommerceStoreID:      settings.AI.CommerceStoreID,
-		AICommerceMCPAPIKeySet: strings.TrimSpace(settings.AI.CommerceMCPAPIKey) != "",
-		AICommerceWelcomeMessage: settings.AI.CommerceWelcomeMessage,
+		AIEnabled:                    settings.AI.Enabled,
+		AIProvider:                   settings.AI.Provider,
+		AIModel:                      settings.AI.Model,
+		AIMaxTokens:                  settings.AI.MaxTokens,
+		AISystemPrompt:               settings.AI.SystemPrompt,
+		AICommerceEnabled:            settings.AI.CommerceEnabled,
+		AICommerceMCPURL:             settings.AI.CommerceMCPURL,
+		AICommerceStoreID:            settings.AI.CommerceStoreID,
+		AICommerceMCPAPIKeySet:       strings.TrimSpace(settings.AI.CommerceMCPAPIKey) != "",
+		AICommerceWelcomeMessage:     settings.AI.CommerceWelcomeMessage,
 		AICommerceWelcomeGeneratedAt: settings.AI.CommerceWelcomeGeneratedAt,
-		AICommerceWelcomeStale: commerceWelcomeStale(settings.AI),
+		AICommerceWelcomeStale:       commerceWelcomeStale(settings.AI),
 		// SLA Settings
 		SLAEnabled:             settings.SLA.Enabled,
 		SLAResponseMinutes:     settings.SLA.ResponseMinutes,
@@ -271,15 +272,15 @@ func chatbotSLASnapshot(s *models.ChatbotSettings) map[string]any {
 // change the activity log should surface.
 func chatbotAISnapshot(s *models.ChatbotSettings) map[string]any {
 	return map[string]any{
-		"ai_enabled":                     s.AI.Enabled,
-		"ai_provider":                    s.AI.Provider,
-		"ai_model":                       s.AI.Model,
-		"ai_max_tokens":                  s.AI.MaxTokens,
-		"ai_system_prompt":               s.AI.SystemPrompt,
-		"ai_commerce_enabled":            s.AI.CommerceEnabled,
-		"ai_commerce_mcp_url":            s.AI.CommerceMCPURL,
-		"ai_commerce_store_id":           s.AI.CommerceStoreID,
-		"ai_commerce_welcome_message":    s.AI.CommerceWelcomeMessage,
+		"ai_enabled":                       s.AI.Enabled,
+		"ai_provider":                      s.AI.Provider,
+		"ai_model":                         s.AI.Model,
+		"ai_max_tokens":                    s.AI.MaxTokens,
+		"ai_system_prompt":                 s.AI.SystemPrompt,
+		"ai_commerce_enabled":              s.AI.CommerceEnabled,
+		"ai_commerce_mcp_url":              s.AI.CommerceMCPURL,
+		"ai_commerce_store_id":             s.AI.CommerceStoreID,
+		"ai_commerce_welcome_message":      s.AI.CommerceWelcomeMessage,
 		"ai_commerce_welcome_generated_at": s.AI.CommerceWelcomeGeneratedAt,
 	}
 }
@@ -445,7 +446,12 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		settings.AI.Provider = *req.AIProvider
 	}
 	if req.AIAPIKey != nil && *req.AIAPIKey != "" {
-		settings.AI.APIKey = *req.AIAPIKey
+		encrypted, err := crypto.Encrypt(*req.AIAPIKey, a.Config.App.EncryptionKey)
+		if err != nil {
+			a.Log.Error("Failed to encrypt AI API key", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
+		}
+		settings.AI.APIKey = encrypted
 	}
 	if req.AIModel != nil {
 		settings.AI.Model = *req.AIModel
@@ -463,7 +469,12 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		settings.AI.CommerceMCPURL = strings.TrimRight(strings.TrimSpace(*req.AICommerceMCPURL), "/")
 	}
 	if req.AICommerceMCPAPIKey != nil && *req.AICommerceMCPAPIKey != "" {
-		settings.AI.CommerceMCPAPIKey = *req.AICommerceMCPAPIKey
+		encrypted, err := crypto.Encrypt(*req.AICommerceMCPAPIKey, a.Config.App.EncryptionKey)
+		if err != nil {
+			a.Log.Error("Failed to encrypt commerce MCP API key", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
+		}
+		settings.AI.CommerceMCPAPIKey = encrypted
 	}
 	if req.AICommerceStoreID != nil {
 		settings.AI.CommerceStoreID = strings.TrimSpace(*req.AICommerceStoreID)
@@ -593,6 +604,7 @@ func (a *App) RefreshCommerceWelcome(r *fastglue.Request) error {
 	if err := a.DB.Where("organization_id = ? AND whats_app_account = ?", orgID, "").First(&settings).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Chatbot settings not found", nil, "")
 	}
+	settings.DecryptSecrets(a.Config.App.EncryptionKey)
 	if !commerceConfigured(settings.AI) {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Commerce tools are not configured", nil, "")
 	}

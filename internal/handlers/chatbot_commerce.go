@@ -107,6 +107,15 @@ type commerceRuntime struct {
 	PhoneNumber string
 }
 
+func (rt *commerceRuntime) Close() {
+	if rt == nil || rt.Client == nil {
+		return
+	}
+	if closer, ok := rt.Client.(interface{ Close() error }); ok {
+		_ = closer.Close()
+	}
+}
+
 func commerceConfigured(ai models.AIConfig) bool {
 	return ai.CommerceEnabled &&
 		strings.TrimSpace(ai.CommerceMCPURL) != "" &&
@@ -934,6 +943,7 @@ func (a *App) getOrRefreshCommerceWelcome(settings *models.ChatbotSettings, sess
 
 	rt := a.newCommerceRuntime(settings, session)
 	if rt != nil {
+		defer rt.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		categories, catErr := rt.Client.ListCategories(ctx, rt.StoreID)
 		cancel()

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/crypto"
 )
 
 // BusinessHoursConfig holds business hours settings
@@ -121,6 +122,16 @@ type ChatbotSettings struct {
 
 func (ChatbotSettings) TableName() string {
 	return "chatbot_settings"
+}
+
+// DecryptSecrets decrypts AI credentials after they are loaded from storage.
+// Legacy plaintext values remain readable while the migration is rolling out.
+func (s *ChatbotSettings) DecryptSecrets(encryptionKey string) {
+	crypto.DecryptFields(
+		encryptionKey,
+		&s.AI.APIKey,
+		&s.AI.CommerceMCPAPIKey,
+	)
 }
 
 // KeywordRule defines automatic response rules based on keywords
