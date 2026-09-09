@@ -703,6 +703,7 @@ func (a *App) sendGreetingText(account *models.WhatsAppAccount, contact *models.
 			greetingButtons = append(greetingButtons, btnMap)
 		}
 	}
+	greetingButtons = normalizeCommerceGreetingButtons(greetingButtons)
 	if len(greetingButtons) > 0 {
 		if err := a.sendAndSaveInteractiveButtons(account, contact, text, greetingButtons); err != nil {
 			a.Log.Error("Failed to send greeting buttons", "error", err, "contact", contact.PhoneNumber)
@@ -760,24 +761,7 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 
 	// Send reply buttons (with the body text)
 	if len(replyButtons) > 0 {
-		waButtons := make([]whatsapp.Button, 0, len(replyButtons))
-		for i, btn := range replyButtons {
-			if i >= 10 {
-				break
-			}
-			buttonID, _ := btn["id"].(string)
-			buttonTitle, _ := btn["title"].(string)
-			if buttonID == "" {
-				buttonID = fmt.Sprintf("btn_%d", i+1)
-			}
-			if buttonTitle == "" {
-				continue
-			}
-			waButtons = append(waButtons, whatsapp.Button{
-				ID:    buttonID,
-				Title: buttonTitle,
-			})
-		}
+		waButtons := whatsappReplyButtons(replyButtons)
 
 		if len(waButtons) > 0 {
 			interactiveType := "button"
@@ -824,6 +808,28 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 	}
 
 	return nil
+}
+
+func whatsappReplyButtons(buttons []map[string]any) []whatsapp.Button {
+	waButtons := make([]whatsapp.Button, 0, len(buttons))
+	for i, btn := range buttons {
+		if i >= 10 {
+			break
+		}
+		buttonID, _ := btn["id"].(string)
+		buttonTitle, _ := btn["title"].(string)
+		if buttonID == "" {
+			buttonID = fmt.Sprintf("btn_%d", i+1)
+		}
+		if buttonTitle == "" {
+			continue
+		}
+		waButtons = append(waButtons, whatsapp.Button{
+			ID:    buttonID,
+			Title: buttonTitle,
+		})
+	}
+	return waButtons
 }
 
 // sendAndSaveLocationRequest asks the user to share a WhatsApp location pin.

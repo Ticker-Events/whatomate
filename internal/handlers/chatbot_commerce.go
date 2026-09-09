@@ -91,9 +91,11 @@ Rules: plain text only — no whatsapp_product cards, no markdown fences, no pol
 // commerceBackend is the storefront data source for LLM commerce tools (MCP).
 type commerceBackend interface {
 	SearchProducts(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error)
+	ListProducts(ctx context.Context, storeID, search, categoryID string, limit, offset int) (tickermcp.ProductPage, error)
 	GetProduct(ctx context.Context, productID string) (map[string]any, error)
 	GetStore(ctx context.Context, storeID string) (map[string]any, error)
 	ListCategories(ctx context.Context, storeID string) ([]map[string]any, error)
+	ListCategoryPage(ctx context.Context, storeID, categoryID string, limit, offset int) (tickermcp.CategoryPage, error)
 	GetOrder(ctx context.Context, orderUUID string) (map[string]any, error)
 	LookupOrderStatus(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
 	CreateOrder(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
@@ -542,7 +544,17 @@ func filterProductsWithOptions(products []ticker.ProductSummary) []ticker.Produc
 	}
 	out := make([]ticker.ProductSummary, 0, len(products))
 	for _, p := range products {
-		if len(p.Options) > 0 {
+		if p.ID <= 0 || strings.TrimSpace(p.Name) == "" || len(p.Options) == 0 {
+			continue
+		}
+		hasValidOption := false
+		for _, option := range p.Options {
+			if option.ID > 0 {
+				hasValidOption = true
+				break
+			}
+		}
+		if hasValidOption {
 			out = append(out, p)
 		}
 	}

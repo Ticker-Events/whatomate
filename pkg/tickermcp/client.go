@@ -37,6 +37,49 @@ type storeCacheEntry struct {
 	expiresAt time.Time
 }
 
+// PageMetadata preserves stable pagination information returned by MCP list tools.
+type PageMetadata struct {
+	Count    int    `json:"count,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+	Offset   int    `json:"offset,omitempty"`
+	Next     string `json:"next,omitempty"`
+	Previous string `json:"previous,omitempty"`
+	HasMore  bool   `json:"has_more,omitempty"`
+}
+
+// CaptureField is a validated category field the assistant may collect.
+type CaptureField struct {
+	Key      string   `json:"key"`
+	Label    string   `json:"label"`
+	Type     string   `json:"type"`
+	Required bool     `json:"required"`
+	Options  []string `json:"options,omitempty"`
+	HelpText string   `json:"help_text,omitempty"`
+}
+
+// Category is the authenticated collection contract exposed to Whatomate.
+type Category struct {
+	ID                    int            `json:"id"`
+	Name                  string         `json:"name"`
+	Description           string         `json:"description"`
+	ListingPriority       int            `json:"listing_priority"`
+	Image                 string         `json:"image"`
+	AIInstructions        string         `json:"ai_instructions,omitempty"`
+	RequiredCaptureFields []CaptureField `json:"required_capture_fields,omitempty"`
+	HandoffPolicy         string         `json:"handoff_policy,omitempty"`
+	HandoffMessage        string         `json:"handoff_message,omitempty"`
+}
+
+type CategoryPage struct {
+	Results []Category `json:"results"`
+	PageMetadata
+}
+
+type ProductPage struct {
+	Results []ticker.ProductSummary `json:"results"`
+	PageMetadata
+}
+
 // NewClient returns an MCP client for the given streamable-HTTP endpoint
 // (e.g. http://127.0.0.1:8100/mcp). If the URL has an empty path, /mcp is appended.
 func NewClient(endpoint, apiKey string, httpClient *http.Client) *Client {
@@ -90,33 +133,38 @@ func normalizeEndpoint(raw string) string {
 
 // SearchProducts maps to MCP list_products and returns compact summaries (prices in rupees).
 func (c *Client) SearchProducts(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error) {
+	page, err := c.ListProducts(ctx, storeID, search, "", limit, 0)
+	return page.Results, err
+}
+
+// ListProducts maps to MCP list_products with category filtering and stable pagination.
+func (c *Client) ListProducts(ctx context.Context, storeID, search, categoryID string, limit, offset int) (ProductPage, error) {
 	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
 	if err != nil || sid <= 0 {
-		return nil, fmt.Errorf("store_id is required")
+		return ProductPage{}, fmt.Errorf("store_id is required")
 	}
 	if limit <= 0 {
 		limit = 20
 	}
-	args := map[string]any{
-		"store_id": sid,
-		"limit":    limit,
-	}
-	if q := strings.TrimSpace(search); q != "" {
-		args["search"] = q
+	args, err := productListArgs(sid, search, categoryID, limit, offset)
+	if err != nil {
+		return ProductPage{}, err
 	}
 	raw, err := c.callTool(ctx, "list_products", args)
 	if err != nil {
-		return nil, err
+		return ProductPage{}, err
 	}
-	items, err := asObjectList(raw)
+	items, meta, err := asObjectPage(raw, "products")
 	if err != nil {
-		return nil, err
+		return ProductPage{}, err
 	}
 	out := make([]ticker.ProductSummary, 0, len(items))
 	for _, item := range items {
 		out = append(out, ticker.CompactProduct(item))
 	}
-	return out, nil
+	meta.Limit = defaultInt(meta.Limit, limit)
+	meta.Offset = defaultInt(meta.Offset, offset)
+	return ProductPage{Results: out, PageMetadata: meta}, nil
 }
 
 // GetProduct maps to MCP get_product.
@@ -171,23 +219,46 @@ func (c *Client) GetStore(ctx context.Context, storeID string) (map[string]any, 
 
 // ListCategories maps to MCP list_categories and returns compact category rows.
 func (c *Client) ListCategories(ctx context.Context, storeID string) ([]map[string]any, error) {
-	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
-	if err != nil || sid <= 0 {
-		return nil, fmt.Errorf("store_id is required")
-	}
-	raw, err := c.callTool(ctx, "list_categories", map[string]any{"store_id": sid})
+	page, err := c.ListCategoryPage(ctx, storeID, "", 50, 0)
 	if err != nil {
 		return nil, err
 	}
-	items, err := asObjectList(raw)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		out = append(out, CompactCategory(item))
+	out := make([]map[string]any, 0, len(page.Results))
+	for _, category := range page.Results {
+		out = append(out, categoryMap(category))
 	}
 	return out, nil
+}
+
+// ListCategoryPage maps to MCP list_categories and preserves paging metadata.
+// categoryID is optional and is useful for loading one selected category's config.
+func (c *Client) ListCategoryPage(ctx context.Context, storeID, categoryID string, limit, offset int) (CategoryPage, error) {
+	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
+	if err != nil || sid <= 0 {
+		return CategoryPage{}, fmt.Errorf("store_id is required")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	args, err := categoryListArgs(sid, categoryID, limit, offset)
+	if err != nil {
+		return CategoryPage{}, err
+	}
+	raw, err := c.callTool(ctx, "list_categories", args)
+	if err != nil {
+		return CategoryPage{}, err
+	}
+	items, meta, err := asObjectPage(raw, "categories")
+	if err != nil {
+		return CategoryPage{}, err
+	}
+	out := make([]Category, 0, len(items))
+	for _, item := range items {
+		out = append(out, decodeCategory(item))
+	}
+	meta.Limit = defaultInt(meta.Limit, limit)
+	meta.Offset = defaultInt(meta.Offset, offset)
+	return CategoryPage{Results: out, PageMetadata: meta}, nil
 }
 
 // CheckDeliveryEligibility maps to MCP check_delivery_eligibility.
@@ -251,25 +322,12 @@ func CompactStore(m map[string]any) map[string]any {
 	return out
 }
 
-// CompactCategory keeps id/name/description/listing_priority for collection listings.
+// CompactCategory keeps the full authenticated collection contract.
 func CompactCategory(m map[string]any) map[string]any {
 	if m == nil {
 		return map[string]any{}
 	}
-	out := map[string]any{}
-	if id, ok := m["id"]; ok {
-		out["id"] = id
-	}
-	if name, ok := m["name"]; ok {
-		out["name"] = name
-	}
-	if desc, ok := m["description"]; ok && desc != nil && fmt.Sprint(desc) != "" {
-		out["description"] = desc
-	}
-	if prio, ok := m["listing_priority"]; ok && prio != nil {
-		out["listing_priority"] = prio
-	}
-	return out
+	return categoryMap(decodeCategory(m))
 }
 
 // LookupOrderStatus maps to MCP lookup_order_status (phone-verified buyer lookup).
@@ -567,6 +625,175 @@ func asObjectList(v any) ([]map[string]any, error) {
 	default:
 		return nil, fmt.Errorf("expected product list, got %T", v)
 	}
+}
+
+func productListArgs(storeID int, search, categoryID string, limit, offset int) (map[string]any, error) {
+	if storeID <= 0 {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	args := map[string]any{"store_id": storeID, "limit": limit, "offset": offset}
+	if q := strings.TrimSpace(search); q != "" {
+		args["search"] = q
+	}
+	if raw := strings.TrimSpace(categoryID); raw != "" {
+		id, err := strconv.Atoi(raw)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("category_id must be a positive integer")
+		}
+		args["category_id"] = id
+	}
+	return args, nil
+}
+
+func categoryListArgs(storeID int, categoryID string, limit, offset int) (map[string]any, error) {
+	if storeID <= 0 {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	args := map[string]any{"store_id": storeID, "limit": limit, "offset": offset}
+	if raw := strings.TrimSpace(categoryID); raw != "" {
+		id, err := strconv.Atoi(raw)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("category_id must be a positive integer")
+		}
+		args["category_id"] = id
+	}
+	return args, nil
+}
+
+func asObjectPage(v any, preferredKey string) ([]map[string]any, PageMetadata, error) {
+	meta := PageMetadata{}
+	if m, ok := v.(map[string]any); ok {
+		meta.Count = asInt(m["count"])
+		meta.Limit = asInt(m["limit"])
+		meta.Offset = asInt(m["offset"])
+		meta.Next = stringValue(m["next"])
+		meta.Previous = stringValue(m["previous"])
+		if b, ok := m["has_more"].(bool); ok {
+			meta.HasMore = b
+		}
+		keys := []string{preferredKey, "results", "data", "items", "products", "categories"}
+		for _, key := range keys {
+			if nested, exists := m[key]; exists {
+				items, err := asObjectList(nested)
+				if err != nil {
+					return nil, meta, err
+				}
+				if meta.Count == 0 {
+					meta.Count = len(items)
+				}
+				if !meta.HasMore {
+					meta.HasMore = meta.Next != "" || meta.Offset+len(items) < meta.Count
+				}
+				return items, meta, nil
+			}
+		}
+	}
+	items, err := asObjectList(v)
+	if err != nil {
+		return nil, meta, err
+	}
+	meta.Count = len(items)
+	return items, meta, nil
+}
+
+func decodeCategory(m map[string]any) Category {
+	var category Category
+	// Decode the typed fields without image first. Backend's ImageMediaReadSerializer
+	// returns image as an object, while older MCP versions returned a URL string.
+	fields := make(map[string]any, len(m))
+	for key, value := range m {
+		if key != "image" {
+			fields[key] = value
+		}
+	}
+	data, err := json.Marshal(fields)
+	if err == nil {
+		_ = json.Unmarshal(data, &category)
+	}
+	if category.ID == 0 {
+		category.ID = asInt(m["id"])
+	}
+	category.Image = categoryImageURL(m["image"])
+	category.HandoffPolicy = strings.ToLower(strings.TrimSpace(category.HandoffPolicy))
+	if category.HandoffPolicy != "after_capture" {
+		category.HandoffPolicy = "none"
+	}
+	valid := make([]CaptureField, 0, len(category.RequiredCaptureFields))
+	for _, field := range category.RequiredCaptureFields {
+		field.Key = strings.TrimSpace(field.Key)
+		field.Label = strings.TrimSpace(field.Label)
+		field.Type = strings.TrimSpace(field.Type)
+		field.HelpText = strings.TrimSpace(field.HelpText)
+		if field.Key == "" || field.Label == "" || field.Type == "" {
+			continue
+		}
+		valid = append(valid, field)
+	}
+	category.RequiredCaptureFields = valid
+	return category
+}
+
+func categoryImageURL(value any) string {
+	switch image := value.(type) {
+	case string:
+		return strings.TrimSpace(image)
+	case map[string]any:
+		for _, key := range []string{"image", "url", "original_url"} {
+			if candidate := categoryImageURL(image[key]); candidate != "" {
+				return candidate
+			}
+		}
+	case json.RawMessage:
+		var decoded any
+		if json.Unmarshal(image, &decoded) == nil {
+			return categoryImageURL(decoded)
+		}
+	}
+	return ""
+}
+
+func categoryMap(category Category) map[string]any {
+	data, _ := json.Marshal(category)
+	var out map[string]any
+	_ = json.Unmarshal(data, &out)
+	return out
+}
+
+func asInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	case string:
+		i, _ := strconv.Atoi(strings.TrimSpace(n))
+		return i
+	default:
+		return 0
+	}
+}
+
+func stringValue(v any) string {
+	if v == nil {
+		return ""
+	}
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "<nil>" {
+		return ""
+	}
+	return s
+}
+
+func defaultInt(value, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 func looksLikeProductObject(m map[string]any) bool {

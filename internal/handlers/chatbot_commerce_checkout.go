@@ -159,6 +159,9 @@ func (a *App) handleCommerceButtonTap(account *models.WhatsAppAccount, contact *
 	if buttonID == "" {
 		return false
 	}
+	if a.handleDeterministicCommerceAction(account, contact, session, settings, buttonID) {
+		return true
+	}
 	switch {
 	case IsAddToCartButton(buttonID):
 		a.handleAddToCartProductTap(account, contact, session, settings, buttonID)

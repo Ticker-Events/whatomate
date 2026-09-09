@@ -46,14 +46,15 @@ type ProductOption struct {
 
 // ProductSummary is a compact product for search results.
 type ProductSummary struct {
-	ID          int             `json:"id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	ImageURL    string          `json:"image_url,omitempty"`
-	MinPrice    float64         `json:"min_price"`
-	MRP         float64         `json:"mrp,omitempty"`
-	Type        string          `json:"type,omitempty"`
-	Options     []ProductOption `json:"options"`
+	ID                     int             `json:"id"`
+	Name                   string          `json:"name"`
+	Description            string          `json:"description,omitempty"`
+	ImageURL               string          `json:"image_url,omitempty"`
+	MinPrice               float64         `json:"min_price"`
+	MRP                    float64         `json:"mrp,omitempty"`
+	Type                   string          `json:"type,omitempty"`
+	PreparationTimeMinutes int             `json:"preparation_time_minutes,omitempty"`
+	Options                []ProductOption `json:"options"`
 }
 
 // SearchProducts lists active products for a store, optionally filtered by search.
@@ -222,13 +223,14 @@ func ExtractProductImageURL(raw map[string]any) string {
 // CompactProduct builds a tool-friendly product summary with prices in rupees.
 func CompactProduct(raw map[string]any) ProductSummary {
 	p := ProductSummary{
-		ID:          asInt(raw["id"]),
-		Name:        asString(raw["name"]),
-		Description: asString(raw["description"]),
-		ImageURL:    ExtractProductImageURL(raw),
-		MinPrice:    PaiseToRupees(asFloat(raw["min_price"])),
-		MRP:         PaiseToRupees(asFloat(raw["mrp"])),
-		Type:        asString(raw["type"]),
+		ID:                     asInt(raw["id"]),
+		Name:                   asString(raw["name"]),
+		Description:            asString(raw["description"]),
+		ImageURL:               ExtractProductImageURL(raw),
+		MinPrice:               PaiseToRupees(asFloat(raw["min_price"])),
+		MRP:                    PaiseToRupees(asFloat(raw["mrp"])),
+		Type:                   asString(raw["type"]),
+		PreparationTimeMinutes: asInt(raw["preparation_time_minutes"]),
 	}
 	var minFromOpts float64
 	if opts, ok := raw["options"].([]any); ok {

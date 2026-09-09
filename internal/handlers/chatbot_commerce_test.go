@@ -10,6 +10,7 @@ import (
 
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
+	"github.com/shridarpatil/whatomate/pkg/tickermcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zerodha/logf"
@@ -30,6 +31,8 @@ type stubCommerceBackend struct {
 	lookupStatusFn  func(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
 	createFn        func(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
 	checkDeliveryFn func(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error)
+	productPageFn   func(ctx context.Context, storeID, search, categoryID string, limit, offset int) (tickermcp.ProductPage, error)
+	categoryPageFn  func(ctx context.Context, storeID, categoryID string, limit, offset int) (tickermcp.CategoryPage, error)
 	lastCreate      ticker.CreateOrderRequest
 }
 
@@ -38,6 +41,14 @@ func (s *stubCommerceBackend) SearchProducts(ctx context.Context, storeID, searc
 		return s.searchFn(ctx, storeID, search, limit)
 	}
 	return nil, fmt.Errorf("search not stubbed")
+}
+
+func (s *stubCommerceBackend) ListProducts(ctx context.Context, storeID, search, categoryID string, limit, offset int) (tickermcp.ProductPage, error) {
+	if s.productPageFn != nil {
+		return s.productPageFn(ctx, storeID, search, categoryID, limit, offset)
+	}
+	products, err := s.SearchProducts(ctx, storeID, search, limit)
+	return tickermcp.ProductPage{Results: products}, err
 }
 
 func (s *stubCommerceBackend) GetProduct(ctx context.Context, productID string) (map[string]any, error) {
@@ -59,6 +70,27 @@ func (s *stubCommerceBackend) ListCategories(ctx context.Context, storeID string
 		return s.categoriesFn(ctx, storeID)
 	}
 	return nil, fmt.Errorf("list_categories not stubbed")
+}
+
+func (s *stubCommerceBackend) ListCategoryPage(ctx context.Context, storeID, categoryID string, limit, offset int) (tickermcp.CategoryPage, error) {
+	if s.categoryPageFn != nil {
+		return s.categoryPageFn(ctx, storeID, categoryID, limit, offset)
+	}
+	raw, err := s.ListCategories(ctx, storeID)
+	if err != nil {
+		return tickermcp.CategoryPage{}, err
+	}
+	results := make([]tickermcp.Category, 0, len(raw))
+	for _, item := range raw {
+		results = append(results, tickermcp.Category{
+			ID:              asToolInt(item["id"]),
+			Name:            asString(item["name"]),
+			Description:     asString(item["description"]),
+			ListingPriority: asToolInt(item["listing_priority"]),
+			Image:           asString(item["image"]),
+		})
+	}
+	return tickermcp.CategoryPage{Results: results}, nil
 }
 
 func (s *stubCommerceBackend) GetOrder(ctx context.Context, orderUUID string) (map[string]any, error) {
@@ -585,4 +617,208 @@ func TestAppendCommerceWelcomeCategories(t *testing.T) {
 		"Hello there",
 		[]map[string]any{{"name": "Earrings"}},
 	))
+}
+
+func TestParseCommerceActionIDs(t *testing.T) {
+	action, categoryID := parseCommerceActionID(commerceActionPlaceOrder)
+	assert.Equal(t, commerceActionPlace, action)
+	assert.Empty(t, categoryID)
+
+	action, _ = parseCommerceActionID(commerceActionOrderStatus)
+	assert.Equal(t, commerceActionStatus, action)
+	action, _ = parseCommerceActionID(commerceActionTalkAgent)
+	assert.Equal(t, commerceActionAgent, action)
+
+	action, categoryID = parseCommerceActionID("browse_category_42")
+	assert.Equal(t, commerceActionBrowse, action)
+	assert.Equal(t, "42", categoryID)
+
+	action, _ = parseCommerceActionID("browse_category_bad")
+	assert.Equal(t, commerceActionNone, action)
+	action, _ = parseCommerceActionID("Place new order")
+	assert.Equal(t, commerceActionNone, action)
+}
+
+func TestNormalizeCommerceGreetingButtons(t *testing.T) {
+	input := []map[string]any{
+		{"title": " Place New Order "},
+		{"title": "CHECK ORDER STATUS"},
+		{"title": "talk to AN agent"},
+		{"title": "Place new order", "id": "custom_place"},
+		{"title": "Contact us"},
+	}
+	normalized := normalizeCommerceGreetingButtons(input)
+	require.Len(t, normalized, 5)
+	assert.Equal(t, commerceActionPlaceOrder, normalized[0]["id"])
+	assert.Equal(t, commerceActionOrderStatus, normalized[1]["id"])
+	assert.Equal(t, commerceActionTalkAgent, normalized[2]["id"])
+	assert.Equal(t, "custom_place", normalized[3]["id"])
+	assert.NotContains(t, normalized[4], "id")
+
+	// Normalization must not mutate persisted greeting configuration.
+	assert.NotContains(t, input[0], "id")
+	assert.Equal(t, "custom_place", input[3]["id"])
+}
+
+func TestNormalizedGreetingButtonsRenderAndRouteByID(t *testing.T) {
+	normalized := normalizeCommerceGreetingButtons([]map[string]any{
+		{"title": "Place new order"},
+		{"title": "Check order status"},
+		{"title": "Talk to an agent"},
+		{"title": "Unrelated"},
+	})
+	rendered := whatsappReplyButtons(normalized)
+	require.Len(t, rendered, 4)
+	assert.Equal(t, commerceActionPlaceOrder, rendered[0].ID)
+	assert.Equal(t, commerceActionOrderStatus, rendered[1].ID)
+	assert.Equal(t, commerceActionTalkAgent, rendered[2].ID)
+	assert.Equal(t, "btn_4", rendered[3].ID)
+
+	for index, expected := range []commerceAction{commerceActionPlace, commerceActionStatus, commerceActionAgent} {
+		action, _ := parseCommerceActionID(rendered[index].ID)
+		assert.Equal(t, expected, action)
+	}
+	action, _ := parseCommerceActionID(rendered[3].Title)
+	assert.Equal(t, commerceActionNone, action)
+	action, _ = parseCommerceActionID(" Place new order ")
+	assert.Equal(t, commerceActionNone, action)
+}
+
+func TestSelectedCategoryStoresOnlyID(t *testing.T) {
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		"existing": "value",
+	}}
+	setSelectedCategoryID(session, "19")
+	assert.Equal(t, "19", selectedCategoryID(session))
+	assert.Equal(t, models.JSONB{
+		"existing":          "value",
+		selectedCategoryKey: "19",
+	}, session.SessionData)
+	assert.NotContains(t, session.SessionData, "ai_instructions")
+	assert.NotContains(t, session.SessionData, "required_capture_fields")
+}
+
+func TestCollectCommerceCategoriesOrdersPriorityAcrossPages(t *testing.T) {
+	stub := &stubCommerceBackend{
+		categoryPageFn: func(_ context.Context, _, _ string, _, offset int) (tickermcp.CategoryPage, error) {
+			if offset == 0 {
+				return tickermcp.CategoryPage{
+					Results:      []tickermcp.Category{{ID: 2, Name: "Zulu", ListingPriority: 5}},
+					PageMetadata: tickermcp.PageMetadata{Count: 2, HasMore: true},
+				}, nil
+			}
+			return tickermcp.CategoryPage{
+				Results:      []tickermcp.Category{{ID: 1, Name: "Featured", ListingPriority: -1, Image: "https://example.test/category.jpg"}},
+				PageMetadata: tickermcp.PageMetadata{Count: 2},
+			}, nil
+		},
+	}
+	categories, err := collectCommerceCategories(context.Background(), &commerceRuntime{Client: stub, StoreID: "7"})
+	require.NoError(t, err)
+	require.Len(t, categories, 2)
+	assert.Equal(t, "Featured", categories[0].Name)
+	assert.Equal(t, "https://example.test/category.jpg", categories[0].Image)
+}
+
+func TestCategoryCardRequestPassesDecodedMediaToRendering(t *testing.T) {
+	account := &models.WhatsAppAccount{}
+	contact := &models.Contact{}
+	request := categoryCardRequest(account, contact, tickermcp.Category{
+		ID:          42,
+		Name:        "Celebration cakes",
+		Description: "Made for your occasion",
+		Image:       "https://example.test/category.jpg",
+	})
+	assert.Same(t, account, request.Account)
+	assert.Same(t, contact, request.Contact)
+	assert.Equal(t, models.MessageTypeInteractive, request.Type)
+	assert.Equal(t, "button", request.InteractiveType)
+	assert.Equal(t, "https://example.test/category.jpg", request.HeaderImageURL)
+	require.Len(t, request.Buttons, 1)
+	assert.Equal(t, "browse_category_42", request.Buttons[0].ID)
+}
+
+func TestCollectValidCategoryProductsFiltersBeforeDisplayPagination(t *testing.T) {
+	stub := &stubCommerceBackend{
+		productPageFn: func(_ context.Context, _, _, categoryID string, _, offset int) (tickermcp.ProductPage, error) {
+			assert.Equal(t, "9", categoryID)
+			if offset == 0 {
+				return tickermcp.ProductPage{
+					Results: []ticker.ProductSummary{
+						{ID: 1, Name: "Invalid"},
+						{ID: 2, Name: "Valid", Options: []ticker.ProductOption{{ID: 20}}},
+					},
+					PageMetadata: tickermcp.PageMetadata{Count: 3, HasMore: true},
+				}, nil
+			}
+			return tickermcp.ProductPage{
+				Results:      []ticker.ProductSummary{{ID: 3, Name: "Also valid", Options: []ticker.ProductOption{{ID: 30}}}},
+				PageMetadata: tickermcp.PageMetadata{Count: 3},
+			}, nil
+		},
+	}
+	products, err := collectValidCategoryProducts(context.Background(), &commerceRuntime{Client: stub, StoreID: "7"}, "9")
+	require.NoError(t, err)
+	require.Len(t, products, 2)
+	assert.Equal(t, []int{2, 3}, []int{products[0].ID, products[1].ID})
+}
+
+func TestCategoryProductPresentationCapsCardsAndListsTenRows(t *testing.T) {
+	products := make([]ticker.ProductSummary, 0, 28)
+	products = append(products, ticker.ProductSummary{ID: 999, Name: "Invalid"})
+	for i := 1; i <= 27; i++ {
+		products = append(products, ticker.ProductSummary{
+			ID: i, Name: fmt.Sprintf("Product %d", i),
+			Options: []ticker.ProductOption{{ID: i * 10}},
+		})
+	}
+	presentation := buildCategoryProductPresentation(products)
+	assert.Len(t, presentation.Cards, 5)
+	require.Len(t, presentation.ListPages, 3)
+	assert.Len(t, presentation.ListPages[0], 10)
+	assert.Len(t, presentation.ListPages[1], 10)
+	assert.Len(t, presentation.ListPages[2], 2)
+}
+
+func TestSelectedCategoryPromptContextAndFallback(t *testing.T) {
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	rt := &commerceRuntime{Client: &stubCommerceBackend{}, StoreID: "7"}
+	assert.Empty(t, selectedCategoryPromptContext(context.Background(), rt, session))
+
+	setSelectedCategoryID(session, "9")
+	rt.Client = &stubCommerceBackend{
+		categoryPageFn: func(_ context.Context, _, categoryID string, _, _ int) (tickermcp.CategoryPage, error) {
+			assert.Equal(t, "9", categoryID)
+			return tickermcp.CategoryPage{Results: []tickermcp.Category{{
+				ID:             9,
+				Name:           "Custom cakes",
+				AIInstructions: "Ask for reference details.",
+				RequiredCaptureFields: []tickermcp.CaptureField{{
+					Key: "writing", Label: "Cake writing", Type: "text", Required: true,
+				}},
+			}}}, nil
+		},
+	}
+	contextText := selectedCategoryPromptContext(context.Background(), rt, session)
+	assert.Contains(t, contextText, "TRUSTED STORE COLLECTION CONFIG")
+	assert.Contains(t, contextText, "Ask for reference details.")
+	assert.Contains(t, contextText, "Cake writing")
+	assert.NotContains(t, session.SessionData, "ai_instructions")
+
+	rt.Client = &stubCommerceBackend{
+		categoryPageFn: func(context.Context, string, string, int, int) (tickermcp.CategoryPage, error) {
+			return tickermcp.CategoryPage{}, fmt.Errorf("backend unavailable")
+		},
+	}
+	assert.Empty(t, selectedCategoryPromptContext(context.Background(), rt, session))
+	fallback := buildCommerceSystemPrompt("Base", "Context")
+	assert.Contains(t, fallback, commerceSystemAddendum)
+	assert.NotContains(t, fallback, "TRUSTED STORE COLLECTION CONFIG")
+}
+
+func TestFormatDirectOrderStatus(t *testing.T) {
+	assert.Equal(t, "Order ST-42 is in transit.", formatDirectOrderStatus(map[string]any{
+		"display_uid": "ST-42",
+		"status":      "IN_TRANSIT",
+	}))
 }

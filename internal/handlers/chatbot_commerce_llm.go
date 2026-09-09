@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,9 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 
 	if rt != nil {
 		defer rt.Close()
+		if categoryContext := selectedCategoryPromptContext(context.Background(), rt, session); categoryContext != "" {
+			contextData = strings.Join([]string{contextData, categoryContext}, "\n\n")
+		}
 		switch settings.AI.Provider {
 		case models.AIProviderOpenAI:
 			return a.generateOpenAIWithTools(settings, session, userMessage, contextData, rt)
