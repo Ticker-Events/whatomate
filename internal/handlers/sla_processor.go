@@ -2,12 +2,16 @@ package handlers
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -161,6 +165,176 @@ func (p *SLAProcessor) processOrganizationSLA(settings models.ChatbotSettings, n
 	if settings.ClientInactivity.ReminderEnabled {
 		p.processClientInactivity(orgID, settings, now)
 	}
+
+	// 5. Commerce reminders use draft-scoped claims rather than the
+	// contact-wide chatbot reminder flag.
+	p.processCommerceReminders(settings, now)
+}
+
+const commerceReminderClaimTTL = 5 * time.Minute
+
+func (p *SLAProcessor) processCommerceReminders(settings models.ChatbotSettings, now time.Time) {
+	storeID := settings.AI.CommerceStoreID
+	if storeID == "" {
+		return
+	}
+	if settings.ClientInactivity.PendingPaymentReminderEnabled &&
+		settings.ClientInactivity.PendingPaymentReminderMinutes > 0 {
+		p.processCommerceReminderKind(settings, now, "pending_payment")
+	}
+	if settings.ClientInactivity.AbandonedDraftReminderEnabled &&
+		settings.ClientInactivity.AbandonedDraftReminderMinutes > 0 {
+		p.processCommerceReminderKind(settings, now, "abandoned_draft")
+	}
+}
+
+func (p *SLAProcessor) processCommerceReminderKind(settings models.ChatbotSettings, now time.Time, kind string) {
+	for processed := 0; processed < 100; processed++ {
+		draft, token, err := p.claimCommerceReminder(settings, now, kind)
+		if err != nil {
+			p.app.Log.Error("Failed to claim commerce reminder", "error", err, "kind", kind)
+			return
+		}
+		if draft == nil {
+			return
+		}
+		if p.app.hasActiveAgentTransfer(draft.OrganizationID, draft.ContactID) {
+			p.releaseCommerceReminderClaim(draft.ID, token, "")
+			continue
+		}
+		var contact models.Contact
+		if err := p.app.DB.Where("id = ? AND organization_id = ?", draft.ContactID, draft.OrganizationID).First(&contact).Error; err != nil {
+			p.releaseCommerceReminderClaim(draft.ID, token, err.Error())
+			return
+		}
+		account, err := p.app.resolveWhatsAppAccount(draft.OrganizationID, draft.WhatsAppAccount)
+		if err != nil {
+			p.releaseCommerceReminderClaim(draft.ID, token, err.Error())
+			return
+		}
+		message := settings.ClientInactivity.PendingPaymentReminderMessage
+		if kind == "abandoned_draft" {
+			message = settings.ClientInactivity.AbandonedDraftReminderMessage
+		}
+		if message == "" {
+			if kind == "pending_payment" {
+				message = "Your order is waiting for payment. Reply here if you need help completing it."
+			} else {
+				message = "You still have an unfinished order. Reply to continue where you left off."
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		msg, sendErr := p.app.SendOutgoingMessage(ctx, OutgoingMessageRequest{
+			Account: account, Contact: &contact, Type: models.MessageTypeText, Content: message,
+			DurableSendKey: "commerce-reminder:" + draft.ID.String() + ":" + kind,
+		}, SLASendOptions())
+		cancel()
+		if sendErr == nil && msg != nil {
+			var persisted models.Message
+			if err := p.app.DB.First(&persisted, "id = ?", msg.ID).Error; err != nil {
+				sendErr = err
+			} else {
+				msg = &persisted
+			}
+		}
+		if sendErr == nil && msg != nil &&
+			msg.Status != models.MessageStatusSent &&
+			msg.Status != models.MessageStatusDelivered &&
+			msg.Status != models.MessageStatusRead {
+			sendErr = fmt.Errorf("reminder message was not durably marked sent: %s", msg.ErrorMessage)
+		}
+		if sendErr == nil && msg == nil {
+			sendErr = errors.New("reminder message was not persisted")
+		}
+		if sendErr != nil {
+			p.releaseCommerceReminderClaim(draft.ID, token, sendErr.Error())
+			return
+		}
+		updates := map[string]any{
+			"reminder_claimed_at": nil, "reminder_claim_token": "", "reminder_claim_kind": "",
+			"reminder_last_error": "", "reminder_at": now,
+		}
+		if kind == "pending_payment" {
+			updates["pending_payment_reminder_at"] = now
+		} else {
+			updates["abandoned_at"] = now
+			updates["abandoned_reminder_at"] = now
+		}
+		result := p.app.DB.Model(&models.CommerceDraft{}).
+			Where("id = ? AND reminder_claim_token = ?", draft.ID, token).
+			Updates(updates)
+		if result.Error != nil || result.RowsAffected != 1 {
+			lastError := "reminder completion marker was not persisted"
+			if result.Error != nil {
+				lastError = result.Error.Error()
+			}
+			p.app.Log.Error("Failed to persist commerce reminder completion", "error", result.Error, "draft_id", draft.ID)
+			p.releaseCommerceReminderClaim(draft.ID, token, lastError)
+			return
+		}
+	}
+}
+
+func (p *SLAProcessor) claimCommerceReminder(
+	settings models.ChatbotSettings,
+	now time.Time,
+	kind string,
+) (*models.CommerceDraft, string, error) {
+	minutes := settings.ClientInactivity.PendingPaymentReminderMinutes
+	status := "pending_payment"
+	sentColumn := "pending_payment_reminder_at"
+	if kind == "abandoned_draft" {
+		minutes = settings.ClientInactivity.AbandonedDraftReminderMinutes
+		status = "active"
+		sentColumn = "abandoned_reminder_at"
+	}
+	cutoff := now.Add(-time.Duration(minutes) * time.Minute)
+	staleClaim := now.Add(-commerceReminderClaimTTL)
+	token := uuid.NewString()
+	var claimed *models.CommerceDraft
+	err := p.app.DB.Transaction(func(tx *gorm.DB) error {
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where(
+				"organization_id = ? AND store_id = ? AND status = ? AND updated_at <= ? AND "+sentColumn+" IS NULL AND (reminder_claimed_at IS NULL OR reminder_claimed_at < ?)",
+				settings.OrganizationID, settings.AI.CommerceStoreID, status, cutoff, staleClaim,
+			).
+			Where(`NOT EXISTS (
+				SELECT 1 FROM agent_transfers
+				WHERE agent_transfers.organization_id = commerce_drafts.organization_id
+				AND agent_transfers.contact_id = commerce_drafts.contact_id
+				AND agent_transfers.status = ?
+				AND agent_transfers.deleted_at IS NULL
+			)`, models.TransferStatusActive)
+		if settings.WhatsAppAccount != "" {
+			query = query.Where("whats_app_account = ?", settings.WhatsAppAccount)
+		}
+		var draft models.CommerceDraft
+		result := query.Order("updated_at ASC").First(&draft)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		if err := tx.Model(&draft).Updates(map[string]any{
+			"reminder_claimed_at": now, "reminder_claim_token": token,
+			"reminder_claim_kind": kind, "reminder_attempts": gorm.Expr("reminder_attempts + 1"),
+		}).Error; err != nil {
+			return err
+		}
+		claimed = &draft
+		return nil
+	})
+	return claimed, token, err
+}
+
+func (p *SLAProcessor) releaseCommerceReminderClaim(draftID uuid.UUID, token, lastError string) {
+	p.app.DB.Model(&models.CommerceDraft{}).
+		Where("id = ? AND reminder_claim_token = ?", draftID, token).
+		Updates(map[string]any{
+			"reminder_claimed_at": nil, "reminder_claim_token": "",
+			"reminder_claim_kind": "", "reminder_last_error": lastError,
+		})
 }
 
 // autoCloseExpiredTransfers closes transfers that have exceeded their expiry time

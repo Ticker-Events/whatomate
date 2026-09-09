@@ -505,3 +505,88 @@ func TestHandleCheckoutAddressMessage_IgnoresWhenNotAddressStep(t *testing.T) {
 	}))
 	assert.Equal(t, "email", getCheckoutState(session).Step)
 }
+
+func TestTargetedMultiLineCartEditAndRemoval(t *testing.T) {
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"7": map[string]any{"qty": 1, "product": map[string]any{"option_name": "Chocolate Large"}},
+			"8": map[string]any{"qty": 2, "product": map[string]any{"option_name": "Vanilla Small"}},
+		},
+	}}
+
+	changed, _ := applyTargetedCartEdit(session, "change vanilla small to 4")
+	require.True(t, changed)
+	assert.Equal(t, 4, anyToInt(normalizeCartMap(session.SessionData[cartKey])["8"]["qty"]))
+	assert.Equal(t, 1, anyToInt(normalizeCartMap(session.SessionData[cartKey])["7"]["qty"]))
+
+	changed, message := applyTargetedCartEdit(session, "remove chocolate")
+	require.True(t, changed)
+	assert.Contains(t, message, "Chocolate Large")
+	assert.NotContains(t, normalizeCartMap(session.SessionData[cartKey]), "7")
+}
+
+func TestCheckoutAddonEditing(t *testing.T) {
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	require.True(t, handleCheckoutAddonEdit(session, "addon 12 x2"))
+	require.Equal(t, []map[string]any{{"addon": 12, "quantity": 2}}, checkoutAddons(session))
+	require.True(t, handleCheckoutAddonEdit(session, "remove addon 12"))
+	assert.Empty(t, checkoutAddons(session))
+}
+
+func TestCheckoutSummaryIncludesSlotAddonsAndStructuredNotes(t *testing.T) {
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"1": map[string]any{"qty": 1, "product": map[string]any{"option_name": "Cake", "price": 100.0}},
+		},
+		"commerce_addons":          []any{map[string]any{"addon": 9, "quantity": 1}},
+		"commerce_captured_fields": map[string]any{"writing": "Happy birthday"},
+	}}
+	summary := formatOrderConfirmSummary(session, &checkoutState{
+		DeliveryMode: "PICKUP_FROM_STORE",
+		RequestedAt:  "2026-09-10T10:00:00Z",
+	})
+	assert.Contains(t, summary, "10 Sep 10:00 AM")
+	assert.Contains(t, summary, "Add-ons: #9 x1")
+	assert.Contains(t, summary, `"writing":"Happy birthday"`)
+}
+
+func TestHydrateSessionFromDurableDraft(t *testing.T) {
+	addressID := 11
+	draft := &models.CommerceDraft{
+		BaseModel:            models.BaseModel{ID: uuid.New()},
+		Cart:                 models.JSONB{"7": map[string]any{"qty": 3}},
+		FulfillmentMode:      "DELIVERY_TO_LOCATION",
+		FulfillmentSlotToken: "opaque",
+		SavedAddressID:       &addressID,
+		AddressSnapshot:      models.JSONB{"address_line_1": "Main Street"},
+	}
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	hydrateSessionFromDraft(session, draft)
+
+	assert.Equal(t, draft.ID, commerceDraftID(session))
+	assert.Equal(t, 3, anyToInt(normalizeCartMap(session.SessionData[cartKey])["7"]["qty"]))
+	state := getCheckoutState(session)
+	require.NotNil(t, state)
+	assert.Equal(t, "opaque", state.SlotToken)
+	require.NotNil(t, state.SavedAddressID)
+	assert.Equal(t, 11, *state.SavedAddressID)
+}
+
+func TestPaymentCTAContentKeepsURLOutOfBody(t *testing.T) {
+	body, paymentURL := paymentCTAContent(map[string]any{
+		"display_uid": "ORD-7",
+		"amount":      250.0,
+		"payment_url": "https://pay.example/retry",
+	})
+	assert.Contains(t, body, "ORD-7")
+	assert.NotContains(t, body, "https://pay.example/retry")
+	assert.Equal(t, "https://pay.example/retry", paymentURL)
+}
+
+func TestStructuredCaptureValidation(t *testing.T) {
+	assert.True(t, validCaptureValue(map[string]any{"type": "number"}, "2.5"))
+	assert.False(t, validCaptureValue(map[string]any{"type": "number"}, "large"))
+	field := map[string]any{"type": "single_select", "options": []string{"Vanilla", "Chocolate"}}
+	assert.True(t, validCaptureValue(field, "chocolate"))
+	assert.False(t, validCaptureValue(field, "Strawberry"))
+}

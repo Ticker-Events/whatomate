@@ -24,6 +24,7 @@ const (
 	ContextKeyIsSuperAdmin   = "is_super_admin"
 	ContextKeyUser           = "user"
 	ContextKeyOrganization   = "organization"
+	ContextKeyAPIKeyID       = "api_key_id"
 )
 
 // JWTClaims represents JWT claims
@@ -230,6 +231,7 @@ func validateAPIKey(r *fastglue.Request, key string, db *gorm.DB) bool {
 			if apiKey.User != nil {
 				r.RequestCtx.SetUserValue(ContextKeyUserID, apiKey.UserID)
 				r.RequestCtx.SetUserValue(ContextKeyOrganizationID, apiKey.OrganizationID)
+				r.RequestCtx.SetUserValue(ContextKeyAPIKeyID, apiKey.ID)
 				r.RequestCtx.SetUserValue(ContextKeyEmail, apiKey.User.Email)
 				if apiKey.User.RoleID != nil {
 					r.RequestCtx.SetUserValue(ContextKeyRoleID, *apiKey.User.RoleID)

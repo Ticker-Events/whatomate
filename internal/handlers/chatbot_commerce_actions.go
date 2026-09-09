@@ -299,7 +299,26 @@ func (a *App) sendLatestCommerceOrderStatus(account *models.WhatsAppAccount, con
 		_ = a.sendAndSaveTextMessage(account, contact, "I couldn’t find a recent order for this phone number.")
 		return
 	}
-	_ = a.sendAndSaveTextMessage(account, contact, formatDirectOrderStatus(compactOrderStatus(raw)))
+	order := compactOrderStatus(raw)
+	body := formatDirectOrderStatus(order)
+	paymentURL := asString(order["payment_url"])
+	status := strings.ToUpper(asString(raw["status"]))
+	if paymentURL == "" && (status == "PENDING_PAYMENT" || status == "PAYMENT_INITIATED") {
+		orderUUID := firstNonEmpty(asString(raw["uuid"]), asString(raw["id"]))
+		if orderUUID != "" {
+			if retry, retryErr := rt.Client.RetryPayment(ctx, orderUUID); retryErr == nil && retry.PaymentURL != nil {
+				paymentURL = strings.TrimSpace(*retry.PaymentURL)
+				body += "\nYour payment link is ready."
+			}
+		}
+	}
+	if paymentURL != "" {
+		if err := a.sendAndSaveCTAURLButton(account, contact, body, "Retry payment", paymentURL); err != nil {
+			_ = a.sendAndSaveTextMessage(account, contact, body+"\nPay here: "+paymentURL)
+		}
+		return
+	}
+	_ = a.sendAndSaveTextMessage(account, contact, body)
 }
 
 func formatDirectOrderStatus(order map[string]any) string {

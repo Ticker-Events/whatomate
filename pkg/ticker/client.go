@@ -101,14 +101,18 @@ func (c *Client) GetProduct(ctx context.Context, productID string) (map[string]a
 
 // CreateOrderRequest is the guest checkout body for POST /service/buyer/order/.
 type CreateOrderRequest struct {
-	Store         int              `json:"store"`
-	Items         []OrderItem      `json:"items"`
-	Email         string           `json:"email,omitempty"`
-	PhoneNumber   string           `json:"phone_number,omitempty"`
-	DeliveryMode  string           `json:"delivery_mode,omitempty"`
-	NewAddress    map[string]any   `json:"new_address,omitempty"`
-	BuyerMetaData map[string]any   `json:"buyer_meta_data,omitempty"`
-	Addons        []map[string]any `json:"addons,omitempty"`
+	Store          int              `json:"store"`
+	Items          []OrderItem      `json:"items"`
+	Email          string           `json:"email,omitempty"`
+	PhoneNumber    string           `json:"phone_number,omitempty"`
+	DeliveryMode   string           `json:"delivery_mode,omitempty"`
+	Address        *int             `json:"address,omitempty"`
+	NewAddress     map[string]any   `json:"new_address,omitempty"`
+	BuyerMetaData  map[string]any   `json:"buyer_meta_data,omitempty"`
+	Addons         []map[string]any `json:"addons,omitempty"`
+	Notes          string           `json:"notes,omitempty"`
+	SlotToken      string           `json:"slot_token,omitempty"`
+	IdempotencyKey string           `json:"idempotency_key,omitempty"`
 }
 
 // OrderItem is a line item on create order.

@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
@@ -100,6 +102,11 @@ type commerceBackend interface {
 	LookupOrderStatus(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
 	CreateOrder(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
 	CheckDeliveryEligibility(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error)
+	ListFulfillmentSlots(ctx context.Context, storeID, deliveryMode string, productOptionIDs []int) (tickermcp.FulfillmentSlotList, error)
+	ValidateFulfillmentSlot(ctx context.Context, storeID, deliveryMode, token string, productOptionIDs []int) (tickermcp.FulfillmentSlotValidation, error)
+	ListCustomerAddresses(ctx context.Context, storeID, phoneNumber string) ([]tickermcp.CustomerAddress, error)
+	CreateCustomerAddress(ctx context.Context, storeID, phoneNumber string, address map[string]any) (tickermcp.CustomerAddress, error)
+	RetryPayment(ctx context.Context, orderUUID string) (tickermcp.PaymentRetry, error)
 }
 
 // commerceRuntime holds per-request commerce tool context.
@@ -286,8 +293,37 @@ func commerceToolDefs() []map[string]any {
 						"buyer_meta_data": map[string]any{
 							"type": "object",
 						},
+						"address": map[string]any{"type": "integer"},
+						"addons": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"addon":    map[string]any{"type": "integer"},
+									"quantity": map[string]any{"type": "integer"},
+								},
+								"required": []string{"addon", "quantity"},
+							},
+						},
+						"notes":           map[string]any{"type": "string"},
+						"slot_token":      map[string]any{"type": "string"},
+						"idempotency_key": map[string]any{"type": "string"},
 					},
 					"required": []string{"confirmed", "items", "email", "delivery_mode"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "retry_payment",
+				"description": "Create or recover a payment link for an existing pending-payment order.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"order_uuid": map[string]any{"type": "string"},
+					},
+					"required": []string{"order_uuid"},
 				},
 			},
 		},
@@ -349,6 +385,8 @@ func (a *App) executeCommerceTool(rt *commerceRuntime, name, argsJSON string) st
 		result, err = a.toolCheckDeliveryEligibility(ctx, rt, argsJSON)
 	case "create_order":
 		result, err = a.toolCreateOrder(ctx, rt, argsJSON)
+	case "retry_payment":
+		result, err = a.toolRetryPayment(ctx, rt, argsJSON)
 	default:
 		err = fmt.Errorf("unknown tool: %s", name)
 	}
@@ -709,14 +747,61 @@ func (a *App) toolCreateOrder(ctx context.Context, rt *commerceRuntime, argsJSON
 	return placeCommerceOrder(ctx, rt, args)
 }
 
+func (a *App) toolRetryPayment(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
+	var args struct {
+		OrderUUID string `json:"order_uuid"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %w", err)
+	}
+	orderID, err := uuid.Parse(strings.TrimSpace(args.OrderUUID))
+	if err != nil || rt == nil || rt.Client == nil ||
+		strings.TrimSpace(rt.StoreID) == "" || strings.TrimSpace(rt.PhoneNumber) == "" {
+		return nil, errors.New("payment retry ownership could not be verified")
+	}
+	order, err := rt.Client.GetOrder(ctx, orderID.String())
+	if err != nil || !commerceOrderOwnedBy(order, orderID, rt.StoreID, rt.PhoneNumber) {
+		return nil, errors.New("payment retry ownership could not be verified")
+	}
+	return rt.Client.RetryPayment(ctx, orderID.String())
+}
+
+func commerceOrderOwnedBy(order map[string]any, orderID uuid.UUID, storeID, phone string) bool {
+	if order == nil || !strings.EqualFold(strings.TrimSpace(asString(order["uuid"])), orderID.String()) {
+		return false
+	}
+	orderStore := asToolInt(order["store"])
+	if store, ok := order["store"].(map[string]any); ok {
+		orderStore = asToolInt(store["id"])
+		if orderStore == 0 {
+			orderStore = asToolInt(store["pk"])
+		}
+	}
+	orderPhone := firstNonEmpty(asString(order["phone_number"]), asString(order["phone"]))
+	if customer, ok := order["customer"].(map[string]any); ok {
+		orderPhone = firstNonEmpty(orderPhone, asString(customer["phone_number"]), asString(customer["phone"]))
+	}
+	normalizePhone := func(value string) string {
+		return strings.TrimPrefix(strings.TrimSpace(value), "+")
+	}
+	configuredStore, err := strconv.Atoi(strings.TrimSpace(storeID))
+	return err == nil && configuredStore > 0 && orderStore == configuredStore &&
+		orderPhone != "" && normalizePhone(orderPhone) == normalizePhone(phone)
+}
+
 type createOrderArgs struct {
-	Confirmed     bool             `json:"confirmed"`
-	Items         []map[string]any `json:"items"`
-	Email         string           `json:"email"`
-	PhoneNumber   string           `json:"phone_number"`
-	DeliveryMode  string           `json:"delivery_mode"`
-	NewAddress    map[string]any   `json:"new_address"`
-	BuyerMetaData map[string]any   `json:"buyer_meta_data"`
+	Confirmed      bool             `json:"confirmed"`
+	Items          []map[string]any `json:"items"`
+	Email          string           `json:"email"`
+	PhoneNumber    string           `json:"phone_number"`
+	DeliveryMode   string           `json:"delivery_mode"`
+	NewAddress     map[string]any   `json:"new_address"`
+	BuyerMetaData  map[string]any   `json:"buyer_meta_data"`
+	AddressID      *int             `json:"address"`
+	Addons         []map[string]any `json:"addons"`
+	Notes          string           `json:"notes"`
+	SlotToken      string           `json:"slot_token"`
+	IdempotencyKey string           `json:"idempotency_key"`
 }
 
 func placeCommerceOrder(ctx context.Context, rt *commerceRuntime, args createOrderArgs) (map[string]any, error) {
@@ -751,17 +836,22 @@ func placeCommerceOrder(ctx context.Context, rt *commerceRuntime, args createOrd
 	}
 
 	req := ticker.CreateOrderRequest{
-		Store:         storeID,
-		Items:         items,
-		Email:         strings.TrimSpace(args.Email),
-		PhoneNumber:   phone,
-		DeliveryMode:  deliveryMode,
-		NewAddress:    args.NewAddress,
-		BuyerMetaData: args.BuyerMetaData,
+		Store:          storeID,
+		Items:          items,
+		Email:          strings.TrimSpace(args.Email),
+		PhoneNumber:    phone,
+		DeliveryMode:   deliveryMode,
+		NewAddress:     args.NewAddress,
+		BuyerMetaData:  args.BuyerMetaData,
+		Address:        args.AddressID,
+		Addons:         args.Addons,
+		Notes:          args.Notes,
+		SlotToken:      args.SlotToken,
+		IdempotencyKey: args.IdempotencyKey,
 	}
 
-	if deliveryMode == "DELIVERY_TO_LOCATION" && req.NewAddress == nil {
-		return nil, fmt.Errorf("new_address is required for DELIVERY_TO_LOCATION")
+	if deliveryMode == "DELIVERY_TO_LOCATION" && req.NewAddress == nil && req.Address == nil {
+		return nil, fmt.Errorf("address or new_address is required for DELIVERY_TO_LOCATION")
 	}
 	if req.NewAddress != nil {
 		if _, ok := req.NewAddress["email"]; !ok && req.Email != "" {

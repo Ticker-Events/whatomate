@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,8 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ContactResponse represents a contact with additional fields for the frontend
@@ -1214,16 +1217,25 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 		PanelConfig: map[string]any{"sections": []any{}},
 	}
 
-	// Get the most recent completed or active session for this contact
+	// Include cancelled sessions because a commerce handoff deliberately
+	// cancels bot processing after persisting its display-safe handoff state.
 	var session models.ChatbotSession
 	err = a.DB.Where("contact_id = ? AND organization_id = ?", contactID, orgID).
-		Where("status IN ?", []models.SessionStatus{models.SessionStatusActive, models.SessionStatusCompleted}).
+		Where("status IN ?", []models.SessionStatus{models.SessionStatusActive, models.SessionStatusCompleted, models.SessionStatusCancelled}).
 		Order("created_at DESC").
 		First(&session).Error
 
 	if err == nil {
 		response.SessionID = &session.ID
 		response.FlowID = session.CurrentFlowID
+		for _, key := range []string{
+			"commerce_draft_id", "commerce_captured_fields", "commerce_media_references",
+			"commerce_handoff_summary", "commerce_handoff", "backend_order_id", "commerce_order_id",
+		} {
+			if value, ok := session.SessionData[key]; ok {
+				response.SessionData[key] = value
+			}
+		}
 
 		// Get the flow to retrieve panel config
 		// First try current_flow_id, then fall back to _flow_id in session_data
@@ -1282,7 +1294,9 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 
 // UpdateContactTagsRequest represents the request body for updating contact tags
 type UpdateContactTagsRequest struct {
-	Tags []string `json:"tags"`
+	Tags      []string `json:"tags"`
+	Operation string   `json:"operation,omitempty"`
+	Tag       string   `json:"tag,omitempty"`
 }
 
 // UpdateContactTags updates the tags on a contact
@@ -1305,6 +1319,25 @@ func (a *App) UpdateContactTags(r *fastglue.Request) error {
 	var req UpdateContactTagsRequest
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
+	}
+	if operation := strings.ToLower(strings.TrimSpace(req.Operation)); operation != "" {
+		if operation != "add" && operation != "remove" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "operation must be add or remove", nil, "")
+		}
+		req.Tag = strings.TrimSpace(req.Tag)
+		if req.Tag == "" || len(req.Tag) > 50 {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "tag must contain 1 to 50 characters", nil, "")
+		}
+		contact, err := a.mutateContactTagValue(orgID, contactID, req.Tag, operation == "add")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+		}
+		if err != nil {
+			a.Log.Error("Failed to atomically mutate contact tag", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact tags", nil, "")
+		}
+		a.syncContactToFirestore(contact)
+		return r.SendEnvelope(contactTagsResponse(contact))
 	}
 
 	// Get contact
@@ -1329,6 +1362,7 @@ func (a *App) UpdateContactTags(r *fastglue.Request) error {
 	if err := a.DB.First(contact, contactID).Error; err != nil {
 		a.Log.Error("Failed to reload contact", "error", err)
 	}
+	a.syncContactToFirestore(contact)
 
 	// Build response with tag details
 	tags := []string{}
@@ -1344,6 +1378,111 @@ func (a *App) UpdateContactTags(r *fastglue.Request) error {
 		"message": "Contact tags updated",
 		"tags":    tags,
 	})
+}
+
+type MutateContactTagRequest struct {
+	Tag string `json:"tag"`
+}
+
+// AddContactTag atomically adds one tag without overwriting concurrent tag
+// mutations. Existing full-replacement clients can continue using PUT.
+func (a *App) AddContactTag(r *fastglue.Request) error {
+	return a.mutateContactTag(r, true)
+}
+
+// RemoveContactTag atomically removes one tag without a read-modify-write race.
+func (a *App) RemoveContactTag(r *fastglue.Request) error {
+	return a.mutateContactTag(r, false)
+}
+
+func (a *App) mutateContactTag(r *fastglue.Request, add bool) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	if !a.HasPermission(userID, models.ResourceContacts, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to update contact tags", nil, "")
+	}
+	contactID, err := parsePathUUID(r, "id", "contact")
+	if err != nil {
+		return nil
+	}
+	var req MutateContactTagRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	req.Tag = strings.TrimSpace(req.Tag)
+	if req.Tag == "" || len(req.Tag) > 50 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "tag must contain 1 to 50 characters", nil, "")
+	}
+
+	contact, err := a.mutateContactTagValue(orgID, contactID, req.Tag, add)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	if err != nil {
+		a.Log.Error("Failed to atomically mutate contact tag", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update contact tags", nil, "")
+	}
+	a.syncContactToFirestore(contact)
+	return r.SendEnvelope(contactTagsResponse(contact))
+}
+
+func (a *App) mutateContactTagValue(orgID, contactID uuid.UUID, targetTag string, add bool) (*models.Contact, error) {
+	targetTag = strings.TrimSpace(targetTag)
+	if targetTag == "" || len(targetTag) > 50 {
+		return nil, errors.New("tag must contain 1 to 50 characters")
+	}
+	var contact models.Contact
+	err := a.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND organization_id = ?", contactID, orgID).
+			First(&contact).Error; err != nil {
+			return err
+		}
+		tags := make([]string, 0, len(contact.Tags)+1)
+		found := false
+		for _, raw := range contact.Tags {
+			tag, ok := raw.(string)
+			if !ok || tag == "" {
+				continue
+			}
+			if tag == targetTag {
+				found = true
+				if !add {
+					continue
+				}
+			}
+			tags = append(tags, tag)
+		}
+		if add && !found {
+			tags = append(tags, targetTag)
+		}
+		values := make(models.JSONBArray, len(tags))
+		for i := range tags {
+			values[i] = tags[i]
+		}
+		contact.Tags = values
+		return tx.Model(&contact).Update("tags", values).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &contact, nil
+}
+
+func contactTagsResponse(contact *models.Contact) map[string]any {
+	tags := make([]string, 0, len(contact.Tags))
+	for _, raw := range contact.Tags {
+		if tag, ok := raw.(string); ok {
+			tags = append(tags, tag)
+		}
+	}
+	return map[string]any{
+		"message":    "Contact tags updated",
+		"tags":       tags,
+		"updated_at": contact.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
 }
 
 // CreateContactRequest represents the request body for creating a contact

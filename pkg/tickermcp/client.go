@@ -64,10 +64,12 @@ type Category struct {
 	Description           string         `json:"description"`
 	ListingPriority       int            `json:"listing_priority"`
 	Image                 string         `json:"image"`
+	Tags                  []string       `json:"tags,omitempty"`
 	AIInstructions        string         `json:"ai_instructions,omitempty"`
 	RequiredCaptureFields []CaptureField `json:"required_capture_fields,omitempty"`
 	HandoffPolicy         string         `json:"handoff_policy,omitempty"`
 	HandoffMessage        string         `json:"handoff_message,omitempty"`
+	VisualTags            []string       `json:"visual_tags,omitempty"`
 }
 
 type CategoryPage struct {
@@ -78,6 +80,50 @@ type CategoryPage struct {
 type ProductPage struct {
 	Results []ticker.ProductSummary `json:"results"`
 	PageMetadata
+}
+
+type FulfillmentSlot struct {
+	RequestedFulfillmentAt string `json:"requested_fulfillment_at"`
+	PromisedReadyAt        string `json:"promised_ready_at"`
+	Timezone               string `json:"timezone"`
+	DeliveryMode           string `json:"delivery_mode"`
+	PreparationTimeMinutes int    `json:"preparation_time_minutes"`
+	Token                  string `json:"token"`
+}
+
+type FulfillmentSlotList struct {
+	StoreID int               `json:"store_id"`
+	Slots   []FulfillmentSlot `json:"slots"`
+}
+
+type FulfillmentSlotValidation struct {
+	Valid                  bool   `json:"valid"`
+	RequestedFulfillmentAt string `json:"requested_fulfillment_at"`
+	PromisedReadyAt        string `json:"promised_ready_at"`
+}
+
+type CustomerAddress struct {
+	ID                int            `json:"id"`
+	Name              string         `json:"name"`
+	Phone             string         `json:"phone"`
+	AddressLine1      string         `json:"address_line_1"`
+	AddressLine2      *string        `json:"address_line_2,omitempty"`
+	City              string         `json:"city"`
+	State             string         `json:"state"`
+	Country           string         `json:"country"`
+	Pincode           string         `json:"pincode"`
+	Landmark          string         `json:"landmark,omitempty"`
+	Latitude          *float64       `json:"latitude,omitempty"`
+	Longitude         *float64       `json:"longitude,omitempty"`
+	MetaData          map[string]any `json:"meta_data,omitempty"`
+	AuthorizedAddress bool           `json:"authorized_address"`
+}
+
+type PaymentRetry struct {
+	OrderUUID  string  `json:"order_uuid"`
+	Status     string  `json:"status"`
+	Retryable  bool    `json:"retryable"`
+	PaymentURL *string `json:"payment_url,omitempty"`
 }
 
 // NewClient returns an MCP client for the given streamable-HTTP endpoint
@@ -282,6 +328,86 @@ func (c *Client) CheckDeliveryEligibility(ctx context.Context, storeID string, l
 	return m, nil
 }
 
+func (c *Client) ListFulfillmentSlots(ctx context.Context, storeID, deliveryMode string, productOptionIDs []int) (FulfillmentSlotList, error) {
+	sid, err := positiveStoreID(storeID)
+	if err != nil {
+		return FulfillmentSlotList{}, err
+	}
+	args := map[string]any{"store_id": sid, "delivery_mode": strings.TrimSpace(deliveryMode)}
+	if len(productOptionIDs) > 0 {
+		args["product_option_ids"] = productOptionIDs
+	}
+	raw, err := c.callTool(ctx, "list_fulfillment_slots", args)
+	if err != nil {
+		return FulfillmentSlotList{}, err
+	}
+	var result FulfillmentSlotList
+	if err := decodeInto(raw, &result); err != nil {
+		return result, fmt.Errorf("decode fulfillment slots: %w", err)
+	}
+	return result, nil
+}
+
+func (c *Client) ValidateFulfillmentSlot(ctx context.Context, storeID, deliveryMode, token string, productOptionIDs []int) (FulfillmentSlotValidation, error) {
+	sid, err := positiveStoreID(storeID)
+	if err != nil {
+		return FulfillmentSlotValidation{}, err
+	}
+	args := map[string]any{"store_id": sid, "delivery_mode": strings.TrimSpace(deliveryMode), "token": strings.TrimSpace(token)}
+	if len(productOptionIDs) > 0 {
+		args["product_option_ids"] = productOptionIDs
+	}
+	raw, err := c.callTool(ctx, "validate_fulfillment_slot", args)
+	if err != nil {
+		return FulfillmentSlotValidation{}, err
+	}
+	var result FulfillmentSlotValidation
+	err = decodeInto(raw, &result)
+	return result, err
+}
+
+func (c *Client) ListCustomerAddresses(ctx context.Context, storeID, phoneNumber string) ([]CustomerAddress, error) {
+	sid, err := positiveStoreID(storeID)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.callTool(ctx, "list_customer_addresses", map[string]any{
+		"store_id": sid, "phone_number": strings.TrimSpace(phoneNumber),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var result []CustomerAddress
+	err = decodeInto(raw, &result)
+	return result, err
+}
+
+func (c *Client) CreateCustomerAddress(ctx context.Context, storeID, phoneNumber string, address map[string]any) (CustomerAddress, error) {
+	sid, err := positiveStoreID(storeID)
+	if err != nil {
+		return CustomerAddress{}, err
+	}
+	raw, err := c.callTool(ctx, "create_customer_address", map[string]any{
+		"store_id": sid, "phone_number": strings.TrimSpace(phoneNumber), "address": address,
+	})
+	if err != nil {
+		return CustomerAddress{}, err
+	}
+	var result CustomerAddress
+	err = decodeInto(raw, &result)
+	return result, err
+}
+
+func (c *Client) RetryPayment(ctx context.Context, orderUUID string) (PaymentRetry, error) {
+	raw, err := c.callTool(ctx, "retry_payment", map[string]any{"order_uuid": strings.TrimSpace(orderUUID)})
+	if err != nil {
+		return PaymentRetry{}, err
+	}
+	var result PaymentRetry
+	err = decodeInto(raw, &result)
+	return result, err
+}
+
 // CompactStore keeps name, description, address, country, delivery modes, and delivery radii.
 func CompactStore(m map[string]any) map[string]any {
 	if m == nil {
@@ -388,11 +514,23 @@ func (c *Client) CreateOrder(ctx context.Context, body ticker.CreateOrderRequest
 	if body.NewAddress != nil {
 		order["new_address"] = body.NewAddress
 	}
+	if body.Address != nil {
+		order["address"] = *body.Address
+	}
 	if body.BuyerMetaData != nil {
 		order["buyer_meta_data"] = body.BuyerMetaData
 	}
 	if len(body.Addons) > 0 {
 		order["addons"] = body.Addons
+	}
+	if body.Notes != "" {
+		order["notes"] = body.Notes
+	}
+	if body.SlotToken != "" {
+		order["slot_token"] = body.SlotToken
+	}
+	if body.IdempotencyKey != "" {
+		order["idempotency_key"] = body.IdempotencyKey
 	}
 	raw, err := c.callTool(ctx, "create_order", map[string]any{"order": order})
 	if err != nil {
@@ -475,11 +613,28 @@ func (c *Client) closeSessionLocked() error {
 func isReadOnlyTool(name string) bool {
 	switch name {
 	case "get_store", "list_categories", "list_products", "get_product",
-		"check_delivery_eligibility", "lookup_order_status", "get_order":
+		"check_delivery_eligibility", "lookup_order_status", "get_order",
+		"list_fulfillment_slots", "validate_fulfillment_slot", "list_customer_addresses":
 		return true
 	default:
 		return false
 	}
+}
+
+func positiveStoreID(storeID string) (int, error) {
+	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
+	if err != nil || sid <= 0 {
+		return 0, fmt.Errorf("store_id is required")
+	}
+	return sid, nil
+}
+
+func decodeInto(value, destination any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, destination)
 }
 
 func parseToolResult(result *mcp.CallToolResult) (any, error) {
@@ -756,6 +911,10 @@ func categoryMap(category Category) map[string]any {
 	data, _ := json.Marshal(category)
 	var out map[string]any
 	_ = json.Unmarshal(data, &out)
+	// Tags are used internally for visual handoff routing, not rendered in the
+	// compact category payload shown to the shopper.
+	delete(out, "tags")
+	delete(out, "visual_tags")
 	return out
 }
 

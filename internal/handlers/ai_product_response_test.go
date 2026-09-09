@@ -1,7 +1,12 @@
 package handlers
 
 import (
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -10,6 +15,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestReachablePublicMediaURLRejectsLoopbackBeforeProbe(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
+	}))
+	defer server.Close()
+
+	assert.False(t, isReachablePublicMediaURL(context.Background(), server.URL))
+	assert.Zero(t, requests.Load(), "loopback targets must be rejected before connecting")
+}
+
+func TestPublicMediaIPClassification(t *testing.T) {
+	for _, raw := range []string{"127.0.0.1", "::1", "10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "fe80::1"} {
+		assert.False(t, isPublicMediaIP(net.ParseIP(raw)), raw)
+	}
+	assert.True(t, isPublicMediaIP(net.ParseIP("8.8.8.8")))
+}
 
 func TestParseAIResponseSegments_PlainTextOnly(t *testing.T) {
 	t.Parallel()
@@ -352,7 +378,7 @@ func TestSetCartLineQty(t *testing.T) {
 	session := &models.ChatbotSession{SessionData: models.JSONB{
 		cartKey: map[string]any{
 			"5": map[string]any{
-				"qty": 1,
+				"qty":     1,
 				"product": map[string]any{"option_name": "Small"},
 			},
 		},

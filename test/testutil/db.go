@@ -106,6 +106,10 @@ func runMigrations(db *gorm.DB) error {
 		&models.ChatbotFlowStep{},
 		&models.ChatbotSession{},
 		&models.ChatbotSessionMessage{},
+		&models.CommerceDraft{},
+		&models.CommerceDraftMessage{},
+		&models.CommerceLifecycleConfig{},
+		&models.CommerceLifecycleEvent{},
 		&models.AIContext{},
 		&models.AgentTransfer{},
 		// Bulk message models
@@ -147,6 +151,10 @@ func cleanupTables(db *gorm.DB) {
 		"bulk_message_campaigns",
 		"notification_rules",
 		// Chatbot tables
+		"commerce_lifecycle_events",
+		"commerce_lifecycle_configs",
+		"commerce_draft_messages",
+		"commerce_drafts",
 		"chatbot_session_messages",
 		"chatbot_sessions",
 		"chatbot_flow_steps",

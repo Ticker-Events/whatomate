@@ -426,6 +426,8 @@ type Message struct {
 	ReplyToMessageID  *uuid.UUID    `gorm:"type:uuid" json:"reply_to_message_id,omitempty"`
 	SentByUserID      *uuid.UUID    `gorm:"type:uuid;index" json:"sent_by_user_id,omitempty"` // User who sent outgoing message
 	Metadata          JSONB         `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	LifecycleEventID  *uuid.UUID    `gorm:"type:uuid;uniqueIndex" json:"lifecycle_event_id,omitempty"`
+	DurableSendKey    *string       `gorm:"size:180;uniqueIndex" json:"-"`
 
 	// Relations
 	Organization   *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`

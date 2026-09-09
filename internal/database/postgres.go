@@ -91,6 +91,10 @@ func GetMigrationModels() []MigrationModel {
 		// dropped in a future maintenance migration.
 		{"ChatbotSession", &models.ChatbotSession{}},
 		{"ChatbotSessionMessage", &models.ChatbotSessionMessage{}},
+		{"CommerceDraft", &models.CommerceDraft{}},
+		{"CommerceDraftMessage", &models.CommerceDraftMessage{}},
+		{"CommerceLifecycleConfig", &models.CommerceLifecycleConfig{}},
+		{"CommerceLifecycleEvent", &models.CommerceLifecycleEvent{}},
 		{"AIContext", &models.AIContext{}},
 		{"AgentTransfer", &models.AgentTransfer{}},
 
@@ -127,7 +131,7 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return nil
+	return EnforceCommerceDraftOwnership(db)
 }
 
 // EncryptLegacyChatbotSecrets migrates plaintext AI credentials in place.
@@ -203,6 +207,9 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 		}
 		currentStep++
 	}
+	if err := EnforceCommerceDraftOwnership(silentDB); err != nil {
+		return fmt.Errorf("failed to enforce commerce draft ownership: %w", err)
+	}
 
 	// Create indexes
 	for _, idx := range indexes {
@@ -258,6 +265,39 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	fmt.Printf("\n  \033[32m✓ Migration completed\033[0m\n\n")
 
 	return nil
+}
+
+// EnforceCommerceDraftOwnership backfills the cross-dialect unique owner key.
+// If an older release created duplicates, the newest recoverable draft wins
+// and older rows are retained as abandoned audit records.
+func EnforceCommerceDraftOwnership(db *gorm.DB) error {
+	var drafts []models.CommerceDraft
+	if err := db.Where("status IN ?", []string{"active", "submitting", "pending_payment"}).
+		Order("updated_at DESC, created_at DESC").
+		Find(&drafts).Error; err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(drafts))
+	return db.Transaction(func(tx *gorm.DB) error {
+		for i := range drafts {
+			owner := fmt.Sprintf("%s\x00%s\x00%s\x00%s",
+				drafts[i].OrganizationID, drafts[i].ContactID, drafts[i].WhatsAppAccount, drafts[i].StoreID)
+			if _, exists := seen[owner]; exists {
+				if err := tx.Model(&models.CommerceDraft{}).Where("id = ?", drafts[i].ID).
+					Updates(map[string]any{"status": "abandoned", "active_owner_key": nil}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			seen[owner] = struct{}{}
+			drafts[i].RefreshActiveOwnerKey()
+			if err := tx.Model(&models.CommerceDraft{}).Where("id = ?", drafts[i].ID).
+				Update("active_owner_key", drafts[i].ActiveOwnerKey).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // repeatChar repeats a character n times
