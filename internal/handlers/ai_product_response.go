@@ -3,8 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"mime"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -603,36 +608,123 @@ func (a *App) lookupCommerceProductImage(ctx context.Context, account *models.Wh
 	return summary.ImageURL
 }
 
+const maxMediaProbeBytes int64 = 1 << 20
+
+func isPublicMediaIP(ip net.IP) bool {
+	return ip != nil &&
+		ip.IsGlobalUnicast() &&
+		!ip.IsPrivate() &&
+		!ip.IsLoopback() &&
+		!ip.IsLinkLocalUnicast() &&
+		!ip.IsLinkLocalMulticast()
+}
+
+func resolvePublicMediaHost(ctx context.Context, host string) ([]net.IPAddr, error) {
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return nil, errors.New("media host did not resolve")
+	}
+	for _, candidate := range ips {
+		if !isPublicMediaIP(candidate.IP) {
+			return nil, errors.New("media host resolves to a non-public address")
+		}
+	}
+	return ips, nil
+}
+
+func validatePublicMediaURL(ctx context.Context, rawURL string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil ||
+		(parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return nil, errors.New("invalid public media URL")
+	}
+	if _, err := resolvePublicMediaHost(ctx, parsed.Hostname()); err != nil {
+		return nil, err
+	}
+	return parsed, nil
+}
+
 func isReachablePublicMediaURL(ctx context.Context, mediaURL string) bool {
-	if !strings.HasPrefix(mediaURL, "https://") && !strings.HasPrefix(mediaURL, "http://") {
+	if _, err := validatePublicMediaURL(ctx, mediaURL); err != nil {
 		return false
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, mediaURL, nil)
+
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	transport := &http.Transport{
+		Proxy:                  nil,
+		DisableKeepAlives:      true,
+		MaxResponseHeaderBytes: 32 << 10,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := resolvePublicMediaHost(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		},
+	}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return errors.New("too many media redirects")
+			}
+			_, err := validatePublicMediaURL(req.Context(), req.URL.String())
+			return err
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
 	if err != nil {
 		return false
 	}
+	req.Header.Set("Range", "bytes=0-511")
 	resp, err := client.Do(req)
-	if err == nil {
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-			return true
-		}
-		if resp.StatusCode != http.StatusMethodNotAllowed && resp.StatusCode != http.StatusForbidden {
-			return false
-		}
-	}
-	req, err = http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
 	if err != nil {
 		return false
 	}
-	req.Header.Set("Range", "bytes=0-0")
-	resp, err = client.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return false
+	}
+	if resp.ContentLength > maxMediaProbeBytes {
+		return false
+	}
+	sniff, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if err != nil || len(sniff) == 0 {
+		return false
+	}
+	detected := normalizeImageMIME(http.DetectContentType(sniff))
+	if detected == "" {
+		return false
+	}
+	declared, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
 		return false
 	}
-	_ = resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 400
+	if declared == "" || declared == "application/octet-stream" {
+		return true
+	}
+	return normalizeImageMIME(declared) == detected
+}
+
+func normalizeImageMIME(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "image/jpeg", "image/jpg":
+		return "image/jpeg"
+	case "image/png":
+		return "image/png"
+	case "image/gif":
+		return "image/gif"
+	case "image/webp":
+		return "image/webp"
+	default:
+		return ""
+	}
 }
 
 func hostOfURL(raw string) string {
@@ -651,10 +743,13 @@ func hostOfURL(raw string) string {
 
 func (a *App) persistSessionData(session *models.ChatbotSession) error {
 	session.LastActivityAt = time.Now()
-	return a.DB.Model(session).Updates(map[string]any{
+	if err := a.DB.Model(session).Updates(map[string]any{
 		"session_data":     session.SessionData,
 		"last_activity_at": session.LastActivityAt,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	return a.syncReferencedCommerceDraft(session)
 }
 
 func (a *App) handleAddToCartProductTap(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, buttonID string) {

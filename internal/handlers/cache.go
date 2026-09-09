@@ -335,7 +335,10 @@ func (a *App) getSLAEnabledSettingsCached() ([]models.ChatbotSettings, error) {
 
 	// Cache miss - fetch from database
 	var settings []models.ChatbotSettings
-	if err := a.DB.Where("sla_enabled = ?", true).Find(&settings).Error; err != nil {
+	if err := a.DB.Where(
+		"sla_enabled = ? OR commerce_pending_payment_reminder_enabled = ? OR commerce_abandoned_draft_reminder_enabled = ?",
+		true, true, true,
+	).Find(&settings).Error; err != nil {
 		return nil, err
 	}
 

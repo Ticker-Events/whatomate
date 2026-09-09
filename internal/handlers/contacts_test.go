@@ -1742,3 +1742,28 @@ func TestApp_UpdateContact_ReopensWithoutChangingClock(t *testing.T) {
 	require.NotNil(t, dbContact.AwaitingReplySince)
 	assert.True(t, clock.Equal(dbContact.AwaitingReplySince.UTC()))
 }
+
+func TestApp_UpdateContactTags_AtomicOperationsPreserveOtherTags(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	require.NoError(t, app.DB.Model(contact).Update("tags", models.JSONBArray{"existing"}).Error)
+
+	add := testutil.NewJSONRequest(t, map[string]any{"tag": "vip"})
+	testutil.SetAuthContext(add, org.ID, user.ID)
+	testutil.SetPathParam(add, "id", contact.ID.String())
+	require.NoError(t, app.AddContactTag(add))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(add))
+
+	remove := testutil.NewJSONRequest(t, map[string]any{"tag": "vip"})
+	testutil.SetAuthContext(remove, org.ID, user.ID)
+	testutil.SetPathParam(remove, "id", contact.ID.String())
+	require.NoError(t, app.RemoveContactTag(remove))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(remove))
+
+	var updated models.Contact
+	require.NoError(t, app.DB.First(&updated, contact.ID).Error)
+	assert.Equal(t, models.JSONBArray{"existing"}, updated.Tags)
+}

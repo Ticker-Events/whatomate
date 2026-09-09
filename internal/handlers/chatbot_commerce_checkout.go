@@ -3,11 +3,15 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
+	draftrepo "github.com/shridarpatil/whatomate/internal/commerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
@@ -21,6 +25,9 @@ const (
 	checkoutCancelButtonID       = "checkout_cancel"
 	checkoutPickupButtonID       = "checkout_delivery_pickup"
 	checkoutDeliveryButtonID     = "checkout_delivery_ship"
+	checkoutNewAddressButtonID   = "checkout_address_new"
+	checkoutSlotPrefix           = "checkout_slot_"
+	checkoutAddressPrefix        = "checkout_address_"
 	cartPendingOptionKey         = "cart_pending_option_id"
 	checkoutLocationPrompt       = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
 	checkoutAddressPrompt        = "Please provide your full delivery address, including your name, phone number, street address, city, state, country, and pincode."
@@ -35,6 +42,9 @@ var (
 	indianPhoneRE  = regexp.MustCompile(`(?:\+?91[\s-]*)?([6-9]\d{9})\b`)
 	addressLabelRE = regexp.MustCompile(`(?i)^\s*(name|phone|mobile|street|address|city|state|country|pin\s*code|pincode|postal)\s*[:\-]\s*(.+)$`)
 	firstQtyRE     = regexp.MustCompile(`(?i)(?:^|\b)(\d{1,4})\b`)
+	targetQtyRE    = regexp.MustCompile(`(?i)^(?:change|update|set)?\s*(.+?)\s+(?:to|x)?\s*(\d{1,4})$`)
+	removeLineRE   = regexp.MustCompile(`(?i)^(?:remove|delete)\s+(.+)$`)
+	addonEditRE    = regexp.MustCompile(`(?i)^(remove\s+)?addon\s+(\d+)(?:\s*(?:x|to)\s*(\d+))?$`)
 )
 
 type checkoutState struct {
@@ -47,6 +57,13 @@ type checkoutState struct {
 	HasLocation      bool
 	DeliveryZone     string
 	ShippingFeePaise int64
+	SlotToken        string
+	RequestedAt      string
+	PromisedAt       string
+	Slots            []map[string]any
+	SavedAddressID   *int
+	CaptureFields    []map[string]any
+	CaptureIndex     int
 }
 
 func getCheckoutState(session *models.ChatbotSession) *checkoutState {
@@ -82,6 +99,31 @@ func getCheckoutState(session *models.ChatbotSession) *checkoutState {
 	if fee, ok := anyToFloat64(raw["shipping_fee_paise"]); ok {
 		st.ShippingFeePaise = int64(fee)
 	}
+	st.SlotToken = asString(raw["slot_token"])
+	st.RequestedAt = asString(raw["requested_at"])
+	st.PromisedAt = asString(raw["promised_at"])
+	if slots, ok := raw["slots"].([]any); ok {
+		for _, slot := range slots {
+			if item, ok := slot.(map[string]any); ok {
+				st.Slots = append(st.Slots, item)
+			}
+		}
+	} else if slots, ok := raw["slots"].([]map[string]any); ok {
+		st.Slots = slots
+	}
+	if id := anyToInt(raw["saved_address_id"]); id > 0 {
+		st.SavedAddressID = &id
+	}
+	if fields, ok := raw["capture_fields"].([]any); ok {
+		for _, field := range fields {
+			if item, ok := field.(map[string]any); ok {
+				st.CaptureFields = append(st.CaptureFields, item)
+			}
+		}
+	} else if fields, ok := raw["capture_fields"].([]map[string]any); ok {
+		st.CaptureFields = fields
+	}
+	st.CaptureIndex = anyToInt(raw["capture_index"])
 	if st.Step == "" {
 		return nil
 	}
@@ -109,7 +151,21 @@ func setCheckoutState(session *models.ChatbotSession, st *checkoutState) {
 		"has_location":       st.HasLocation,
 		"delivery_zone":      st.DeliveryZone,
 		"shipping_fee_paise": st.ShippingFeePaise,
+		"slot_token":         st.SlotToken,
+		"requested_at":       st.RequestedAt,
+		"promised_at":        st.PromisedAt,
+		"slots":              st.Slots,
+		"saved_address_id":   pointerIntValue(st.SavedAddressID),
+		"capture_fields":     st.CaptureFields,
+		"capture_index":      st.CaptureIndex,
 	}
+}
+
+func pointerIntValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func clearCheckoutState(session *models.ChatbotSession) {
@@ -148,10 +204,10 @@ func anyToFloat64(v any) (float64, bool) {
 func IsCheckoutButton(buttonID string) bool {
 	switch buttonID {
 	case checkoutButtonID, checkoutExploreButtonID, checkoutConfirmButtonID, checkoutCancelButtonID,
-		checkoutPickupButtonID, checkoutDeliveryButtonID:
+		checkoutPickupButtonID, checkoutDeliveryButtonID, checkoutNewAddressButtonID:
 		return true
 	default:
-		return false
+		return strings.HasPrefix(buttonID, checkoutSlotPrefix) || strings.HasPrefix(buttonID, checkoutAddressPrefix)
 	}
 }
 
@@ -178,6 +234,14 @@ func (a *App) handleCommerceButtonTap(account *models.WhatsAppAccount, contact *
 }
 
 func (a *App) handleCheckoutButtonTap(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, buttonID string) {
+	if strings.HasPrefix(buttonID, checkoutSlotPrefix) {
+		a.handleCheckoutSlotChoice(account, contact, session, settings, buttonID)
+		return
+	}
+	if strings.HasPrefix(buttonID, checkoutAddressPrefix) && buttonID != checkoutNewAddressButtonID {
+		a.handleCheckoutSavedAddressChoice(account, contact, session, settings, buttonID)
+		return
+	}
 	switch buttonID {
 	case checkoutButtonID:
 		a.startCheckout(account, contact, session, settings)
@@ -187,6 +251,8 @@ func (a *App) handleCheckoutButtonTap(account *models.WhatsAppAccount, contact *
 		a.handleCheckoutDeliveryChoice(account, contact, session, settings, "PICKUP_FROM_STORE")
 	case checkoutDeliveryButtonID:
 		a.handleCheckoutDeliveryChoice(account, contact, session, settings, "DELIVERY_TO_LOCATION")
+	case checkoutNewAddressButtonID:
+		a.beginNewCheckoutAddress(account, contact, session, settings)
 	case checkoutConfirmButtonID:
 		a.placeCheckoutOrder(account, contact, session, settings)
 	case checkoutCancelButtonID:
@@ -203,11 +269,64 @@ func (a *App) startCheckout(account *models.WhatsAppAccount, contact *models.Con
 	summary := formatCheckoutCartSummary(session)
 	_ = a.sendAndSaveTextMessage(account, contact, summary)
 
-	st := &checkoutState{NewAddress: map[string]any{}}
-	st.Step = "email"
+	st := &checkoutState{NewAddress: map[string]any{}, CaptureFields: a.checkoutCaptureFields(session, settings)}
+	if len(st.CaptureFields) > 0 {
+		st.Step = "capture"
+	} else {
+		st.Step = "email"
+	}
 	setCheckoutState(session, st)
+	if _, err := a.ensureCommerceDraft(contact, session, settings); err != nil {
+		a.Log.Error("create durable commerce draft failed", "error", err)
+		_ = a.sendAndSaveTextMessage(account, contact, "Checkout is temporarily unavailable. Please try again.")
+		return
+	}
 	_ = a.persistSessionData(session)
-	_ = a.sendAndSaveTextMessage(account, contact, "Please share your email address to continue checkout.")
+	a.repromptCheckoutStep(account, contact, session, settings, st)
+}
+
+func (a *App) checkoutCaptureFields(session *models.ChatbotSession, settings *models.ChatbotSettings) []map[string]any {
+	categoryID := selectedCategoryID(session)
+	if categoryID == "" {
+		return nil
+	}
+	rt := a.newCommerceRuntime(settings, session)
+	if rt == nil {
+		return nil
+	}
+	defer rt.Close()
+	page, err := rt.Client.ListCategoryPage(context.Background(), rt.StoreID, categoryID, 1, 0)
+	if err != nil || len(page.Results) != 1 {
+		return nil
+	}
+	captured := jsonMapFromSession(session, "commerce_captured_fields")
+	fields := make([]map[string]any, 0, len(page.Results[0].RequiredCaptureFields))
+	for _, field := range page.Results[0].RequiredCaptureFields {
+		if !field.Required || captured[field.Key] != nil {
+			continue
+		}
+		fields = append(fields, map[string]any{
+			"key": field.Key, "label": field.Label, "type": field.Type, "options": field.Options, "help_text": field.HelpText,
+		})
+	}
+	return fields
+}
+
+func promptCaptureField(field map[string]any) string {
+	label := asString(field["label"])
+	if help := asString(field["help_text"]); help != "" {
+		label += "\n" + help
+	}
+	if options, ok := field["options"].([]any); ok && len(options) > 0 {
+		values := make([]string, 0, len(options))
+		for _, option := range options {
+			values = append(values, fmt.Sprint(option))
+		}
+		label += "\nOptions: " + strings.Join(values, ", ")
+	} else if options, ok := field["options"].([]string); ok && len(options) > 0 {
+		label += "\nOptions: " + strings.Join(options, ", ")
+	}
+	return label
 }
 
 func (a *App) sendDeliveryModeButtons(account *models.WhatsAppAccount, contact *models.Contact) {
@@ -223,52 +342,190 @@ func (a *App) handleCheckoutDeliveryChoice(account *models.WhatsAppAccount, cont
 		return
 	}
 	st.DeliveryMode = mode
-	if mode == "DELIVERY_TO_LOCATION" {
-		if st.NewAddress == nil {
-			st.NewAddress = map[string]any{}
-		}
-		if contact != nil {
-			if contact.ProfileName != "" {
-				st.NewAddress["name"] = contact.ProfileName
-			}
-			if contact.PhoneNumber != "" {
-				st.NewAddress["phone"] = contact.PhoneNumber
-			}
-		}
-		st.NewAddress["email"] = st.Email
-		if country := a.storeAddressCountry(session, settings); country != "" {
-			st.NewAddress["country"] = country
-		}
+	st.Step = "slot"
+	setCheckoutState(session, st)
+	_ = a.persistSessionData(session)
+	a.sendFulfillmentSlots(account, contact, session, settings, st)
+}
 
-		if a.storeRequiresLocationBasedDelivery(session, settings) {
-			st.Step = "location"
-			st.HasLocation = false
-			st.Latitude = 0
-			st.Longitude = 0
-			st.DeliveryZone = ""
-			st.ShippingFeePaise = 0
-			setCheckoutState(session, st)
-			_ = a.persistSessionData(session)
-			_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
-			return
+func (a *App) sendFulfillmentSlots(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
+	rt := a.newCommerceRuntime(settings, session)
+	if rt == nil {
+		_ = a.sendAndSaveTextMessage(account, contact, "Fulfillment times are temporarily unavailable.")
+		return
+	}
+	defer rt.Close()
+	result, err := rt.Client.ListFulfillmentSlots(context.Background(), rt.StoreID, st.DeliveryMode, cartProductOptionIDs(session))
+	if err != nil || len(result.Slots) == 0 {
+		a.Log.Warn("list fulfillment slots failed", "error", err)
+		_ = a.sendAndSaveTextMessage(account, contact, "No fulfillment times are available right now. Please choose another mode or try later.")
+		a.sendDeliveryModeButtons(account, contact)
+		return
+	}
+	st.Slots = make([]map[string]any, 0, len(result.Slots))
+	buttons := make([]map[string]any, 0, len(result.Slots))
+	for i, slot := range result.Slots {
+		if i >= 10 {
+			break
 		}
+		st.Slots = append(st.Slots, map[string]any{
+			"token": slot.Token, "requested_at": slot.RequestedFulfillmentAt, "promised_at": slot.PromisedReadyAt,
+		})
+		buttons = append(buttons, map[string]any{
+			"id":    checkoutSlotPrefix + strconv.Itoa(i),
+			"title": checkoutSlotLabel(slot.RequestedFulfillmentAt),
+		})
+	}
+	setCheckoutState(session, st)
+	_ = a.persistSessionData(session)
+	_ = a.sendAndSaveInteractiveButtons(account, contact, "Choose a fulfillment time:", buttons)
+}
 
-		// Flag off (default): collect address (WhatsApp form for India stores).
-		st.Step = "address"
+func checkoutSlotLabel(value string) string {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return truncateRunes(value, 20)
+	}
+	return parsed.Format("02 Jan 3:04 PM")
+}
+
+func cartProductOptionIDs(session *models.ChatbotSession) []int {
+	items := cartOrderItems(session)
+	out := make([]int, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.ProductOption)
+	}
+	return out
+}
+
+func (a *App) handleCheckoutSlotChoice(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, buttonID string) {
+	st := getCheckoutState(session)
+	if st == nil || st.Step != "slot" {
+		return
+	}
+	index, err := strconv.Atoi(strings.TrimPrefix(buttonID, checkoutSlotPrefix))
+	if err != nil || index < 0 || index >= len(st.Slots) {
+		a.sendFulfillmentSlots(account, contact, session, settings, st)
+		return
+	}
+	slot := st.Slots[index]
+	st.SlotToken = asString(slot["token"])
+	st.RequestedAt = asString(slot["requested_at"])
+	st.PromisedAt = asString(slot["promised_at"])
+	if st.DeliveryMode == "PICKUP_FROM_STORE" {
+		st.Step = "confirm"
+		setCheckoutState(session, st)
+		_ = a.persistSessionData(session)
+		a.sendOrderConfirmPrompt(account, contact, session)
+		return
+	}
+	a.sendSavedAddressChoices(account, contact, session, settings, st)
+}
+
+func (a *App) sendSavedAddressChoices(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
+	rt := a.newCommerceRuntime(settings, session)
+	if rt == nil {
+		a.beginNewCheckoutAddress(account, contact, session, settings)
+		return
+	}
+	defer rt.Close()
+	addresses, err := rt.Client.ListCustomerAddresses(context.Background(), rt.StoreID, contact.PhoneNumber)
+	if err != nil || len(addresses) == 0 {
+		a.beginNewCheckoutAddress(account, contact, session, settings)
+		return
+	}
+	st.Step = "saved_address"
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
+	addressMap := map[string]any{}
+	buttons := make([]map[string]any, 0, len(addresses)+1)
+	for _, address := range addresses {
+		if !address.AuthorizedAddress || len(buttons) >= 9 {
+			continue
+		}
+		key := strconv.Itoa(address.ID)
+		data, _ := json.Marshal(address)
+		var raw map[string]any
+		_ = json.Unmarshal(data, &raw)
+		addressMap[key] = raw
+		buttons = append(buttons, map[string]any{"id": checkoutAddressPrefix + key, "title": truncateRunes(address.AddressLine1, 20)})
+	}
+	buttons = append(buttons, map[string]any{"id": checkoutNewAddressButtonID, "title": "Use new address"})
+	session.SessionData["checkout_saved_addresses"] = addressMap
+	setCheckoutState(session, st)
+	_ = a.persistSessionData(session)
+	_ = a.sendAndSaveInteractiveButtons(account, contact, "Choose a saved delivery address:", buttons)
+}
+
+func (a *App) handleCheckoutSavedAddressChoice(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, buttonID string) {
+	st := getCheckoutState(session)
+	id, err := strconv.Atoi(strings.TrimPrefix(buttonID, checkoutAddressPrefix))
+	if st == nil || err != nil || id <= 0 {
+		return
+	}
+	addresses, _ := session.SessionData["checkout_saved_addresses"].(map[string]any)
+	raw, _ := addresses[strconv.Itoa(id)].(map[string]any)
+	if raw == nil {
+		a.sendSavedAddressChoices(account, contact, session, settings, st)
+		return
+	}
+	st.SavedAddressID = &id
+	st.NewAddress = raw
+	if lat, ok := anyToFloat64(raw["latitude"]); ok {
+		st.Latitude, st.HasLocation = lat, true
+	}
+	if lng, ok := anyToFloat64(raw["longitude"]); ok {
+		st.Longitude = lng
+	}
+	st.Step = "confirm"
+	setCheckoutState(session, st)
+	_ = a.persistSessionData(session)
+	a.sendOrderConfirmPrompt(account, contact, session)
+}
+
+func (a *App) beginNewCheckoutAddress(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
+	st := getCheckoutState(session)
+	if st == nil {
+		return
+	}
+	st.SavedAddressID = nil
+	if st.NewAddress == nil {
+		st.NewAddress = map[string]any{}
+	}
+	if contact != nil {
+		if contact.ProfileName != "" {
+			st.NewAddress["name"] = contact.ProfileName
+		}
+		if contact.PhoneNumber != "" {
+			st.NewAddress["phone"] = contact.PhoneNumber
+		}
+	}
+	st.NewAddress["email"] = st.Email
+	if country := a.storeAddressCountry(session, settings); country != "" {
+		st.NewAddress["country"] = country
+	}
+
+	if a.storeRequiresLocationBasedDelivery(session, settings) {
+		st.Step = "location"
 		st.HasLocation = false
+		st.Latitude = 0
+		st.Longitude = 0
 		st.DeliveryZone = ""
 		st.ShippingFeePaise = 0
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
-		a.promptCheckoutAddress(account, contact, session, settings, st)
+		_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
 		return
 	}
-	st.Step = "confirm"
+
+	st.Step = "address"
+	st.HasLocation = false
 	st.DeliveryZone = ""
 	st.ShippingFeePaise = 0
 	setCheckoutState(session, st)
 	_ = a.persistSessionData(session)
-	a.sendOrderConfirmPrompt(account, contact, session)
+	a.promptCheckoutAddress(account, contact, session, settings, st)
 }
 
 // storeRequiresLocationBasedDelivery reports whether the commerce store opts into
@@ -413,6 +670,7 @@ func (a *App) handleCheckoutAddressMessage(account *models.WhatsAppAccount, cont
 		return true
 	}
 	st.NewAddress = parsed
+	a.persistCustomerAddress(session, settings, contact, st)
 	st.Step = "confirm"
 	setCheckoutState(session, st)
 	_ = a.persistSessionData(session)
@@ -429,7 +687,7 @@ func (a *App) sendOrderConfirmPrompt(account *models.WhatsAppAccount, contact *m
 	})
 }
 
-func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, messageText, buttonID string) bool {
+func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, messageText, buttonID string, persistedMessage *models.Message) bool {
 	if buttonID != "" && IsCheckoutButton(buttonID) {
 		return false // handled by handleCommerceButtonTap
 	}
@@ -450,6 +708,55 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 	}
 
 	switch st.Step {
+	case "capture":
+		if st.CaptureIndex < 0 || st.CaptureIndex >= len(st.CaptureFields) {
+			st.Step = "email"
+			setCheckoutState(session, st)
+			_ = a.persistSessionData(session)
+			a.repromptCheckoutStep(account, contact, session, settings, st)
+			return true
+		}
+		field := st.CaptureFields[st.CaptureIndex]
+		if captureFieldAcceptsAttachment(field) {
+			attachments := attachmentFromMessage(persistedMessage, asString(field["key"]))
+			if len(attachments) == 0 {
+				_ = a.sendAndSaveTextMessage(account, contact, "Please attach the requested file.\n"+promptCaptureField(field))
+				return true
+			}
+			captured := jsonMapFromSession(session, "commerce_captured_fields")
+			captured[asString(field["key"])] = attachmentsJSON(attachments)
+			session.SessionData["commerce_captured_fields"] = map[string]any(captured)
+			a.appendDraftAttachments(session, attachments)
+			st.CaptureIndex++
+			if st.CaptureIndex >= len(st.CaptureFields) {
+				if a.completeCommerceCapture(account, contact, session, settings, st) {
+					return true
+				}
+				st.Step = "email"
+			}
+			setCheckoutState(session, st)
+			_ = a.persistSessionData(session)
+			a.repromptCheckoutStep(account, contact, session, settings, st)
+			return true
+		}
+		if !validCaptureValue(field, text) {
+			_ = a.sendAndSaveTextMessage(account, contact, "Please provide a valid value.\n"+promptCaptureField(field))
+			return true
+		}
+		captured := jsonMapFromSession(session, "commerce_captured_fields")
+		captured[asString(field["key"])] = normalizedCaptureValue(field, text)
+		session.SessionData["commerce_captured_fields"] = map[string]any(captured)
+		st.CaptureIndex++
+		if st.CaptureIndex >= len(st.CaptureFields) {
+			if a.completeCommerceCapture(account, contact, session, settings, st) {
+				return true
+			}
+			st.Step = "email"
+		}
+		setCheckoutState(session, st)
+		_ = a.persistSessionData(session)
+		a.repromptCheckoutStep(account, contact, session, settings, st)
+		return true
 	case "email":
 		if !simpleEmailRE.MatchString(text) {
 			_ = a.sendAndSaveTextMessage(account, contact, "Please enter a valid email address.")
@@ -485,6 +792,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 			return true
 		}
 		st.NewAddress = parsed
+		a.persistCustomerAddress(session, settings, contact, st)
 		st.Step = "confirm"
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
@@ -502,6 +810,89 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		a.repromptCheckoutStep(account, contact, session, settings, st)
 		return true
 	}
+}
+
+func captureFieldAcceptsAttachment(field map[string]any) bool {
+	fieldType := strings.ToLower(asString(field["type"]))
+	key := strings.ToLower(asString(field["key"]))
+	switch fieldType {
+	case "image", "images", "file", "document", "media", "attachment":
+		return true
+	}
+	return strings.Contains(key, "reference") && strings.Contains(key, "image")
+}
+
+func validCaptureValue(field map[string]any, value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	if asString(field["type"]) == "number" {
+		_, err := strconv.ParseFloat(value, 64)
+		return err == nil
+	}
+	var options []string
+	switch raw := field["options"].(type) {
+	case []string:
+		options = raw
+	case []any:
+		for _, option := range raw {
+			options = append(options, fmt.Sprint(option))
+		}
+	}
+	if len(options) > 0 {
+		values := []string{value}
+		if asString(field["type"]) == "multi_select" {
+			values = strings.Split(value, ",")
+		} else if asString(field["type"]) != "single_select" {
+			return true
+		}
+		for _, candidate := range values {
+			found := false
+			for _, option := range options {
+				if strings.EqualFold(strings.TrimSpace(option), strings.TrimSpace(candidate)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+	return true
+}
+
+func normalizedCaptureValue(field map[string]any, value string) any {
+	if asString(field["type"]) != "multi_select" {
+		return strings.TrimSpace(value)
+	}
+	raw := strings.Split(value, ",")
+	values := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if item = strings.TrimSpace(item); item != "" {
+			values = append(values, item)
+		}
+	}
+	return values
+}
+
+func (a *App) persistCustomerAddress(session *models.ChatbotSession, settings *models.ChatbotSettings, contact *models.Contact, st *checkoutState) {
+	if st == nil || st.SavedAddressID != nil || contact == nil {
+		return
+	}
+	rt := a.newCommerceRuntime(settings, session)
+	if rt == nil {
+		return
+	}
+	defer rt.Close()
+	address, err := rt.Client.CreateCustomerAddress(context.Background(), rt.StoreID, contact.PhoneNumber, st.NewAddress)
+	if err != nil {
+		a.Log.Warn("create customer address failed; continuing with order snapshot", "error", err)
+		return
+	}
+	st.SavedAddressID = &address.ID
 }
 
 // handleCheckoutLocationPin processes a WhatsApp location share during the location checkout step.
@@ -573,6 +964,22 @@ func (a *App) handleCheckoutLocationPin(account *models.WhatsAppAccount, contact
 // handleCheckoutCartEditIntent handles qty updates and exit-to-browse during checkout.
 // Returns true when the message was consumed as a cart-edit intent.
 func (a *App) handleCheckoutCartEditIntent(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, text string) bool {
+	if handleCheckoutAddonEdit(session, text) {
+		_ = a.persistSessionData(session)
+		_ = a.sendAndSaveTextMessage(account, contact, formatCheckoutCartSummary(session))
+		a.repromptCheckoutStep(account, contact, session, settings, st)
+		return true
+	}
+	if changed, message := applyTargetedCartEdit(session, text); changed {
+		_ = a.persistSessionData(session)
+		_ = a.sendAndSaveTextMessage(account, contact, message+"\n\n"+formatCheckoutCartSummary(session))
+		if cartIsEmpty(session) {
+			clearCheckoutState(session)
+			return true
+		}
+		a.repromptCheckoutStep(account, contact, session, settings, st)
+		return true
+	}
 	if isCheckoutEditExitIntent(text) {
 		qty := extractQtyFromText(text)
 		if qty > 0 {
@@ -599,6 +1006,71 @@ func (a *App) handleCheckoutCartEditIntent(account *models.WhatsAppAccount, cont
 		return true
 	}
 	return false
+}
+
+func applyTargetedCartEdit(session *models.ChatbotSession, text string) (bool, string) {
+	cart := normalizeCartMap(session.SessionData[cartKey])
+	if match := removeLineRE.FindStringSubmatch(strings.TrimSpace(text)); len(match) == 2 {
+		if key, name := findCartLine(cart, match[1]); key != "" {
+			delete(cart, key)
+			session.SessionData[cartKey] = cartToAny(cart)
+			return true, "Removed " + name + " from your cart."
+		}
+	}
+	if match := targetQtyRE.FindStringSubmatch(strings.TrimSpace(text)); len(match) == 3 {
+		qty := parsePositiveInt(match[2])
+		if key, name := findCartLine(cart, match[1]); key != "" && qty > 0 {
+			cart[key]["qty"] = qty
+			session.SessionData[cartKey] = cartToAny(cart)
+			return true, fmt.Sprintf("Updated %s to quantity %d.", name, qty)
+		}
+	}
+	return false, ""
+}
+
+func findCartLine(cart map[string]map[string]any, target string) (string, string) {
+	target = strings.ToLower(strings.TrimSpace(target))
+	for key, line := range cart {
+		meta, _ := line["product"].(map[string]any)
+		name := cartLineOptionName(meta)
+		if target == key || strings.Contains(strings.ToLower(name), target) {
+			return key, name
+		}
+	}
+	return "", ""
+}
+
+func cartToAny(cart map[string]map[string]any) map[string]any {
+	out := make(map[string]any, len(cart))
+	for key, line := range cart {
+		out[key] = line
+	}
+	return out
+}
+
+func handleCheckoutAddonEdit(session *models.ChatbotSession, text string) bool {
+	match := addonEditRE.FindStringSubmatch(strings.TrimSpace(text))
+	if len(match) == 0 {
+		return false
+	}
+	id := parsePositiveInt(match[2])
+	qty := 1
+	if len(match) > 3 && match[3] != "" {
+		qty = parsePositiveInt(match[3])
+	}
+	raw, _ := session.SessionData["commerce_addons"].([]any)
+	next := make([]any, 0, len(raw)+1)
+	for _, value := range raw {
+		addon, _ := value.(map[string]any)
+		if asToolInt(addon["addon"]) != id {
+			next = append(next, value)
+		}
+	}
+	if match[1] == "" && id > 0 && qty > 0 {
+		next = append(next, map[string]any{"addon": id, "quantity": qty})
+	}
+	session.SessionData["commerce_addons"] = next
+	return true
 }
 
 func (a *App) applyCheckoutQtyOrPause(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, qty int) bool {
@@ -645,10 +1117,18 @@ func (a *App) repromptCheckoutStep(account *models.WhatsAppAccount, contact *mod
 		return
 	}
 	switch st.Step {
+	case "capture":
+		if st.CaptureIndex >= 0 && st.CaptureIndex < len(st.CaptureFields) {
+			_ = a.sendAndSaveTextMessage(account, contact, promptCaptureField(st.CaptureFields[st.CaptureIndex]))
+		}
 	case "email":
 		_ = a.sendAndSaveTextMessage(account, contact, "Please share your email address to continue checkout.")
 	case "delivery_mode":
 		a.sendDeliveryModeButtons(account, contact)
+	case "slot":
+		a.sendFulfillmentSlots(account, contact, session, settings, st)
+	case "saved_address":
+		a.sendSavedAddressChoices(account, contact, session, settings, st)
 	case "location":
 		_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
 	case "address", "address_line_1", "city", "state", "pincode":
@@ -1105,7 +1585,40 @@ func (a *App) placeCheckoutOrder(account *models.WhatsAppAccount, contact *model
 	}
 	defer rt.Close()
 
+	draftID := commerceDraftID(session)
+	if draftID == uuid.Nil {
+		a.Log.Error("checkout submission blocked without durable draft")
+		_ = a.sendAndSaveTextMessage(account, contact, "Checkout is temporarily unavailable. Your cart is still saved; please try again.")
+		return
+	}
+	repo := draftrepo.NewDraftRepository(a.DB)
+	current, loadErr := repo.Get(draftID, session.OrganizationID)
+	if loadErr != nil {
+		a.Log.Error("checkout draft load failed closed", "error", loadErr, "draft_id", draftID)
+		_ = a.sendAndSaveTextMessage(account, contact, "Checkout is temporarily unavailable. Your cart is still saved; please try again.")
+		return
+	}
+
 	items := cartOrderItems(session)
+	if st.SlotToken == "" {
+		_ = a.sendAndSaveTextMessage(account, contact, "Please choose a fulfillment time before confirming.")
+		st.Step = "slot"
+		setCheckoutState(session, st)
+		a.sendFulfillmentSlots(account, contact, session, settings, st)
+		return
+	}
+	if current.Status != "submitting" {
+		validation, err := rt.Client.ValidateFulfillmentSlot(context.Background(), rt.StoreID, st.DeliveryMode, st.SlotToken, cartProductOptionIDs(session))
+		if err != nil || !validation.Valid {
+			st.Step = "slot"
+			st.SlotToken = ""
+			setCheckoutState(session, st)
+			_ = a.persistSessionData(session)
+			_ = a.sendAndSaveTextMessage(account, contact, "That fulfillment time is no longer available. Please choose another slot.")
+			a.sendFulfillmentSlots(account, contact, session, settings, st)
+			return
+		}
+	}
 	orderItems := make([]map[string]any, 0, len(items))
 	for _, it := range items {
 		orderItems = append(orderItems, map[string]any{
@@ -1113,13 +1626,38 @@ func (a *App) placeCheckoutOrder(account *models.WhatsAppAccount, contact *model
 			"quantity":       it.Quantity,
 		})
 	}
+	idempotencyKey := current.SubmissionKey
+	draft := current
+	if idempotencyKey == "" {
+		candidateKey := "whatomate-" + uuid.NewString()
+		claimed, claimErr := repo.ClaimSubmission(draftID, session.OrganizationID, current.Version, candidateKey)
+		if claimErr != nil && !errors.Is(claimErr, draftrepo.ErrAlreadySubmitted) {
+			_ = a.sendAndSaveTextMessage(account, contact, "Your order is already being submitted. Please wait a moment.")
+			return
+		}
+		if claimed == nil || claimed.SubmissionKey == "" {
+			a.Log.Error("checkout submission claim returned no durable key", "draft_id", draftID)
+			_ = a.sendAndSaveTextMessage(account, contact, "Checkout is temporarily unavailable. Your cart is still saved; please try again.")
+			return
+		}
+		draft = claimed
+		idempotencyKey = claimed.SubmissionKey
+	}
 	args := createOrderArgs{
-		Confirmed:     true,
-		Items:         orderItems,
-		Email:         st.Email,
-		DeliveryMode:  st.DeliveryMode,
-		NewAddress:    st.NewAddress,
-		BuyerMetaData: checkoutBuyerMeta(st, contact),
+		Confirmed:      true,
+		Items:          orderItems,
+		Email:          st.Email,
+		DeliveryMode:   st.DeliveryMode,
+		NewAddress:     st.NewAddress,
+		BuyerMetaData:  checkoutBuyerMeta(st, contact),
+		AddressID:      st.SavedAddressID,
+		Addons:         checkoutAddons(session),
+		Notes:          checkoutNotes(session),
+		SlotToken:      st.SlotToken,
+		IdempotencyKey: idempotencyKey,
+	}
+	if st.SavedAddressID != nil {
+		args.NewAddress = nil
 	}
 	if st.DeliveryMode == "" {
 		args.DeliveryMode = "PICKUP_FROM_STORE"
@@ -1138,14 +1676,81 @@ func (a *App) placeCheckoutOrder(account *models.WhatsAppAccount, contact *model
 		_ = a.sendAndSaveTextMessage(account, contact, "Sorry, we could not place your order. Please try again.")
 		return
 	}
+	orderID := firstNonEmpty(asString(result["uuid"]), asString(result["id"]))
+	paymentID := ""
+	if payment, ok := result["payment"].(map[string]any); ok {
+		paymentID = asString(payment["id"])
+	}
+	if _, err := repo.CompleteSubmission(draft.ID, session.OrganizationID, idempotencyKey, orderID, paymentID); err != nil {
+		a.Log.Error("backend order succeeded but durable draft save failed", "error", err, "draft_id", draft.ID, "order_id", orderID)
+		_ = a.sendAndSaveTextMessage(account, contact, "Your order was received, but confirmation is still syncing. Please retry Confirm; you will not be charged twice.")
+		return
+	}
 
 	clearCart(session)
 	clearCheckoutState(session)
 	clearCartPendingOption(session)
 	_ = a.persistSessionData(session)
 
-	msg := formatOrderSuccessMessage(result)
-	_ = a.sendAndSaveTextMessage(account, contact, msg)
+	a.sendOrderPaymentCTA(account, contact, result)
+}
+
+func checkoutAddons(session *models.ChatbotSession) []map[string]any {
+	raw, _ := session.SessionData["commerce_addons"].([]any)
+	out := make([]map[string]any, 0, len(raw))
+	for _, value := range raw {
+		if addon, ok := value.(map[string]any); ok {
+			out = append(out, addon)
+		}
+	}
+	return out
+}
+
+func checkoutNotes(session *models.ChatbotSession) string {
+	payload := map[string]any{}
+	for _, key := range []string{"commerce_captured_fields", "commerce_notes"} {
+		if values, ok := session.SessionData[key].(map[string]any); ok {
+			for name, value := range values {
+				payload[name] = value
+			}
+		}
+	}
+	if len(payload) == 0 {
+		return ""
+	}
+	encoded, _ := json.Marshal(payload)
+	return string(encoded)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func (a *App) sendOrderPaymentCTA(account *models.WhatsAppAccount, contact *models.Contact, result map[string]any) {
+	body, paymentURL := paymentCTAContent(result)
+	if paymentURL == "" {
+		_ = a.sendAndSaveTextMessage(account, contact, body)
+		return
+	}
+	if err := a.sendAndSaveCTAURLButton(account, contact, body, "Pay now", paymentURL); err != nil {
+		_ = a.sendAndSaveTextMessage(account, contact, body+"\nPay here: "+paymentURL)
+	}
+}
+
+func paymentCTAContent(result map[string]any) (string, string) {
+	paymentURL := asString(result["payment_url"])
+	copyResult := make(map[string]any, len(result))
+	for key, value := range result {
+		if key != "payment_url" {
+			copyResult[key] = value
+		}
+	}
+	return formatOrderSuccessMessage(copyResult), paymentURL
 }
 
 func formatOrderSuccessMessage(result map[string]any) string {
@@ -1207,10 +1812,10 @@ func formatOrderConfirmSummary(session *models.ChatbotSession, st *checkoutState
 		mode = "PICKUP_FROM_STORE"
 	}
 	if mode == "PICKUP_FROM_STORE" {
-		b.WriteString("Delivery: Store pickup\n")
+		b.WriteString("Fulfillment: Store pickup\n")
 		b.WriteString("Delivery fee: Free (pickup)\n")
 	} else {
-		b.WriteString("Delivery: To your address\n")
+		b.WriteString("Fulfillment: Delivery to your address\n")
 		if st.NewAddress != nil {
 			if v := asString(st.NewAddress["address_line_1"]); v != "" {
 				fmt.Fprintf(&b, "Address: %s", v)
@@ -1233,6 +1838,19 @@ func formatOrderConfirmSummary(session *models.ChatbotSession, st *checkoutState
 		}
 		grand := cartSubtotal + ticker.PaiseToRupees(float64(st.ShippingFeePaise))
 		fmt.Fprintf(&b, "Estimated total: %s\n", formatPriceINR(grand))
+	}
+	if st.RequestedAt != "" {
+		fmt.Fprintf(&b, "Requested time: %s\n", checkoutSlotLabel(st.RequestedAt))
+	}
+	if addons := checkoutAddons(session); len(addons) > 0 {
+		b.WriteString("Add-ons:")
+		for _, addon := range addons {
+			fmt.Fprintf(&b, " #%d x%d", asToolInt(addon["addon"]), asToolInt(addon["quantity"]))
+		}
+		b.WriteString("\n")
+	}
+	if notes := checkoutNotes(session); notes != "" {
+		fmt.Fprintf(&b, "Notes: %s\n", notes)
 	}
 	b.WriteString("\nConfirm your order?")
 	return b.String()

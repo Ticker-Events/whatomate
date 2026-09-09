@@ -41,6 +41,13 @@ type ClientInactivityConfig struct {
 	ReminderMessage  string `gorm:"column:client_reminder_message;type:text" json:"client_reminder_message"`      // Reminder message to client
 	AutoCloseMinutes int    `gorm:"column:client_auto_close_minutes;default:60" json:"client_auto_close_minutes"` // Auto-close after Y minutes of client inactivity
 	AutoCloseMessage string `gorm:"column:client_auto_close_message;type:text" json:"client_auto_close_message"`  // Message when closing due to client inactivity
+
+	PendingPaymentReminderEnabled bool   `gorm:"column:commerce_pending_payment_reminder_enabled;default:false" json:"commerce_pending_payment_reminder_enabled"`
+	PendingPaymentReminderMinutes int    `gorm:"column:commerce_pending_payment_reminder_minutes;default:30" json:"commerce_pending_payment_reminder_minutes"`
+	PendingPaymentReminderMessage string `gorm:"column:commerce_pending_payment_reminder_message;type:text" json:"commerce_pending_payment_reminder_message"`
+	AbandonedDraftReminderEnabled bool   `gorm:"column:commerce_abandoned_draft_reminder_enabled;default:false" json:"commerce_abandoned_draft_reminder_enabled"`
+	AbandonedDraftReminderMinutes int    `gorm:"column:commerce_abandoned_draft_reminder_minutes;default:60" json:"commerce_abandoned_draft_reminder_minutes"`
+	AbandonedDraftReminderMessage string `gorm:"column:commerce_abandoned_draft_reminder_message;type:text" json:"commerce_abandoned_draft_reminder_message"`
 }
 
 // AIConfig holds AI provider settings
@@ -259,10 +266,12 @@ func (ChatbotSession) TableName() string {
 // ChatbotSessionMessage stores message history within a session
 type ChatbotSessionMessage struct {
 	BaseModel
-	SessionID uuid.UUID `gorm:"type:uuid;index;not null" json:"session_id"`
-	Direction Direction `gorm:"size:10;not null" json:"direction"` // incoming, outgoing
-	Message   string    `gorm:"type:text" json:"message"`
-	StepName  string    `gorm:"size:100" json:"step_name"`
+	SessionID   uuid.UUID  `gorm:"type:uuid;index;not null" json:"session_id"`
+	MessageID   *uuid.UUID `gorm:"type:uuid;index" json:"message_id,omitempty"`
+	Direction   Direction  `gorm:"size:10;not null" json:"direction"` // incoming, outgoing
+	Message     string     `gorm:"type:text" json:"message"`
+	StepName    string     `gorm:"size:100" json:"step_name"`
+	Attachments JSONBArray `gorm:"type:jsonb;not null;default:'[]'" json:"attachments,omitempty"`
 
 	// Relations
 	Session *ChatbotSession `gorm:"foreignKey:SessionID" json:"session,omitempty"`
@@ -324,6 +333,8 @@ type AgentTransfer struct {
 	TeamID              *uuid.UUID     `gorm:"type:uuid;index" json:"team_id,omitempty"`          // Team queue (null = general queue)
 	TransferredByUserID *uuid.UUID     `gorm:"type:uuid" json:"transferred_by_user_id,omitempty"` // User who initiated the transfer (null for system)
 	Notes               string         `gorm:"type:text" json:"notes"`
+	Metadata            JSONB          `gorm:"type:jsonb;not null;default:'{}'" json:"metadata"`
+	CommerceDraftID     *uuid.UUID     `gorm:"type:uuid;index" json:"commerce_draft_id,omitempty"`
 	TransferredAt       time.Time      `gorm:"autoCreateTime" json:"transferred_at"`
 	ResumedAt           *time.Time     `json:"resumed_at,omitempty"`
 	ResumedBy           *uuid.UUID     `gorm:"type:uuid" json:"resumed_by,omitempty"`

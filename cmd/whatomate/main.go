@@ -691,6 +691,12 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/api-keys/{id}", app.UpdateAPIKey)
 	g.DELETE("/api/api-keys/{id}", app.DeleteAPIKey)
 
+	// Backend -> Whatomate commerce lifecycle integration
+	g.POST("/api/v1/integrations/whatomate/order-events", app.ReceiveCommerceLifecycleEvent)
+	g.GET("/api/commerce/lifecycle-config", app.GetCommerceLifecycleConfig)
+	g.PUT("/api/commerce/lifecycle-config", app.PutCommerceLifecycleConfig)
+	g.GET("/api/commerce/lifecycle-events", app.ListCommerceLifecycleEvents)
+
 	// Accounts
 	g.GET("/api/accounts", app.ListAccounts)
 	g.POST("/api/accounts", app.CreateAccount)
@@ -711,6 +717,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/contacts/{id}", app.DeleteContact)
 	g.PUT("/api/contacts/{id}/assign", app.AssignContact)
 	g.PUT("/api/contacts/{id}/tags", app.UpdateContactTags)
+	g.POST("/api/contacts/{id}/tags/add", app.AddContactTag)
+	g.POST("/api/contacts/{id}/tags/remove", app.RemoveContactTag)
 	g.GET("/api/contacts/{id}/session-data", app.GetContactSessionData)
 
 	// Generic Import/Export

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -18,6 +19,7 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm"
 )
 
 // ============================================================================
@@ -75,6 +77,13 @@ type OutgoingMessageRequest struct {
 
 	// Reply context
 	ReplyToMessage *models.Message
+
+	// LifecycleEventID provides a durable idempotency key for system messages.
+	// A failed send reuses its message row.
+	LifecycleEventID *uuid.UUID
+	// DurableSendKey lets other system producers (for example reminders) reuse
+	// a successfully sent row after a crash before their completion marker.
+	DurableSendKey string
 }
 
 // MessageSendOptions configures optional behaviors for message sending
@@ -148,8 +157,57 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	// 1. Create message record
 	msg := a.createOutgoingMessage(req, opts)
 
-	// Save to database
-	if err := a.DB.Create(msg).Error; err != nil {
+	durableKey := strings.TrimSpace(req.DurableSendKey)
+	if durableKey == "" && req.LifecycleEventID != nil {
+		durableKey = "lifecycle:" + req.LifecycleEventID.String()
+	}
+	if durableKey != "" {
+		msg.DurableSendKey = &durableKey
+	}
+
+	// Durable sends reuse sent rows, retry explicit failures, and fail closed
+	// on pending rows whose external delivery outcome is unknown.
+	if durableKey != "" {
+		var existing models.Message
+		result := a.DB.Where("durable_send_key = ?", durableKey).First(&existing)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) && req.LifecycleEventID != nil {
+			result = a.DB.Where("lifecycle_event_id = ?", *req.LifecycleEventID).First(&existing)
+		}
+		if result.Error == nil {
+			switch existing.Status {
+			case models.MessageStatusSent, models.MessageStatusDelivered, models.MessageStatusRead:
+				return &existing, nil
+			case models.MessageStatusPending:
+				return nil, fmt.Errorf("durable message %q has an unknown pending delivery outcome", durableKey)
+			case models.MessageStatusFailed:
+			default:
+				return nil, fmt.Errorf("durable message %q has unsupported status %q", durableKey, existing.Status)
+			}
+			msg = &existing
+			msg.Status = models.MessageStatusPending
+			msg.ErrorMessage = ""
+			if err := a.DB.Model(msg).Updates(map[string]any{
+				"status": models.MessageStatusPending, "error_message": "", "durable_send_key": durableKey,
+			}).Error; err != nil {
+				return nil, fmt.Errorf("reset failed durable message: %w", err)
+			}
+		} else if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("load durable message: %w", result.Error)
+		} else if err := a.DB.Create(msg).Error; err != nil {
+			// A concurrent sender may have created the key after our lookup.
+			if loadErr := a.DB.Where("durable_send_key = ?", durableKey).First(&existing).Error; loadErr == nil {
+				if existing.Status == models.MessageStatusPending {
+					return nil, fmt.Errorf("durable message %q is already being dispatched", durableKey)
+				}
+				if existing.Status == models.MessageStatusSent ||
+					existing.Status == models.MessageStatusDelivered ||
+					existing.Status == models.MessageStatusRead {
+					return &existing, nil
+				}
+			}
+			return nil, fmt.Errorf("create durable message: %w", err)
+		}
+	} else if err := a.DB.Create(msg).Error; err != nil {
 		a.Log.Error("Failed to create message", "error", err)
 		return nil, fmt.Errorf("failed to create message: %w", err)
 	}
@@ -282,14 +340,18 @@ func (a *App) toWhatsAppAccount(account *models.WhatsAppAccount) *whatsapp.Accou
 // createOutgoingMessage creates a Message model from the request
 func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSendOptions) *models.Message {
 	msg := &models.Message{
-		BaseModel:       models.BaseModel{ID: uuid.New()},
-		OrganizationID:  req.Account.OrganizationID,
-		WhatsAppAccount: req.Account.Name,
-		ContactID:       req.Contact.ID,
-		Direction:       models.DirectionOutgoing,
-		MessageType:     req.Type,
-		Status:          models.MessageStatusPending,
-		SentByUserID:    opts.SentByUserID,
+		BaseModel:        models.BaseModel{ID: uuid.New()},
+		OrganizationID:   req.Account.OrganizationID,
+		WhatsAppAccount:  req.Account.Name,
+		ContactID:        req.Contact.ID,
+		Direction:        models.DirectionOutgoing,
+		MessageType:      req.Type,
+		Status:           models.MessageStatusPending,
+		SentByUserID:     opts.SentByUserID,
+		LifecycleEventID: req.LifecycleEventID,
+	}
+	if key := strings.TrimSpace(req.DurableSendKey); key != "" {
+		msg.DurableSendKey = &key
 	}
 
 	// Set content based on message type

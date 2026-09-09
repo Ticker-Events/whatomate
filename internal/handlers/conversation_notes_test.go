@@ -56,6 +56,10 @@ func TestApp_ListConversationNotes_Success(t *testing.T) {
 	assert.Equal(t, 3, resp.Data.Total)
 	assert.Len(t, resp.Data.Notes, 3)
 	assert.False(t, resp.Data.HasMore)
+	assert.Equal(t, user.ID, resp.Data.Notes[0].CreatedByID)
+	assert.Equal(t, user.FullName, resp.Data.Notes[0].CreatedByName)
+	assert.True(t, resp.Data.Notes[0].CanEdit)
+	assert.True(t, resp.Data.Notes[0].CanDelete)
 }
 
 func TestApp_ListConversationNotes_CrossOrgIsolation(t *testing.T) {
@@ -211,6 +215,34 @@ func TestApp_UpdateConversationNote_OnlyCreatorCanEdit(t *testing.T) {
 
 	require.NoError(t, app.DB.Where("id = ?", note.ID).First(&got).Error)
 	assert.Equal(t, "fixed", got.Content)
+}
+
+func TestApp_UpdateConversationNote_AdminCanEditAnotherUsersNote(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	admin := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	creator := testutil.CreateTestUser(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	note := &models.ConversationNote{
+		BaseModel: models.BaseModel{ID: uuid.New()}, OrganizationID: org.ID,
+		ContactID: contact.ID, CreatedByID: creator.ID, Content: "original",
+	}
+	require.NoError(t, app.DB.Create(note).Error)
+
+	req := testutil.NewJSONRequest(t, map[string]any{"content": "admin update"})
+	testutil.SetAuthContext(req, org.ID, admin.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+	testutil.SetPathParam(req, "note_id", note.ID.String())
+
+	require.NoError(t, app.UpdateConversationNote(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+	var resp struct {
+		Data handlers.ConversationNoteResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	assert.True(t, resp.Data.CanEdit)
+	assert.True(t, resp.Data.CanDelete)
 }
 
 func TestApp_UpdateConversationNote_NotFound(t *testing.T) {

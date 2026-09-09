@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
@@ -30,6 +31,7 @@ type stubCommerceBackend struct {
 	orderFn         func(ctx context.Context, orderUUID string) (map[string]any, error)
 	lookupStatusFn  func(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
 	createFn        func(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
+	retryFn         func(ctx context.Context, orderUUID string) (tickermcp.PaymentRetry, error)
 	checkDeliveryFn func(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error)
 	productPageFn   func(ctx context.Context, storeID, search, categoryID string, limit, offset int) (tickermcp.ProductPage, error)
 	categoryPageFn  func(ctx context.Context, storeID, categoryID string, limit, offset int) (tickermcp.CategoryPage, error)
@@ -125,6 +127,29 @@ func (s *stubCommerceBackend) CheckDeliveryEligibility(ctx context.Context, stor
 		"shipping_fee_paise": 0,
 		"message":            "",
 	}, nil
+}
+
+func (s *stubCommerceBackend) ListFulfillmentSlots(context.Context, string, string, []int) (tickermcp.FulfillmentSlotList, error) {
+	return tickermcp.FulfillmentSlotList{}, fmt.Errorf("list_fulfillment_slots not stubbed")
+}
+
+func (s *stubCommerceBackend) ValidateFulfillmentSlot(context.Context, string, string, string, []int) (tickermcp.FulfillmentSlotValidation, error) {
+	return tickermcp.FulfillmentSlotValidation{}, fmt.Errorf("validate_fulfillment_slot not stubbed")
+}
+
+func (s *stubCommerceBackend) ListCustomerAddresses(context.Context, string, string) ([]tickermcp.CustomerAddress, error) {
+	return nil, fmt.Errorf("list_customer_addresses not stubbed")
+}
+
+func (s *stubCommerceBackend) CreateCustomerAddress(context.Context, string, string, map[string]any) (tickermcp.CustomerAddress, error) {
+	return tickermcp.CustomerAddress{}, fmt.Errorf("create_customer_address not stubbed")
+}
+
+func (s *stubCommerceBackend) RetryPayment(ctx context.Context, orderUUID string) (tickermcp.PaymentRetry, error) {
+	if s.retryFn != nil {
+		return s.retryFn(ctx, orderUUID)
+	}
+	return tickermcp.PaymentRetry{}, fmt.Errorf("retry_payment not stubbed")
 }
 
 func TestCommerceConfigured(t *testing.T) {
@@ -380,6 +405,40 @@ func TestGetOrderStatusUnauthorizedError(t *testing.T) {
 	rt := &commerceRuntime{Client: stub, StoreID: "42", PhoneNumber: "919876543210"}
 	out := app.executeCommerceTool(rt, "get_order_status", `{"order_id":"ST-000"}`)
 	assert.Contains(t, out, "Order not found")
+}
+
+func TestRetryPaymentRequiresMatchingOrderOwnerAndStore(t *testing.T) {
+	orderID := uuid.New()
+	retries := 0
+	stub := &stubCommerceBackend{
+		orderFn: func(context.Context, string) (map[string]any, error) {
+			return map[string]any{
+				"uuid": orderID.String(), "store": 42, "phone_number": "+919876543210",
+			}, nil
+		},
+		retryFn: func(context.Context, string) (tickermcp.PaymentRetry, error) {
+			retries++
+			url := "https://pay.example/retry"
+			return tickermcp.PaymentRetry{PaymentURL: &url}, nil
+		},
+	}
+	app := testApp()
+	rt := &commerceRuntime{Client: stub, StoreID: "42", PhoneNumber: "919876543210"}
+
+	_, err := app.toolRetryPayment(context.Background(), rt, `{"order_uuid":"`+orderID.String()+`"}`)
+	require.NoError(t, err)
+	assert.Equal(t, 1, retries)
+
+	rt.PhoneNumber = "911111111111"
+	_, err = app.toolRetryPayment(context.Background(), rt, `{"order_uuid":"`+orderID.String()+`"}`)
+	require.Error(t, err)
+	assert.Equal(t, 1, retries, "ownership mismatch must fail before requesting a payment URL")
+
+	rt.PhoneNumber = "919876543210"
+	rt.StoreID = "99"
+	_, err = app.toolRetryPayment(context.Background(), rt, `{"order_uuid":"`+orderID.String()+`"}`)
+	require.Error(t, err)
+	assert.Equal(t, 1, retries, "store mismatch must fail before requesting a payment URL")
 }
 
 func TestStubCreateOrderJSONRoundTrip(t *testing.T) {
