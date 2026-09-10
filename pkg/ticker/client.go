@@ -46,14 +46,15 @@ type ProductOption struct {
 
 // ProductSummary is a compact product for search results.
 type ProductSummary struct {
-	ID          int             `json:"id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	ImageURL    string          `json:"image_url,omitempty"`
-	MinPrice    float64         `json:"min_price"`
-	MRP         float64         `json:"mrp,omitempty"`
-	Type        string          `json:"type,omitempty"`
-	Options     []ProductOption `json:"options"`
+	ID                     int             `json:"id"`
+	Name                   string          `json:"name"`
+	Description            string          `json:"description,omitempty"`
+	ImageURL               string          `json:"image_url,omitempty"`
+	MinPrice               float64         `json:"min_price"`
+	MRP                    float64         `json:"mrp,omitempty"`
+	Type                   string          `json:"type,omitempty"`
+	PreparationTimeMinutes int             `json:"preparation_time_minutes,omitempty"`
+	Options                []ProductOption `json:"options"`
 }
 
 // SearchProducts lists active products for a store, optionally filtered by search.
@@ -100,14 +101,18 @@ func (c *Client) GetProduct(ctx context.Context, productID string) (map[string]a
 
 // CreateOrderRequest is the guest checkout body for POST /service/buyer/order/.
 type CreateOrderRequest struct {
-	Store         int              `json:"store"`
-	Items         []OrderItem      `json:"items"`
-	Email         string           `json:"email,omitempty"`
-	PhoneNumber   string           `json:"phone_number,omitempty"`
-	DeliveryMode  string           `json:"delivery_mode,omitempty"`
-	NewAddress    map[string]any   `json:"new_address,omitempty"`
-	BuyerMetaData map[string]any   `json:"buyer_meta_data,omitempty"`
-	Addons        []map[string]any `json:"addons,omitempty"`
+	Store          int              `json:"store"`
+	Items          []OrderItem      `json:"items"`
+	Email          string           `json:"email,omitempty"`
+	PhoneNumber    string           `json:"phone_number,omitempty"`
+	DeliveryMode   string           `json:"delivery_mode,omitempty"`
+	Address        *int             `json:"address,omitempty"`
+	NewAddress     map[string]any   `json:"new_address,omitempty"`
+	BuyerMetaData  map[string]any   `json:"buyer_meta_data,omitempty"`
+	Addons         []map[string]any `json:"addons,omitempty"`
+	Notes          string           `json:"notes,omitempty"`
+	SlotToken      string           `json:"slot_token,omitempty"`
+	IdempotencyKey string           `json:"idempotency_key,omitempty"`
 }
 
 // OrderItem is a line item on create order.
@@ -197,7 +202,8 @@ func PaiseToRupees(paise float64) float64 {
 }
 
 // ExtractProductImageURL returns the first HTTPS product image from a ticker
-// product payload (images[].image), or empty when none is present.
+// product payload. Prefers images[].original_url (JPEG/PNG source) over the
+// optimized display fields (images[].url / images[].image), which are often WebP.
 func ExtractProductImageURL(raw map[string]any) string {
 	if raw == nil {
 		return ""
@@ -211,7 +217,16 @@ func ExtractProductImageURL(raw map[string]any) string {
 		if !ok {
 			continue
 		}
-		url := strings.TrimSpace(asString(m["image"]))
+		if url := firstHTTPURL(m, "original_url", "url", "image"); url != "" {
+			return url
+		}
+	}
+	return ""
+}
+
+func firstHTTPURL(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		url := strings.TrimSpace(asString(m[key]))
 		if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
 			return url
 		}
@@ -222,13 +237,14 @@ func ExtractProductImageURL(raw map[string]any) string {
 // CompactProduct builds a tool-friendly product summary with prices in rupees.
 func CompactProduct(raw map[string]any) ProductSummary {
 	p := ProductSummary{
-		ID:          asInt(raw["id"]),
-		Name:        asString(raw["name"]),
-		Description: asString(raw["description"]),
-		ImageURL:    ExtractProductImageURL(raw),
-		MinPrice:    PaiseToRupees(asFloat(raw["min_price"])),
-		MRP:         PaiseToRupees(asFloat(raw["mrp"])),
-		Type:        asString(raw["type"]),
+		ID:                     asInt(raw["id"]),
+		Name:                   asString(raw["name"]),
+		Description:            asString(raw["description"]),
+		ImageURL:               ExtractProductImageURL(raw),
+		MinPrice:               PaiseToRupees(asFloat(raw["min_price"])),
+		MRP:                    PaiseToRupees(asFloat(raw["mrp"])),
+		Type:                   asString(raw["type"]),
+		PreparationTimeMinutes: asInt(raw["preparation_time_minutes"]),
 	}
 	var minFromOpts float64
 	if opts, ok := raw["options"].([]any); ok {

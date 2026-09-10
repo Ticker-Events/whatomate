@@ -134,8 +134,125 @@ func TestCompactCategory(t *testing.T) {
 		"name":             "Earrings",
 		"description":      "Studs and jhumkas",
 		"listing_priority": float64(2),
+		"image":            "https://example.com/cat.png",
+		"handoff_policy":   "none",
 	}, out)
-	assert.NotContains(t, out, "image")
+	assert.NotContains(t, out, "tags")
+}
+
+func TestAsObjectPageEnvelopePreservesMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  string
+	}{
+		{name: "products envelope", key: "products"},
+		{name: "categories envelope", key: "categories"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			items, meta, err := asObjectPage(map[string]any{
+				"count":    float64(23),
+				"limit":    float64(10),
+				"offset":   float64(10),
+				"has_more": true,
+				tc.key:     []any{map[string]any{"id": float64(3), "name": "Cake"}},
+			}, tc.key)
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			assert.Equal(t, 23, meta.Count)
+			assert.Equal(t, 10, meta.Limit)
+			assert.Equal(t, 10, meta.Offset)
+			assert.True(t, meta.HasMore)
+		})
+	}
+}
+
+func TestListArgsIncludeCategoryAndPagination(t *testing.T) {
+	productArgs, err := productListArgs(7, " cake ", "12", 10, 20)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{
+		"store_id":    7,
+		"search":      "cake",
+		"category_id": 12,
+		"limit":       10,
+		"offset":      20,
+	}, productArgs)
+
+	categoryArgs, err := categoryListArgs(7, "12", 1, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 12, categoryArgs["category_id"])
+	assert.Equal(t, 1, categoryArgs["limit"])
+	assert.Equal(t, 0, categoryArgs["offset"])
+}
+
+func TestDecodeCategoryValidatesConfig(t *testing.T) {
+	category := decodeCategory(map[string]any{
+		"id":              float64(12),
+		"name":            "Custom cakes",
+		"ai_instructions": "Ask for a reference.",
+		"handoff_policy":  "invalid",
+		"required_capture_fields": []any{
+			map[string]any{"key": "writing", "label": "Cake writing", "type": "text", "required": true},
+			map[string]any{"key": "", "label": "Broken", "type": "text"},
+		},
+	})
+	assert.Equal(t, "none", category.HandoffPolicy)
+	require.Len(t, category.RequiredCaptureFields, 1)
+	assert.Equal(t, "writing", category.RequiredCaptureFields[0].Key)
+}
+
+func TestDecodeCategoryImageFormsPreserveFields(t *testing.T) {
+	base := map[string]any{
+		"id":               float64(12),
+		"name":             "Custom cakes",
+		"description":      "Made to order",
+		"listing_priority": float64(-2),
+		"ai_instructions":  "Ask for a reference.",
+		"handoff_policy":   "after_capture",
+		"handoff_message":  "A baker will help next.",
+		"required_capture_fields": []any{
+			map[string]any{"key": "writing", "label": "Cake writing", "type": "text", "required": true},
+		},
+	}
+
+	t.Run("legacy string", func(t *testing.T) {
+		input := cloneMap(base)
+		input["image"] = " https://example.com/legacy.jpg "
+		category := decodeCategory(input)
+		assert.Equal(t, "https://example.com/legacy.jpg", category.Image)
+		assert.Equal(t, "Custom cakes", category.Name)
+		assert.Equal(t, -2, category.ListingPriority)
+		assert.Equal(t, "Ask for a reference.", category.AIInstructions)
+		assert.Equal(t, "after_capture", category.HandoffPolicy)
+		require.Len(t, category.RequiredCaptureFields, 1)
+	})
+
+	t.Run("serializer object prefers original_url", func(t *testing.T) {
+		input := cloneMap(base)
+		input["image"] = map[string]any{
+			"id":           float64(99),
+			"image":        "https://example.com/image.webp",
+			"url":          "https://example.com/url.webp",
+			"original_url": "https://example.com/original.jpg",
+		}
+		category := decodeCategory(input)
+		assert.Equal(t, "https://example.com/original.jpg", category.Image)
+		assert.Equal(t, "Made to order", category.Description)
+		assert.Equal(t, "A baker will help next.", category.HandoffMessage)
+		assert.Equal(t, "Ask for a reference.", category.AIInstructions)
+	})
+
+	t.Run("serializer object falls back to url then image", func(t *testing.T) {
+		assert.Equal(t, "https://example.com/original.jpg", categoryImageURL(map[string]any{
+			"url":          "https://example.com/url.webp",
+			"original_url": "https://example.com/original.jpg",
+		}))
+		assert.Equal(t, "https://example.com/url.jpg", categoryImageURL(map[string]any{
+			"url": "https://example.com/url.jpg",
+		}))
+		assert.Equal(t, "https://example.com/original.jpg", categoryImageURL(map[string]any{
+			"original_url": "https://example.com/original.jpg",
+		}))
+	})
 }
 
 func TestCloneMapDoesNotShareNestedValues(t *testing.T) {

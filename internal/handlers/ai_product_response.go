@@ -3,8 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"mime"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,7 +36,7 @@ const productFormatInstructions = `## WhatsApp Product Cards
 Whenever you need to display a specific product to the user, you MUST NOT output standard text for that product. Instead, format that specific product recommendation as a structured JSON object inside a ` + "```whatsapp_product" + ` code block.
 
 CRITICAL RULES FOR THE JSON OBJECT:
-1. "image_url": MUST be the exact HTTPS image_url from search_products / get_product tool results (images[].image). NEVER invent, guess, slugify, or placeholder a URL. If the tool result has no image, omit image_url or use "".
+1. "image_url": MUST be the exact HTTPS image_url from search_products / get_product tool results (prefer image_url / images[].original_url over images[].image). NEVER invent, guess, slugify, or placeholder a URL. If the tool result has no image, omit image_url or use "".
 2. "product_title": Keep it short (under 20 characters). Use the real product name from tools.
 3. "product_description": MUST include "Starts at ₹X.XX" using min_price from tool results, plus a brief detail. Do not list individual option prices on the product card.
 4. "button_id": This must follow the strict format: "add_to_cart_[PRODUCT_ID]" using the numeric product id from tools.
@@ -568,31 +573,50 @@ func (a *App) lookupCommerceProductSummary(ctx context.Context, account *models.
 
 func (a *App) resolveProductCardImage(ctx context.Context, account *models.WhatsAppAccount, session *models.ChatbotSession, product *WhatsAppProduct, commerceImage string) string {
 	provided := strings.TrimSpace(product.ImageURL)
-	if provided == "" {
-		provided = strings.TrimSpace(commerceImage)
-	}
-	source := "none"
-	resolved := ""
+	commerce := strings.TrimSpace(commerceImage)
 
-	if isReachablePublicMediaURL(ctx, provided) {
-		source = "provided"
-		resolved = provided
-	} else if img := commerceImage; img != "" && isReachablePublicMediaURL(ctx, img) {
-		source = "commerce"
-		resolved = img
-	} else if img := a.lookupCommerceProductImage(ctx, account, session, product.ProductID()); img != "" {
-		source = "commerce"
-		resolved = img
+	pick := func(mediaURL string) (string, bool) {
+		if mediaURL == "" || !isWhatsAppHeaderImageURL(mediaURL) {
+			return "", false
+		}
+		if !isReachablePublicMediaURL(ctx, mediaURL) {
+			return "", false
+		}
+		return mediaURL, true
 	}
 
-	if provided != "" && source != "provided" && source != "commerce" {
+	// Prefer commerce original (JPEG/PNG). LLM-provided URLs are often the
+	// optimized WebP display URL, which WhatsApp interactive headers reject.
+	if resolved, ok := pick(commerce); ok {
+		return resolved
+	}
+	if resolved, ok := pick(provided); ok {
+		return resolved
+	}
+	if img := a.lookupCommerceProductImage(ctx, account, session, product.ProductID()); img != "" {
+		if resolved, ok := pick(img); ok {
+			return resolved
+		}
+	}
+
+	if provided != "" {
 		a.Log.Warn("Product card image_url not fetchable; using fallback",
 			"product_id", product.ProductID(),
 			"provided_host", hostOfURL(provided),
-			"source", source,
+			"source", "none",
 		)
 	}
-	return resolved
+	return ""
+}
+
+// isWhatsAppHeaderImageURL reports whether a media URL is usable as an
+// interactive message header image (WhatsApp rejects WebP uploads).
+func isWhatsAppHeaderImageURL(mediaURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(mediaURL))
+	if err != nil || parsed.Path == "" {
+		return false
+	}
+	return !strings.HasSuffix(strings.ToLower(parsed.Path), ".webp")
 }
 
 func (a *App) lookupCommerceProductImage(ctx context.Context, account *models.WhatsAppAccount, session *models.ChatbotSession, productID string) string {
@@ -603,36 +627,123 @@ func (a *App) lookupCommerceProductImage(ctx context.Context, account *models.Wh
 	return summary.ImageURL
 }
 
+const maxMediaProbeBytes int64 = 1 << 20
+
+func isPublicMediaIP(ip net.IP) bool {
+	return ip != nil &&
+		ip.IsGlobalUnicast() &&
+		!ip.IsPrivate() &&
+		!ip.IsLoopback() &&
+		!ip.IsLinkLocalUnicast() &&
+		!ip.IsLinkLocalMulticast()
+}
+
+func resolvePublicMediaHost(ctx context.Context, host string) ([]net.IPAddr, error) {
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return nil, errors.New("media host did not resolve")
+	}
+	for _, candidate := range ips {
+		if !isPublicMediaIP(candidate.IP) {
+			return nil, errors.New("media host resolves to a non-public address")
+		}
+	}
+	return ips, nil
+}
+
+func validatePublicMediaURL(ctx context.Context, rawURL string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil ||
+		(parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return nil, errors.New("invalid public media URL")
+	}
+	if _, err := resolvePublicMediaHost(ctx, parsed.Hostname()); err != nil {
+		return nil, err
+	}
+	return parsed, nil
+}
+
 func isReachablePublicMediaURL(ctx context.Context, mediaURL string) bool {
-	if !strings.HasPrefix(mediaURL, "https://") && !strings.HasPrefix(mediaURL, "http://") {
+	if _, err := validatePublicMediaURL(ctx, mediaURL); err != nil {
 		return false
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, mediaURL, nil)
+
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	transport := &http.Transport{
+		Proxy:                  nil,
+		DisableKeepAlives:      true,
+		MaxResponseHeaderBytes: 32 << 10,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := resolvePublicMediaHost(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		},
+	}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return errors.New("too many media redirects")
+			}
+			_, err := validatePublicMediaURL(req.Context(), req.URL.String())
+			return err
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
 	if err != nil {
 		return false
 	}
+	req.Header.Set("Range", "bytes=0-511")
 	resp, err := client.Do(req)
-	if err == nil {
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-			return true
-		}
-		if resp.StatusCode != http.StatusMethodNotAllowed && resp.StatusCode != http.StatusForbidden {
-			return false
-		}
-	}
-	req, err = http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
 	if err != nil {
 		return false
 	}
-	req.Header.Set("Range", "bytes=0-0")
-	resp, err = client.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return false
+	}
+	if resp.ContentLength > maxMediaProbeBytes {
+		return false
+	}
+	sniff, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if err != nil || len(sniff) == 0 {
+		return false
+	}
+	detected := normalizeImageMIME(http.DetectContentType(sniff))
+	if detected == "" {
+		return false
+	}
+	declared, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
 		return false
 	}
-	_ = resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 400
+	if declared == "" || declared == "application/octet-stream" {
+		return true
+	}
+	return normalizeImageMIME(declared) == detected
+}
+
+func normalizeImageMIME(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "image/jpeg", "image/jpg":
+		return "image/jpeg"
+	case "image/png":
+		return "image/png"
+	case "image/gif":
+		return "image/gif"
+	case "image/webp":
+		return "image/webp"
+	default:
+		return ""
+	}
 }
 
 func hostOfURL(raw string) string {
@@ -651,10 +762,13 @@ func hostOfURL(raw string) string {
 
 func (a *App) persistSessionData(session *models.ChatbotSession) error {
 	session.LastActivityAt = time.Now()
-	return a.DB.Model(session).Updates(map[string]any{
+	if err := a.DB.Model(session).Updates(map[string]any{
 		"session_data":     session.SessionData,
 		"last_activity_at": session.LastActivityAt,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	return a.syncReferencedCommerceDraft(session)
 }
 
 func (a *App) handleAddToCartProductTap(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, buttonID string) {
@@ -679,7 +793,7 @@ func (a *App) handleAddToCartProductTap(account *models.WhatsAppAccount, contact
 	if len(product.Options) == 1 {
 		opt := product.Options[0]
 		meta := cartMetaFromProductSummary(product, opt)
-		a.completeAddToCart(account, contact, session, opt.ID, meta, opt.Name)
+		a.completeAddToCart(account, contact, session, settings, opt.ID, meta, opt.Name)
 		return
 	}
 	if err := a.sendOptionPicker(account, contact, session, product); err != nil {
@@ -714,7 +828,7 @@ func (a *App) handleAddOptionTap(account *models.WhatsAppAccount, contact *model
 	for _, opt := range product.Options {
 		if opt.ID == optionID {
 			meta := cartMetaFromProductSummary(product, opt)
-			a.completeAddToCart(account, contact, session, opt.ID, meta, opt.Name)
+			a.completeAddToCart(account, contact, session, settings, opt.ID, meta, opt.Name)
 			clearPendingPickerProduct(session)
 			return
 		}
@@ -789,7 +903,7 @@ func (a *App) sendOptionPicker(account *models.WhatsAppAccount, contact *models.
 	return err
 }
 
-func (a *App) completeAddToCart(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, optionID int, meta map[string]any, optionName string) {
+func (a *App) completeAddToCart(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, optionID int, meta map[string]any, optionName string) {
 	added, name, qty := addOptionToCart(session, optionID, meta)
 	if !added {
 		return
@@ -808,7 +922,11 @@ func (a *App) completeAddToCart(account *models.WhatsAppAccount, contact *models
 		a.Log.Error("Failed to send add-to-cart ack", "error", err, "contact", contact.PhoneNumber)
 	}
 	a.logSessionMessage(session.ID, models.DirectionOutgoing, ack, "add_to_cart")
-	a.sendCheckoutButtonPrompt(account, contact)
+	if settings == nil || !commerceConfigured(settings.AI) {
+		a.sendCheckoutButtonPrompt(account, contact)
+		return
+	}
+	a.beginPostCartLineFlow(account, contact, session, settings, productIDFromCartMeta(meta))
 }
 
 func formatAddToCartAck(optionName string, qty int) string {

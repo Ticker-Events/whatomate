@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
@@ -91,13 +93,21 @@ Rules: plain text only — no whatsapp_product cards, no markdown fences, no pol
 // commerceBackend is the storefront data source for LLM commerce tools (MCP).
 type commerceBackend interface {
 	SearchProducts(ctx context.Context, storeID, search string, limit int) ([]ticker.ProductSummary, error)
+	ListProducts(ctx context.Context, storeID, search, categoryID string, limit, offset int) (tickermcp.ProductPage, error)
 	GetProduct(ctx context.Context, productID string) (map[string]any, error)
 	GetStore(ctx context.Context, storeID string) (map[string]any, error)
 	ListCategories(ctx context.Context, storeID string) ([]map[string]any, error)
+	ListCategoryPage(ctx context.Context, storeID, categoryID string, limit, offset int) (tickermcp.CategoryPage, error)
 	GetOrder(ctx context.Context, orderUUID string) (map[string]any, error)
 	LookupOrderStatus(ctx context.Context, storeID, phoneNumber, orderID string) (map[string]any, error)
 	CreateOrder(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
 	CheckDeliveryEligibility(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error)
+	ListFulfillmentSlots(ctx context.Context, storeID, deliveryMode string, productOptionIDs []int) (tickermcp.FulfillmentSlotList, error)
+	ProposeFulfillmentTime(ctx context.Context, storeID, deliveryMode, requestedAt string, productOptionIDs []int) (tickermcp.FulfillmentSlot, error)
+	ValidateFulfillmentSlot(ctx context.Context, storeID, deliveryMode, token string, productOptionIDs []int) (tickermcp.FulfillmentSlotValidation, error)
+	ListCustomerAddresses(ctx context.Context, storeID, phoneNumber string) ([]tickermcp.CustomerAddress, error)
+	CreateCustomerAddress(ctx context.Context, storeID, phoneNumber string, address map[string]any) (tickermcp.CustomerAddress, error)
+	RetryPayment(ctx context.Context, orderUUID string) (tickermcp.PaymentRetry, error)
 }
 
 // commerceRuntime holds per-request commerce tool context.
@@ -284,8 +294,37 @@ func commerceToolDefs() []map[string]any {
 						"buyer_meta_data": map[string]any{
 							"type": "object",
 						},
+						"address": map[string]any{"type": "integer"},
+						"addons": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"addon":    map[string]any{"type": "integer"},
+									"quantity": map[string]any{"type": "integer"},
+								},
+								"required": []string{"addon", "quantity"},
+							},
+						},
+						"notes":           map[string]any{"type": "string"},
+						"slot_token":      map[string]any{"type": "string"},
+						"idempotency_key": map[string]any{"type": "string"},
 					},
 					"required": []string{"confirmed", "items", "email", "delivery_mode"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "retry_payment",
+				"description": "Create or recover a payment link for an existing pending-payment order.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"order_uuid": map[string]any{"type": "string"},
+					},
+					"required": []string{"order_uuid"},
 				},
 			},
 		},
@@ -347,6 +386,8 @@ func (a *App) executeCommerceTool(rt *commerceRuntime, name, argsJSON string) st
 		result, err = a.toolCheckDeliveryEligibility(ctx, rt, argsJSON)
 	case "create_order":
 		result, err = a.toolCreateOrder(ctx, rt, argsJSON)
+	case "retry_payment":
+		result, err = a.toolRetryPayment(ctx, rt, argsJSON)
 	default:
 		err = fmt.Errorf("unknown tool: %s", name)
 	}
@@ -542,7 +583,17 @@ func filterProductsWithOptions(products []ticker.ProductSummary) []ticker.Produc
 	}
 	out := make([]ticker.ProductSummary, 0, len(products))
 	for _, p := range products {
-		if len(p.Options) > 0 {
+		if p.ID <= 0 || strings.TrimSpace(p.Name) == "" || len(p.Options) == 0 {
+			continue
+		}
+		hasValidOption := false
+		for _, option := range p.Options {
+			if option.ID > 0 {
+				hasValidOption = true
+				break
+			}
+		}
+		if hasValidOption {
 			out = append(out, p)
 		}
 	}
@@ -697,14 +748,61 @@ func (a *App) toolCreateOrder(ctx context.Context, rt *commerceRuntime, argsJSON
 	return placeCommerceOrder(ctx, rt, args)
 }
 
+func (a *App) toolRetryPayment(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
+	var args struct {
+		OrderUUID string `json:"order_uuid"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %w", err)
+	}
+	orderID, err := uuid.Parse(strings.TrimSpace(args.OrderUUID))
+	if err != nil || rt == nil || rt.Client == nil ||
+		strings.TrimSpace(rt.StoreID) == "" || strings.TrimSpace(rt.PhoneNumber) == "" {
+		return nil, errors.New("payment retry ownership could not be verified")
+	}
+	order, err := rt.Client.GetOrder(ctx, orderID.String())
+	if err != nil || !commerceOrderOwnedBy(order, orderID, rt.StoreID, rt.PhoneNumber) {
+		return nil, errors.New("payment retry ownership could not be verified")
+	}
+	return rt.Client.RetryPayment(ctx, orderID.String())
+}
+
+func commerceOrderOwnedBy(order map[string]any, orderID uuid.UUID, storeID, phone string) bool {
+	if order == nil || !strings.EqualFold(strings.TrimSpace(asString(order["uuid"])), orderID.String()) {
+		return false
+	}
+	orderStore := asToolInt(order["store"])
+	if store, ok := order["store"].(map[string]any); ok {
+		orderStore = asToolInt(store["id"])
+		if orderStore == 0 {
+			orderStore = asToolInt(store["pk"])
+		}
+	}
+	orderPhone := firstNonEmpty(asString(order["phone_number"]), asString(order["phone"]))
+	if customer, ok := order["customer"].(map[string]any); ok {
+		orderPhone = firstNonEmpty(orderPhone, asString(customer["phone_number"]), asString(customer["phone"]))
+	}
+	normalizePhone := func(value string) string {
+		return strings.TrimPrefix(strings.TrimSpace(value), "+")
+	}
+	configuredStore, err := strconv.Atoi(strings.TrimSpace(storeID))
+	return err == nil && configuredStore > 0 && orderStore == configuredStore &&
+		orderPhone != "" && normalizePhone(orderPhone) == normalizePhone(phone)
+}
+
 type createOrderArgs struct {
-	Confirmed     bool             `json:"confirmed"`
-	Items         []map[string]any `json:"items"`
-	Email         string           `json:"email"`
-	PhoneNumber   string           `json:"phone_number"`
-	DeliveryMode  string           `json:"delivery_mode"`
-	NewAddress    map[string]any   `json:"new_address"`
-	BuyerMetaData map[string]any   `json:"buyer_meta_data"`
+	Confirmed      bool             `json:"confirmed"`
+	Items          []map[string]any `json:"items"`
+	Email          string           `json:"email"`
+	PhoneNumber    string           `json:"phone_number"`
+	DeliveryMode   string           `json:"delivery_mode"`
+	NewAddress     map[string]any   `json:"new_address"`
+	BuyerMetaData  map[string]any   `json:"buyer_meta_data"`
+	AddressID      *int             `json:"address"`
+	Addons         []map[string]any `json:"addons"`
+	Notes          string           `json:"notes"`
+	SlotToken      string           `json:"slot_token"`
+	IdempotencyKey string           `json:"idempotency_key"`
 }
 
 func placeCommerceOrder(ctx context.Context, rt *commerceRuntime, args createOrderArgs) (map[string]any, error) {
@@ -739,17 +837,22 @@ func placeCommerceOrder(ctx context.Context, rt *commerceRuntime, args createOrd
 	}
 
 	req := ticker.CreateOrderRequest{
-		Store:         storeID,
-		Items:         items,
-		Email:         strings.TrimSpace(args.Email),
-		PhoneNumber:   phone,
-		DeliveryMode:  deliveryMode,
-		NewAddress:    args.NewAddress,
-		BuyerMetaData: args.BuyerMetaData,
+		Store:          storeID,
+		Items:          items,
+		Email:          strings.TrimSpace(args.Email),
+		PhoneNumber:    phone,
+		DeliveryMode:   deliveryMode,
+		NewAddress:     args.NewAddress,
+		BuyerMetaData:  args.BuyerMetaData,
+		Address:        args.AddressID,
+		Addons:         args.Addons,
+		Notes:          args.Notes,
+		SlotToken:      args.SlotToken,
+		IdempotencyKey: args.IdempotencyKey,
 	}
 
-	if deliveryMode == "DELIVERY_TO_LOCATION" && req.NewAddress == nil {
-		return nil, fmt.Errorf("new_address is required for DELIVERY_TO_LOCATION")
+	if deliveryMode == "DELIVERY_TO_LOCATION" && req.NewAddress == nil && req.Address == nil {
+		return nil, fmt.Errorf("address or new_address is required for DELIVERY_TO_LOCATION")
 	}
 	if req.NewAddress != nil {
 		if _, ok := req.NewAddress["email"]; !ok && req.Email != "" {
@@ -785,11 +888,44 @@ func compactOrderStatus(raw map[string]any) map[string]any {
 
 func compactOrderCreateResult(raw map[string]any) map[string]any {
 	out := compactOrderStatus(raw)
-	out["id"] = raw["id"]
+	// Keep uuid for durable draft completion / payment retry. System prompt
+	// already forbids sharing uuid with the customer.
+	if u := strings.TrimSpace(asString(raw["uuid"])); u != "" {
+		out["uuid"] = u
+	}
+	if id := anyIDString(raw["id"]); id != "" {
+		out["id"] = id
+	} else if raw["id"] != nil {
+		out["id"] = raw["id"]
+	}
 	if _, ok := raw["shipping_fee"]; ok {
 		out["shipping_fee"] = ticker.PaiseToRupees(asToolFloat(raw["shipping_fee"]))
 	}
 	return out
+}
+
+// anyIDString stringifies order/payment identifiers that may arrive as string,
+// int, or JSON float from MCP/JSON decoding.
+func anyIDString(v any) string {
+	switch n := v.(type) {
+	case string:
+		return strings.TrimSpace(n)
+	case float64:
+		if n == float64(int64(n)) {
+			return strconv.FormatInt(int64(n), 10)
+		}
+		return strconv.FormatFloat(n, 'f', -1, 64)
+	case float32:
+		return anyIDString(float64(n))
+	case int:
+		return strconv.Itoa(n)
+	case int64:
+		return strconv.FormatInt(n, 10)
+	case json.Number:
+		return strings.TrimSpace(n.String())
+	default:
+		return ""
+	}
 }
 
 // convertProductMoneyToRupees copies a product payload and converts paise money fields to rupees.
@@ -897,9 +1033,29 @@ func asToolInt(v any) int {
 	}
 }
 
+func commerceWelcomeHasCategoryBullets(msg string) bool {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return false
+	}
+	if strings.Contains(msg, commerceWelcomeMoreLabel) {
+		return true
+	}
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "• ") {
+			return true
+		}
+	}
+	return false
+}
+
 func commerceWelcomeFresh(ai models.AIConfig) bool {
 	msg := strings.TrimSpace(ai.CommerceWelcomeMessage)
 	if msg == "" || ai.CommerceWelcomeGeneratedAt == nil {
+		return false
+	}
+	// Legacy welcomes appended a collection bullet list; force regenerate.
+	if commerceWelcomeHasCategoryBullets(msg) {
 		return false
 	}
 	return time.Since(*ai.CommerceWelcomeGeneratedAt) < commerceWelcomeTTL
@@ -922,8 +1078,8 @@ func clearCommerceWelcome(ai *models.AIConfig) {
 }
 
 // getOrRefreshCommerceWelcome returns a cached welcome when fresh, otherwise
-// regenerates via the commerce tool loop, appends a category bullet list, and
-// persists the result on settings.
+// regenerates via the commerce tool loop and persists the result on settings.
+// Collections are not listed here — Place new order shows them.
 func (a *App) getOrRefreshCommerceWelcome(settings *models.ChatbotSettings, session *models.ChatbotSession, force bool) (string, error) {
 	if settings == nil || !commerceConfigured(settings.AI) {
 		return "", fmt.Errorf("commerce is not configured")
@@ -939,20 +1095,6 @@ func (a *App) getOrRefreshCommerceWelcome(settings *models.ChatbotSettings, sess
 	reply = strings.TrimSpace(stripWhatsAppProductFences(reply))
 	if reply == "" {
 		return "", fmt.Errorf("empty welcome response from AI")
-	}
-
-	rt := a.newCommerceRuntime(settings, session)
-	if rt != nil {
-		defer rt.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		categories, catErr := rt.Client.ListCategories(ctx, rt.StoreID)
-		cancel()
-		if catErr != nil {
-			a.Log.Warn("commerce welcome: list_categories failed; sending greeting without list",
-				"error", catErr.Error(), "store_id", rt.StoreID)
-		} else {
-			reply = appendCommerceWelcomeCategories(reply, categories)
-		}
 	}
 
 	now := time.Now().UTC()

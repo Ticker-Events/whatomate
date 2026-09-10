@@ -350,7 +350,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if msg.Context != nil && msg.Context.ID != "" {
 		replyToWAMID = msg.Context.ID
 	}
-	a.saveIncomingMessage(account, contact, msg.ID, messageType, messageText, mediaInfo, replyToWAMID)
+	persistedMessage := a.saveIncomingMessage(account, contact, msg.ID, messageType, messageText, mediaInfo, replyToWAMID)
 
 	// Clear chatbot tracking since client has replied
 	a.ClearContactChatbotTracking(contact.ID)
@@ -376,6 +376,13 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		return
 	}
 	a.Log.Info("Chatbot settings loaded", "settings_id", settings.ID, "is_enabled", settings.IsEnabled, "ai_enabled", settings.AI.Enabled, "ai_provider", settings.AI.Provider, "default_response", settings.DefaultResponse)
+
+	// Media without a caption is meaningful in commerce (for example, a cake
+	// reference image). Keep the existing empty-text behavior for all other
+	// routing so media does not unexpectedly trigger flows or keyword rules.
+	if messageText == "" && commerceConfigured(settings.AI) && persistedMessage != nil && persistedMessage.MediaURL != "" {
+		messageText = commerceMediaFallbackText(msg.Type, persistedMessage.MediaFilename)
+	}
 
 	// Check business hours if enabled
 	if settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 {
@@ -405,9 +412,14 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 
 	// Get or create active session for this contact
 	session, isNewSession := a.getOrCreateSession(account.OrganizationID, contact.ID, account.Name, msg.From, settings.SessionTimeoutMins)
+	a.recoverCommerceDraft(contact, session, settings)
+	if !a.recordCommerceMessage(session, msg.ID) {
+		a.Log.Info("duplicate commerce message ignored", "message_id", msg.ID)
+		return
+	}
 
 	// Log incoming message to session
-	a.logSessionMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check")
+	a.logSessionMessageWithMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check", persistedMessage, "")
 
 	// Commerce button taps (cart, checkout) stop further routing.
 	if a.handleCommerceButtonTap(account, contact, session, settings, buttonID) {
@@ -429,7 +441,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	}
 
 	// Checkout conversation steps and cart quantity replies.
-	if a.handleCheckoutConversation(account, contact, session, settings, messageText, buttonID) {
+	if a.handleCheckoutConversation(account, contact, session, settings, messageText, buttonID, persistedMessage) {
 		return
 	}
 	if a.handleCartQuantityReply(account, contact, session, messageText) {
@@ -515,7 +527,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 				}
 				return
 			}
-			a.sendGreetingText(account, contact, session, welcome, settings.GreetingButtons)
+			a.sendGreetingText(account, contact, session, settings, welcome, settings.GreetingButtons)
 			return
 		}
 		if settings.DefaultResponse != "" {
@@ -593,6 +605,20 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		a.logSessionMessage(session.ID, models.DirectionOutgoing, settings.FallbackMessage, "fallback_response")
 	} else if !isNewSession {
 		a.Log.Info("No fallback message configured for existing session")
+	}
+}
+
+func commerceMediaFallbackText(messageType, filename string) string {
+	switch messageType {
+	case "image":
+		return "[Image attached]"
+	case "document":
+		if filename = strings.TrimSpace(filename); filename != "" {
+			return "[Document attached: " + filename + "]"
+		}
+		return "[Document attached]"
+	default:
+		return ""
 	}
 }
 
@@ -689,10 +715,10 @@ func (a *App) matchKeywordRules(orgID uuid.UUID, accountName, messageText string
 // sendAndSaveTextMessage sends a text message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
 func (a *App) sendStaticGreeting(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
-	a.sendGreetingText(account, contact, session, settings.DefaultResponse, settings.GreetingButtons)
+	a.sendGreetingText(account, contact, session, settings, settings.DefaultResponse, settings.GreetingButtons)
 }
 
-func (a *App) sendGreetingText(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, text string, buttons models.JSONBArray) {
+func (a *App) sendGreetingText(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, text string, buttons models.JSONBArray) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return
@@ -703,6 +729,10 @@ func (a *App) sendGreetingText(account *models.WhatsAppAccount, contact *models.
 			greetingButtons = append(greetingButtons, btnMap)
 		}
 	}
+	if len(greetingButtons) == 0 && settings != nil && commerceConfigured(settings.AI) {
+		greetingButtons = defaultCommerceGreetingButtons()
+	}
+	greetingButtons = normalizeCommerceGreetingButtons(greetingButtons)
 	if len(greetingButtons) > 0 {
 		if err := a.sendAndSaveInteractiveButtons(account, contact, text, greetingButtons); err != nil {
 			a.Log.Error("Failed to send greeting buttons", "error", err, "contact", contact.PhoneNumber)
@@ -760,24 +790,7 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 
 	// Send reply buttons (with the body text)
 	if len(replyButtons) > 0 {
-		waButtons := make([]whatsapp.Button, 0, len(replyButtons))
-		for i, btn := range replyButtons {
-			if i >= 10 {
-				break
-			}
-			buttonID, _ := btn["id"].(string)
-			buttonTitle, _ := btn["title"].(string)
-			if buttonID == "" {
-				buttonID = fmt.Sprintf("btn_%d", i+1)
-			}
-			if buttonTitle == "" {
-				continue
-			}
-			waButtons = append(waButtons, whatsapp.Button{
-				ID:    buttonID,
-				Title: buttonTitle,
-			})
-		}
+		waButtons := whatsappReplyButtons(replyButtons)
 
 		if len(waButtons) > 0 {
 			interactiveType := "button"
@@ -824,6 +837,28 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 	}
 
 	return nil
+}
+
+func whatsappReplyButtons(buttons []map[string]any) []whatsapp.Button {
+	waButtons := make([]whatsapp.Button, 0, len(buttons))
+	for i, btn := range buttons {
+		if i >= 10 {
+			break
+		}
+		buttonID, _ := btn["id"].(string)
+		buttonTitle, _ := btn["title"].(string)
+		if buttonID == "" {
+			buttonID = fmt.Sprintf("btn_%d", i+1)
+		}
+		if buttonTitle == "" {
+			continue
+		}
+		waButtons = append(waButtons, whatsapp.Button{
+			ID:    buttonID,
+			Title: buttonTitle,
+		})
+	}
+	return waButtons
 }
 
 // sendAndSaveLocationRequest asks the user to share a WhatsApp location pin.
@@ -937,12 +972,21 @@ func (a *App) getOrCreateSession(orgID, contactID uuid.UUID, accountName, phoneN
 
 // logSessionMessage logs a message to the chatbot session
 func (a *App) logSessionMessage(sessionID uuid.UUID, direction models.Direction, message, stepName string) {
+	a.logSessionMessageWithMessage(sessionID, direction, message, stepName, nil, "")
+}
+
+func (a *App) logSessionMessageWithMessage(sessionID uuid.UUID, direction models.Direction, message, stepName string, persisted *models.Message, captureKey string) {
 	msg := models.ChatbotSessionMessage{
-		BaseModel: models.BaseModel{ID: uuid.New()},
-		SessionID: sessionID,
-		Direction: direction,
-		Message:   message,
-		StepName:  stepName,
+		BaseModel:   models.BaseModel{ID: uuid.New()},
+		SessionID:   sessionID,
+		Direction:   direction,
+		Message:     message,
+		StepName:    stepName,
+		Attachments: models.JSONBArray{},
+	}
+	if persisted != nil {
+		msg.MessageID = &persisted.ID
+		msg.Attachments = attachmentsJSON(attachmentFromMessage(persisted, captureKey))
 	}
 	if err := a.DB.Create(&msg).Error; err != nil {
 		a.Log.Error("Failed to log session message", "error", err)
@@ -1165,7 +1209,7 @@ func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *
 	url := "https://api.openai.com/v1/chat/completions"
 
 	// Build messages array
-	messages := []map[string]string{}
+	messages := []map[string]any{}
 
 	// Build system prompt with context
 	systemPrompt := settings.AI.SystemPrompt
@@ -1179,7 +1223,7 @@ func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *
 
 	// Add system prompt if configured
 	if systemPrompt != "" {
-		messages = append(messages, map[string]string{
+		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": systemPrompt,
 		})
@@ -1193,17 +1237,17 @@ func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *
 			if msg.Direction == models.DirectionOutgoing {
 				role = "assistant"
 			}
-			messages = append(messages, map[string]string{
+			messages = append(messages, map[string]any{
 				"role":    role,
-				"content": msg.Message,
+				"content": a.openAIContent(msg.Message, attachmentsFromJSON(msg.Attachments)),
 			})
 		}
 	}
 
 	// Add current user message
-	messages = append(messages, map[string]string{
+	messages = append(messages, map[string]any{
 		"role":    "user",
-		"content": userMessage,
+		"content": a.openAIContent(userMessage, a.currentAIAttachments(session, userMessage)),
 	})
 
 	payload := map[string]any{
@@ -1270,7 +1314,7 @@ func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, sessio
 	url := "https://api.anthropic.com/v1/messages"
 
 	// Build messages array
-	messages := []map[string]string{}
+	messages := []map[string]any{}
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
@@ -1280,17 +1324,17 @@ func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, sessio
 			if msg.Direction == models.DirectionOutgoing {
 				role = "assistant"
 			}
-			messages = append(messages, map[string]string{
+			messages = append(messages, map[string]any{
 				"role":    role,
-				"content": msg.Message,
+				"content": a.anthropicContent(msg.Message, attachmentsFromJSON(msg.Attachments)),
 			})
 		}
 	}
 
 	// Add current user message
-	messages = append(messages, map[string]string{
+	messages = append(messages, map[string]any{
 		"role":    "user",
-		"content": userMessage,
+		"content": a.anthropicContent(userMessage, a.currentAIAttachments(session, userMessage)),
 	})
 
 	payload := map[string]any{
@@ -1385,12 +1429,12 @@ func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *
 			if msg.Direction == models.DirectionOutgoing {
 				role = "model"
 			}
-			contents = appendGeminiTurn(contents, role, msg.Message)
+			contents = append(contents, map[string]any{"role": role, "parts": a.geminiParts(msg.Message, attachmentsFromJSON(msg.Attachments))})
 		}
 	}
 
 	// Add current user message
-	contents = appendGeminiTurn(contents, "user", userMessage)
+	contents = append(contents, map[string]any{"role": "user", "parts": a.geminiParts(userMessage, a.currentAIAttachments(session, userMessage))})
 
 	payload := map[string]any{
 		"contents": contents,
@@ -1703,7 +1747,7 @@ type MediaInfo struct {
 }
 
 // saveIncomingMessage saves an incoming message to the messages table
-func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo, replyToWAMID string) {
+func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo, replyToWAMID string) *models.Message {
 	now := time.Now()
 
 	message := models.Message{
@@ -1738,7 +1782,7 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 
 	if err := a.DB.Create(&message).Error; err != nil {
 		a.Log.Error("Failed to save incoming message", "error", err)
-		return
+		return nil
 	}
 
 	// If the chatbot will handle this conversation (enabled + no active
@@ -1791,6 +1835,7 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		WhatsAppAccount: account.Name,
 		Direction:       models.DirectionIncoming,
 	})
+	return &message
 }
 
 // isWithinBusinessHours checks if current time is within configured business hours

@@ -49,6 +49,8 @@ func main() {
 		runWorker(os.Args[2:])
 	case "migrate":
 		runMigrate(os.Args[2:])
+	case "fresh-session":
+		runFreshSession(os.Args[2:])
 	case "version":
 		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
 	case "help", "-h", "--help":
@@ -67,11 +69,12 @@ Usage:
   whatomate <command> [options]
 
 Commands:
-  server    Start the API server (with optional embedded workers)
-  worker    Start background workers only (no API server)
-  migrate   Run database migrations and exit
-  version   Show version information
-  help      Show this help message
+  server         Start the API server (with optional embedded workers)
+  worker         Start background workers only (no API server)
+  migrate        Run database migrations and exit
+  fresh-session  Cancel prior chatbot state and start a clean session for a phone
+  version        Show version information
+  help           Show this help message
 
 Server Options:
   -config string    Path to config file (default "config.toml")
@@ -85,6 +88,12 @@ Worker Options:
 Migrate Options:
   -config string    Path to config file (default "config.toml")
 
+Fresh-session Options:
+  -config string    Path to config file (default "config.toml")
+  -phone string     Contact phone number (required; with or without +)
+  -org string       Organization UUID when the phone exists in multiple orgs
+  -account string   WhatsApp account name when the contact spans multiple accounts
+
 Examples:
   whatomate server                     # API + 1 embedded worker
   whatomate server -workers 0          # API only (no workers)
@@ -92,6 +101,8 @@ Examples:
   whatomate server -migrate            # Run migrations and start server
   whatomate migrate                    # Run migrations and exit
   whatomate worker -workers 4          # 4 workers only (no API)
+  whatomate fresh-session -phone 919876543210
+  whatomate fresh-session -phone +919876543210 -org <uuid> -account shop
 
 Deployment Scenarios:
   All-in-one:    whatomate server
@@ -691,6 +702,12 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/api-keys/{id}", app.UpdateAPIKey)
 	g.DELETE("/api/api-keys/{id}", app.DeleteAPIKey)
 
+	// Backend -> Whatomate commerce lifecycle integration
+	g.POST("/api/v1/integrations/whatomate/order-events", app.ReceiveCommerceLifecycleEvent)
+	g.GET("/api/commerce/lifecycle-config", app.GetCommerceLifecycleConfig)
+	g.PUT("/api/commerce/lifecycle-config", app.PutCommerceLifecycleConfig)
+	g.GET("/api/commerce/lifecycle-events", app.ListCommerceLifecycleEvents)
+
 	// Accounts
 	g.GET("/api/accounts", app.ListAccounts)
 	g.POST("/api/accounts", app.CreateAccount)
@@ -711,6 +728,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/contacts/{id}", app.DeleteContact)
 	g.PUT("/api/contacts/{id}/assign", app.AssignContact)
 	g.PUT("/api/contacts/{id}/tags", app.UpdateContactTags)
+	g.POST("/api/contacts/{id}/tags/add", app.AddContactTag)
+	g.POST("/api/contacts/{id}/tags/remove", app.RemoveContactTag)
 	g.GET("/api/contacts/{id}/session-data", app.GetContactSessionData)
 
 	// Generic Import/Export

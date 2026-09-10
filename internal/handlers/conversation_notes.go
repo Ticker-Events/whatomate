@@ -21,6 +21,8 @@ type ConversationNoteResponse struct {
 	ContactID     uuid.UUID `json:"contact_id"`
 	CreatedByID   uuid.UUID `json:"created_by_id"`
 	CreatedByName string    `json:"created_by_name"`
+	CanEdit       bool      `json:"can_edit"`
+	CanDelete     bool      `json:"can_delete"`
 	Content       string    `json:"content"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -39,6 +41,9 @@ func (a *App) ListConversationNotes(r *fastglue.Request) error {
 
 	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
+		return nil
+	}
+	if _, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact"); err != nil {
 		return nil
 	}
 
@@ -80,8 +85,9 @@ func (a *App) ListConversationNotes(r *fastglue.Request) error {
 	}
 
 	result := make([]ConversationNoteResponse, len(notes))
+	isAdmin := a.isConversationNoteAdmin(orgID, userID)
 	for i, n := range notes {
-		result[i] = noteToResponse(n)
+		result[i] = noteToResponse(n, isAdmin || n.CreatedByID == userID)
 	}
 
 	return r.SendEnvelope(map[string]any{
@@ -104,6 +110,9 @@ func (a *App) CreateConversationNote(r *fastglue.Request) error {
 
 	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
+		return nil
+	}
+	if _, err := findByIDAndOrg[models.Contact](a.DB, r, contactID, orgID, "Contact"); err != nil {
 		return nil
 	}
 
@@ -134,7 +143,7 @@ func (a *App) CreateConversationNote(r *fastglue.Request) error {
 	a.DB.First(&user, "id = ?", userID)
 	note.CreatedBy = &user
 
-	resp := noteToResponse(note)
+	resp := noteToResponse(note, true)
 
 	// Broadcast via WebSocket
 	if a.WSHub != nil {
@@ -158,7 +167,7 @@ func (a *App) UpdateConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
-	_, err = parsePathUUID(r, "id", "contact")
+	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
 	}
@@ -172,9 +181,12 @@ func (a *App) UpdateConversationNote(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	if note.ContactID != contactID {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Note not found", nil, "")
+	}
 
-	// Only the creator can update their own notes
-	if note.CreatedByID != userID {
+	// Creators and organization administrators may update notes.
+	if note.CreatedByID != userID && !a.isConversationNoteAdmin(orgID, userID) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You can only edit your own notes", nil, "")
 	}
 
@@ -199,7 +211,7 @@ func (a *App) UpdateConversationNote(r *fastglue.Request) error {
 	a.DB.First(&user, "id = ?", note.CreatedByID)
 	note.CreatedBy = &user
 
-	resp := noteToResponse(*note)
+	resp := noteToResponse(*note, true)
 
 	// Broadcast via WebSocket
 	if a.WSHub != nil {
@@ -223,7 +235,7 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 		return nil
 	}
 
-	_, err = parsePathUUID(r, "id", "contact")
+	pathContactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
 	}
@@ -237,9 +249,12 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+	if note.ContactID != pathContactID {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Note not found", nil, "")
+	}
 
-	// Only the creator can delete their own notes
-	if note.CreatedByID != userID {
+	// Creators and organization administrators may delete notes.
+	if note.CreatedByID != userID && !a.isConversationNoteAdmin(orgID, userID) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You can only delete your own notes", nil, "")
 	}
 
@@ -265,7 +280,22 @@ func (a *App) DeleteConversationNote(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]string{"message": "Note deleted"})
 }
 
-func noteToResponse(n models.ConversationNote) ConversationNoteResponse {
+func (a *App) isConversationNoteAdmin(orgID, userID uuid.UUID) bool {
+	var user models.User
+	if err := a.DB.Preload("Role").Where("id = ?", userID).First(&user).Error; err == nil {
+		if user.IsSuperAdmin ||
+			(user.OrganizationID == orgID && user.Role != nil && user.Role.Name == "admin") {
+			return true
+		}
+	}
+	var membership models.UserOrganization
+	return a.DB.Preload("Role").
+		Where("user_id = ? AND organization_id = ?", userID, orgID).
+		First(&membership).Error == nil &&
+		membership.Role != nil && membership.Role.Name == "admin"
+}
+
+func noteToResponse(n models.ConversationNote, canChange bool) ConversationNoteResponse {
 	createdByName := ""
 	if n.CreatedBy != nil {
 		createdByName = n.CreatedBy.FullName
@@ -275,6 +305,8 @@ func noteToResponse(n models.ConversationNote) ConversationNoteResponse {
 		ContactID:     n.ContactID,
 		CreatedByID:   n.CreatedByID,
 		CreatedByName: createdByName,
+		CanEdit:       canChange,
+		CanDelete:     canChange,
 		Content:       n.Content,
 		CreatedAt:     n.CreatedAt,
 		UpdatedAt:     n.UpdatedAt,

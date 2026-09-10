@@ -30,6 +30,8 @@ type agentTransferRow struct {
 	TeamID                *uuid.UUID            `gorm:"column:team_id"`
 	TransferredByUserID   *uuid.UUID            `gorm:"column:transferred_by_user_id"`
 	Notes                 string                `gorm:"column:notes"`
+	Metadata              models.JSONB          `gorm:"column:metadata"`
+	CommerceDraftID       *uuid.UUID            `gorm:"column:commerce_draft_id"`
 	TransferredAt         time.Time             `gorm:"column:transferred_at"`
 	ResumedAt             *time.Time            `gorm:"column:resumed_at"`
 	ResumedBy             *uuid.UUID            `gorm:"column:resumed_by"`
@@ -82,6 +84,8 @@ type AgentTransferResponse struct {
 	TransferredBy     *string               `json:"transferred_by,omitempty"`
 	TransferredByName *string               `json:"transferred_by_name,omitempty"`
 	Notes             string                `json:"notes"`
+	Metadata          models.JSONB          `json:"metadata,omitempty"`
+	CommerceDraftID   *string               `json:"commerce_draft_id,omitempty"`
 	TransferredAt     string                `json:"transferred_at"`
 	ResumedAt         *string               `json:"resumed_at,omitempty"`
 	ResumedBy         *string               `json:"resumed_by,omitempty"`
@@ -330,7 +334,12 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 			Status:          t.Status,
 			Source:          t.Source,
 			Notes:           t.Notes,
+			Metadata:        t.Metadata,
 			TransferredAt:   t.TransferredAt.Format(time.RFC3339),
+		}
+		if t.CommerceDraftID != nil {
+			id := t.CommerceDraftID.String()
+			resp.CommerceDraftID = &id
 		}
 
 		if t.ContactName != nil {

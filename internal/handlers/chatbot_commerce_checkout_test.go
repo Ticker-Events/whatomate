@@ -505,3 +505,213 @@ func TestHandleCheckoutAddressMessage_IgnoresWhenNotAddressStep(t *testing.T) {
 	}))
 	assert.Equal(t, "email", getCheckoutState(session).Step)
 }
+
+func TestTargetedMultiLineCartEditAndRemoval(t *testing.T) {
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"7": map[string]any{"qty": 1, "product": map[string]any{"option_name": "Chocolate Large"}},
+			"8": map[string]any{"qty": 2, "product": map[string]any{"option_name": "Vanilla Small"}},
+		},
+	}}
+
+	changed, _ := applyTargetedCartEdit(session, "change vanilla small to 4")
+	require.True(t, changed)
+	assert.Equal(t, 4, anyToInt(normalizeCartMap(session.SessionData[cartKey])["8"]["qty"]))
+	assert.Equal(t, 1, anyToInt(normalizeCartMap(session.SessionData[cartKey])["7"]["qty"]))
+
+	changed, message := applyTargetedCartEdit(session, "remove chocolate")
+	require.True(t, changed)
+	assert.Contains(t, message, "Chocolate Large")
+	assert.NotContains(t, normalizeCartMap(session.SessionData[cartKey]), "7")
+}
+
+func TestCheckoutAddonEditing(t *testing.T) {
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	require.True(t, handleCheckoutAddonEdit(session, "addon 12 x2"))
+	require.Equal(t, []map[string]any{{"addon": 12, "quantity": 2}}, checkoutAddons(session))
+	require.True(t, handleCheckoutAddonEdit(session, "remove addon 12"))
+	assert.Empty(t, checkoutAddons(session))
+}
+
+func TestCheckoutSummaryIncludesSlotAddonsAndStructuredNotes(t *testing.T) {
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"1": map[string]any{"qty": 1, "product": map[string]any{"option_name": "Cake", "price": 100.0}},
+		},
+		"commerce_addons":          []any{map[string]any{"addon": 9, "quantity": 1}},
+		"commerce_captured_fields": map[string]any{"writing": "Happy birthday"},
+	}}
+	summary := formatOrderConfirmSummary(session, &checkoutState{
+		DeliveryMode: "PICKUP_FROM_STORE",
+		RequestedAt:  "2026-09-10T10:00:00Z",
+	})
+	assert.Contains(t, summary, "10 Sep 10:00 AM")
+	assert.Contains(t, summary, "Add-ons: #9 x1")
+	assert.Contains(t, summary, `"writing":"Happy birthday"`)
+}
+
+func TestHydrateSessionFromDurableDraft(t *testing.T) {
+	addressID := 11
+	draft := &models.CommerceDraft{
+		BaseModel:            models.BaseModel{ID: uuid.New()},
+		Cart:                 models.JSONB{"7": map[string]any{"qty": 3}},
+		FulfillmentMode:      "DELIVERY_TO_LOCATION",
+		FulfillmentSlotToken: "opaque",
+		SavedAddressID:       &addressID,
+		AddressSnapshot:      models.JSONB{"address_line_1": "Main Street"},
+	}
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	hydrateSessionFromDraft(session, draft)
+
+	assert.Equal(t, draft.ID, commerceDraftID(session))
+	assert.Equal(t, 3, anyToInt(normalizeCartMap(session.SessionData[cartKey])["7"]["qty"]))
+	state := getCheckoutState(session)
+	require.NotNil(t, state)
+	assert.Equal(t, "opaque", state.SlotToken)
+	require.NotNil(t, state.SavedAddressID)
+	assert.Equal(t, 11, *state.SavedAddressID)
+}
+
+func TestPaymentCTAContentKeepsURLOutOfBody(t *testing.T) {
+	body, paymentURL := paymentCTAContent(map[string]any{
+		"display_uid": "ORD-7",
+		"amount":      250.0,
+		"payment_url": "https://pay.example/retry",
+	})
+	assert.Contains(t, body, "ORD-7")
+	assert.NotContains(t, body, "https://pay.example/retry")
+	assert.Equal(t, "https://pay.example/retry", paymentURL)
+}
+
+func TestStructuredCaptureValidation(t *testing.T) {
+	assert.True(t, validCaptureValue(map[string]any{"type": "number"}, "2.5"))
+	assert.False(t, validCaptureValue(map[string]any{"type": "number"}, "large"))
+	field := map[string]any{"type": "single_select", "options": []string{"Vanilla", "Chocolate"}}
+	assert.True(t, validCaptureValue(field, "chocolate"))
+	assert.False(t, validCaptureValue(field, "Strawberry"))
+}
+
+func TestCheckoutStateRoundTripIncludesFlowAndAddons(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	setCheckoutState(session, &checkoutState{
+		Step:             "addons",
+		Flow:             checkoutFlowPostCart,
+		PendingProductID: "99",
+		AddonChoices:     []map[string]any{{"id": 5, "name": "Candle", "price": 5000}},
+		CaptureFields:    []map[string]any{{"key": "writing_on_cake", "label": "Writing"}},
+		CaptureIndex:     0,
+	})
+	st := getCheckoutState(session)
+	require.NotNil(t, st)
+	assert.Equal(t, "addons", st.Step)
+	assert.Equal(t, checkoutFlowPostCart, st.Flow)
+	assert.Equal(t, "99", st.PendingProductID)
+	require.Len(t, st.AddonChoices, 1)
+	assert.Equal(t, 5, anyToInt(st.AddonChoices[0]["id"]))
+}
+
+func TestApplyCheckoutSlotPersistsTokenBeforeAddress(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	st := &checkoutState{
+		Step:         "slot",
+		Flow:         checkoutFlowCheckout,
+		DeliveryMode: "DELIVERY_TO_LOCATION",
+		NewAddress:   map[string]any{},
+	}
+	setCheckoutState(session, st)
+
+	// Simulate applyCheckoutSlot's persist-before-address fix without WhatsApp I/O.
+	st.SlotToken = "tok-abc"
+	st.RequestedAt = "2026-09-10T10:30:00+05:30"
+	st.PromisedAt = "2026-09-10T11:00:00+05:30"
+	setCheckoutState(session, st)
+
+	// beginNewCheckoutAddress reloads from session — token must survive.
+	reloaded := getCheckoutState(session)
+	require.NotNil(t, reloaded)
+	assert.Equal(t, "tok-abc", reloaded.SlotToken)
+	assert.Equal(t, "2026-09-10T10:30:00+05:30", reloaded.RequestedAt)
+
+	reloaded.Step = "location"
+	setCheckoutState(session, reloaded)
+	got := getCheckoutState(session)
+	require.NotNil(t, got)
+	assert.Equal(t, "location", got.Step)
+	assert.Equal(t, "tok-abc", got.SlotToken)
+}
+
+func TestParseProductAddonChoices(t *testing.T) {
+	t.Parallel()
+	choices := parseProductAddonChoices([]any{
+		map[string]any{"id": 1, "name": "Candle", "price": 5000, "is_active": true},
+		map[string]any{"id": 2, "name": "Hidden", "is_active": false},
+		map[string]any{"name": "No ID"},
+	})
+	require.Len(t, choices, 1)
+	assert.Equal(t, 1, anyToInt(choices[0]["id"]))
+	assert.Equal(t, "Candle", asString(choices[0]["name"]))
+}
+
+func TestAppendCommerceAddon(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	appendCommerceAddon(session, 9, 1)
+	appendCommerceAddon(session, 9, 2)
+	appendCommerceAddon(session, 3, 1)
+	addons := checkoutAddons(session)
+	require.Len(t, addons, 2)
+	assert.Equal(t, 9, anyToInt(addons[0]["addon"]))
+	assert.Equal(t, 3, anyToInt(addons[0]["quantity"]))
+	assert.Equal(t, 3, anyToInt(addons[1]["addon"]))
+}
+
+func TestIsCheckoutButtonIncludesAddonActions(t *testing.T) {
+	assert.True(t, IsCheckoutButton(checkoutAddonSkipButtonID))
+	assert.True(t, IsCheckoutButton(checkoutAddonDoneButtonID))
+	assert.True(t, IsCheckoutButton(checkoutAddonPrefix+"12"))
+	assert.True(t, IsCheckoutButton(checkoutButtonID))
+}
+
+func TestProductIDFromCartMeta(t *testing.T) {
+	assert.Equal(t, "42", productIDFromCartMeta(map[string]any{"product_id": 42}))
+	assert.Equal(t, "7", productIDFromCartMeta(map[string]any{"product_id": "7"}))
+	assert.Empty(t, productIDFromCartMeta(nil))
+}
+
+func TestFinishPostCartLineFlowClearsCheckoutState(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	setCheckoutState(session, &checkoutState{
+		Flow: checkoutFlowPostCart, Step: "addons", NewAddress: map[string]any{},
+	})
+	require.NotNil(t, getCheckoutState(session))
+	clearCheckoutState(session)
+	assert.Nil(t, getCheckoutState(session))
+}
+
+func TestFinishAddonStepThemedSetsDeliveryMode(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	st := &checkoutState{Flow: checkoutFlowThemed, Step: "addons", NewAddress: map[string]any{}}
+	// Mirror finishAddonStep themed branch without WhatsApp I/O.
+	st.Step = "delivery_mode"
+	setCheckoutState(session, st)
+	got := getCheckoutState(session)
+	require.NotNil(t, got)
+	assert.Equal(t, "delivery_mode", got.Step)
+	assert.Equal(t, checkoutFlowThemed, got.Flow)
+}
+
+func TestAdvanceToConfirmOrHandoffThemedUsesConfirmStep(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	st := &checkoutState{Flow: checkoutFlowThemed, Step: "address", NewAddress: map[string]any{}}
+	st.Step = "confirm"
+	setCheckoutState(session, st)
+	got := getCheckoutState(session)
+	require.NotNil(t, got)
+	assert.Equal(t, "confirm", got.Step)
+	assert.Equal(t, checkoutFlowThemed, got.Flow)
+}

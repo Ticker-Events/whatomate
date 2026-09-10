@@ -88,6 +88,26 @@ func (c *Client) SyncContactChatbotPaused(ctx context.Context, orgID, contactID 
 	return nil
 }
 
+// SyncCommerceHandoff exposes only display-safe handoff fields. Agent-transfer
+// notes remain private in Postgres and are deliberately not mirrored.
+func (c *Client) SyncCommerceHandoff(ctx context.Context, orgID, contactID, transferID uuid.UUID, summary string, tags []string) error {
+	if !c.Enabled() {
+		return nil
+	}
+	data := map[string]any{
+		"organizationId":         orgID.String(),
+		"chatbotPaused":          true,
+		"activeTransferId":       transferID.String(),
+		"commerceHandoffSummary": summary,
+		"tags":                   tags,
+	}
+	_, err := c.firestore.Collection(collectionContacts).Doc(contactID.String()).Set(ctx, data, firestore.MergeAll)
+	if err != nil {
+		return fmt.Errorf("firestore sync commerce handoff %s: %w", contactID, err)
+	}
+	return nil
+}
+
 func (c *Client) syncContactFromMessage(ctx context.Context, orgID uuid.UUID, msg *models.Message, contact *models.Contact, msgData map[string]any, maskPhone bool) error {
 	profileName := contact.ProfileName
 	phoneNumber := contact.PhoneNumber
@@ -102,6 +122,7 @@ func (c *Client) syncContactFromMessage(ctx context.Context, orgID uuid.UUID, ms
 		"profileName":     profileName,
 		"whatsappAccount": contact.WhatsAppAccount,
 		"lastMessageInfo": msgData,
+		"tags":            stringTags(contact.Tags),
 	}
 
 	applyAssignedUserField(contactData, contact)
@@ -149,6 +170,7 @@ func (c *Client) SyncContact(ctx context.Context, orgID uuid.UUID, contact *mode
 		"phoneNumber":     phoneNumber,
 		"profileName":     profileName,
 		"whatsappAccount": contact.WhatsAppAccount,
+		"tags":            stringTags(contact.Tags),
 	}
 	applyAssignedUserField(contactData, contact)
 	if contact.LastMessageAt != nil {
@@ -164,6 +186,16 @@ func (c *Client) SyncContact(ctx context.Context, orgID uuid.UUID, contact *mode
 		return fmt.Errorf("firestore sync contact %s: %w", contact.ID, err)
 	}
 	return nil
+}
+
+func stringTags(values models.JSONBArray) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if tag, ok := value.(string); ok {
+			out = append(out, tag)
+		}
+	}
+	return out
 }
 
 // applyConversationWaitFields writes first-response SLA fields in camelCase so

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,9 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 
 	if rt != nil {
 		defer rt.Close()
+		if categoryContext := selectedCategoryPromptContext(context.Background(), rt, session); categoryContext != "" {
+			contextData = strings.Join([]string{contextData, categoryContext}, "\n\n")
+		}
 		switch settings.AI.Provider {
 		case models.AIProviderOpenAI:
 			return a.generateOpenAIWithTools(settings, session, userMessage, contextData, rt)
@@ -59,10 +63,10 @@ func (a *App) generateOpenAIWithTools(settings *models.ChatbotSettings, session 
 			if msg.Direction == models.DirectionOutgoing {
 				role = "assistant"
 			}
-			messages = append(messages, map[string]any{"role": role, "content": msg.Message})
+			messages = append(messages, map[string]any{"role": role, "content": a.openAIContent(msg.Message, attachmentsFromJSON(msg.Attachments))})
 		}
 	}
-	messages = append(messages, map[string]any{"role": "user", "content": userMessage})
+	messages = append(messages, map[string]any{"role": "user", "content": a.openAIContent(userMessage, a.currentAIAttachments(session, userMessage))})
 
 	maxTokens := settings.AI.MaxTokens
 	if maxTokens < 500 {
@@ -183,11 +187,11 @@ func (a *App) generateAnthropicWithTools(settings *models.ChatbotSettings, sessi
 			}
 			messages = append(messages, map[string]any{
 				"role":    role,
-				"content": msg.Message,
+				"content": a.anthropicContent(msg.Message, attachmentsFromJSON(msg.Attachments)),
 			})
 		}
 	}
-	messages = append(messages, map[string]any{"role": "user", "content": userMessage})
+	messages = append(messages, map[string]any{"role": "user", "content": a.anthropicContent(userMessage, a.currentAIAttachments(session, userMessage))})
 
 	systemPrompt := buildCommerceSystemPrompt(settings.AI.SystemPrompt, contextData)
 	maxTokens := settings.AI.MaxTokens
@@ -329,10 +333,10 @@ func (a *App) generateGoogleWithTools(settings *models.ChatbotSettings, session 
 			if msg.Direction == models.DirectionOutgoing {
 				role = "model"
 			}
-			contents = appendGeminiTurn(contents, role, msg.Message)
+			contents = append(contents, map[string]any{"role": role, "parts": a.geminiParts(msg.Message, attachmentsFromJSON(msg.Attachments))})
 		}
 	}
-	contents = appendGeminiTurn(contents, "user", userMessage)
+	contents = append(contents, map[string]any{"role": "user", "parts": a.geminiParts(userMessage, a.currentAIAttachments(session, userMessage))})
 
 	systemPrompt := buildCommerceSystemPrompt(settings.AI.SystemPrompt, contextData)
 	maxTokens := settings.AI.MaxTokens

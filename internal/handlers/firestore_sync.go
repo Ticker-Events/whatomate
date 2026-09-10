@@ -86,3 +86,28 @@ func (a *App) syncContactChatbotPausedToFirestore(orgID, contactID uuid.UUID, tr
 		}
 	}()
 }
+
+func (a *App) syncCommerceHandoffToFirestore(orgID, contactID uuid.UUID, transfer *models.AgentTransfer, contact *models.Contact) {
+	if a == nil || a.Firestore == nil || !a.Firestore.Enabled() || transfer == nil {
+		return
+	}
+	tags := make([]string, 0, len(contact.Tags))
+	for _, raw := range contact.Tags {
+		if tag, ok := raw.(string); ok {
+			tags = append(tags, tag)
+		}
+	}
+	summary := ""
+	if transfer.CommerceDraftID != nil {
+		summary = "Commerce request " + transfer.CommerceDraftID.String() + " is awaiting an agent"
+	}
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := a.Firestore.SyncCommerceHandoff(ctx, orgID, contactID, transfer.ID, summary, tags); err != nil {
+			a.Log.Error("Failed to sync commerce handoff to Firestore", "error", err, "transfer_id", transfer.ID)
+		}
+	}()
+}
