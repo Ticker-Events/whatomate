@@ -348,6 +348,30 @@ func (c *Client) ListFulfillmentSlots(ctx context.Context, storeID, deliveryMode
 	return result, nil
 }
 
+func (c *Client) ProposeFulfillmentTime(ctx context.Context, storeID, deliveryMode, requestedAt string, productOptionIDs []int) (FulfillmentSlot, error) {
+	sid, err := positiveStoreID(storeID)
+	if err != nil {
+		return FulfillmentSlot{}, err
+	}
+	args := map[string]any{
+		"store_id":                 sid,
+		"delivery_mode":            strings.TrimSpace(deliveryMode),
+		"requested_fulfillment_at": strings.TrimSpace(requestedAt),
+	}
+	if len(productOptionIDs) > 0 {
+		args["product_option_ids"] = productOptionIDs
+	}
+	raw, err := c.callTool(ctx, "propose_fulfillment_time", args)
+	if err != nil {
+		return FulfillmentSlot{}, err
+	}
+	var result FulfillmentSlot
+	if err := decodeInto(raw, &result); err != nil {
+		return result, fmt.Errorf("decode proposed fulfillment time: %w", err)
+	}
+	return result, nil
+}
+
 func (c *Client) ValidateFulfillmentSlot(ctx context.Context, storeID, deliveryMode, token string, productOptionIDs []int) (FulfillmentSlotValidation, error) {
 	sid, err := positiveStoreID(storeID)
 	if err != nil {
@@ -893,7 +917,9 @@ func categoryImageURL(value any) string {
 	case string:
 		return strings.TrimSpace(image)
 	case map[string]any:
-		for _, key := range []string{"image", "url", "original_url"} {
+		// Prefer original_url (JPEG/PNG) — WhatsApp interactive headers reject WebP,
+		// which is what optimized image/url fields typically return.
+		for _, key := range []string{"original_url", "url", "image"} {
 			if candidate := categoryImageURL(image[key]); candidate != "" {
 				return candidate
 			}

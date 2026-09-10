@@ -133,6 +133,10 @@ func (s *stubCommerceBackend) ListFulfillmentSlots(context.Context, string, stri
 	return tickermcp.FulfillmentSlotList{}, fmt.Errorf("list_fulfillment_slots not stubbed")
 }
 
+func (s *stubCommerceBackend) ProposeFulfillmentTime(context.Context, string, string, string, []int) (tickermcp.FulfillmentSlot, error) {
+	return tickermcp.FulfillmentSlot{}, fmt.Errorf("propose_fulfillment_time not stubbed")
+}
+
 func (s *stubCommerceBackend) ValidateFulfillmentSlot(context.Context, string, string, string, []int) (tickermcp.FulfillmentSlotValidation, error) {
 	return tickermcp.FulfillmentSlotValidation{}, fmt.Errorf("validate_fulfillment_slot not stubbed")
 }

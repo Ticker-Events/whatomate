@@ -226,25 +226,28 @@ func TestDecodeCategoryImageFormsPreserveFields(t *testing.T) {
 		require.Len(t, category.RequiredCaptureFields, 1)
 	})
 
-	t.Run("serializer object prefers image", func(t *testing.T) {
+	t.Run("serializer object prefers original_url", func(t *testing.T) {
 		input := cloneMap(base)
 		input["image"] = map[string]any{
 			"id":           float64(99),
-			"image":        "https://example.com/image.jpg",
-			"url":          "https://example.com/url.jpg",
+			"image":        "https://example.com/image.webp",
+			"url":          "https://example.com/url.webp",
 			"original_url": "https://example.com/original.jpg",
 		}
 		category := decodeCategory(input)
-		assert.Equal(t, "https://example.com/image.jpg", category.Image)
+		assert.Equal(t, "https://example.com/original.jpg", category.Image)
 		assert.Equal(t, "Made to order", category.Description)
 		assert.Equal(t, "A baker will help next.", category.HandoffMessage)
 		assert.Equal(t, "Ask for a reference.", category.AIInstructions)
 	})
 
-	t.Run("serializer object falls back to url then original", func(t *testing.T) {
-		assert.Equal(t, "https://example.com/url.jpg", categoryImageURL(map[string]any{
-			"url":          "https://example.com/url.jpg",
+	t.Run("serializer object falls back to url then image", func(t *testing.T) {
+		assert.Equal(t, "https://example.com/original.jpg", categoryImageURL(map[string]any{
+			"url":          "https://example.com/url.webp",
 			"original_url": "https://example.com/original.jpg",
+		}))
+		assert.Equal(t, "https://example.com/url.jpg", categoryImageURL(map[string]any{
+			"url": "https://example.com/url.jpg",
 		}))
 		assert.Equal(t, "https://example.com/original.jpg", categoryImageURL(map[string]any{
 			"original_url": "https://example.com/original.jpg",

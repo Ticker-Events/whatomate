@@ -45,6 +45,9 @@ var (
 	targetQtyRE    = regexp.MustCompile(`(?i)^(?:change|update|set)?\s*(.+?)\s+(?:to|x)?\s*(\d{1,4})$`)
 	removeLineRE   = regexp.MustCompile(`(?i)^(?:remove|delete)\s+(.+)$`)
 	addonEditRE    = regexp.MustCompile(`(?i)^(remove\s+)?addon\s+(\d+)(?:\s*(?:x|to)\s*(\d+))?$`)
+	relativeTimeRE = regexp.MustCompile(`(?i)^\s*(?:in|after)\s+(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours)\s*$`)
+	asapTimeRE     = regexp.MustCompile(`(?i)^\s*(asap|earliest|soonest|now|as soon as possible)\s*$`)
+	absoluteTimeRE = regexp.MustCompile(`(?i)^\s*(today|tomorrow)?\s*(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$`)
 )
 
 type checkoutState struct {
@@ -60,6 +63,8 @@ type checkoutState struct {
 	SlotToken        string
 	RequestedAt      string
 	PromisedAt       string
+	Timezone         string
+	EarliestAt       string
 	Slots            []map[string]any
 	SavedAddressID   *int
 	CaptureFields    []map[string]any
@@ -102,6 +107,8 @@ func getCheckoutState(session *models.ChatbotSession) *checkoutState {
 	st.SlotToken = asString(raw["slot_token"])
 	st.RequestedAt = asString(raw["requested_at"])
 	st.PromisedAt = asString(raw["promised_at"])
+	st.Timezone = asString(raw["timezone"])
+	st.EarliestAt = asString(raw["earliest_at"])
 	if slots, ok := raw["slots"].([]any); ok {
 		for _, slot := range slots {
 			if item, ok := slot.(map[string]any); ok {
@@ -154,6 +161,8 @@ func setCheckoutState(session *models.ChatbotSession, st *checkoutState) {
 		"slot_token":         st.SlotToken,
 		"requested_at":       st.RequestedAt,
 		"promised_at":        st.PromisedAt,
+		"timezone":           st.Timezone,
+		"earliest_at":        st.EarliestAt,
 		"slots":              st.Slots,
 		"saved_address_id":   pointerIntValue(st.SavedAddressID),
 		"capture_fields":     st.CaptureFields,
@@ -355,30 +364,48 @@ func (a *App) sendFulfillmentSlots(account *models.WhatsAppAccount, contact *mod
 		return
 	}
 	defer rt.Close()
+
+	tzName := "UTC"
+	earliestLabel := ""
+	if store, err := rt.Client.GetStore(context.Background(), rt.StoreID); err == nil {
+		if tz := asString(store["timezone"]); tz != "" {
+			tzName = tz
+		}
+	}
 	result, err := rt.Client.ListFulfillmentSlots(context.Background(), rt.StoreID, st.DeliveryMode, cartProductOptionIDs(session))
-	if err != nil || len(result.Slots) == 0 {
+	if err != nil {
 		a.Log.Warn("list fulfillment slots failed", "error", err)
-		_ = a.sendAndSaveTextMessage(account, contact, "No fulfillment times are available right now. Please choose another mode or try later.")
+		_ = a.sendAndSaveTextMessage(account, contact, "Couldn't load pickup/delivery times right now. Please try again in a moment.")
 		a.sendDeliveryModeButtons(account, contact)
 		return
 	}
-	st.Slots = make([]map[string]any, 0, len(result.Slots))
-	buttons := make([]map[string]any, 0, len(result.Slots))
-	for i, slot := range result.Slots {
-		if i >= 10 {
-			break
-		}
-		st.Slots = append(st.Slots, map[string]any{
-			"token": slot.Token, "requested_at": slot.RequestedFulfillmentAt, "promised_at": slot.PromisedReadyAt,
-		})
-		buttons = append(buttons, map[string]any{
-			"id":    checkoutSlotPrefix + strconv.Itoa(i),
-			"title": checkoutSlotLabel(slot.RequestedFulfillmentAt),
-		})
+	if len(result.Slots) == 0 {
+		a.Log.Warn("list fulfillment slots returned no options", "store_id", rt.StoreID, "mode", st.DeliveryMode)
+		_ = a.sendAndSaveTextMessage(account, contact, "No pickup/delivery times are available over the next few days. Please try another mode or contact the store.")
+		a.sendDeliveryModeButtons(account, contact)
+		return
 	}
+	first := result.Slots[0]
+	if first.Timezone != "" {
+		tzName = first.Timezone
+	}
+	st.Timezone = tzName
+	st.EarliestAt = first.RequestedFulfillmentAt
+	st.Slots = nil
+	earliestLabel = checkoutSlotLabel(first.RequestedFulfillmentAt)
 	setCheckoutState(session, st)
 	_ = a.persistSessionData(session)
-	_ = a.sendAndSaveInteractiveButtons(account, contact, "Choose a fulfillment time:", buttons)
+
+	modeWord := "pickup"
+	if st.DeliveryMode == "DELIVERY_TO_LOCATION" {
+		modeWord = "delivery"
+	}
+	prompt := fmt.Sprintf(
+		"When would you like %s?\nReply with a time like \"in 45 minutes\", \"today 5:30pm\", or \"tomorrow 10am\".\nEarliest available: %s",
+		modeWord,
+		earliestLabel,
+	)
+	_ = a.sendAndSaveTextMessage(account, contact, prompt)
 }
 
 func checkoutSlotLabel(value string) string {
@@ -399,6 +426,7 @@ func cartProductOptionIDs(session *models.ChatbotSession) []int {
 }
 
 func (a *App) handleCheckoutSlotChoice(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, buttonID string) {
+	// Legacy interactive slot buttons (kept for mid-session checkouts).
 	st := getCheckoutState(session)
 	if st == nil || st.Step != "slot" {
 		return
@@ -409,9 +437,60 @@ func (a *App) handleCheckoutSlotChoice(account *models.WhatsAppAccount, contact 
 		return
 	}
 	slot := st.Slots[index]
-	st.SlotToken = asString(slot["token"])
-	st.RequestedAt = asString(slot["requested_at"])
-	st.PromisedAt = asString(slot["promised_at"])
+	a.applyCheckoutSlot(account, contact, session, settings, st, asString(slot["token"]), asString(slot["requested_at"]), asString(slot["promised_at"]))
+}
+
+func (a *App) handleCheckoutSlotText(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, text string) {
+	rt := a.newCommerceRuntime(settings, session)
+	if rt == nil {
+		_ = a.sendAndSaveTextMessage(account, contact, "Fulfillment times are temporarily unavailable.")
+		return
+	}
+	defer rt.Close()
+
+	tzName := st.Timezone
+	if tzName == "" {
+		tzName = "UTC"
+		if store, err := rt.Client.GetStore(context.Background(), rt.StoreID); err == nil {
+			if tz := asString(store["timezone"]); tz != "" {
+				tzName = tz
+			}
+		}
+		st.Timezone = tzName
+	}
+	loc, err := time.LoadLocation(tzName)
+	if err != nil {
+		loc = time.UTC
+		tzName = "UTC"
+	}
+
+	now := time.Now().In(loc)
+	requested, parseErr := parseFulfillmentTimeText(text, now, loc, st.EarliestAt)
+	if parseErr != nil {
+		_ = a.sendAndSaveTextMessage(account, contact, "I couldn't understand that time. Try \"in 30 minutes\", \"today 5pm\", or \"tomorrow 10:30am\".")
+		a.sendFulfillmentSlots(account, contact, session, settings, st)
+		return
+	}
+
+	slot, err := rt.Client.ProposeFulfillmentTime(context.Background(), rt.StoreID, st.DeliveryMode, requested.Format(time.RFC3339), cartProductOptionIDs(session))
+	if err != nil {
+		a.Log.Warn("propose fulfillment time failed", "error", err, "requested", requested)
+		msg := "That time isn't available. "
+		if st.EarliestAt != "" {
+			msg += "Earliest available is " + checkoutSlotLabel(st.EarliestAt) + ". "
+		}
+		msg += "Please choose another time within store hours."
+		_ = a.sendAndSaveTextMessage(account, contact, msg)
+		a.sendFulfillmentSlots(account, contact, session, settings, st)
+		return
+	}
+	a.applyCheckoutSlot(account, contact, session, settings, st, slot.Token, slot.RequestedFulfillmentAt, slot.PromisedReadyAt)
+}
+
+func (a *App) applyCheckoutSlot(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, token, requestedAt, promisedAt string) {
+	st.SlotToken = token
+	st.RequestedAt = requestedAt
+	st.PromisedAt = promisedAt
 	if st.DeliveryMode == "PICKUP_FROM_STORE" {
 		st.Step = "confirm"
 		setCheckoutState(session, st)
@@ -779,6 +858,9 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		default:
 			a.sendDeliveryModeButtons(account, contact)
 		}
+		return true
+	case "slot":
+		a.handleCheckoutSlotText(account, contact, session, settings, st, text)
 		return true
 	case "location":
 		_ = a.sendAndSaveTextMessage(account, contact, "Please use the Send location button to share your delivery pin.")
@@ -1601,7 +1683,7 @@ func (a *App) placeCheckoutOrder(account *models.WhatsAppAccount, contact *model
 
 	items := cartOrderItems(session)
 	if st.SlotToken == "" {
-		_ = a.sendAndSaveTextMessage(account, contact, "Please choose a fulfillment time before confirming.")
+		_ = a.sendAndSaveTextMessage(account, contact, "Please enter a fulfillment time before confirming.")
 		st.Step = "slot"
 		setCheckoutState(session, st)
 		a.sendFulfillmentSlots(account, contact, session, settings, st)
@@ -1971,4 +2053,74 @@ func cartOrderItems(session *models.ChatbotSession) []ticker.OrderItem {
 		items = append(items, ticker.OrderItem{ProductOption: optID, Quantity: qty})
 	}
 	return items
+}
+
+// parseFulfillmentTimeText converts buyer free text into a store-local datetime.
+// Relative phrases are resolved from now; "asap" uses earliestAt when present.
+func parseFulfillmentTimeText(text string, now time.Time, loc *time.Location, earliestAt string) (time.Time, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return time.Time{}, errors.New("empty time")
+	}
+	if asapTimeRE.MatchString(text) {
+		if earliestAt != "" {
+			if parsed, err := time.Parse(time.RFC3339, earliestAt); err == nil {
+				return parsed.In(loc), nil
+			}
+		}
+		return now.Add(time.Minute).Truncate(time.Minute), nil
+	}
+	if m := relativeTimeRE.FindStringSubmatch(text); len(m) == 3 {
+		n, err := strconv.Atoi(m[1])
+		if err != nil || n <= 0 {
+			return time.Time{}, errors.New("invalid relative amount")
+		}
+		unit := strings.ToLower(m[2])
+		switch unit {
+		case "h", "hr", "hrs", "hour", "hours":
+			return now.Add(time.Duration(n) * time.Hour).Truncate(time.Minute), nil
+		default:
+			return now.Add(time.Duration(n) * time.Minute).Truncate(time.Minute), nil
+		}
+	}
+	if m := absoluteTimeRE.FindStringSubmatch(text); len(m) == 5 {
+		dayOffset := 0
+		switch strings.ToLower(m[1]) {
+		case "tomorrow":
+			dayOffset = 1
+		}
+		hour, err := strconv.Atoi(m[2])
+		if err != nil {
+			return time.Time{}, err
+		}
+		minute := 0
+		if m[3] != "" {
+			minute, err = strconv.Atoi(m[3])
+			if err != nil || minute > 59 {
+				return time.Time{}, errors.New("invalid minutes")
+			}
+		}
+		ampm := strings.ToLower(m[4])
+		if ampm == "pm" || ampm == "am" {
+			if hour < 1 || hour > 12 {
+				return time.Time{}, errors.New("invalid hour")
+			}
+			if ampm == "pm" && hour < 12 {
+				hour += 12
+			}
+			if ampm == "am" && hour == 12 {
+				hour = 0
+			}
+		} else if hour > 23 {
+			return time.Time{}, errors.New("invalid hour")
+		}
+		base := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, dayOffset)
+		candidate := time.Date(base.Year(), base.Month(), base.Day(), hour, minute, 0, 0, loc)
+		// Bare clock times that already passed today roll to tomorrow.
+		if dayOffset == 0 && m[1] == "" && !candidate.After(now) {
+			candidate = candidate.AddDate(0, 0, 1)
+		}
+		return candidate, nil
+	}
+	return time.Time{}, errors.New("unrecognized time")
 }

@@ -16,6 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsWhatsAppHeaderImageURL(t *testing.T) {
+	assert.True(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.jpg"))
+	assert.True(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.PNG?x=1"))
+	assert.False(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.webp"))
+	assert.False(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.WEBP"))
+	assert.False(t, isWhatsAppHeaderImageURL(""))
+}
+
 func TestReachablePublicMediaURLRejectsLoopbackBeforeProbe(t *testing.T) {
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	var requests atomic.Int32

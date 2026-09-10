@@ -202,7 +202,8 @@ func PaiseToRupees(paise float64) float64 {
 }
 
 // ExtractProductImageURL returns the first HTTPS product image from a ticker
-// product payload (images[].image), or empty when none is present.
+// product payload. Prefers images[].original_url (JPEG/PNG source) over the
+// optimized display fields (images[].url / images[].image), which are often WebP.
 func ExtractProductImageURL(raw map[string]any) string {
 	if raw == nil {
 		return ""
@@ -216,7 +217,16 @@ func ExtractProductImageURL(raw map[string]any) string {
 		if !ok {
 			continue
 		}
-		url := strings.TrimSpace(asString(m["image"]))
+		if url := firstHTTPURL(m, "original_url", "url", "image"); url != "" {
+			return url
+		}
+	}
+	return ""
+}
+
+func firstHTTPURL(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		url := strings.TrimSpace(asString(m[key]))
 		if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
 			return url
 		}

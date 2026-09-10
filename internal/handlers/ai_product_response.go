@@ -36,7 +36,7 @@ const productFormatInstructions = `## WhatsApp Product Cards
 Whenever you need to display a specific product to the user, you MUST NOT output standard text for that product. Instead, format that specific product recommendation as a structured JSON object inside a ` + "```whatsapp_product" + ` code block.
 
 CRITICAL RULES FOR THE JSON OBJECT:
-1. "image_url": MUST be the exact HTTPS image_url from search_products / get_product tool results (images[].image). NEVER invent, guess, slugify, or placeholder a URL. If the tool result has no image, omit image_url or use "".
+1. "image_url": MUST be the exact HTTPS image_url from search_products / get_product tool results (prefer image_url / images[].original_url over images[].image). NEVER invent, guess, slugify, or placeholder a URL. If the tool result has no image, omit image_url or use "".
 2. "product_title": Keep it short (under 20 characters). Use the real product name from tools.
 3. "product_description": MUST include "Starts at ₹X.XX" using min_price from tool results, plus a brief detail. Do not list individual option prices on the product card.
 4. "button_id": This must follow the strict format: "add_to_cart_[PRODUCT_ID]" using the numeric product id from tools.
@@ -573,31 +573,50 @@ func (a *App) lookupCommerceProductSummary(ctx context.Context, account *models.
 
 func (a *App) resolveProductCardImage(ctx context.Context, account *models.WhatsAppAccount, session *models.ChatbotSession, product *WhatsAppProduct, commerceImage string) string {
 	provided := strings.TrimSpace(product.ImageURL)
-	if provided == "" {
-		provided = strings.TrimSpace(commerceImage)
-	}
-	source := "none"
-	resolved := ""
+	commerce := strings.TrimSpace(commerceImage)
 
-	if isReachablePublicMediaURL(ctx, provided) {
-		source = "provided"
-		resolved = provided
-	} else if img := commerceImage; img != "" && isReachablePublicMediaURL(ctx, img) {
-		source = "commerce"
-		resolved = img
-	} else if img := a.lookupCommerceProductImage(ctx, account, session, product.ProductID()); img != "" {
-		source = "commerce"
-		resolved = img
+	pick := func(mediaURL string) (string, bool) {
+		if mediaURL == "" || !isWhatsAppHeaderImageURL(mediaURL) {
+			return "", false
+		}
+		if !isReachablePublicMediaURL(ctx, mediaURL) {
+			return "", false
+		}
+		return mediaURL, true
 	}
 
-	if provided != "" && source != "provided" && source != "commerce" {
+	// Prefer commerce original (JPEG/PNG). LLM-provided URLs are often the
+	// optimized WebP display URL, which WhatsApp interactive headers reject.
+	if resolved, ok := pick(commerce); ok {
+		return resolved
+	}
+	if resolved, ok := pick(provided); ok {
+		return resolved
+	}
+	if img := a.lookupCommerceProductImage(ctx, account, session, product.ProductID()); img != "" {
+		if resolved, ok := pick(img); ok {
+			return resolved
+		}
+	}
+
+	if provided != "" {
 		a.Log.Warn("Product card image_url not fetchable; using fallback",
 			"product_id", product.ProductID(),
 			"provided_host", hostOfURL(provided),
-			"source", source,
+			"source", "none",
 		)
 	}
-	return resolved
+	return ""
+}
+
+// isWhatsAppHeaderImageURL reports whether a media URL is usable as an
+// interactive message header image (WhatsApp rejects WebP uploads).
+func isWhatsAppHeaderImageURL(mediaURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(mediaURL))
+	if err != nil || parsed.Path == "" {
+		return false
+	}
+	return !strings.HasSuffix(strings.ToLower(parsed.Path), ".webp")
 }
 
 func (a *App) lookupCommerceProductImage(ctx context.Context, account *models.WhatsAppAccount, session *models.ChatbotSession, productID string) string {

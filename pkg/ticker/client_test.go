@@ -47,6 +47,15 @@ func TestExtractProductImageURL(t *testing.T) {
 			map[string]any{"image": "https://cdn.example.com/a.jpg"},
 		},
 	}))
+	assert.Equal(t, "https://cdn.example.com/original.jpg", ticker.ExtractProductImageURL(map[string]any{
+		"images": []any{
+			map[string]any{
+				"image":        "https://cdn.example.com/display.webp",
+				"url":          "https://cdn.example.com/display.webp",
+				"original_url": "https://cdn.example.com/original.jpg",
+			},
+		},
+	}))
 }
 
 func TestClientCreateOrderError(t *testing.T) {

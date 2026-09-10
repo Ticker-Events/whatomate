@@ -103,6 +103,7 @@ type commerceBackend interface {
 	CreateOrder(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error)
 	CheckDeliveryEligibility(ctx context.Context, storeID string, latitude, longitude float64) (map[string]any, error)
 	ListFulfillmentSlots(ctx context.Context, storeID, deliveryMode string, productOptionIDs []int) (tickermcp.FulfillmentSlotList, error)
+	ProposeFulfillmentTime(ctx context.Context, storeID, deliveryMode, requestedAt string, productOptionIDs []int) (tickermcp.FulfillmentSlot, error)
 	ValidateFulfillmentSlot(ctx context.Context, storeID, deliveryMode, token string, productOptionIDs []int) (tickermcp.FulfillmentSlotValidation, error)
 	ListCustomerAddresses(ctx context.Context, storeID, phoneNumber string) ([]tickermcp.CustomerAddress, error)
 	CreateCustomerAddress(ctx context.Context, storeID, phoneNumber string, address map[string]any) (tickermcp.CustomerAddress, error)
