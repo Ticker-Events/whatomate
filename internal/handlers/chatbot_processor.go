@@ -527,7 +527,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 				}
 				return
 			}
-			a.sendGreetingText(account, contact, session, welcome, settings.GreetingButtons)
+			a.sendGreetingText(account, contact, session, settings, welcome, settings.GreetingButtons)
 			return
 		}
 		if settings.DefaultResponse != "" {
@@ -715,10 +715,10 @@ func (a *App) matchKeywordRules(orgID uuid.UUID, accountName, messageText string
 // sendAndSaveTextMessage sends a text message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
 func (a *App) sendStaticGreeting(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
-	a.sendGreetingText(account, contact, session, settings.DefaultResponse, settings.GreetingButtons)
+	a.sendGreetingText(account, contact, session, settings, settings.DefaultResponse, settings.GreetingButtons)
 }
 
-func (a *App) sendGreetingText(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, text string, buttons models.JSONBArray) {
+func (a *App) sendGreetingText(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, text string, buttons models.JSONBArray) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return
@@ -728,6 +728,9 @@ func (a *App) sendGreetingText(account *models.WhatsAppAccount, contact *models.
 		if btnMap, ok := btn.(map[string]any); ok {
 			greetingButtons = append(greetingButtons, btnMap)
 		}
+	}
+	if len(greetingButtons) == 0 && settings != nil && commerceConfigured(settings.AI) {
+		greetingButtons = defaultCommerceGreetingButtons()
 	}
 	greetingButtons = normalizeCommerceGreetingButtons(greetingButtons)
 	if len(greetingButtons) > 0 {

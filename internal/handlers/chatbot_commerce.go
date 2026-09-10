@@ -888,11 +888,44 @@ func compactOrderStatus(raw map[string]any) map[string]any {
 
 func compactOrderCreateResult(raw map[string]any) map[string]any {
 	out := compactOrderStatus(raw)
-	out["id"] = raw["id"]
+	// Keep uuid for durable draft completion / payment retry. System prompt
+	// already forbids sharing uuid with the customer.
+	if u := strings.TrimSpace(asString(raw["uuid"])); u != "" {
+		out["uuid"] = u
+	}
+	if id := anyIDString(raw["id"]); id != "" {
+		out["id"] = id
+	} else if raw["id"] != nil {
+		out["id"] = raw["id"]
+	}
 	if _, ok := raw["shipping_fee"]; ok {
 		out["shipping_fee"] = ticker.PaiseToRupees(asToolFloat(raw["shipping_fee"]))
 	}
 	return out
+}
+
+// anyIDString stringifies order/payment identifiers that may arrive as string,
+// int, or JSON float from MCP/JSON decoding.
+func anyIDString(v any) string {
+	switch n := v.(type) {
+	case string:
+		return strings.TrimSpace(n)
+	case float64:
+		if n == float64(int64(n)) {
+			return strconv.FormatInt(int64(n), 10)
+		}
+		return strconv.FormatFloat(n, 'f', -1, 64)
+	case float32:
+		return anyIDString(float64(n))
+	case int:
+		return strconv.Itoa(n)
+	case int64:
+		return strconv.FormatInt(n, 10)
+	case json.Number:
+		return strings.TrimSpace(n.String())
+	default:
+		return ""
+	}
 }
 
 // convertProductMoneyToRupees copies a product payload and converts paise money fields to rupees.
@@ -1000,9 +1033,29 @@ func asToolInt(v any) int {
 	}
 }
 
+func commerceWelcomeHasCategoryBullets(msg string) bool {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return false
+	}
+	if strings.Contains(msg, commerceWelcomeMoreLabel) {
+		return true
+	}
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "• ") {
+			return true
+		}
+	}
+	return false
+}
+
 func commerceWelcomeFresh(ai models.AIConfig) bool {
 	msg := strings.TrimSpace(ai.CommerceWelcomeMessage)
 	if msg == "" || ai.CommerceWelcomeGeneratedAt == nil {
+		return false
+	}
+	// Legacy welcomes appended a collection bullet list; force regenerate.
+	if commerceWelcomeHasCategoryBullets(msg) {
 		return false
 	}
 	return time.Since(*ai.CommerceWelcomeGeneratedAt) < commerceWelcomeTTL
@@ -1025,8 +1078,8 @@ func clearCommerceWelcome(ai *models.AIConfig) {
 }
 
 // getOrRefreshCommerceWelcome returns a cached welcome when fresh, otherwise
-// regenerates via the commerce tool loop, appends a category bullet list, and
-// persists the result on settings.
+// regenerates via the commerce tool loop and persists the result on settings.
+// Collections are not listed here — Place new order shows them.
 func (a *App) getOrRefreshCommerceWelcome(settings *models.ChatbotSettings, session *models.ChatbotSession, force bool) (string, error) {
 	if settings == nil || !commerceConfigured(settings.AI) {
 		return "", fmt.Errorf("commerce is not configured")
@@ -1042,20 +1095,6 @@ func (a *App) getOrRefreshCommerceWelcome(settings *models.ChatbotSettings, sess
 	reply = strings.TrimSpace(stripWhatsAppProductFences(reply))
 	if reply == "" {
 		return "", fmt.Errorf("empty welcome response from AI")
-	}
-
-	rt := a.newCommerceRuntime(settings, session)
-	if rt != nil {
-		defer rt.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		categories, catErr := rt.Client.ListCategories(ctx, rt.StoreID)
-		cancel()
-		if catErr != nil {
-			a.Log.Warn("commerce welcome: list_categories failed; sending greeting without list",
-				"error", catErr.Error(), "store_id", rt.StoreID)
-		} else {
-			reply = appendCommerceWelcomeCategories(reply, categories)
-		}
 	}
 
 	now := time.Now().UTC()

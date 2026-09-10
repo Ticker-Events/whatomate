@@ -793,7 +793,7 @@ func (a *App) handleAddToCartProductTap(account *models.WhatsAppAccount, contact
 	if len(product.Options) == 1 {
 		opt := product.Options[0]
 		meta := cartMetaFromProductSummary(product, opt)
-		a.completeAddToCart(account, contact, session, opt.ID, meta, opt.Name)
+		a.completeAddToCart(account, contact, session, settings, opt.ID, meta, opt.Name)
 		return
 	}
 	if err := a.sendOptionPicker(account, contact, session, product); err != nil {
@@ -828,7 +828,7 @@ func (a *App) handleAddOptionTap(account *models.WhatsAppAccount, contact *model
 	for _, opt := range product.Options {
 		if opt.ID == optionID {
 			meta := cartMetaFromProductSummary(product, opt)
-			a.completeAddToCart(account, contact, session, opt.ID, meta, opt.Name)
+			a.completeAddToCart(account, contact, session, settings, opt.ID, meta, opt.Name)
 			clearPendingPickerProduct(session)
 			return
 		}
@@ -903,7 +903,7 @@ func (a *App) sendOptionPicker(account *models.WhatsAppAccount, contact *models.
 	return err
 }
 
-func (a *App) completeAddToCart(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, optionID int, meta map[string]any, optionName string) {
+func (a *App) completeAddToCart(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, optionID int, meta map[string]any, optionName string) {
 	added, name, qty := addOptionToCart(session, optionID, meta)
 	if !added {
 		return
@@ -922,7 +922,11 @@ func (a *App) completeAddToCart(account *models.WhatsAppAccount, contact *models
 		a.Log.Error("Failed to send add-to-cart ack", "error", err, "contact", contact.PhoneNumber)
 	}
 	a.logSessionMessage(session.ID, models.DirectionOutgoing, ack, "add_to_cart")
-	a.sendCheckoutButtonPrompt(account, contact)
+	if settings == nil || !commerceConfigured(settings.AI) {
+		a.sendCheckoutButtonPrompt(account, contact)
+		return
+	}
+	a.beginPostCartLineFlow(account, contact, session, settings, productIDFromCartMeta(meta))
 }
 
 func formatAddToCartAck(optionName string, qty int) string {

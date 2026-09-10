@@ -590,3 +590,128 @@ func TestStructuredCaptureValidation(t *testing.T) {
 	assert.True(t, validCaptureValue(field, "chocolate"))
 	assert.False(t, validCaptureValue(field, "Strawberry"))
 }
+
+func TestCheckoutStateRoundTripIncludesFlowAndAddons(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	setCheckoutState(session, &checkoutState{
+		Step:             "addons",
+		Flow:             checkoutFlowPostCart,
+		PendingProductID: "99",
+		AddonChoices:     []map[string]any{{"id": 5, "name": "Candle", "price": 5000}},
+		CaptureFields:    []map[string]any{{"key": "writing_on_cake", "label": "Writing"}},
+		CaptureIndex:     0,
+	})
+	st := getCheckoutState(session)
+	require.NotNil(t, st)
+	assert.Equal(t, "addons", st.Step)
+	assert.Equal(t, checkoutFlowPostCart, st.Flow)
+	assert.Equal(t, "99", st.PendingProductID)
+	require.Len(t, st.AddonChoices, 1)
+	assert.Equal(t, 5, anyToInt(st.AddonChoices[0]["id"]))
+}
+
+func TestApplyCheckoutSlotPersistsTokenBeforeAddress(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	st := &checkoutState{
+		Step:         "slot",
+		Flow:         checkoutFlowCheckout,
+		DeliveryMode: "DELIVERY_TO_LOCATION",
+		NewAddress:   map[string]any{},
+	}
+	setCheckoutState(session, st)
+
+	// Simulate applyCheckoutSlot's persist-before-address fix without WhatsApp I/O.
+	st.SlotToken = "tok-abc"
+	st.RequestedAt = "2026-09-10T10:30:00+05:30"
+	st.PromisedAt = "2026-09-10T11:00:00+05:30"
+	setCheckoutState(session, st)
+
+	// beginNewCheckoutAddress reloads from session — token must survive.
+	reloaded := getCheckoutState(session)
+	require.NotNil(t, reloaded)
+	assert.Equal(t, "tok-abc", reloaded.SlotToken)
+	assert.Equal(t, "2026-09-10T10:30:00+05:30", reloaded.RequestedAt)
+
+	reloaded.Step = "location"
+	setCheckoutState(session, reloaded)
+	got := getCheckoutState(session)
+	require.NotNil(t, got)
+	assert.Equal(t, "location", got.Step)
+	assert.Equal(t, "tok-abc", got.SlotToken)
+}
+
+func TestParseProductAddonChoices(t *testing.T) {
+	t.Parallel()
+	choices := parseProductAddonChoices([]any{
+		map[string]any{"id": 1, "name": "Candle", "price": 5000, "is_active": true},
+		map[string]any{"id": 2, "name": "Hidden", "is_active": false},
+		map[string]any{"name": "No ID"},
+	})
+	require.Len(t, choices, 1)
+	assert.Equal(t, 1, anyToInt(choices[0]["id"]))
+	assert.Equal(t, "Candle", asString(choices[0]["name"]))
+}
+
+func TestAppendCommerceAddon(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	appendCommerceAddon(session, 9, 1)
+	appendCommerceAddon(session, 9, 2)
+	appendCommerceAddon(session, 3, 1)
+	addons := checkoutAddons(session)
+	require.Len(t, addons, 2)
+	assert.Equal(t, 9, anyToInt(addons[0]["addon"]))
+	assert.Equal(t, 3, anyToInt(addons[0]["quantity"]))
+	assert.Equal(t, 3, anyToInt(addons[1]["addon"]))
+}
+
+func TestIsCheckoutButtonIncludesAddonActions(t *testing.T) {
+	assert.True(t, IsCheckoutButton(checkoutAddonSkipButtonID))
+	assert.True(t, IsCheckoutButton(checkoutAddonDoneButtonID))
+	assert.True(t, IsCheckoutButton(checkoutAddonPrefix+"12"))
+	assert.True(t, IsCheckoutButton(checkoutButtonID))
+}
+
+func TestProductIDFromCartMeta(t *testing.T) {
+	assert.Equal(t, "42", productIDFromCartMeta(map[string]any{"product_id": 42}))
+	assert.Equal(t, "7", productIDFromCartMeta(map[string]any{"product_id": "7"}))
+	assert.Empty(t, productIDFromCartMeta(nil))
+}
+
+func TestFinishPostCartLineFlowClearsCheckoutState(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	setCheckoutState(session, &checkoutState{
+		Flow: checkoutFlowPostCart, Step: "addons", NewAddress: map[string]any{},
+	})
+	require.NotNil(t, getCheckoutState(session))
+	clearCheckoutState(session)
+	assert.Nil(t, getCheckoutState(session))
+}
+
+func TestFinishAddonStepThemedSetsDeliveryMode(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	st := &checkoutState{Flow: checkoutFlowThemed, Step: "addons", NewAddress: map[string]any{}}
+	// Mirror finishAddonStep themed branch without WhatsApp I/O.
+	st.Step = "delivery_mode"
+	setCheckoutState(session, st)
+	got := getCheckoutState(session)
+	require.NotNil(t, got)
+	assert.Equal(t, "delivery_mode", got.Step)
+	assert.Equal(t, checkoutFlowThemed, got.Flow)
+}
+
+func TestAdvanceToConfirmOrHandoffThemedUsesConfirmStep(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	st := &checkoutState{Flow: checkoutFlowThemed, Step: "address", NewAddress: map[string]any{}}
+	st.Step = "confirm"
+	setCheckoutState(session, st)
+	got := getCheckoutState(session)
+	require.NotNil(t, got)
+	assert.Equal(t, "confirm", got.Step)
+	assert.Equal(t, checkoutFlowThemed, got.Flow)
+}

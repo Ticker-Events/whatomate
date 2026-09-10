@@ -352,7 +352,18 @@ func TestCompactOrderCreateResultUsesDisplayUIDAndPaymentURL(t *testing.T) {
 	assert.Equal(t, 250.5, out["amount"])
 	assert.Equal(t, "https://pay.example/go", out["payment_url"])
 	assert.Equal(t, "INR", out["currency"])
-	assert.NotContains(t, out, "uuid")
+	assert.Equal(t, "secret-uuid", out["uuid"])
+	assert.Equal(t, "1", out["id"])
+}
+
+func TestAnyIDString(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "abc", anyIDString("abc"))
+	assert.Equal(t, "42", anyIDString(42))
+	assert.Equal(t, "42", anyIDString(int64(42)))
+	assert.Equal(t, "42", anyIDString(float64(42)))
+	assert.Equal(t, "7", anyIDString(json.Number("7")))
+	assert.Empty(t, anyIDString(nil))
 }
 
 func TestGetOrderStatusLatestWithoutOrderID(t *testing.T) {
@@ -496,6 +507,25 @@ func TestCommerceWelcomeFresh(t *testing.T) {
 		CommerceWelcomeMessage:     "Hi!",
 		CommerceWelcomeGeneratedAt: &old,
 	}))
+	// Legacy bullet-list welcomes are treated as stale so they regenerate without collections.
+	assert.False(t, commerceWelcomeFresh(models.AIConfig{
+		CommerceWelcomeMessage:     "Welcome!\n\n• Birthday cakes\n• Themed cakes",
+		CommerceWelcomeGeneratedAt: &now,
+	}))
+	assert.True(t, commerceWelcomeHasCategoryBullets("Hi\n• Earrings"))
+	assert.False(t, commerceWelcomeHasCategoryBullets("Warm hello from the bakery."))
+}
+
+func TestDefaultCommerceGreetingButtons(t *testing.T) {
+	buttons := defaultCommerceGreetingButtons()
+	require.Len(t, buttons, 2)
+	normalized := normalizeCommerceGreetingButtons(buttons)
+	assert.Equal(t, commerceActionPlaceOrder, normalized[0]["id"])
+	assert.Equal(t, commerceActionOrderStatus, normalized[1]["id"])
+	action, _ := parseCommerceActionID(asString(normalized[0]["id"]))
+	assert.Equal(t, commerceActionPlace, action)
+	action, _ = parseCommerceActionID(asString(normalized[1]["id"]))
+	assert.Equal(t, commerceActionStatus, action)
 }
 
 func TestStripWhatsAppProductFences(t *testing.T) {
@@ -783,22 +813,28 @@ func TestCollectCommerceCategoriesOrdersPriorityAcrossPages(t *testing.T) {
 	assert.Equal(t, "https://example.test/category.jpg", categories[0].Image)
 }
 
-func TestCategoryCardRequestPassesDecodedMediaToRendering(t *testing.T) {
-	account := &models.WhatsAppAccount{}
-	contact := &models.Contact{}
-	request := categoryCardRequest(account, contact, tickermcp.Category{
-		ID:          42,
-		Name:        "Celebration cakes",
-		Description: "Made for your occasion",
-		Image:       "https://example.test/category.jpg",
+func TestCommerceCategoryChoiceButtonsSingleMessage(t *testing.T) {
+	t.Parallel()
+	buttons := commerceCategoryChoiceButtons([]tickermcp.Category{
+		{ID: 1, Name: "Birthday cakes"},
+		{ID: 0, Name: "Skipped"},
+		{ID: 2, Name: "  Anniversary cakes  "},
+		{ID: 3, Name: ""},
+		{ID: 4, Name: "Themed cakes"},
 	})
-	assert.Same(t, account, request.Account)
-	assert.Same(t, contact, request.Contact)
-	assert.Equal(t, models.MessageTypeInteractive, request.Type)
-	assert.Equal(t, "button", request.InteractiveType)
-	assert.Equal(t, "https://example.test/category.jpg", request.HeaderImageURL)
-	require.Len(t, request.Buttons, 1)
-	assert.Equal(t, "browse_category_42", request.Buttons[0].ID)
+	require.Len(t, buttons, 3)
+	assert.Equal(t, "browse_category_1", buttons[0]["id"])
+	assert.Equal(t, "Birthday cakes", buttons[0]["title"])
+	assert.Equal(t, "browse_category_2", buttons[1]["id"])
+	assert.Equal(t, "Anniversary cakes", buttons[1]["title"])
+	assert.Equal(t, "browse_category_4", buttons[2]["id"])
+
+	// WhatsApp list/button cap is 10 rows.
+	many := make([]tickermcp.Category, 0, 12)
+	for i := 1; i <= 12; i++ {
+		many = append(many, tickermcp.Category{ID: i, Name: fmt.Sprintf("Cat %d", i)})
+	}
+	assert.Len(t, commerceCategoryChoiceButtons(many), 10)
 }
 
 func TestCollectValidCategoryProductsFiltersBeforeDisplayPagination(t *testing.T) {

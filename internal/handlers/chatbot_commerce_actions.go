@@ -11,7 +11,6 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
-	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
 
 const (
@@ -72,6 +71,13 @@ func parseCommerceActionID(id string) (commerceAction, string) {
 		}
 	}
 	return commerceActionNone, ""
+}
+
+func defaultCommerceGreetingButtons() []map[string]any {
+	return []map[string]any{
+		{"id": commerceActionPlaceOrder, "title": "Place new order"},
+		{"id": commerceActionOrderStatus, "title": "Check order status"},
+	}
 }
 
 func normalizeCommerceGreetingButtons(buttons []map[string]any) []map[string]any {
@@ -151,33 +157,35 @@ func (a *App) sendCommerceCategories(account *models.WhatsAppAccount, contact *m
 		_ = a.sendAndSaveTextMessage(account, contact, "There are no collections available right now.")
 		return
 	}
-	_ = a.sendAndSaveTextMessage(account, contact, "Choose a collection to browse:")
-	for _, category := range categories {
-		_, err := a.SendOutgoingMessage(context.Background(), categoryCardRequest(account, contact, category), ChatbotSendOptions())
-		if err != nil {
-			a.Log.Error("send category card failed", "error", err, "category_id", category.ID)
-			return
-		}
+	buttons := commerceCategoryChoiceButtons(categories)
+	if len(buttons) == 0 {
+		_ = a.sendAndSaveTextMessage(account, contact, "There are no collections available right now.")
+		return
+	}
+	if err := a.sendAndSaveInteractiveButtons(account, contact, "Choose a collection to browse:", buttons); err != nil {
+		a.Log.Error("send category choices failed", "error", err)
+		_ = a.sendAndSaveTextMessage(account, contact, "I couldn’t load the collections right now. Please try again.")
 	}
 }
 
-func categoryCardRequest(account *models.WhatsAppAccount, contact *models.Contact, category tickermcp.Category) OutgoingMessageRequest {
-	body := category.Name
-	if category.Description != "" {
-		body += "\n" + category.Description
+// commerceCategoryChoiceButtons builds one reply/list row per collection.
+// WhatsApp allows at most 10 rows; titles are truncated by the WhatsApp client.
+func commerceCategoryChoiceButtons(categories []tickermcp.Category) []map[string]any {
+	out := make([]map[string]any, 0, len(categories))
+	for _, category := range categories {
+		name := strings.TrimSpace(category.Name)
+		if category.ID <= 0 || name == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":    commerceBrowsePrefix + strconv.Itoa(category.ID),
+			"title": name,
+		})
+		if len(out) >= 10 {
+			break
+		}
 	}
-	return OutgoingMessageRequest{
-		Account:         account,
-		Contact:         contact,
-		Type:            models.MessageTypeInteractive,
-		InteractiveType: "button",
-		BodyText:        body,
-		HeaderImageURL:  category.Image,
-		Buttons: []whatsapp.Button{{
-			ID:    commerceBrowsePrefix + strconv.Itoa(category.ID),
-			Title: "Browse",
-		}},
-	}
+	return out
 }
 
 func collectCommerceCategories(ctx context.Context, rt *commerceRuntime) ([]tickermcp.Category, error) {
@@ -220,21 +228,35 @@ func (a *App) browseCommerceCategory(account *models.WhatsAppAccount, contact *m
 		_ = a.sendAndSaveTextMessage(account, contact, "That collection is no longer available.")
 		return
 	}
+	category := categoryPage.Results[0]
+	setSelectedCategoryID(session, categoryID)
+	if err := a.persistSessionData(session); err != nil {
+		a.Log.Error("persist selected category failed", "error", err)
+	}
+
+	if strings.EqualFold(strings.TrimSpace(category.HandoffPolicy), "after_capture") {
+		productID := ""
+		products, prodErr := collectValidCategoryProducts(ctx, rt, categoryID)
+		if prodErr != nil {
+			a.Log.Warn("list themed category products failed", "error", prodErr, "category_id", categoryID)
+		} else if len(products) == 1 {
+			productID = strconv.Itoa(products[0].ID)
+		}
+		_ = a.sendAndSaveTextMessage(account, contact, "This is a custom "+category.Name+" request — I’ll collect a few details and connect you with our team.")
+		a.beginThemedIntake(account, contact, session, settings, category, productID)
+		return
+	}
+
 	products, err := collectValidCategoryProducts(ctx, rt, categoryID)
 	if err != nil {
 		a.Log.Warn("list category products failed", "error", err, "category_id", categoryID)
 		_ = a.sendAndSaveTextMessage(account, contact, "I couldn’t load those products right now. Please try again.")
 		return
 	}
-	setSelectedCategoryID(session, categoryID)
-	if err := a.persistSessionData(session); err != nil {
-		a.Log.Error("persist selected category failed", "error", err)
-	}
 	if len(products) == 0 {
 		_ = a.sendAndSaveTextMessage(account, contact, "There are no available products in this collection right now.")
 		return
 	}
-	category := categoryPage.Results[0]
 	_ = a.sendAndSaveTextMessage(account, contact, "Here are products from "+category.Name+":")
 	presentation := buildCategoryProductPresentation(products)
 	for _, product := range presentation.Cards {
