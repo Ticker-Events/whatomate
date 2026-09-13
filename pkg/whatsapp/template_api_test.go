@@ -222,6 +222,49 @@ func TestClient_FetchTemplates_Empty(t *testing.T) {
 	assert.Empty(t, templates)
 }
 
+func TestClient_FetchTemplates_Paginates(t *testing.T) {
+	t.Parallel()
+
+	var hits int
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusOK)
+		if hits == 1 {
+			assert.Contains(t, r.URL.Path, "/message_templates")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": "1", "name": "page_one_a", "language": "en", "category": "UTILITY", "status": "APPROVED"},
+					{"id": "2", "name": "page_one_b", "language": "en", "category": "UTILITY", "status": "APPROVED"},
+				},
+				"paging": map[string]any{
+					"next": serverURL + "/v18.0/WABA/message_templates?after=CURSOR",
+				},
+			})
+			return
+		}
+		assert.Contains(t, r.URL.RawQuery, "after=CURSOR")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "3", "name": "page_two", "language": "en", "category": "MARKETING", "status": "APPROVED"},
+			},
+		})
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	client := newTestClient(t, server)
+	account := testAccount(server.URL)
+
+	templates, err := client.FetchTemplates(context.Background(), account)
+	require.NoError(t, err)
+	require.Len(t, templates, 3)
+	assert.Equal(t, 2, hits)
+	assert.Equal(t, "page_one_a", templates[0].Name)
+	assert.Equal(t, "page_one_b", templates[1].Name)
+	assert.Equal(t, "page_two", templates[2].Name)
+}
+
 func TestClient_FetchTemplates_APIError(t *testing.T) {
 	t.Parallel()
 
