@@ -200,7 +200,7 @@ function defaultConfigFor(type: ChatNodeType): Record<string, any> {
     case 'api_call':
       return { url: '', method: 'GET', headers: {}, body: '', response_mapping: {}, message_template: '' }
     case 'tiqr_store_api':
-      return { operation: 'list_products', params: {}, response_mapping: {}, message_template: '' }
+      return { api_type: 'mcp', operation: 'list_products', params: {}, response_mapping: {}, message_template: '' }
     case 'whatsapp_flow':
       return { flow_id: '', header: '', body: '', cta: 'Open' }
     case 'transfer':

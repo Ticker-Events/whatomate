@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ChatNode } from '@/services/api'
-import { TIQR_STORE_OPERATIONS, tiqrStoreOperationDef } from '@/components/chatbot/tiqrStoreApiCatalog'
+import { tiqrStoreOperationDef, tiqrStoreOperationsFor, tiqrStoreApiType } from '@/components/chatbot/tiqrStoreApiCatalog'
 import { useTeamsStore } from '@/stores/teams'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -196,6 +196,23 @@ function updateParam(key: string, value: string) {
 }
 
 const tiqrOperation = computed(() => tiqrStoreOperationDef(config.value.operation))
+const tiqrApiType = computed(() => tiqrStoreApiType(config.value.api_type))
+const tiqrOperations = computed(() => tiqrStoreOperationsFor(config.value.api_type))
+
+function updateTiqrApiType(value: string) {
+  const next = tiqrStoreApiType(value)
+  const allowed = tiqrStoreOperationsFor(next)
+  const current = String(config.value.operation || '')
+  const stillValid = allowed.some((op) => op.value === current)
+  emit('update:node', {
+    ...props.node,
+    config: {
+      ...props.node.config,
+      api_type: next,
+      operation: stillValid ? current : (allowed[0]?.value || 'list_products'),
+    },
+  })
+}
 
 // Timing schedule
 const defaultSchedule = [
@@ -492,14 +509,32 @@ const typeLabel: Record<string, string> = {
     <!-- tiqr_store_api -->
     <template v-if="node.type === 'tiqr_store_api'">
       <div class="space-y-1.5">
+        <Label class="text-xs">API type</Label>
+        <Select :model-value="tiqrApiType" @update:model-value="(v: any) => updateTiqrApiType(String(v))">
+          <SelectTrigger class="h-8 text-sm"><SelectValue>{{ tiqrApiType === 'rest' ? 'REST' : 'MCP' }}</SelectValue></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="mcp">MCP</SelectItem>
+            <SelectItem value="rest">REST</SelectItem>
+          </SelectContent>
+        </Select>
+        <p class="text-[10px] text-muted-foreground">
+          <template v-if="tiqrApiType === 'rest'">
+            Uses Commerce REST Endpoint URL + Store ID from AI settings → Commerce.
+          </template>
+          <template v-else>
+            Uses Commerce MCP URL, MCP API key, and Store ID from AI settings → Commerce.
+          </template>
+        </p>
+      </div>
+      <div class="space-y-1.5">
         <Label class="text-xs">Operation</Label>
         <Select :model-value="config.operation || 'list_products'" @update:model-value="(v: any) => updateConfig('operation', v)">
           <SelectTrigger class="h-8 text-sm"><SelectValue>{{ tiqrOperation?.label || 'Select operation' }}</SelectValue></SelectTrigger>
           <SelectContent>
-            <SelectItem v-for="op in TIQR_STORE_OPERATIONS" :key="op.value" :value="op.value">{{ op.label }}</SelectItem>
+            <SelectItem v-for="op in tiqrOperations" :key="op.value" :value="op.value">{{ op.label }}</SelectItem>
           </SelectContent>
         </Select>
-        <p class="text-[10px] text-muted-foreground">Store ID is taken from AI settings → Commerce. Guest checkout uses create order; JWT cart is not available here.</p>
+        <p class="text-[10px] text-muted-foreground">Guest checkout uses create order; JWT cart is not available here.</p>
       </div>
       <div v-for="field in (tiqrOperation?.fields || [])" :key="field.key" class="space-y-1.5">
         <Label class="text-xs">{{ field.label }}<span v-if="field.required" class="text-destructive"> *</span></Label>

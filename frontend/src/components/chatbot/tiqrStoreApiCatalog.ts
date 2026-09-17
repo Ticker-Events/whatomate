@@ -1,3 +1,5 @@
+export type TiqrStoreApiType = 'mcp' | 'rest'
+
 export type TiqrStoreOperation =
   | 'list_collections'
   | 'search_collections'
@@ -27,6 +29,8 @@ export type TiqrStoreOperationDef = {
   value: TiqrStoreOperation
   label: string
   fields: TiqrStoreField[]
+  /** Guest-accessible buyer REST exists for this op. Default true when omitted. */
+  rest?: boolean
 }
 
 export const TIQR_STORE_OPERATIONS: TiqrStoreOperationDef[] = [
@@ -90,6 +94,7 @@ export const TIQR_STORE_OPERATIONS: TiqrStoreOperationDef[] = [
   {
     value: 'check_delivery',
     label: 'Check delivery',
+    rest: false,
     fields: [
       { key: 'latitude', label: 'Latitude', required: true, placeholder: '{{latitude}}' },
       { key: 'longitude', label: 'Longitude', required: true, placeholder: '{{longitude}}' },
@@ -133,6 +138,7 @@ export const TIQR_STORE_OPERATIONS: TiqrStoreOperationDef[] = [
   {
     value: 'lookup_order_status',
     label: 'Lookup order status',
+    rest: false,
     fields: [
       { key: 'order_id', label: 'Order number', placeholder: '{{order_id}}' },
     ],
@@ -140,6 +146,7 @@ export const TIQR_STORE_OPERATIONS: TiqrStoreOperationDef[] = [
   {
     value: 'retry_payment',
     label: 'Retry payment',
+    rest: false,
     fields: [
       { key: 'order_uuid', label: 'Order UUID', required: true, placeholder: '{{order_uuid}}' },
     ],
@@ -152,4 +159,18 @@ export function tiqrStoreOperationLabel(value: string | undefined): string {
 
 export function tiqrStoreOperationDef(value: string | undefined): TiqrStoreOperationDef | undefined {
   return TIQR_STORE_OPERATIONS.find((op) => op.value === value)
+}
+
+export function tiqrStoreApiType(value: string | undefined): TiqrStoreApiType {
+  return value === 'rest' ? 'rest' : 'mcp'
+}
+
+export function tiqrStoreOperationsFor(apiType: string | undefined): TiqrStoreOperationDef[] {
+  const type = tiqrStoreApiType(apiType)
+  if (type === 'mcp') return TIQR_STORE_OPERATIONS
+  return TIQR_STORE_OPERATIONS.filter((op) => op.rest !== false)
+}
+
+export function tiqrStoreApiTypeLabel(value: string | undefined): string {
+  return tiqrStoreApiType(value) === 'rest' ? 'REST' : 'MCP'
 }

@@ -142,6 +142,191 @@ func (c *Client) GetOrder(ctx context.Context, orderUUID string) (map[string]any
 	return raw, nil
 }
 
+// ListCategoriesParams filters GET /service/buyer/store/{id}/category/.
+type ListCategoriesParams struct {
+	Search string
+	Tags   []string
+	TagsOp string
+	Limit  int
+	Offset int
+}
+
+// ListCategories returns a page shaped like MCP list_categories: categories + count/limit/offset.
+func (c *Client) ListCategories(ctx context.Context, storeID string, params ListCategoriesParams) (map[string]any, error) {
+	if storeID == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	q := url.Values{}
+	if params.Limit > 0 {
+		q.Set("limit", strconv.Itoa(params.Limit))
+	}
+	if params.Offset > 0 {
+		q.Set("offset", strconv.Itoa(params.Offset))
+	}
+	if s := strings.TrimSpace(params.Search); s != "" {
+		q.Set("search", s)
+	}
+	if len(params.Tags) > 0 {
+		q.Set("tags", strings.Join(params.Tags, ","))
+	}
+	if op := strings.TrimSpace(params.TagsOp); op != "" {
+		q.Set("tags_op", op)
+	}
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/category/"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	return c.getPageAs(ctx, path, "categories", params.Limit, params.Offset)
+}
+
+// ListProductsParams filters GET /service/buyer/product/.
+type ListProductsParams struct {
+	Search     string
+	CategoryID string
+	Limit      int
+	Offset     int
+}
+
+// ListProductsPage returns products + pagination metadata (MCP-compatible keys).
+func (c *Client) ListProductsPage(ctx context.Context, storeID string, params ListProductsParams) (map[string]any, error) {
+	if storeID == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	q := url.Values{}
+	q.Set("store_id", storeID)
+	if params.Limit > 0 {
+		q.Set("limit", strconv.Itoa(params.Limit))
+	}
+	if params.Offset > 0 {
+		q.Set("offset", strconv.Itoa(params.Offset))
+	}
+	if s := strings.TrimSpace(params.Search); s != "" {
+		q.Set("search", s)
+	}
+	if id := strings.TrimSpace(params.CategoryID); id != "" {
+		q.Set("category_id", id)
+	}
+	return c.getPageAs(ctx, "/service/buyer/product/?"+q.Encode(), "products", params.Limit, params.Offset)
+}
+
+// ListProductOptions lists options optionally filtered by store and ids.
+func (c *Client) ListProductOptions(ctx context.Context, storeID string, ids []int) (any, error) {
+	q := url.Values{}
+	if strings.TrimSpace(storeID) != "" {
+		q.Set("store_id", strings.TrimSpace(storeID))
+	}
+	if len(ids) > 0 {
+		parts := make([]string, 0, len(ids))
+		for _, id := range ids {
+			parts = append(parts, strconv.Itoa(id))
+		}
+		q.Set("ids", strings.Join(parts, ","))
+	}
+	path := "/service/buyer/product-option/"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var raw any
+	if err := c.getJSON(ctx, path, &raw); err != nil {
+		return nil, err
+	}
+	switch t := raw.(type) {
+	case []any:
+		return t, nil
+	case map[string]any:
+		if results, ok := t["results"]; ok {
+			return results, nil
+		}
+		return t, nil
+	default:
+		return raw, nil
+	}
+}
+
+// GetStore fetches store details.
+func (c *Client) GetStore(ctx context.Context, storeID string) (map[string]any, error) {
+	if storeID == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	var raw map[string]any
+	if err := c.getJSON(ctx, "/service/buyer/store/"+url.PathEscape(storeID)+"/", &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// GetStoreInfo fetches store policy / about info.
+func (c *Client) GetStoreInfo(ctx context.Context, storeID string) (map[string]any, error) {
+	if storeID == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/store-info/"
+	var page struct {
+		Results []map[string]any `json:"results"`
+	}
+	if err := c.getJSON(ctx, path, &page); err == nil && len(page.Results) > 0 {
+		return page.Results[0], nil
+	}
+	var raw map[string]any
+	if err := c.getJSON(ctx, path, &raw); err != nil {
+		return nil, err
+	}
+	if results, ok := raw["results"].([]any); ok && len(results) > 0 {
+		if m, ok := results[0].(map[string]any); ok {
+			return m, nil
+		}
+	}
+	return raw, nil
+}
+
+// ListFaqs returns active FAQs for a store (array).
+func (c *Client) ListFaqs(ctx context.Context, storeID string) (any, error) {
+	if storeID == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/faq/"
+	var page struct {
+		Results []map[string]any `json:"results"`
+	}
+	if err := c.getJSON(ctx, path, &page); err != nil {
+		return nil, err
+	}
+	if page.Results != nil {
+		return page.Results, nil
+	}
+	return []map[string]any{}, nil
+}
+
+func (c *Client) getPageAs(ctx context.Context, path, listKey string, limit, offset int) (map[string]any, error) {
+	var page struct {
+		Results  []map[string]any `json:"results"`
+		Count    int              `json:"count"`
+		Next     *string          `json:"next"`
+		Previous *string          `json:"previous"`
+	}
+	if err := c.getJSON(ctx, path, &page); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = len(page.Results)
+	}
+	out := map[string]any{
+		listKey:  page.Results,
+		"count":  page.Count,
+		"limit":  limit,
+		"offset": offset,
+	}
+	if page.Count == 0 {
+		out["count"] = len(page.Results)
+	}
+	hasMore := page.Next != nil && *page.Next != ""
+	if !hasMore && page.Count > 0 {
+		hasMore = offset+len(page.Results) < page.Count
+	}
+	out["has_more"] = hasMore
+	return out, nil
+}
+
 func (c *Client) getJSON(ctx context.Context, path string, dest any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
 	if err != nil {

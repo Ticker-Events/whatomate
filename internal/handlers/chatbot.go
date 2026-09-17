@@ -35,6 +35,7 @@ type ChatbotSettingsResponse struct {
 	AISystemPrompt               string            `json:"ai_system_prompt"`
 	AICommerceEnabled            bool              `json:"ai_commerce_enabled"`
 	AICommerceMCPURL             string            `json:"ai_commerce_mcp_url"`
+	AICommerceRESTURL            string            `json:"ai_commerce_rest_url"`
 	AICommerceStoreID            string            `json:"ai_commerce_store_id"`
 	AICommerceMCPAPIKeySet       bool              `json:"ai_commerce_mcp_api_key_set"`
 	AICommerceWelcomeMessage     string            `json:"ai_commerce_welcome_message"`
@@ -193,6 +194,7 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AISystemPrompt:               settings.AI.SystemPrompt,
 		AICommerceEnabled:            settings.AI.CommerceEnabled,
 		AICommerceMCPURL:             settings.AI.CommerceMCPURL,
+		AICommerceRESTURL:            settings.AI.CommerceRESTURL,
 		AICommerceStoreID:            settings.AI.CommerceStoreID,
 		AICommerceMCPAPIKeySet:       strings.TrimSpace(settings.AI.CommerceMCPAPIKey) != "",
 		AICommerceWelcomeMessage:     settings.AI.CommerceWelcomeMessage,
@@ -297,6 +299,7 @@ func chatbotAISnapshot(s *models.ChatbotSettings) map[string]any {
 		"ai_system_prompt":                 s.AI.SystemPrompt,
 		"ai_commerce_enabled":              s.AI.CommerceEnabled,
 		"ai_commerce_mcp_url":              s.AI.CommerceMCPURL,
+		"ai_commerce_rest_url":             s.AI.CommerceRESTURL,
 		"ai_commerce_store_id":             s.AI.CommerceStoreID,
 		"ai_commerce_welcome_message":      s.AI.CommerceWelcomeMessage,
 		"ai_commerce_welcome_generated_at": s.AI.CommerceWelcomeGeneratedAt,
@@ -332,6 +335,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AICommerceEnabled            *bool              `json:"ai_commerce_enabled"`
 		AICommerceMCPURL             *string            `json:"ai_commerce_mcp_url"`
 		AICommerceMCPAPIKey          *string            `json:"ai_commerce_mcp_api_key"`
+		AICommerceRESTURL            *string            `json:"ai_commerce_rest_url"`
 		AICommerceStoreID            *string            `json:"ai_commerce_store_id"`
 		// SLA Settings
 		SLAEnabled             *bool     `json:"sla_enabled"`
@@ -403,7 +407,8 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	aiTouched := req.AIEnabled != nil || req.AIProvider != nil || req.AIAPIKey != nil ||
 		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil ||
 		req.AICommerceEnabled != nil || req.AICommerceMCPURL != nil ||
-		req.AICommerceMCPAPIKey != nil || req.AICommerceStoreID != nil
+		req.AICommerceMCPAPIKey != nil || req.AICommerceRESTURL != nil ||
+		req.AICommerceStoreID != nil
 
 	// Update fields if provided
 	if req.Enabled != nil {
@@ -502,6 +507,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
 		}
 		settings.AI.CommerceMCPAPIKey = encrypted
+	}
+	if req.AICommerceRESTURL != nil {
+		settings.AI.CommerceRESTURL = strings.TrimRight(strings.TrimSpace(*req.AICommerceRESTURL), "/")
 	}
 	if req.AICommerceStoreID != nil {
 		settings.AI.CommerceStoreID = strings.TrimSpace(*req.AICommerceStoreID)
