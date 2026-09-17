@@ -203,6 +203,8 @@ func (a *App) executeChatNode(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		return a.execChatPrompt(node, ctx)
 	case ChatNodeAPICall:
 		return a.execChatAPICall(node, ctx)
+	case ChatNodeTiqrStoreAPI:
+		return a.execChatTiqrStoreAPI(node, ctx)
 	case ChatNodeCondition:
 		return a.execChatCondition(node, ctx)
 	case ChatNodeTiming:

@@ -324,6 +324,7 @@ The `config` schema depends on `type`.
 | `prompt` | Send a question; wait for and validate a reply. | `body`, `store_as`, `validation_regex`, `validation_error`, `max_retries` | `default`, `max_retries` |
 | `buttons` | Interactive reply buttons. | `body`, `buttons: [{id,title}]` | `button:<id>` per button |
 | `api_call` | HTTP request with response capture + optional templated reply. | `url`, `method`, `headers`, `body`, `response_mapping`, `message_template` | `http:2xx`, `http:non2xx` |
+| `tiqr_store_api` | Call a TiQR storefront operation via buyer MCP. Store ID / MCP credentials come from AI settings. | `operation`, `params`, `response_mapping`, `message_template` | `http:2xx`, `http:non2xx` |
 | `condition` | Boolean expression branch ([expr-lang](https://expr-lang.org/) syntax) over session data. | `expression` | `true`, `false` |
 | `timing` | Business-hours routing. | `schedule: [{day,enabled,start_time,end_time}]` | `in_hours`, `out_of_hours` |
 | `whatsapp_flow` | Send a native WhatsApp Flow form. | `flow_id`, `header`, `body`, `cta` | `default` |
@@ -331,6 +332,22 @@ The `config` schema depends on `type`.
 | `goto_flow` | Jump to another flow in the same org/account. | `flow_id` | (handled internally) |
 | `webhook` | Fire-and-forget HTTP call; result ignored. | `url`, `method`, `headers`, `body` | `default` |
 | `end` | Optionally send a final message and terminate. | `message` | (terminal) |
+
+`tiqr_store_api` operations: `list_collections`, `search_collections`, `list_products`, `search_products`, `get_product`, `list_product_options`, `get_store`, `get_store_info`, `list_faqs`, `check_delivery`, `create_order`, `get_order`, `lookup_order_status`, `retry_payment`. Store ID is injected from AI settings; JWT cart is not supported. Example:
+
+```json
+{
+  "id": "search",
+  "type": "tiqr_store_api",
+  "label": "Search products",
+  "config": {
+    "operation": "search_products",
+    "params": { "search": "{{query}}", "limit": "10" },
+    "response_mapping": { "product_name": "products[0].name" },
+    "message_template": "Found {{product_name}}"
+  }
+}
+```
 
 ### Edge resolution
 

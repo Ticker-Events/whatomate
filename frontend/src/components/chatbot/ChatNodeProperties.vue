@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ChatNode } from '@/services/api'
+import { TIQR_STORE_OPERATIONS, tiqrStoreOperationDef } from '@/components/chatbot/tiqrStoreApiCatalog'
 import { useTeamsStore } from '@/stores/teams'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -190,6 +191,12 @@ function updateResponseMappingValue(key: string, value: string) {
   updateConfig('response_mapping', m)
 }
 
+function updateParam(key: string, value: string) {
+  updateConfig('params', { ...(config.value.params || {}), [key]: value })
+}
+
+const tiqrOperation = computed(() => tiqrStoreOperationDef(config.value.operation))
+
 // Timing schedule
 const defaultSchedule = [
   { day: 'monday', enabled: true, start_time: '09:00', end_time: '17:00' },
@@ -218,6 +225,7 @@ const typeLabel: Record<string, string> = {
   prompt: 'Prompt',
   buttons: 'Buttons',
   api_call: 'API Call',
+  tiqr_store_api: 'TiQR Store API',
   condition: 'Condition',
   timing: 'Timing',
   transfer: 'Transfer',
@@ -478,6 +486,64 @@ const typeLabel: Record<string, string> = {
           class="min-h-[50px] text-xs"
         />
         <p class="text-[10px] text-muted-foreground">Sent on 2xx response after mappings are applied.</p>
+      </div>
+    </template>
+
+    <!-- tiqr_store_api -->
+    <template v-if="node.type === 'tiqr_store_api'">
+      <div class="space-y-1.5">
+        <Label class="text-xs">Operation</Label>
+        <Select :model-value="config.operation || 'list_products'" @update:model-value="(v: any) => updateConfig('operation', v)">
+          <SelectTrigger class="h-8 text-sm"><SelectValue>{{ tiqrOperation?.label || 'Select operation' }}</SelectValue></SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="op in TIQR_STORE_OPERATIONS" :key="op.value" :value="op.value">{{ op.label }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p class="text-[10px] text-muted-foreground">Store ID is taken from AI settings → Commerce. Guest checkout uses create order; JWT cart is not available here.</p>
+      </div>
+      <div v-for="field in (tiqrOperation?.fields || [])" :key="field.key" class="space-y-1.5">
+        <Label class="text-xs">{{ field.label }}<span v-if="field.required" class="text-destructive"> *</span></Label>
+        <Textarea
+          v-if="field.multiline"
+          :model-value="(config.params || {})[field.key] || ''"
+          @update:model-value="(v: string) => updateParam(field.key, v)"
+          :placeholder="field.placeholder"
+          class="min-h-[60px] text-xs font-mono"
+        />
+        <Input
+          v-else
+          :model-value="(config.params || {})[field.key] || ''"
+          @update:model-value="(v: string) => updateParam(field.key, v)"
+          :placeholder="field.placeholder"
+          class="h-8 text-xs font-mono"
+        />
+        <p v-if="field.hint" class="text-[10px] text-muted-foreground">{{ field.hint }}</p>
+      </div>
+      <div class="space-y-1.5">
+        <div class="flex items-center justify-between">
+          <Label class="text-xs">Response mapping</Label>
+          <Button variant="outline" size="sm" class="h-6 text-xs" @click="addResponseMapping">
+            <Plus class="h-3 w-3 mr-1" /> Add
+          </Button>
+        </div>
+        <p class="text-[10px] text-muted-foreground">Map JSON paths into session variables (e.g. <code>products[0].name</code>).</p>
+        <div v-for="(val, key) in (config.response_mapping || {})" :key="String(key)" class="flex items-center gap-1">
+          <Input :model-value="String(key)" @update:model-value="(v: string) => updateResponseMappingKey(String(key), v)" placeholder="var_name" class="h-7 text-xs flex-1 font-mono" />
+          <Input :model-value="String(val)" @update:model-value="(v: string) => updateResponseMappingValue(String(key), v)" placeholder="path.to.field" class="h-7 text-xs flex-1 font-mono" />
+          <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeResponseMapping(String(key))">
+            <Trash2 class="h-3 w-3 text-destructive" />
+          </Button>
+        </div>
+      </div>
+      <div class="space-y-1.5">
+        <Label class="text-xs">Message template (optional)</Label>
+        <Textarea
+          :model-value="config.message_template || ''"
+          @update:model-value="(v: string) => updateConfig('message_template', v)"
+          placeholder="Found {{product_name}}"
+          class="min-h-[50px] text-xs"
+        />
+        <p class="text-[10px] text-muted-foreground">Sent on success after mappings are applied. Fields support <code v-pre>{{variable}}</code> templates.</p>
       </div>
     </template>
 

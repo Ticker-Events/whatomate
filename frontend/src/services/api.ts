@@ -1058,6 +1058,7 @@ export type ChatNodeType =
   | 'end'
   | 'prompt'
   | 'api_call'
+  | 'tiqr_store_api'
   | 'condition'
   | 'timing'
   | 'set_variable'
