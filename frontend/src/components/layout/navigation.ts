@@ -50,7 +50,7 @@ export const navigationSections: NavSection[] = [
     items: [
       {
         name: 'nav.dashboard',
-        path: '/',
+        path: '/dashboard',
         icon: LayoutDashboard,
         permission: 'analytics'
       },

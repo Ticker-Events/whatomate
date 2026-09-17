@@ -36,11 +36,17 @@ const router = createRouter({
     },
     {
       path: '/',
+      name: 'landing',
+      component: () => import('@/views/marketing/LandingView.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
+      path: '/',
       component: () => import('@/components/layout/AppLayout.vue'),
       meta: { requiresAuth: true },
       children: [
         {
-          path: '',
+          path: 'dashboard',
           name: 'dashboard',
           component: () => import('@/views/dashboard/DashboardView.vue'),
           meta: { permission: 'analytics' }
@@ -340,7 +346,7 @@ const router = createRouter({
 // Navigation items with permissions in priority order (matches AppLayout.vue)
 // Used to find the first accessible route for a user
 const navigationOrder = [
-  { path: '/', permission: 'analytics' },
+  { path: '/dashboard', permission: 'analytics' },
   { path: '/chat', permission: 'chat' },
   { path: '/chatbot', permission: 'settings.chatbot', childPaths: [
     { path: '/chatbot', permission: 'settings.chatbot' },
@@ -419,8 +425,11 @@ router.beforeEach(async (to, _from, next) => {
       }
     }
   } else {
-    // Redirect to appropriate page if already logged in
-    if (authStore.isAuthenticated && (to.name === 'login' || to.name === 'register')) {
+    // Redirect authenticated users away from public marketing/auth screens
+    if (
+      authStore.isAuthenticated &&
+      (to.name === 'login' || to.name === 'register' || to.name === 'landing')
+    ) {
       return next({ path: getFirstAccessibleRoute(authStore) })
     }
   }
