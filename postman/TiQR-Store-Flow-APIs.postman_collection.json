@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "name": "TiQR Store APIs (Whatomate Flow Node)",
-    "description": "MCP tools used by the Whatomate chatbot **TiQR Store** flow node (`tiqr_store_api`).\n\nWhatomate does not call buyer REST directly for this node \u2014 it invokes the tiqr-buyer MCP server (`tools/call`) with credentials from Chatbot \u2192 AI settings (`ai_commerce_mcp_url`, `ai_commerce_mcp_api_key`, `ai_commerce_store_id`).\n\n**Setup**\n1. Set collection variables: `mcp_base_url` (no trailing slash), `mcp_api_key`, `store_id`, and the sample IDs you need.\n2. Endpoint path is `/mcp` (streamable HTTP, `stateless_http=True`).\n3. Optional: send `initialize` first if your MCP gateway requires a session.\n\nFlow operation labels match the Whatomate palette dropdown in `tiqrStoreApiCatalog.ts`.",
+    "description": "APIs used by the Whatomate chatbot **TiQR Store** flow node (`tiqr_store_api`).\n\nThe node has an **API type** dropdown:\n- **MCP** \u2192 `tools/call` on the tiqr-buyer MCP server (`ai_commerce_mcp_url` + key + store id)\n- **REST** \u2192 ticker-events buyer HTTP under `/service/buyer/` (`ai_commerce_rest_url` + store id)\n\n**Setup**\n1. Set `mcp_base_url` (e.g. `http://127.0.0.1:8100`) and `mcp_api_key` for MCP folder.\n2. Set `rest_base_url` (e.g. `https://api.example.com`, no trailing slash) for REST folder.\n3. Set `store_id` and other sample IDs.\n\nMCP-only ops (no guest REST): Check delivery, Lookup order status, Retry payment.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -13,6 +13,10 @@
     {
       "key": "mcp_api_key",
       "value": ""
+    },
+    {
+      "key": "rest_base_url",
+      "value": "http://127.0.0.1:8000"
     },
     {
       "key": "store_id",
@@ -61,11 +65,19 @@
     {
       "key": "slot_token",
       "value": ""
+    },
+    {
+      "key": "limit",
+      "value": "20"
+    },
+    {
+      "key": "offset",
+      "value": "0"
     }
   ],
   "item": [
     {
-      "name": "0. Session",
+      "name": "0. MCP Session",
       "item": [
         {
           "name": "initialize",
@@ -95,7 +107,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Optional MCP handshake. With FastMCP `stateless_http=True` (ticker-events-backend default), individual `tools/call` requests usually work without persisting a session."
+            "description": "Optional MCP handshake."
           },
           "response": []
         },
@@ -127,14 +139,14 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "List all tools exposed by the buyer MCP server."
+            "description": "List tools on the buyer MCP server."
           },
           "response": []
         }
       ]
     },
     {
-      "name": "1. Catalog (flow ops)",
+      "name": "1. MCP \u2014 Catalog",
       "item": [
         {
           "name": "List collections",
@@ -164,7 +176,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `list_collections` \u2192 MCP tool `list_categories`.\n\nList store collections (categories). Optional tags / tags_op / limit / offset."
+            "description": "Whatomate flow operation `list_collections` \u2192 MCP tool `list_categories`.\n\nList store collections."
           },
           "response": []
         },
@@ -196,7 +208,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `search_collections` \u2192 MCP tool `list_categories`.\n\nSame MCP tool as list collections, with required `search` (name icontains)."
+            "description": "Whatomate flow operation `search_collections` \u2192 MCP tool `list_categories`.\n\nList collections with search."
           },
           "response": []
         },
@@ -228,7 +240,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `list_products` \u2192 MCP tool `list_products`.\n\nList active products for the store. Optional `category_id` filter."
+            "description": "Whatomate flow operation `list_products` \u2192 MCP tool `list_products`.\n\nList products."
           },
           "response": []
         },
@@ -260,7 +272,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `search_products` \u2192 MCP tool `list_products`.\n\nSame MCP tool as list products, with required `search`."
+            "description": "Whatomate flow operation `search_products` \u2192 MCP tool `list_products`.\n\nSearch products."
           },
           "response": []
         },
@@ -292,7 +304,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `get_product` \u2192 MCP tool `get_product`.\n\nFull product payload including options / addons / categories."
+            "description": "Whatomate flow operation `get_product` \u2192 MCP tool `get_product`.\n\nGet product."
           },
           "response": []
         },
@@ -324,7 +336,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `list_product_options` \u2192 MCP tool `list_product_options`.\n\nList product options; optional `ids` filter."
+            "description": "Whatomate flow operation `list_product_options` \u2192 MCP tool `list_product_options`.\n\nList options."
           },
           "response": []
         },
@@ -356,7 +368,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `get_store` \u2192 MCP tool `get_store`.\n\nCompact store summary used for commerce capabilities."
+            "description": "Whatomate flow operation `get_store` \u2192 MCP tool `get_store`.\n\nGet store."
           },
           "response": []
         },
@@ -388,7 +400,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `get_store_info` \u2192 MCP tool `get_store_info`.\n\nStore policies / about information."
+            "description": "Whatomate flow operation `get_store_info` \u2192 MCP tool `get_store_info`.\n\nGet store info."
           },
           "response": []
         },
@@ -420,7 +432,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `list_faqs` \u2192 MCP tool `list_faqs`.\n\nActive FAQs for the store."
+            "description": "Whatomate flow operation `list_faqs` \u2192 MCP tool `list_faqs`.\n\nList FAQs."
           },
           "response": []
         },
@@ -452,14 +464,14 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `check_delivery` \u2192 MCP tool `check_delivery_eligibility`.\n\nEligibility for a lat/lng pin. Returns deliverable, zone, fee, message."
+            "description": "Whatomate flow operation `check_delivery` \u2192 MCP tool `check_delivery_eligibility`.\n\nMCP-only."
           },
           "response": []
         }
       ]
     },
     {
-      "name": "2. Orders (flow ops)",
+      "name": "2. MCP \u2014 Orders",
       "item": [
         {
           "name": "Checkout (create order)",
@@ -489,7 +501,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `create_order` \u2192 MCP tool `create_order`.\n\nGuest checkout used by the flow node. Nested `order` payload.\n`delivery_mode`: PICKUP_FROM_STORE | DELIVERY_TO_LOCATION.\nFor delivery, include `new_address`. Optional `slot_token` / `notes`."
+            "description": "Whatomate flow operation `create_order` \u2192 MCP tool `create_order`.\n\nGuest checkout."
           },
           "response": []
         },
@@ -521,7 +533,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `get_order` \u2192 MCP tool `get_order`.\n\nFetch order by UUID (guest-safe with MCP API key)."
+            "description": "Whatomate flow operation `get_order` \u2192 MCP tool `get_order`.\n\nBy UUID."
           },
           "response": []
         },
@@ -553,7 +565,7 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `lookup_order_status` \u2192 MCP tool `lookup_order_status`.\n\nPhone-verified order lookup. Whatomate auto-fills phone from the WhatsApp session; pass `order_display_id` (flow param `order_id`) to target a specific order, or omit it for the latest match."
+            "description": "Whatomate flow operation `lookup_order_status` \u2192 MCP tool `lookup_order_status`.\n\nMCP-only phone lookup."
           },
           "response": []
         },
@@ -585,7 +597,195 @@
               }
             },
             "url": "{{mcp_base_url}}/mcp",
-            "description": "Whatomate flow operation `retry_payment` \u2192 MCP tool `retry_payment`.\n\nRe-initiate payment for an order awaiting payment."
+            "description": "Whatomate flow operation `retry_payment` \u2192 MCP tool `retry_payment`.\n\nMCP-only guest path."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. REST \u2014 Catalog",
+      "item": [
+        {
+          "name": "List collections",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/store/{{store_id}}/category/?limit={{limit}}&offset={{offset}}",
+            "description": "Whatomate flow operation `list_collections` \u2192 buyer REST `GET /service/buyer/store/{{store_id}}/category/`.\n\nOptional: add ?tags=vegan&tags_op=or&search=...&limit=20&offset=0"
+          },
+          "response": []
+        },
+        {
+          "name": "Search collections",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/store/{{store_id}}/category/?search={{search}}&limit={{limit}}&offset={{offset}}",
+            "description": "Whatomate flow operation `search_collections` \u2192 buyer REST `GET /service/buyer/store/{{store_id}}/category/`.\n\nName search via `search` query param."
+          },
+          "response": []
+        },
+        {
+          "name": "List products",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/product/?store_id={{store_id}}&category_id={{category_id}}&limit={{limit}}&offset={{offset}}",
+            "description": "Whatomate flow operation `list_products` \u2192 buyer REST `GET /service/buyer/product/`.\n\nFilter by store and optional category."
+          },
+          "response": []
+        },
+        {
+          "name": "Search products",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/product/?store_id={{store_id}}&search={{search}}&limit={{limit}}&offset={{offset}}",
+            "description": "Whatomate flow operation `search_products` \u2192 buyer REST `GET /service/buyer/product/`.\n\nFilter by store + search."
+          },
+          "response": []
+        },
+        {
+          "name": "Product details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/product/{{product_id}}/",
+            "description": "Whatomate flow operation `get_product` \u2192 buyer REST `GET /service/buyer/product/{{product_id}}/`.\n\nSingle product including options."
+          },
+          "response": []
+        },
+        {
+          "name": "Product options",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/product-option/?store_id={{store_id}}&ids={{option_id}}",
+            "description": "Whatomate flow operation `list_product_options` \u2192 buyer REST `GET /service/buyer/product-option/`.\n\nOptional store_id / ids filters."
+          },
+          "response": []
+        },
+        {
+          "name": "Store details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/store/{{store_id}}/",
+            "description": "Whatomate flow operation `get_store` \u2192 buyer REST `GET /service/buyer/store/{{store_id}}/`.\n\nStore summary."
+          },
+          "response": []
+        },
+        {
+          "name": "Store info",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/store/{{store_id}}/store-info/",
+            "description": "Whatomate flow operation `get_store_info` \u2192 buyer REST `GET /service/buyer/store/{{store_id}}/store-info/`.\n\nPolicies / about (may be a list or object)."
+          },
+          "response": []
+        },
+        {
+          "name": "FAQs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/store/{{store_id}}/faq/",
+            "description": "Whatomate flow operation `list_faqs` \u2192 buyer REST `GET /service/buyer/store/{{store_id}}/faq/`.\n\nActive FAQs for the store."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. REST \u2014 Orders",
+      "item": [
+        {
+          "name": "Checkout (create order)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/order/",
+            "description": "Whatomate flow operation `create_order` \u2192 buyer REST `POST /service/buyer/order/`.\n\nGuest create (no JWT). Same payload shape as MCP create_order.order.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"store\": {{store_id}},\n  \"items\": [\n    {\n      \"product_option\": {{option_id}},\n      \"quantity\": 1\n    }\n  ],\n  \"email\": \"{{email}}\",\n  \"phone_number\": \"{{phone_number}}\",\n  \"delivery_mode\": \"PICKUP_FROM_STORE\",\n  \"notes\": \"Postman REST test order\",\n  \"slot_token\": \"{{slot_token}}\",\n  \"new_address\": {\n    \"name\": \"Preview Buyer\",\n    \"address_line_1\": \"123 Test Street\",\n    \"city\": \"Bengaluru\",\n    \"state\": \"KA\",\n    \"country\": \"IN\",\n    \"pincode\": \"560001\",\n    \"phone\": \"{{phone_number}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get order",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{rest_base_url}}/service/buyer/order/{{order_uuid}}/",
+            "description": "Whatomate flow operation `get_order` \u2192 buyer REST `GET /service/buyer/order/{{order_uuid}}/`.\n\nGuest retrieve by UUID (no JWT)."
           },
           "response": []
         }
