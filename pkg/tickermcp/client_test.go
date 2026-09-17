@@ -177,11 +177,17 @@ func TestListArgsIncludeCategoryAndPagination(t *testing.T) {
 		"offset":      20,
 	}, productArgs)
 
-	categoryArgs, err := categoryListArgs(7, "12", 1, 0)
+	categoryArgs, err := categoryListArgs(7, "12", 1, 0, " cakes ", []string{"dessert"}, "and")
 	require.NoError(t, err)
-	assert.Equal(t, 12, categoryArgs["category_id"])
-	assert.Equal(t, 1, categoryArgs["limit"])
-	assert.Equal(t, 0, categoryArgs["offset"])
+	assert.Equal(t, map[string]any{
+		"store_id":    7,
+		"category_id": 12,
+		"limit":       1,
+		"offset":      0,
+		"search":      "cakes",
+		"tags":        []string{"dessert"},
+		"tags_op":     "and",
+	}, categoryArgs)
 }
 
 func TestDecodeCategoryValidatesConfig(t *testing.T) {

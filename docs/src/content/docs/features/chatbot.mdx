@@ -227,6 +227,7 @@ labelled with the outcome they handle (`default`, `button:<id>`,
 | `prompt` | Send a question, wait for the user's reply, optionally validate against a regex, and store the response. | `default`, `max_retries` |
 | `buttons` | Send interactive reply buttons and branch on which one the user taps. | `button:<id>` per button |
 | `api_call` | Fire an HTTP request, capture mapped fields into session data, optionally send a templated message. | `http:2xx`, `http:non2xx` |
+| `tiqr_store_api` | Call a TiQR storefront operation (collections, products, guest checkout, orders). Store ID and MCP credentials come from AI settings → Commerce. | `http:2xx`, `http:non2xx` |
 | `condition` | Evaluate an expression against session data and route on the result. | `true`, `false` |
 | `timing` | Route based on a per-day business-hours schedule. | `in_hours`, `out_of_hours` |
 | `whatsapp_flow` | Send a native WhatsApp Flow form and merge the submission into session data. | `default` |
@@ -235,12 +236,22 @@ labelled with the outcome they handle (`default`, `button:<id>`,
 | `webhook` | Fire-and-forget HTTP call; result is ignored. | `default` |
 | `end` | Optionally send a final message and terminate the session. | (terminal) |
 
+### TiQR Store API
+
+`tiqr_store_api` is a first-party clone of `api_call` for TiQR storefront data. Authors pick an operation from a dropdown; the node injects **Store ID**, MCP URL, and MCP API key from **AI settings → Commerce**. Endpoints are not authored on the node.
+
+Supported operations: list/search collections, list/search products, product details, product options, store details, store info, FAQs, check delivery, guest checkout (`create_order`), get order, lookup order status, retry payment.
+
+Checkout is guest `create_order` (phone is taken from the WhatsApp session when omitted). Logged-in JWT cart (`get_cart` / `upsert_cart` / `checkout_cart`) is not available from a flow session.
+
+Map response fields with the same JSON-path syntax as `api_call` (`products[0].name`). Missing commerce settings or a tool error routes to `http:non2xx`.
+
 ### Condition Expressions
 
 `condition` nodes use a small expression language
 ([expr-lang](https://expr-lang.org/)) evaluated against session
 variables. Top-level identifiers refer to keys stored via
-`prompt.store_as`, `api_call.response_mapping`, or earlier inputs.
+`prompt.store_as`, `api_call.response_mapping`, `tiqr_store_api.response_mapping`, or earlier inputs.
 
 ```text
 tier == "premium" and amount > 100

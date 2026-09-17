@@ -286,7 +286,7 @@ func (c *Client) ListCategoryPage(ctx context.Context, storeID, categoryID strin
 	if limit <= 0 {
 		limit = 50
 	}
-	args, err := categoryListArgs(sid, categoryID, limit, offset)
+	args, err := categoryListArgs(sid, categoryID, limit, offset, "", nil, "")
 	if err != nil {
 		return CategoryPage{}, err
 	}
@@ -305,6 +305,53 @@ func (c *Client) ListCategoryPage(ctx context.Context, storeID, categoryID strin
 	meta.Limit = defaultInt(meta.Limit, limit)
 	meta.Offset = defaultInt(meta.Offset, offset)
 	return CategoryPage{Results: out, PageMetadata: meta}, nil
+}
+
+// CallTool invokes an MCP tool and returns the decoded JSON payload.
+func (c *Client) CallTool(ctx context.Context, name string, args map[string]any) (any, error) {
+	return c.callTool(ctx, name, args)
+}
+
+// ListFaqs maps to MCP list_faqs.
+func (c *Client) ListFaqs(ctx context.Context, storeID string) (any, error) {
+	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
+	if err != nil || sid <= 0 {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	return c.callTool(ctx, "list_faqs", map[string]any{"store_id": sid})
+}
+
+// GetStoreInfo maps to MCP get_store_info.
+func (c *Client) GetStoreInfo(ctx context.Context, storeID string) (map[string]any, error) {
+	sid, err := strconv.Atoi(strings.TrimSpace(storeID))
+	if err != nil || sid <= 0 {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	raw, err := c.callTool(ctx, "get_store_info", map[string]any{"store_id": sid})
+	if err != nil {
+		return nil, err
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected get_store_info result type %T", raw)
+	}
+	return m, nil
+}
+
+// ListProductOptions maps to MCP list_product_options.
+func (c *Client) ListProductOptions(ctx context.Context, storeID string, ids []int) (any, error) {
+	args := map[string]any{}
+	if raw := strings.TrimSpace(storeID); raw != "" {
+		sid, err := strconv.Atoi(raw)
+		if err != nil || sid <= 0 {
+			return nil, fmt.Errorf("store_id must be a positive integer")
+		}
+		args["store_id"] = sid
+	}
+	if len(ids) > 0 {
+		args["ids"] = ids
+	}
+	return c.callTool(ctx, "list_product_options", args)
 }
 
 // CheckDeliveryEligibility maps to MCP check_delivery_eligibility.
@@ -638,7 +685,8 @@ func isReadOnlyTool(name string) bool {
 	switch name {
 	case "get_store", "list_categories", "list_products", "get_product",
 		"check_delivery_eligibility", "lookup_order_status", "get_order",
-		"list_fulfillment_slots", "validate_fulfillment_slot", "list_customer_addresses":
+		"list_fulfillment_slots", "validate_fulfillment_slot", "list_customer_addresses",
+		"list_faqs", "get_store_info", "list_product_options":
 		return true
 	default:
 		return false
@@ -824,7 +872,7 @@ func productListArgs(storeID int, search, categoryID string, limit, offset int) 
 	return args, nil
 }
 
-func categoryListArgs(storeID int, categoryID string, limit, offset int) (map[string]any, error) {
+func categoryListArgs(storeID int, categoryID string, limit, offset int, search string, tags []string, tagsOp string) (map[string]any, error) {
 	if storeID <= 0 {
 		return nil, fmt.Errorf("store_id is required")
 	}
@@ -835,6 +883,15 @@ func categoryListArgs(storeID int, categoryID string, limit, offset int) (map[st
 			return nil, fmt.Errorf("category_id must be a positive integer")
 		}
 		args["category_id"] = id
+	}
+	if q := strings.TrimSpace(search); q != "" {
+		args["search"] = q
+	}
+	if len(tags) > 0 {
+		args["tags"] = tags
+	}
+	if op := strings.TrimSpace(tagsOp); op != "" {
+		args["tags_op"] = op
 	}
 	return args, nil
 }

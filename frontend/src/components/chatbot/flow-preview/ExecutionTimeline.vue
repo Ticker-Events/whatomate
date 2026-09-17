@@ -68,8 +68,10 @@ const formattedEntries = computed(() => {
       case 'api_call':
         icon = Globe
         color = 'text-cyan-500'
-        label = 'API call'
-        details = `${entry.details.method} ${entry.details.url}`
+        label = entry.details.operation ? 'TiQR Store API' : 'API call'
+        details = entry.details.operation
+          ? String(entry.details.operation)
+          : `${entry.details.method} ${entry.details.url}`
         break
       case 'validation_pass':
         icon = CheckCircle

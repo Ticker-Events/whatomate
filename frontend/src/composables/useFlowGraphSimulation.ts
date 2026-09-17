@@ -272,6 +272,8 @@ export function useFlowGraphSimulation(
         return execTransfer(node)
       case 'api_call':
         return execApiCall(node)
+      case 'tiqr_store_api':
+        return execTiqrStoreApi(node)
       case 'whatsapp_flow':
         return execWhatsAppFlow(node)
       case 'goto_flow':
@@ -357,7 +359,11 @@ export function useFlowGraphSimulation(
   }
 
   async function execApiCall(node: ChatNode): Promise<string> {
-    log('api_call', node.id, { url: node.config?.url, method: node.config?.method })
+    log('api_call', node.id, {
+      url: node.config?.url,
+      method: node.config?.method,
+      operation: node.config?.operation,
+    })
     addMessage('system', `Calling API: ${node.config?.method || 'GET'} ${node.config?.url || ''}`)
 
     const fakeStep: any = {
@@ -392,6 +398,19 @@ export function useFlowGraphSimulation(
     const fb = stringField(node, 'fallback_message')
     if (fb) addMessage('bot', fb, { stepName: node.id, isApiMessage: true })
     return 'http:non2xx'
+  }
+
+  async function execTiqrStoreApi(node: ChatNode): Promise<string> {
+    const operation = stringField(node, 'operation') || 'list_products'
+    addMessage('system', `Calling TiQR Store API: ${operation}`)
+    return execApiCall({
+      ...node,
+      config: {
+        ...node.config,
+        url: `tiqr://${operation}`,
+        method: 'POST',
+      },
+    })
   }
 
   function execWhatsAppFlow(node: ChatNode): string {
@@ -596,6 +615,8 @@ function nodeTypeToMessageType(t: string): string {
     case 'buttons':
       return 'buttons'
     case 'api_call':
+      return 'api_fetch'
+    case 'tiqr_store_api':
       return 'api_fetch'
     case 'whatsapp_flow':
       return 'whatsapp_flow'

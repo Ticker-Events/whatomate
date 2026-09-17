@@ -18,7 +18,7 @@ test.describe('Chatbot Flow Builder - Palette', () => {
 
   test('palette shows the action-node tiles', async () => {
     await expect(builder.paletteToolbar).toBeVisible()
-    for (const label of ['Text', 'Buttons', 'API', 'Transfer', 'Condition', 'Timing', 'End']) {
+    for (const label of ['Text', 'Buttons', 'API', 'TiQR Store', 'Transfer', 'Condition', 'Timing', 'End']) {
       await expect(builder.paletteToolbar.getByRole('button', { name: label, exact: true })).toBeVisible()
     }
   })
@@ -149,6 +149,24 @@ test.describe('Chatbot Flow Builder - Other node types', () => {
     await builder.addNode('API')
     await expect(builder.page.getByText(/^Method$/i).first()).toBeVisible()
     await expect(builder.page.getByText(/^URL$/i).first()).toBeVisible()
+  })
+
+  test('TiQR Store API node exposes an operation dropdown', async () => {
+    await builder.addNode('TiQR Store')
+    await expect(builder.page.getByText(/^Operation$/i).first()).toBeVisible()
+    await expect(builder.page.getByText(/Store ID is taken from AI settings/i)).toBeVisible()
+    await expect(builder.page.getByText(/^Search$/)).toHaveCount(0)
+    await expect(builder.page.getByText(/^Product ID$/)).toHaveCount(0)
+
+    await builder.page.getByRole('combobox').filter({ hasText: /List products/i }).click()
+    await builder.page.getByRole('option', { name: 'Search products' }).click()
+    await expect(builder.page.getByText(/^Search$/)).toBeVisible()
+    await expect(builder.page.getByText(/^Product ID$/)).toHaveCount(0)
+
+    await builder.page.getByRole('combobox').filter({ hasText: /Search products/i }).click()
+    await builder.page.getByRole('option', { name: 'Product details' }).click()
+    await expect(builder.page.getByText(/^Product ID$/)).toBeVisible()
+    await expect(builder.page.getByText(/^Search$/)).toHaveCount(0)
   })
 
   test('Transfer node exposes a team selector', async () => {

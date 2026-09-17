@@ -36,6 +36,7 @@ import {
   Plus,
   Trash2,
   Play,
+  ShoppingBag,
 } from 'lucide-vue-next'
 
 import AuditLogPanel from '@/components/shared/AuditLogPanel.vue'
@@ -50,6 +51,7 @@ import type { PanelConfig, AvailableVariable } from '@/components/chatbot/PanelC
 import ChatbotTextNode from '@/components/chatbot/nodes/ChatbotTextNode.vue'
 import ChatbotButtonsNode from '@/components/chatbot/nodes/ChatbotButtonsNode.vue'
 import ChatbotApiNode from '@/components/chatbot/nodes/ChatbotApiNode.vue'
+import ChatbotTiqrStoreApiNode from '@/components/chatbot/nodes/ChatbotTiqrStoreApiNode.vue'
 import ChatbotWhatsAppFlowNode from '@/components/chatbot/nodes/ChatbotWhatsAppFlowNode.vue'
 import ChatbotTransferNode from '@/components/chatbot/nodes/ChatbotTransferNode.vue'
 import ChatbotConditionNode from '@/components/chatbot/nodes/ChatbotConditionNode.vue'
@@ -113,6 +115,7 @@ const nodeTypes: any = {
   prompt: markRaw(ChatbotTextNode),
   buttons: markRaw(ChatbotButtonsNode),
   api_call: markRaw(ChatbotApiNode),
+  tiqr_store_api: markRaw(ChatbotTiqrStoreApiNode),
   whatsapp_flow: markRaw(ChatbotWhatsAppFlowNode),
   transfer: markRaw(ChatbotTransferNode),
   condition: markRaw(ChatbotConditionNode),
@@ -128,6 +131,7 @@ const palette: { type: ChatNodeType; label: string; icon: any; color: string }[]
   { type: 'message', label: 'Text', icon: MessageSquare, color: 'bg-blue-600' },
   { type: 'buttons', label: 'Buttons', icon: MousePointerClick, color: 'bg-purple-600' },
   { type: 'api_call', label: 'API', icon: Globe, color: 'bg-orange-600' },
+  { type: 'tiqr_store_api', label: 'TiQR Store', icon: ShoppingBag, color: 'bg-emerald-600' },
   { type: 'whatsapp_flow', label: 'WA Flow', icon: MessageCircle, color: 'bg-green-600' },
   { type: 'transfer', label: 'Transfer', icon: Users, color: 'bg-amber-600' },
   { type: 'condition', label: 'Condition', icon: GitBranch, color: 'bg-indigo-600' },
@@ -195,6 +199,8 @@ function defaultConfigFor(type: ChatNodeType): Record<string, any> {
       return { body: '', buttons: [] }
     case 'api_call':
       return { url: '', method: 'GET', headers: {}, body: '', response_mapping: {}, message_template: '' }
+    case 'tiqr_store_api':
+      return { operation: 'list_products', params: {}, response_mapping: {}, message_template: '' }
     case 'whatsapp_flow':
       return { flow_id: '', header: '', body: '', cta: 'Open' }
     case 'transfer':
@@ -229,6 +235,7 @@ const paletteLabels: Record<string, string> = {
   prompt: 'Prompt',
   buttons: 'Buttons',
   api_call: 'API',
+  tiqr_store_api: 'TiQR Store API',
   whatsapp_flow: 'WhatsApp Flow',
   transfer: 'Transfer',
   condition: 'Condition',
@@ -423,7 +430,7 @@ function toGraphPayload(): ChatFlowGraph {
 }
 
 // Variables available to the contact-panel editor — captured from
-// prompt nodes (store_as) and api_call nodes (response_mapping keys).
+// prompt nodes (store_as) and api_call / tiqr_store_api nodes (response_mapping keys).
 const availableVariables = computed<AvailableVariable[]>(() => {
   const out: AvailableVariable[] = []
   for (const n of nodes.value) {
@@ -431,7 +438,7 @@ const availableVariables = computed<AvailableVariable[]>(() => {
     if (n.type === 'prompt' && typeof cfg.store_as === 'string' && cfg.store_as.trim()) {
       out.push({ key: cfg.store_as.trim(), source: 'Store as', stepName: n.id })
     }
-    if (n.type === 'api_call' && cfg.response_mapping && typeof cfg.response_mapping === 'object') {
+    if ((n.type === 'api_call' || n.type === 'tiqr_store_api') && cfg.response_mapping && typeof cfg.response_mapping === 'object') {
       for (const k of Object.keys(cfg.response_mapping)) {
         if (k && k.trim()) out.push({ key: k.trim(), source: 'Response mapping', stepName: n.id })
       }
