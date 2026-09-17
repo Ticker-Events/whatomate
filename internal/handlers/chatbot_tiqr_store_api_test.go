@@ -2,11 +2,15 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -185,4 +189,72 @@ func TestBuildTiqrStoreToolArgs_UnknownOperation(t *testing.T) {
 	_, _, err := buildTiqrStoreToolArgs("get_cart", 1, "", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown")
+}
+
+func TestRunChatGraph_TiqrStoreAPI_RESTMapsResponseOn2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/service/buyer/product/", r.URL.Path)
+		assert.Equal(t, "42", r.URL.Query().Get("store_id"))
+		assert.Equal(t, "cake", r.URL.Query().Get("search"))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"count": 1,
+			"results": []map[string]any{
+				{"id": 1, "name": "Chocolate Cake", "min_price": 100},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	prev := newTiqrStoreRESTClient
+	newTiqrStoreRESTClient = func(baseURL string) *ticker.Client {
+		return ticker.NewClient(baseURL, srv.Client())
+	}
+	t.Cleanup(func() { newTiqrStoreRESTClient = prev })
+
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData["query"] = "cake"
+	require.NoError(t, app.DB.Save(session).Error)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	flow := newTiqrStoreFlow(t, app, org, account, map[string]any{
+		"api_type":  "rest",
+		"operation": "search_products",
+		"params":    map[string]any{"search": "{{query}}"},
+		"response_mapping": map[string]any{
+			"product_name": "products[0].name",
+		},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "Chocolate Cake", session.SessionData["product_name"])
+	path := chatGraphPath(t, session)
+	assert.Equal(t, "http:2xx", path[0]["outcome"])
+}
+
+func TestRunChatGraph_TiqrStoreAPI_RESTMissingURLRoutesNon2xx(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceStoreID: "42",
+	})
+	flow := newTiqrStoreFlow(t, app, org, account, map[string]any{
+		"api_type":  "rest",
+		"operation": "list_products",
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	path := chatGraphPath(t, session)
+	assert.Equal(t, "http:non2xx", path[0]["outcome"])
+	assert.Equal(t, "bad", path[1]["node"])
+}
+
+func TestInvokeTiqrStoreRESTOperation_MCPOnlyOps(t *testing.T) {
+	client := ticker.NewClient("http://example.com", nil)
+	_, err := invokeTiqrStoreRESTOperation(context.Background(), client, "check_delivery", "1", "", map[string]string{
+		"latitude": "1", "longitude": "2",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not available over REST")
 }

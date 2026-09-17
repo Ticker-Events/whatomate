@@ -66,6 +66,7 @@ type AIConfig struct {
 	CommerceEnabled   bool   `gorm:"column:ai_commerce_enabled;default:false" json:"ai_commerce_enabled"`
 	CommerceMCPURL    string `gorm:"column:ai_commerce_base_url;size:500" json:"ai_commerce_mcp_url"` // streamable-http endpoint, e.g. http://127.0.0.1:8100/mcp
 	CommerceMCPAPIKey string `gorm:"column:ai_commerce_mcp_api_key;type:text" json:"-"`               // optional X-MCP-API-Key
+	CommerceRESTURL   string `gorm:"column:ai_commerce_rest_url;size:500" json:"ai_commerce_rest_url"` // ticker-events origin for buyer REST, e.g. https://api.example.com
 	CommerceStoreID   string `gorm:"column:ai_commerce_store_id;size:50" json:"ai_commerce_store_id"`
 
 	// Cached AI welcome for commerce new-session greetings (TTL enforced in handlers)

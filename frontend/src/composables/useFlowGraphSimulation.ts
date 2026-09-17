@@ -405,12 +405,13 @@ export function useFlowGraphSimulation(
 
   async function execTiqrStoreApi(node: ChatNode): Promise<string> {
     const operation = stringField(node, 'operation') || 'list_products'
-    addMessage('system', `Calling TiQR Store API: ${operation}`)
+    const apiType = stringField(node, 'api_type') || 'mcp'
+    addMessage('system', `Calling TiQR Store API (${apiType}): ${operation}`)
     return execApiCall({
       ...node,
       config: {
         ...node.config,
-        url: `tiqr://${operation}`,
+        url: `tiqr://${apiType}/${operation}`,
         method: 'POST',
       },
     })

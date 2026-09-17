@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
 )
 
@@ -24,13 +25,34 @@ func defaultTiqrStoreInvoker(mcpURL, apiKey string) tiqrStoreInvoker {
 	return tickermcp.NewClient(mcpURL, apiKey, nil)
 }
 
-// execChatTiqrStoreAPI calls a first-party TiQR buyer MCP tool selected in
-// node.Config["operation"]. Store ID / MCP credentials come from AI settings.
+var newTiqrStoreRESTClient = defaultTiqrStoreRESTClient
+
+func defaultTiqrStoreRESTClient(baseURL string) *ticker.Client {
+	return ticker.NewClient(baseURL, nil)
+}
+
+func commerceRESTConfigured(ai models.AIConfig) bool {
+	return strings.TrimSpace(ai.CommerceRESTURL) != "" &&
+		strings.TrimSpace(ai.CommerceStoreID) != ""
+}
+
+func tiqrStoreAPIType(cfg map[string]any) string {
+	t := strings.ToLower(strings.TrimSpace(stringFromConfig(cfg, "api_type")))
+	if t == "rest" {
+		return "rest"
+	}
+	return "mcp"
+}
+
+// execChatTiqrStoreAPI calls a first-party TiQR buyer operation selected in
+// node.Config["operation"] via MCP or buyer REST (node.Config["api_type"]).
+// Store ID and credentials come from AI settings.
 // Outcomes match api_call: "http:2xx" / "http:non2xx".
 //
 // Config:
 //
 //	{
+//	  "api_type": "mcp",
 //	  "operation": "search_products",
 //	  "params": { "search": "{{query}}", "limit": "10" },
 //	  "response_mapping": { "product_name": "products[0].name" },
@@ -44,9 +66,21 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	sessionData["phone_number"] = ctx.session.PhoneNumber
 
 	settings, err := a.getChatbotSettingsCached(ctx.account.OrganizationID, ctx.account.Name)
-	if err != nil || settings == nil || !commerceConfigured(settings.AI) {
+	apiType := tiqrStoreAPIType(node.Config)
+	if err != nil || settings == nil {
 		a.Log.Error("tiqr_store_api node missing commerce settings",
-			"node", node.ID, "session", ctx.session.ID, "error", err)
+			"node", node.ID, "session", ctx.session.ID, "api_type", apiType, "error", err)
+		return nodeOutcome{outcome: "http:non2xx"}, nil
+	}
+	if apiType == "rest" {
+		if !commerceRESTConfigured(settings.AI) {
+			a.Log.Error("tiqr_store_api node missing REST commerce settings",
+				"node", node.ID, "session", ctx.session.ID)
+			return nodeOutcome{outcome: "http:non2xx"}, nil
+		}
+	} else if !commerceConfigured(settings.AI) {
+		a.Log.Error("tiqr_store_api node missing MCP commerce settings",
+			"node", node.ID, "session", ctx.session.ID)
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 
@@ -57,16 +91,21 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	replaceVar := func(s string) string { return processTemplate(s, sessionData) }
 	params := templateTiqrParams(node.Config["params"], replaceVar)
 
-	invoker := newTiqrStoreInvoker(settings.AI.CommerceMCPURL, settings.AI.CommerceMCPAPIKey)
-	defer func() { _ = invoker.Close() }()
-
 	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	raw, err := invokeTiqrStoreOperation(callCtx, invoker, operation, storeID, ctx.session.PhoneNumber, params)
+	var raw any
+	if apiType == "rest" {
+		client := newTiqrStoreRESTClient(settings.AI.CommerceRESTURL)
+		raw, err = invokeTiqrStoreRESTOperation(callCtx, client, operation, storeID, ctx.session.PhoneNumber, params)
+	} else {
+		invoker := newTiqrStoreInvoker(settings.AI.CommerceMCPURL, settings.AI.CommerceMCPAPIKey)
+		defer func() { _ = invoker.Close() }()
+		raw, err = invokeTiqrStoreOperation(callCtx, invoker, operation, storeID, ctx.session.PhoneNumber, params)
+	}
 	if err != nil {
 		a.Log.Error("tiqr_store_api node request failed",
-			"node", node.ID, "session", ctx.session.ID, "operation", operation, "error", err)
+			"node", node.ID, "session", ctx.session.ID, "api_type", apiType, "operation", operation, "error", err)
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 
@@ -86,6 +125,116 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	}
 
 	return nodeOutcome{outcome: "http:2xx"}, nil
+}
+
+func invokeTiqrStoreRESTOperation(
+	ctx context.Context,
+	client *ticker.Client,
+	operation, storeID, phone string,
+	params map[string]string,
+) (any, error) {
+	if client == nil || strings.TrimSpace(client.BaseURL) == "" {
+		return nil, fmt.Errorf("rest base url is required")
+	}
+	if strings.TrimSpace(storeID) == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+
+	limit, _ := optionalPositiveInt(params["limit"])
+	offset, _ := optionalNonNegativeInt(params["offset"])
+
+	switch strings.TrimSpace(operation) {
+	case "list_collections":
+		return client.ListCategories(ctx, storeID, ticker.ListCategoriesParams{
+			Tags:   splitCSV(params["tags"]),
+			TagsOp: strings.TrimSpace(params["tags_op"]),
+			Limit:  limit,
+			Offset: offset,
+		})
+	case "search_collections":
+		search := strings.TrimSpace(params["search"])
+		if search == "" {
+			return nil, fmt.Errorf("search is required")
+		}
+		return client.ListCategories(ctx, storeID, ticker.ListCategoriesParams{
+			Search: search,
+			Tags:   splitCSV(params["tags"]),
+			TagsOp: strings.TrimSpace(params["tags_op"]),
+			Limit:  limit,
+			Offset: offset,
+		})
+	case "list_products":
+		return client.ListProductsPage(ctx, storeID, ticker.ListProductsParams{
+			CategoryID: strings.TrimSpace(params["category_id"]),
+			Limit:      limit,
+			Offset:     offset,
+		})
+	case "search_products":
+		search := strings.TrimSpace(params["search"])
+		if search == "" {
+			return nil, fmt.Errorf("search is required")
+		}
+		return client.ListProductsPage(ctx, storeID, ticker.ListProductsParams{
+			Search:     search,
+			CategoryID: strings.TrimSpace(params["category_id"]),
+			Limit:      limit,
+			Offset:     offset,
+		})
+	case "get_product":
+		productID := strings.TrimSpace(params["product_id"])
+		if productID == "" {
+			return nil, fmt.Errorf("product_id is required")
+		}
+		return client.GetProduct(ctx, productID)
+	case "list_product_options":
+		ids, err := parseIntListParam(params["ids"])
+		if err != nil {
+			return nil, err
+		}
+		return client.ListProductOptions(ctx, storeID, ids)
+	case "get_store":
+		return client.GetStore(ctx, storeID)
+	case "get_store_info":
+		return client.GetStoreInfo(ctx, storeID)
+	case "list_faqs":
+		return client.ListFaqs(ctx, storeID)
+	case "create_order":
+		sid, err := strconv.Atoi(strings.TrimSpace(storeID))
+		if err != nil || sid <= 0 {
+			return nil, fmt.Errorf("store_id is required")
+		}
+		orderMap, err := buildGuestOrderPayload(sid, phone, params)
+		if err != nil {
+			return nil, err
+		}
+		body, err := orderMapToCreateRequest(orderMap)
+		if err != nil {
+			return nil, err
+		}
+		return client.CreateOrder(ctx, body)
+	case "get_order":
+		uuid := strings.TrimSpace(params["order_uuid"])
+		if uuid == "" {
+			return nil, fmt.Errorf("order_uuid is required")
+		}
+		return client.GetOrder(ctx, uuid)
+	case "check_delivery", "lookup_order_status", "retry_payment":
+		return nil, fmt.Errorf("operation %q is not available over REST (use MCP)", operation)
+	default:
+		return nil, fmt.Errorf("unknown tiqr store operation %q", operation)
+	}
+}
+
+func orderMapToCreateRequest(order map[string]any) (ticker.CreateOrderRequest, error) {
+	b, err := json.Marshal(order)
+	if err != nil {
+		return ticker.CreateOrderRequest{}, err
+	}
+	var body ticker.CreateOrderRequest
+	if err := json.Unmarshal(b, &body); err != nil {
+		return ticker.CreateOrderRequest{}, fmt.Errorf("invalid order payload: %w", err)
+	}
+	return body, nil
 }
 
 func invokeTiqrStoreOperation(

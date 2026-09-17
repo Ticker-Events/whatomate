@@ -1,0 +1,595 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "TiQR Store APIs (Whatomate Flow Node)",
+    "description": "MCP tools used by the Whatomate chatbot **TiQR Store** flow node (`tiqr_store_api`).\n\nWhatomate does not call buyer REST directly for this node \u2014 it invokes the tiqr-buyer MCP server (`tools/call`) with credentials from Chatbot \u2192 AI settings (`ai_commerce_mcp_url`, `ai_commerce_mcp_api_key`, `ai_commerce_store_id`).\n\n**Setup**\n1. Set collection variables: `mcp_base_url` (no trailing slash), `mcp_api_key`, `store_id`, and the sample IDs you need.\n2. Endpoint path is `/mcp` (streamable HTTP, `stateless_http=True`).\n3. Optional: send `initialize` first if your MCP gateway requires a session.\n\nFlow operation labels match the Whatomate palette dropdown in `tiqrStoreApiCatalog.ts`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "mcp_base_url",
+      "value": "http://127.0.0.1:8100"
+    },
+    {
+      "key": "mcp_api_key",
+      "value": ""
+    },
+    {
+      "key": "store_id",
+      "value": "1"
+    },
+    {
+      "key": "product_id",
+      "value": "1"
+    },
+    {
+      "key": "option_id",
+      "value": "1"
+    },
+    {
+      "key": "category_id",
+      "value": "1"
+    },
+    {
+      "key": "order_uuid",
+      "value": ""
+    },
+    {
+      "key": "order_display_id",
+      "value": ""
+    },
+    {
+      "key": "phone_number",
+      "value": "+919876543210"
+    },
+    {
+      "key": "email",
+      "value": "buyer@example.com"
+    },
+    {
+      "key": "search",
+      "value": "coffee"
+    },
+    {
+      "key": "latitude",
+      "value": "12.9716"
+    },
+    {
+      "key": "longitude",
+      "value": "77.5946"
+    },
+    {
+      "key": "slot_token",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Session",
+      "item": [
+        {
+          "name": "initialize",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 0,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2024-11-05\",\n    \"capabilities\": {},\n    \"clientInfo\": {\n      \"name\": \"postman-tiqr-store\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Optional MCP handshake. With FastMCP `stateless_http=True` (ticker-events-backend default), individual `tools/call` requests usually work without persisting a session."
+          },
+          "response": []
+        },
+        {
+          "name": "tools/list",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 0,\n  \"method\": \"tools/list\",\n  \"params\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "List all tools exposed by the buyer MCP server."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. Catalog (flow ops)",
+      "item": [
+        {
+          "name": "List collections",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"list_categories\",\n    \"arguments\": {\n      \"store_id\": {{store_id}},\n      \"limit\": 20,\n      \"offset\": 0,\n      \"tags\": [],\n      \"tags_op\": \"or\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `list_collections` \u2192 MCP tool `list_categories`.\n\nList store collections (categories). Optional tags / tags_op / limit / offset."
+          },
+          "response": []
+        },
+        {
+          "name": "Search collections",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"list_categories\",\n    \"arguments\": {\n      \"store_id\": {{store_id}},\n      \"search\": \"{{search}}\",\n      \"limit\": 20,\n      \"offset\": 0,\n      \"tags_op\": \"or\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `search_collections` \u2192 MCP tool `list_categories`.\n\nSame MCP tool as list collections, with required `search` (name icontains)."
+          },
+          "response": []
+        },
+        {
+          "name": "List products",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"list_products\",\n    \"arguments\": {\n      \"store_id\": {{store_id}},\n      \"category_id\": {{category_id}},\n      \"limit\": 20,\n      \"offset\": 0\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `list_products` \u2192 MCP tool `list_products`.\n\nList active products for the store. Optional `category_id` filter."
+          },
+          "response": []
+        },
+        {
+          "name": "Search products",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"list_products\",\n    \"arguments\": {\n      \"store_id\": {{store_id}},\n      \"search\": \"{{search}}\",\n      \"limit\": 20,\n      \"offset\": 0\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `search_products` \u2192 MCP tool `list_products`.\n\nSame MCP tool as list products, with required `search`."
+          },
+          "response": []
+        },
+        {
+          "name": "Product details",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_product\",\n    \"arguments\": {\n      \"product_id\": {{product_id}}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `get_product` \u2192 MCP tool `get_product`.\n\nFull product payload including options / addons / categories."
+          },
+          "response": []
+        },
+        {
+          "name": "Product options",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"list_product_options\",\n    \"arguments\": {\n      \"store_id\": {{store_id}},\n      \"ids\": [\n        {{option_id}}\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `list_product_options` \u2192 MCP tool `list_product_options`.\n\nList product options; optional `ids` filter."
+          },
+          "response": []
+        },
+        {
+          "name": "Store details",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_store\",\n    \"arguments\": {\n      \"store_id\": {{store_id}}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `get_store` \u2192 MCP tool `get_store`.\n\nCompact store summary used for commerce capabilities."
+          },
+          "response": []
+        },
+        {
+          "name": "Store info",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_store_info\",\n    \"arguments\": {\n      \"store_id\": {{store_id}}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `get_store_info` \u2192 MCP tool `get_store_info`.\n\nStore policies / about information."
+          },
+          "response": []
+        },
+        {
+          "name": "FAQs",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"list_faqs\",\n    \"arguments\": {\n      \"store_id\": {{store_id}}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `list_faqs` \u2192 MCP tool `list_faqs`.\n\nActive FAQs for the store."
+          },
+          "response": []
+        },
+        {
+          "name": "Check delivery",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"check_delivery_eligibility\",\n    \"arguments\": {\n      \"store_id\": {{store_id}},\n      \"latitude\": {{latitude}},\n      \"longitude\": {{longitude}}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `check_delivery` \u2192 MCP tool `check_delivery_eligibility`.\n\nEligibility for a lat/lng pin. Returns deliverable, zone, fee, message."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Orders (flow ops)",
+      "item": [
+        {
+          "name": "Checkout (create order)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"create_order\",\n    \"arguments\": {\n      \"order\": {\n        \"store\": {{store_id}},\n        \"items\": [\n          {\n            \"product_option\": {{option_id}},\n            \"quantity\": 1\n          }\n        ],\n        \"email\": \"{{email}}\",\n        \"phone_number\": \"{{phone_number}}\",\n        \"delivery_mode\": \"PICKUP_FROM_STORE\",\n        \"notes\": \"Postman test order\",\n        \"slot_token\": \"{{slot_token}}\",\n        \"new_address\": {\n          \"name\": \"Preview Buyer\",\n          \"address_line_1\": \"123 Test Street\",\n          \"city\": \"Bengaluru\",\n          \"state\": \"KA\",\n          \"country\": \"IN\",\n          \"pincode\": \"560001\",\n          \"phone\": \"{{phone_number}}\"\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `create_order` \u2192 MCP tool `create_order`.\n\nGuest checkout used by the flow node. Nested `order` payload.\n`delivery_mode`: PICKUP_FROM_STORE | DELIVERY_TO_LOCATION.\nFor delivery, include `new_address`. Optional `slot_token` / `notes`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_order\",\n    \"arguments\": {\n      \"order_uuid\": \"{{order_uuid}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `get_order` \u2192 MCP tool `get_order`.\n\nFetch order by UUID (guest-safe with MCP API key)."
+          },
+          "response": []
+        },
+        {
+          "name": "Lookup order status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"lookup_order_status\",\n    \"arguments\": {\n      \"store_id\": {{store_id}},\n      \"phone_number\": \"{{phone_number}}\",\n      \"order_display_id\": \"{{order_display_id}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `lookup_order_status` \u2192 MCP tool `lookup_order_status`.\n\nPhone-verified order lookup. Whatomate auto-fills phone from the WhatsApp session; pass `order_display_id` (flow param `order_id`) to target a specific order, or omit it for the latest match."
+          },
+          "response": []
+        },
+        {
+          "name": "Retry payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "X-MCP-API-Key",
+                "value": "{{mcp_api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"retry_payment\",\n    \"arguments\": {\n      \"order_uuid\": \"{{order_uuid}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{mcp_base_url}}/mcp",
+            "description": "Whatomate flow operation `retry_payment` \u2192 MCP tool `retry_payment`.\n\nRe-initiate payment for an order awaiting payment."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

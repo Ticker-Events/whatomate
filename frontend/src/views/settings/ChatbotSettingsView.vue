@@ -134,6 +134,7 @@ const aiSettings = ref({
   ai_commerce_enabled: false,
   ai_commerce_mcp_url: '',
   ai_commerce_mcp_api_key: '',
+  ai_commerce_rest_url: '',
   ai_commerce_store_id: '',
   ai_commerce_welcome_message: '',
   ai_commerce_welcome_generated_at: '' as string | null,
@@ -257,6 +258,7 @@ onMounted(async () => {
         ai_commerce_enabled: aiCommerceEnabledValue,
         ai_commerce_mcp_url: chatbotData.settings.ai_commerce_mcp_url || chatbotData.settings.ai_commerce_base_url || '',
         ai_commerce_mcp_api_key: '',
+        ai_commerce_rest_url: chatbotData.settings.ai_commerce_rest_url || '',
         ai_commerce_store_id: chatbotData.settings.ai_commerce_store_id || '',
         ai_commerce_welcome_message: chatbotData.settings.ai_commerce_welcome_message || '',
         ai_commerce_welcome_generated_at: chatbotData.settings.ai_commerce_welcome_generated_at || null,
@@ -366,6 +368,7 @@ async function saveAISettings() {
       ai_system_prompt: aiSettings.value.ai_system_prompt,
       ai_commerce_enabled: aiSettings.value.ai_commerce_enabled,
       ai_commerce_mcp_url: aiSettings.value.ai_commerce_mcp_url,
+      ai_commerce_rest_url: aiSettings.value.ai_commerce_rest_url,
       ai_commerce_store_id: aiSettings.value.ai_commerce_store_id
     }
     if (aiSettings.value.ai_api_key) {
@@ -1052,6 +1055,15 @@ function removeEscalationUser(userId: string) {
                         :placeholder="$t('chatbotSettings.commerceMcpApiKeyPlaceholder')"
                       />
                       <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMcpApiKeyHint') }}</p>
+                    </div>
+                    <div class="space-y-2">
+                      <Label>{{ $t('chatbotSettings.commerceRestUrl') }}</Label>
+                      <Input
+                        v-model="aiSettings.ai_commerce_rest_url"
+                        type="url"
+                        :placeholder="$t('chatbotSettings.commerceRestUrlPlaceholder')"
+                      />
+                      <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceRestUrlHint') }}</p>
                     </div>
                     <div class="space-y-2">
                       <Label>{{ $t('chatbotSettings.commerceStoreId') }}</Label>

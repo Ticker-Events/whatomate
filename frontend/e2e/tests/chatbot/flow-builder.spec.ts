@@ -151,10 +151,11 @@ test.describe('Chatbot Flow Builder - Other node types', () => {
     await expect(builder.page.getByText(/^URL$/i).first()).toBeVisible()
   })
 
-  test('TiQR Store API node exposes an operation dropdown', async () => {
+  test('TiQR Store API node exposes API type and operation dropdowns', async () => {
     await builder.addNode('TiQR Store')
+    await expect(builder.page.getByText(/^API type$/i).first()).toBeVisible()
     await expect(builder.page.getByText(/^Operation$/i).first()).toBeVisible()
-    await expect(builder.page.getByText(/Store ID is taken from AI settings/i)).toBeVisible()
+    await expect(builder.page.getByText(/Uses Commerce MCP URL/i)).toBeVisible()
     await expect(builder.page.getByText(/^Search$/)).toHaveCount(0)
     await expect(builder.page.getByText(/^Product ID$/)).toHaveCount(0)
 
@@ -167,6 +168,16 @@ test.describe('Chatbot Flow Builder - Other node types', () => {
     await builder.page.getByRole('option', { name: 'Product details' }).click()
     await expect(builder.page.getByText(/^Product ID$/)).toBeVisible()
     await expect(builder.page.getByText(/^Search$/)).toHaveCount(0)
+
+    // REST mode hides MCP-only ops (Check delivery / Lookup order status / Retry payment).
+    await builder.page.getByRole('combobox').filter({ hasText: /^MCP$/ }).click()
+    await builder.page.getByRole('option', { name: 'REST', exact: true }).click()
+    await expect(builder.page.getByText(/Uses Commerce REST Endpoint URL/i)).toBeVisible()
+    await builder.page.getByRole('combobox').filter({ hasText: /Product details|List products|Search products/i }).first().click()
+    await expect(builder.page.getByRole('option', { name: 'Check delivery' })).toHaveCount(0)
+    await expect(builder.page.getByRole('option', { name: 'Lookup order status' })).toHaveCount(0)
+    await expect(builder.page.getByRole('option', { name: 'Retry payment' })).toHaveCount(0)
+    await expect(builder.page.getByRole('option', { name: 'List products' })).toBeVisible()
   })
 
   test('Transfer node exposes a team selector', async () => {

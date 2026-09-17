@@ -2,13 +2,17 @@
 import { computed } from 'vue'
 import { ShoppingBag } from 'lucide-vue-next'
 import BaseNode from '@/components/calling/nodes/BaseNode.vue'
-import { tiqrStoreOperationLabel } from '@/components/chatbot/tiqrStoreApiCatalog'
+import { tiqrStoreApiTypeLabel, tiqrStoreOperationLabel } from '@/components/chatbot/tiqrStoreApiCatalog'
 
 defineOptions({ inheritAttrs: false })
 
 const props = defineProps<{ data: any }>()
 
-const summary = computed(() => tiqrStoreOperationLabel(props.data?.config?.operation))
+const summary = computed(() => {
+  const op = tiqrStoreOperationLabel(props.data?.config?.operation)
+  const transport = tiqrStoreApiTypeLabel(props.data?.config?.api_type)
+  return `${op} · ${transport}`
+})
 
 const outputHandles = [
   { id: 'http:2xx', label: '2xx', title: 'Success' },
