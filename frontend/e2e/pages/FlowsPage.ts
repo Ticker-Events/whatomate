@@ -386,4 +386,25 @@ export class ChatbotFlowBuilderPage extends BasePage {
   getButtonDeleteButton(index: number) {
     return this.buttonCards.nth(index).locator('button').filter({ has: this.page.locator('.text-destructive') })
   }
+
+  /** Header "Preview" button that opens the interactive preview dialog. */
+  get openPreviewButton() {
+    return this.page.getByRole('button', { name: /^Preview$/i })
+  }
+
+  /** Phone frame inside the preview dialog. */
+  get previewPhoneFrame() {
+    return this.page.locator('#preview-phone-frame')
+  }
+
+  /** Debug-panel play/Start control (title="Start" while idle). */
+  get previewStartButton() {
+    return this.page.locator('button[title="Start"]')
+  }
+
+  async openPreviewAndStart() {
+    await this.openPreviewButton.click()
+    await expect(this.previewPhoneFrame).toBeVisible()
+    await this.previewStartButton.click()
+  }
 }

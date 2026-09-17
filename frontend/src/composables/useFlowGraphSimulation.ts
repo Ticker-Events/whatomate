@@ -253,6 +253,9 @@ export function useFlowGraphSimulation(
     }
 
     switch (node.type) {
+      case 'start':
+        // Entry sentinel — mirror backend ChatNodeStart (no side effect).
+        return 'default'
       case 'message':
         return execMessage(node)
       case 'buttons':
