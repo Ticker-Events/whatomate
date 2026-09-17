@@ -179,3 +179,26 @@ test.describe('Chatbot Flow Builder - Other node types', () => {
     await expect(builder.page.getByText(/^Expression$/i).first()).toBeVisible()
   })
 })
+
+test.describe('Chatbot Flow Builder - Preview', () => {
+  let builder: ChatbotFlowBuilderPage
+
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page)
+    builder = new ChatbotFlowBuilderPage(page)
+    await builder.gotoNew()
+  })
+
+  test('skips the start sentinel and runs the first Text node', async () => {
+    const textBody = 'Hello from preview text node'
+    await builder.addNode('Text')
+    await builder.messageTextarea.fill(textBody)
+
+    await builder.openPreviewAndStart()
+
+    const phone = builder.previewPhoneFrame
+    await expect(phone.getByText(/Unknown node type "start"/i)).toHaveCount(0)
+    await expect(phone.getByText('Hi! Let me help you with that.')).toBeVisible()
+    await expect(phone.getByText(textBody)).toBeVisible()
+  })
+})
