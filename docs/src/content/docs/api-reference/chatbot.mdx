@@ -249,6 +249,52 @@ GET /api/chatbot/flows
 POST /api/chatbot/flows
 ```
 
+### Export Flow
+
+Download a portable JSON envelope for a conversation flow. Org/user IDs
+are stripped; cross-reference IDs inside the graph (`goto_flow.flow_id`,
+`transfer.team_id`, `whatsapp_flow.flow_id`, …) are kept as-is.
+
+```bash
+GET /api/chatbot/flows/{id}/export
+```
+
+Response is a JSON file (`Content-Disposition: attachment`) with shape:
+
+```json
+{
+  "format": "whatomate.chatbot_flow",
+  "format_version": 1,
+  "exported_at": "2026-01-01T00:00:00Z",
+  "flow": {
+    "name": "Feedback Collection",
+    "description": "",
+    "trigger_keywords": ["feedback"],
+    "whatsapp_account": "primary",
+    "graph": { "version": 2, "entry_node": "…", "nodes": [], "edges": [] }
+  }
+}
+```
+
+### Import Flow
+
+Create a **new** flow from an export envelope. The imported flow is always
+created **disabled** so trigger keywords do not collide with the source.
+Does not update an existing flow.
+
+```bash
+POST /api/chatbot/flows/import
+```
+
+### Duplicate Flow
+
+Same-org clone: copies metadata + graph, appends ` (Copy)` to the name,
+and creates the copy disabled.
+
+```bash
+POST /api/chatbot/flows/{id}/duplicate
+```
+
 ### Request Body
 
 Flows are stored as a graph: `nodes` (each with an `id`, `type`, and

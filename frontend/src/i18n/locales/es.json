@@ -1800,7 +1800,17 @@
     "active": "Activo",
     "inactive": "Inactivo",
     "editFlow": "Editar flujo",
-    "deleteFlow": "Eliminar flujo"
+    "deleteFlow": "Eliminar flujo",
+    "importFlow": "Importar",
+    "exportFlowLabel": "Exportar flujo",
+    "duplicateFlowLabel": "Duplicar flujo",
+    "exportSuccess": "Flujo exportado",
+    "exportFailed": "Error al exportar el flujo",
+    "importSuccess": "Flujo importado (deshabilitado)",
+    "importFailed": "Error al importar el flujo",
+    "importInvalidJson": "JSON no válido",
+    "duplicateSuccess": "Flujo duplicado",
+    "duplicateFailed": "Error al duplicar el flujo"
   },
   "chatbot": {
     "title": "Chatbot",

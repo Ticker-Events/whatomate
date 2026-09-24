@@ -2063,7 +2063,17 @@
     "deleteFlow": "Delete Flow",
     "fetchError": "Failed to load flows. Please try again.",
     "editFlowLabel": "Edit flow",
-    "deleteFlowLabel": "Delete flow"
+    "deleteFlowLabel": "Delete flow",
+    "importFlow": "Import",
+    "exportFlowLabel": "Export flow",
+    "duplicateFlowLabel": "Duplicate flow",
+    "exportSuccess": "Flow exported",
+    "exportFailed": "Failed to export flow",
+    "importSuccess": "Flow imported (disabled — enable when ready)",
+    "importFailed": "Failed to import flow",
+    "importInvalidJson": "Invalid JSON file",
+    "duplicateSuccess": "Flow duplicated",
+    "duplicateFailed": "Failed to duplicate flow"
   },
   "chatbot": {
     "title": "Chatbot",

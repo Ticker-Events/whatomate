@@ -1800,7 +1800,17 @@
     "active": "सक्रिय",
     "inactive": "निष्क्रिय",
     "editFlow": "एडिट",
-    "deleteFlow": "हटाएं"
+    "deleteFlow": "हटाएं",
+    "importFlow": "आयात",
+    "exportFlowLabel": "निर्यात",
+    "duplicateFlowLabel": "डुप्लिकेट",
+    "exportSuccess": "फ्लो निर्यात हुआ",
+    "exportFailed": "निर्यात विफल",
+    "importSuccess": "फ्लो आयात हुआ (अक्षम)",
+    "importFailed": "आयात विफल",
+    "importInvalidJson": "अमान्य JSON",
+    "duplicateSuccess": "फ्लो डुप्लिकेट हुआ",
+    "duplicateFailed": "डुप्लिकेट विफल"
   },
   "chatbot": {
     "title": "चैटबॉट",

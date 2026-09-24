@@ -1777,7 +1777,17 @@
     "deleteFlow": "حذف التدفق",
     "fetchError": "فشل تحميل التدفقات. يرجى المحاولة مرة أخرى.",
     "editFlowLabel": "تعديل التدفق",
-    "deleteFlowLabel": "حذف التدفق"
+    "deleteFlowLabel": "حذف التدفق",
+    "importFlow": "استيراد",
+    "exportFlowLabel": "تصدير التدفق",
+    "duplicateFlowLabel": "تكرار التدفق",
+    "exportSuccess": "تم تصدير التدفق",
+    "exportFailed": "فشل تصدير التدفق",
+    "importSuccess": "تم استيراد التدفق (معطل)",
+    "importFailed": "فشل استيراد التدفق",
+    "importInvalidJson": "ملف JSON غير صالح",
+    "duplicateSuccess": "تم تكرار التدفق",
+    "duplicateFailed": "فشل تكرار التدفق"
   },
   "chatbot": {
     "title": "روبوت الدردشة",

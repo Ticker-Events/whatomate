@@ -1800,7 +1800,17 @@
     "active": "செயலில்",
     "inactive": "செயலற்று",
     "editFlow": "பாய்வைத் திருத்து",
-    "deleteFlow": "பாய்வை நீக்கு"
+    "deleteFlow": "பாய்வை நீக்கு",
+    "importFlow": "இறக்குமதி",
+    "exportFlowLabel": "ஏற்றுமதி",
+    "duplicateFlowLabel": "நகல்",
+    "exportSuccess": "பாய்வு ஏற்றுமதி செய்யப்பட்டது",
+    "exportFailed": "ஏற்றுமதி தோல்வி",
+    "importSuccess": "பாய்வு இறக்குமதி செய்யப்பட்டது (முடக்கப்பட்டது)",
+    "importFailed": "இறக்குமதி தோல்வி",
+    "importInvalidJson": "தவறான JSON",
+    "duplicateSuccess": "பாய்வு நகலெடுக்கப்பட்டது",
+    "duplicateFailed": "நகல் தோல்வி"
   },
   "chatbot": {
     "title": "அரட்டைப்பேச்சி",
