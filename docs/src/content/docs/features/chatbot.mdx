@@ -223,6 +223,18 @@ it does), a `config` blob (its parameters), and outgoing edges
 labelled with the outcome they handle (`default`, `button:<id>`,
 `true`/`false`, `in_hours`/`out_of_hours`, ...).
 
+### Export and import
+
+From the Conversation Flows list you can:
+
+- **Export** a flow as a JSON file (`whatomate.chatbot_flow` format)
+- **Import** a previously exported JSON file as a new flow
+- **Duplicate** a flow in the same organization
+
+Imported and duplicated flows are created **disabled**. Cross-reference
+IDs inside the graph (other flows, teams, WhatsApp Flows) are preserved
+as-is — fix them in the builder if you restore into a different org.
+
 ### Node Types
 
 | Type | Purpose | Outgoing edges |

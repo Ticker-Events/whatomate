@@ -11,7 +11,7 @@ import { chatbotService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { PageHeader, DataTable, DeleteConfirmDialog, SearchInput, IconButton, ErrorState, type Column } from '@/components/shared'
 import { getErrorMessage } from '@/lib/api-utils'
-import { Plus, Pencil, Trash2, Workflow } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Workflow, Download, Upload, Copy, Loader2 } from 'lucide-vue-next'
 import { useDebounceFn } from '@vueuse/core'
 
 const { t } = useI18n()
@@ -34,6 +34,10 @@ const searchQuery = ref('')
 const deleteDialogOpen = ref(false)
 const isDeleting = ref(false)
 const flowToDelete = ref<ChatbotFlow | null>(null)
+const importInput = ref<HTMLInputElement | null>(null)
+const isImporting = ref(false)
+const exportingFlowId = ref<string | null>(null)
+const duplicatingFlowId = ref<string | null>(null)
 
 // Pagination state
 const currentPage = ref(1)
@@ -98,6 +102,73 @@ function editFlow(flow: ChatbotFlow) {
   router.push(`/chatbot/flows/${flow.id}/edit`)
 }
 
+function sanitizeFilename(name: string): string {
+  const base = name.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^[-._]+|[-._]+$/g, '')
+  return `${base || 'chatbot-flow'}.json`
+}
+
+async function exportFlow(flow: ChatbotFlow) {
+  exportingFlowId.value = flow.id
+  try {
+    const response = await chatbotService.exportFlow(flow.id)
+    const blob = response.data instanceof Blob
+      ? response.data
+      : new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = sanitizeFilename(flow.name)
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success(t('chatbotFlows.exportSuccess'))
+  } catch (error: any) {
+    toast.error(getErrorMessage(error, t('chatbotFlows.exportFailed')))
+  } finally {
+    exportingFlowId.value = null
+  }
+}
+
+async function duplicateFlow(flow: ChatbotFlow) {
+  duplicatingFlowId.value = flow.id
+  try {
+    await chatbotService.duplicateFlow(flow.id)
+    toast.success(t('chatbotFlows.duplicateSuccess'))
+    await fetchFlows()
+  } catch (error: any) {
+    toast.error(getErrorMessage(error, t('chatbotFlows.duplicateFailed')))
+  } finally {
+    duplicatingFlowId.value = null
+  }
+}
+
+function triggerImport() {
+  importInput.value?.click()
+}
+
+async function onImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  isImporting.value = true
+  try {
+    const text = await file.text()
+    const payload = JSON.parse(text)
+    await chatbotService.importFlow(payload)
+    toast.success(t('chatbotFlows.importSuccess'))
+    await fetchFlows()
+  } catch (error: any) {
+    if (error instanceof SyntaxError) {
+      toast.error(t('chatbotFlows.importInvalidJson'))
+    } else {
+      toast.error(getErrorMessage(error, t('chatbotFlows.importFailed')))
+    }
+  } finally {
+    isImporting.value = false
+  }
+}
+
 async function toggleFlow(flow: ChatbotFlow) {
   try {
     await chatbotService.updateFlow(flow.id, { enabled: !flow.enabled })
@@ -141,6 +212,18 @@ async function confirmDeleteFlow() {
       :breadcrumbs="[{ label: $t('chatbotFlows.backToChatbot'), href: '/chatbot' }, { label: $t('nav.flows') }]"
     >
       <template #actions>
+        <input
+          ref="importInput"
+          type="file"
+          accept="application/json,.json"
+          class="hidden"
+          @change="onImportFile"
+        />
+        <Button variant="outline" size="sm" :disabled="isImporting" @click="triggerImport">
+          <Loader2 v-if="isImporting" class="h-4 w-4 mr-2 animate-spin" />
+          <Upload v-else class="h-4 w-4 mr-2" />
+          {{ $t('chatbotFlows.importFlow') }}
+        </Button>
         <Button variant="outline" size="sm" @click="createFlow">
           <Plus class="h-4 w-4 mr-2" />
           {{ $t('chatbotFlows.createFlow') }}
@@ -214,6 +297,20 @@ async function confirmDeleteFlow() {
                 </template>
                 <template #cell-actions="{ item: flow }">
                   <div class="flex items-center justify-end gap-1">
+                    <IconButton
+                      :icon="exportingFlowId === flow.id ? Loader2 : Download"
+                      :label="$t('chatbotFlows.exportFlowLabel')"
+                      class="h-8 w-8"
+                      :disabled="exportingFlowId === flow.id"
+                      @click="exportFlow(flow)"
+                    />
+                    <IconButton
+                      :icon="duplicatingFlowId === flow.id ? Loader2 : Copy"
+                      :label="$t('chatbotFlows.duplicateFlowLabel')"
+                      class="h-8 w-8"
+                      :disabled="duplicatingFlowId === flow.id"
+                      @click="duplicateFlow(flow)"
+                    />
                     <IconButton :icon="Pencil" :label="$t('chatbotFlows.editFlowLabel')" class="h-8 w-8" @click="editFlow(flow)" />
                     <IconButton :icon="Trash2" :label="$t('chatbotFlows.deleteFlowLabel')" class="h-8 w-8 text-destructive" @click="openDeleteDialog(flow)" />
                   </div>
