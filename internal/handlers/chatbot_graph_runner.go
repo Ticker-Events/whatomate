@@ -296,7 +296,8 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 	return nodeOutcome{yield: true}, nil
 }
 
-// execChatPrompt asks the user for input. On first entry (no userInput),
+// execChatPrompt asks the user for input. On first entry (no userInput, or
+// inbound already consumed by an earlier node in this run such as buttons),
 // sends the prompt body and yields to wait for a reply. On a later inbound,
 // validates ctx.userInput against an optional regex:
 //   - valid (or no regex): stores the input in SessionData under store_as,
@@ -318,8 +319,11 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	body := stringFromConfig(node.Config, "body", "message", "text")
 
-	// No input yet → send prompt and wait.
-	if !ctx.consumed && ctx.userInput == "" {
+	// First entry: no inbound text yet, OR an earlier blocking node in this
+	// run already consumed the inbound (e.g. buttons → prompt). Send the
+	// prompt body and wait for a fresh reply — do not treat a prior button
+	// title as the prompt answer, and do not yield silently without sending.
+	if ctx.consumed || ctx.userInput == "" {
 		if body == "" {
 			return nodeOutcome{}, fmt.Errorf("prompt node %q has no body configured", node.ID)
 		}
@@ -328,12 +332,6 @@ func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, err
 			return nodeOutcome{}, fmt.Errorf("send prompt: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, rendered, node.ID)
-		return nodeOutcome{yield: true}, nil
-	}
-
-	if ctx.consumed {
-		// Input was already consumed by an earlier blocking node in this
-		// run — defensive guard. Treat as fresh entry.
 		return nodeOutcome{yield: true}, nil
 	}
 
