@@ -21,7 +21,8 @@ import {
   Tags,
   PhoneCall,
   PhoneForwarded,
-  ScrollText
+  ScrollText,
+  BookOpen
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -59,6 +60,17 @@ export const navigationSections: NavSection[] = [
         path: '/chat',
         icon: MessageSquare,
         permission: 'chat'
+      },
+    ]
+  },
+  {
+    label: 'nav.sectionHelp',
+    permissions: [],
+    items: [
+      {
+        name: 'nav.majorWorkflows',
+        path: '/help/workflows',
+        icon: BookOpen
       },
     ]
   },

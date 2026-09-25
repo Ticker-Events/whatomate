@@ -1,0 +1,174 @@
+---
+title: Major Workflows
+description: Step-by-step guides for API keys, template messages, and chatbot conversation flows
+---
+
+import { Steps, Aside, Card, CardGrid } from '@astrojs/starlight/components';
+
+These guides walk through the three workflows most teams need after connecting a WhatsApp account: authenticate via API key, send approved templates, and run chatbot conversation flows.
+
+<CardGrid>
+  <Card title="API keys" icon="seti:lock">
+    [Generate a key →](#generating-an-api-key)
+  </Card>
+  <Card title="Templates" icon="document">
+    [Create and send →](#creating-and-sending-template-messages)
+  </Card>
+  <Card title="Chatbot flows" icon="setting">
+    [Set up a flow →](#setting-up-chatbot-workflows)
+  </Card>
+</CardGrid>
+
+## Generating an API key
+
+API keys authenticate server-to-server requests with the `X-API-Key` header. Creating keys requires the `api_keys` **write** permission on your role.
+
+<Steps>
+
+1. **Open API Keys**
+
+   In the app, go to **Settings → API Keys** (`/settings/api-keys`).
+
+2. **Create a key**
+
+   Click **Create API Key** to open `/settings/api-keys/new`. Enter a **name** (required) and an optional **expiration** date.
+
+3. **Copy the secret once**
+
+   After create, a dialog shows the full key (`whm_` followed by 32 hex characters) and a sample curl. Copy and store it securely — the list and detail pages only show the key prefix afterward.
+
+4. **Call the API**
+
+   Send the key on every request:
+
+   ```bash
+   curl -X GET "http://your-server:8080/api/contacts" \
+     -H "X-API-Key: whm_your_api_key_here"
+   ```
+
+</Steps>
+
+<Aside type="note">
+  The key inherits the **creator's** role permissions. Deactivate a key from the list toggle, or delete it to revoke permanently.
+</Aside>
+
+For list, update, delete, and security practices, see the [API Keys](/whatomate/api-reference/api-keys/) reference.
+
+## Creating and sending template messages
+
+WhatsApp templates must be **APPROVED** by Meta before you can send them. Requires a connected WhatsApp account (**Settings → Accounts**) and the `templates` permission.
+
+![Templates](/whatomate/images/11-templates.png)
+
+### Create or sync a template
+
+<Steps>
+
+1. **Create in Whatomate (Path A)**
+
+   Go to **Templates → New** (`/templates/new`). Fill header, body, footer, and buttons, then **Save**. The template is stored locally as **`DRAFT`** and cannot be sent yet.
+
+2. **Upload media samples if needed**
+
+   For `IMAGE`, `VIDEO`, or `DOCUMENT` headers, upload a sample file in the editor and **Save** so the media handle is persisted. Meta reviews this sample with the template text — it is not the media customers receive at send time.
+
+3. **Publish**
+
+   Click **Publish**. Whatomate submits the template to Meta and status becomes **`PENDING`**.
+
+4. **Sync status from Meta**
+
+   On the Templates list, click **Sync from Meta**. Status updates to **`APPROVED`** or **`REJECTED`**.
+
+5. **Or sync Meta-only templates (Path B)**
+
+   Create and approve the template in Meta Business Manager, then **Sync from Meta** to pull an **APPROVED** copy into Whatomate.
+
+</Steps>
+
+Lifecycle: **DRAFT → PENDING → APPROVED** (or **REJECTED**). Edit and republish from **DRAFT** or **REJECTED** after fixing issues.
+
+### Send an approved template
+
+Only **APPROVED** templates appear in the chat picker and are accepted by the send API.
+
+**From chat (UI)**
+
+Open a contact under **Chat**, use **Send Template**, pick an approved template, fill body/header/button parameters (and optional header media), then send.
+
+**From the API**
+
+```bash
+curl -X POST "http://your-server:8080/api/messages/template" \
+  -H "X-API-Key: whm_your_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone_number": "919876543210",
+    "template_name": "hello_world"
+  }'
+```
+
+With named body parameters:
+
+```json
+{
+  "phone_number": "919876543210",
+  "template_name": "order_confirmation",
+  "template_params": {
+    "name": "John",
+    "order_id": "12345"
+  }
+}
+```
+
+You can also pass `contact_id`, `header_params`, `button_params`, and optional `account_name`. See [Send Template Message](/whatomate/api-reference/messages/#send-template-message).
+
+<Aside type="tip">
+  For bulk sends to many contacts, use [Campaigns](/whatomate/features/campaigns/) with an approved template.
+</Aside>
+
+More detail on the editor, variables, and media rules: [Templates](/whatomate/features/templates/).
+
+## Setting up chatbot workflows
+
+This section covers **conversation flows** (graph automations under **Chatbot → Flows**). That is separate from Meta [WhatsApp Flows](/whatomate/features/whatsapp-flows/) (forms under **Flows** / `/flows`).
+
+![Conversation Flows](/whatomate/images/07-conversation-flows.png)
+
+<Steps>
+
+1. **Prerequisites**
+
+   Connect a WhatsApp account that receives webhooks. On the **Chatbot** hub (`/chatbot`), enable the chatbot.
+
+2. **Configure defaults**
+
+   Open **Settings → Chatbot** (`/settings/chatbot`). Set a **greeting** and **fallback** message (optional interactive buttons), session timeout, and optionally business hours.
+
+3. **Create a flow**
+
+   Go to **Chatbot → Flows → Create** (`/chatbot/flows/new`). Set a **name** and comma-separated **trigger keywords**. Inbound messages that **contain** a trigger (case-insensitive) can start the flow when it is enabled.
+
+4. **Build the graph**
+
+   Add nodes and wire edges (for example `message` → `buttons` → `end`, or a `transfer` handoff). Save the flow.
+
+5. **Enable the flow**
+
+   Turn on **Enabled** in the builder or on the flows list. Imported and duplicated flows start **disabled**.
+
+6. **Optional extras**
+
+   Add a **Keywords** rule with response type **Flow**, or configure **Teams** for agent transfers.
+
+7. **Test**
+
+   Message the business WhatsApp number with a trigger keyword. Check the chatbot hub, sessions, and **Transfers** as needed.
+
+</Steps>
+
+<Aside type="note">
+  Rough inbound order when the chatbot is enabled and not paused on transfer: active flow session → transfer keywords → **flow trigger keywords** → greeting/fallback → keyword rules → AI.
+</Aside>
+
+For node types, conditions, TiQR Store API nodes, AI, and transfers, see [Chatbot Automation](/whatomate/features/chatbot/).

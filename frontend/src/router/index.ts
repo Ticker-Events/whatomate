@@ -59,6 +59,12 @@ const router = createRouter({
           // All roles can access profile
         },
         {
+          path: 'help/workflows',
+          name: 'help-workflows',
+          component: () => import('@/views/help/WorkflowsGuideView.vue')
+          // All authenticated users can access workflow guides
+        },
+        {
           path: 'templates',
           name: 'templates',
           component: () => import('@/views/settings/TemplatesView.vue'),
