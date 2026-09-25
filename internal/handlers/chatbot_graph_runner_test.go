@@ -461,6 +461,80 @@ func TestRunChatGraph_WhatsAppFlow_MissingFlowIDAdvancesGracefully(t *testing.T)
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 }
 
+// TestRunChatGraph_ButtonsThenPrompt_SendsPromptAfterButtonClick covers the
+// regression where a buttons node consumed the inbound in the same run and
+// the following prompt yielded without sending its body (silent stall).
+func TestRunChatGraph_ButtonsThenPrompt_SendsPromptAfterButtonClick(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "buttons-then-prompt",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "b1",
+			"nodes": []any{
+				map[string]any{
+					"id": "b1", "type": "buttons", "label": "Choose language",
+					"config": map[string]any{
+						"body": "Please choose your language.",
+						"buttons": []any{
+							map[string]any{"id": "btn_en", "title": "English"},
+							map[string]any{"id": "btn_ar", "title": "Arabic"},
+						},
+					},
+				},
+				map[string]any{
+					"id": "p1", "type": "prompt", "label": "Ask name",
+					"config": map[string]any{
+						"body":     "What is your name?",
+						"store_as": "customer_name",
+					},
+				},
+				map[string]any{"id": "e1", "type": "end", "label": "done"},
+			},
+			"edges": []any{
+				map[string]any{"from": "b1", "to": "p1", "condition": "button:btn_en"},
+				map[string]any{"from": "b1", "to": "p1", "condition": "button:btn_ar"},
+				map[string]any{"from": "p1", "to": "e1", "condition": "default"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	// First inbound: send language buttons and park.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	require.Equal(t, "b1", session.CurrentStep)
+
+	// Button tap advances to prompt in the same run — prompt body must be sent.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "English", "btn_en", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "p1", session.CurrentStep, "should park at prompt after button")
+	assert.Equal(t, models.SessionStatusActive, session.Status)
+
+	var msgs []models.ChatbotSessionMessage
+	require.NoError(t, app.DB.Where("session_id = ? AND direction = ?", session.ID, models.DirectionOutgoing).
+		Order("created_at asc").Find(&msgs).Error)
+	var promptSent bool
+	for _, m := range msgs {
+		if m.StepName == "p1" && m.Message == "What is your name?" {
+			promptSent = true
+			break
+		}
+	}
+	assert.True(t, promptSent, "prompt body must be sent when entered after a consumed button click")
+
+	// Free-text reply to the prompt should advance and store.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "Roopak", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Equal(t, "Roopak", session.SessionData["customer_name"])
+}
+
 // TestRunChatGraph_Prompt_HappyPath: first inbound sends prompt + yields;
 // second inbound validates, stores into SessionData, advances to terminal.
 func TestRunChatGraph_Prompt_HappyPath(t *testing.T) {
