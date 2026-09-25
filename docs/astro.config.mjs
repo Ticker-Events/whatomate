@@ -21,6 +21,12 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Guides',
+          items: [
+            { label: 'Major Workflows', slug: 'guides/workflows' },
+          ],
+        },
+        {
           label: 'Features',
           items: [
             { label: 'Dashboard', slug: 'features/dashboard' },
