@@ -747,7 +747,7 @@ const typeLabel: Record<string, string> = {
               placeholder="Add to cart"
               class="h-8 text-sm"
             />
-            <p class="text-[10px] text-muted-foreground">Button text on every card. Variables such as {{ '{{name}}' }} use the current item, then session data.</p>
+            <p v-pre class="text-[10px] text-muted-foreground">Button text on every card. Variables such as {{name}} use the current item, then session data.</p>
           </div>
           <div class="space-y-1.5">
             <Label class="text-xs">ID field</Label>
