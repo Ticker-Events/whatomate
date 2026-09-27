@@ -198,6 +198,34 @@ test.describe('Chatbot Flow Builder - Buttons node', () => {
     await expect(builder.page.getByText('Description field')).toBeVisible()
     await expect(builder.page.getByPlaceholder('description')).toBeVisible()
   })
+
+  test('carousel static shows a card with media and button fields', async () => {
+    const panel = builder.page.locator('div.space-y-4').filter({ has: builder.page.getByRole('heading', { name: 'Buttons', exact: true }) })
+    await panel.getByRole('combobox').nth(0).click()
+    await builder.page.getByRole('option', { name: 'Carousel', exact: true }).click()
+    await expect(panel.getByText('Cards (0/10)')).toBeVisible()
+    await panel.getByRole('button', { name: 'Card', exact: true }).click()
+    await expect(panel.getByPlaceholder('https://example.com/image.jpg')).toBeVisible()
+    await expect(panel.getByPlaceholder('Card text')).toBeVisible()
+    await expect(panel.getByPlaceholder('button_id')).toBeVisible()
+    await expect(panel.getByText('Optional header')).toHaveCount(0)
+  })
+
+  test('carousel dynamic shows media, title, and id fields', async () => {
+    const panel = builder.page.locator('div.space-y-4').filter({ has: builder.page.getByRole('heading', { name: 'Buttons', exact: true }) })
+    await panel.getByRole('combobox').nth(0).click()
+    await builder.page.getByRole('option', { name: 'Carousel', exact: true }).click()
+    await panel.getByRole('combobox').nth(1).click()
+    await builder.page.getByRole('option', { name: 'Dynamic', exact: true }).click()
+    await expect(panel.getByText('Media field')).toBeVisible()
+    await expect(panel.getByPlaceholder('image')).toBeVisible()
+    await expect(panel.getByText('Title field')).toBeVisible()
+    await expect(panel.getByText('ID field')).toBeVisible()
+    await panel.getByRole('combobox').nth(2).click()
+    await builder.page.getByRole('option', { name: 'URL', exact: true }).click()
+    await expect(panel.getByText('URL field')).toBeVisible()
+    await expect(panel.getByText('ID field')).toHaveCount(0)
+  })
 })
 
 test.describe('Chatbot Flow Builder - Other node types', () => {

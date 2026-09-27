@@ -264,6 +264,24 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		body = node.Label
 	}
 	body = processTemplate(body, ctx.session.SessionData)
+	if stringFromConfig(node.Config, "mode") == "carousel" {
+		cards, err := carouselCardsForNode(node.Config, ctx.session.SessionData)
+		if err != nil {
+			return nodeOutcome{}, fmt.Errorf("buttons node %q: %w", node.ID, err)
+		}
+		for _, card := range cards {
+			for _, key := range []string{"title", "title_2", "url", "body", "media_url", "id", "id_2"} {
+				if s, ok := card[key].(string); ok && s != "" {
+					card[key] = processTemplate(s, ctx.session.SessionData)
+				}
+			}
+		}
+		if err := a.sendAndSaveInteractiveCarousel(ctx.account, ctx.contact, body, cards); err != nil {
+			return nodeOutcome{}, fmt.Errorf("send carousel: %w", err)
+		}
+		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
+		return nodeOutcome{yield: true}, nil
+	}
 	buttons, err := buttonsForNode(node.Config, ctx.session.SessionData)
 	if err != nil {
 		return nodeOutcome{}, fmt.Errorf("buttons node %q: %w", node.ID, err)
@@ -1017,6 +1035,9 @@ func buttonsFromConfig(cfg map[string]any) []map[string]any {
 // buttonsForNode returns static config buttons, or rows mapped from a
 // session-data array when source is dynamic.
 func buttonsForNode(cfg map[string]any, data models.JSONB) ([]map[string]any, error) {
+	if stringFromConfig(cfg, "mode") == "carousel" {
+		return carouselCardsForNode(cfg, data)
+	}
 	if stringFromConfig(cfg, "source") != "dynamic" {
 		return buttonsFromConfig(cfg), nil
 	}
@@ -1203,7 +1224,7 @@ func selectedItemFields(cfg map[string]any, data models.JSONB, buttonID, title s
 		return selected
 	}
 	for _, b := range buttons {
-		if fieldString(b, "id") != buttonID {
+		if fieldString(b, "id") != buttonID && fieldString(b, "id_2") != buttonID {
 			continue
 		}
 		for k, v := range b {
@@ -1217,8 +1238,14 @@ func selectedItemFields(cfg map[string]any, data models.JSONB, buttonID, title s
 				selected[k] = v
 			}
 		}
-		if t := fieldString(b, "title"); t != "" {
-			selected["title"] = t
+		matchedTitle := fieldString(b, "title")
+		if fieldString(b, "id_2") == buttonID {
+			if t := fieldString(b, "title_2"); t != "" {
+				matchedTitle = t
+			}
+		}
+		if matchedTitle != "" {
+			selected["title"] = matchedTitle
 		}
 		if d := fieldString(b, "description"); d != "" {
 			selected["description"] = d
@@ -1227,6 +1254,201 @@ func selectedItemFields(cfg map[string]any, data models.JSONB, buttonID, title s
 		break
 	}
 	return selected
+}
+
+func carouselCardsForNode(cfg map[string]any, data models.JSONB) ([]map[string]any, error) {
+	action := stringFromConfig(cfg, "card_action")
+	if action != "url" {
+		action = "reply"
+	}
+	var cards []map[string]any
+	if stringFromConfig(cfg, "source") == "dynamic" {
+		items, err := sessionItemSlice(cfg, data)
+		if err != nil {
+			return nil, err
+		}
+		cards = dynamicCarouselCards(cfg, items, action)
+	} else {
+		cards = staticCarouselCards(buttonsFromConfig(cfg), action)
+	}
+	if len(cards) < 2 {
+		return nil, fmt.Errorf("carousel needs at least 2 cards")
+	}
+	if len(cards) > 10 {
+		cards = cards[:10]
+	}
+	count := carouselReplyCount(cards[0])
+	for _, card := range cards[1:] {
+		if carouselReplyCount(card) != count {
+			return nil, fmt.Errorf("carousel cards must have the same number of buttons")
+		}
+	}
+	return cards, nil
+}
+
+func sessionItemSlice(cfg map[string]any, data models.JSONB) ([]any, error) {
+	key := strings.TrimSpace(stringFromConfig(cfg, "items_var"))
+	key = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(key, "{{"), "}}"))
+	if key == "" {
+		return nil, fmt.Errorf("dynamic buttons have no items variable")
+	}
+	if data == nil {
+		return nil, fmt.Errorf("dynamic buttons variable %q is empty", key)
+	}
+	raw, ok := data[key]
+	if !ok || raw == nil {
+		return nil, fmt.Errorf("dynamic buttons variable %q is empty", key)
+	}
+	items, ok := anySlice(raw)
+	if !ok {
+		return nil, fmt.Errorf("dynamic buttons variable %q is not an array", key)
+	}
+	return items, nil
+}
+
+func staticCarouselCards(buttons []map[string]any, action string) []map[string]any {
+	out := make([]map[string]any, 0, len(buttons))
+	for i, button := range buttons {
+		card := map[string]any{
+			"type":       action,
+			"media_type": carouselMediaType(fieldString(button, "media_type")),
+			"media_url":  fieldString(button, "media_url"),
+			"body":       fieldString(button, "body"),
+			"title":      fieldString(button, "title"),
+		}
+		if action == "url" {
+			card["url"] = fieldString(button, "url")
+			card["id"] = fieldString(button, "id")
+			if fieldString(card, "id") == "" {
+				card["id"] = fmt.Sprintf("card_%d", i+1)
+			}
+		} else {
+			id := fieldString(button, "id")
+			if id == "" {
+				id = fmt.Sprintf("card_%d", i+1)
+			}
+			card["id"] = id
+			if title := fieldString(button, "title_2"); title != "" {
+				id2 := fieldString(button, "id_2")
+				if id2 == "" {
+					id2 = fmt.Sprintf("card_%d_b", i+1)
+				}
+				card["title_2"] = title
+				card["id_2"] = id2
+			}
+		}
+		if !carouselCardReady(card, action) {
+			continue
+		}
+		out = append(out, card)
+	}
+	return out
+}
+
+func dynamicCarouselCards(cfg map[string]any, items []any, action string) []map[string]any {
+	mediaField := stringFromConfig(cfg, "media_field")
+	if mediaField == "" {
+		mediaField = "image"
+	}
+	bodyField := stringFromConfig(cfg, "body_field")
+	titleField := stringFromConfig(cfg, "title_field")
+	if titleField == "" {
+		titleField = "title"
+	}
+	idField := stringFromConfig(cfg, "id_field")
+	if idField == "" {
+		idField = "id"
+	}
+	titleField2 := stringFromConfig(cfg, "title_field_2")
+	idField2 := stringFromConfig(cfg, "id_field_2")
+	urlField := stringFromConfig(cfg, "url_field")
+	if urlField == "" {
+		urlField = "url"
+	}
+	buttonTitle := stringFromConfig(cfg, "button_title")
+	mediaType := carouselMediaType(stringFromConfig(cfg, "media_type"))
+
+	out := make([]map[string]any, 0, len(items))
+	for i, item := range items {
+		if len(out) >= 10 {
+			break
+		}
+		obj, ok := asStringMap(item)
+		if !ok {
+			continue
+		}
+		card := map[string]any{
+			"type":       action,
+			"media_type": mediaType,
+			"media_url":  fieldString(obj, mediaField),
+			"_item":      obj,
+		}
+		if bodyField != "" {
+			card["body"] = fieldString(obj, bodyField)
+		}
+		if action == "url" {
+			title := buttonTitle
+			if title == "" {
+				title = fieldString(obj, titleField)
+			}
+			card["title"] = title
+			card["url"] = fieldString(obj, urlField)
+			id := fieldString(obj, idField)
+			if id == "" {
+				id = fmt.Sprintf("card_%d", i+1)
+			}
+			card["id"] = id
+		} else {
+			title := fieldString(obj, titleField)
+			id := fieldString(obj, idField)
+			if id == "" {
+				id = fmt.Sprintf("card_%d", i+1)
+			}
+			card["title"] = title
+			card["id"] = id
+			if titleField2 != "" {
+				title2 := fieldString(obj, titleField2)
+				if title2 == "" {
+					continue
+				}
+				id2 := fieldString(obj, idField2)
+				if id2 == "" {
+					id2 = fmt.Sprintf("card_%d_b", i+1)
+				}
+				card["title_2"] = title2
+				card["id_2"] = id2
+			}
+		}
+		if !carouselCardReady(card, action) {
+			continue
+		}
+		out = append(out, card)
+	}
+	return out
+}
+
+func carouselCardReady(card map[string]any, action string) bool {
+	if fieldString(card, "media_url") == "" || fieldString(card, "title") == "" {
+		return false
+	}
+	if action == "url" && fieldString(card, "url") == "" {
+		return false
+	}
+	return true
+}
+
+func carouselReplyCount(card map[string]any) int {
+	if fieldString(card, "title_2") != "" {
+		return 2
+	}
+	return 1
+}
+
+func carouselMediaType(raw string) string {
+	if raw == "video" {
+		return "video"
+	}
+	return "image"
 }
 
 func fieldString(obj map[string]any, key string) string {

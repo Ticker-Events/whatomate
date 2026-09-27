@@ -15,6 +15,7 @@ type MessagingClient interface {
 	SendLocationRequest(ctx context.Context, account *Account, rcpt Recipient, bodyText string) (string, error)
 	SendAddressMessage(ctx context.Context, account *Account, rcpt Recipient, bodyText string, params AddressMessageParams) (string, error)
 	SendInteractiveList(ctx context.Context, account *Account, rcpt Recipient, bodyText string, params ListMessageParams) (string, error)
+	SendInteractiveCarousel(ctx context.Context, account *Account, rcpt Recipient, bodyText string, params CarouselMessageParams) (string, error)
 	SendCTAURLButton(ctx context.Context, account *Account, rcpt Recipient, bodyText, buttonText, url string) (string, error)
 	SendVoiceCallButton(ctx context.Context, account *Account, rcpt Recipient, bodyText, displayText string, ttlMinutes int, payload string) (string, error)
 	SendTemplateMessage(ctx context.Context, account *Account, rcpt Recipient, templateName, languageCode string, components []map[string]any) (string, error)

@@ -245,6 +245,22 @@ func (c *Client) SendInteractiveList(ctx context.Context, account *whatsapp.Acco
 	return c.sendMessage(ctx, account, payload)
 }
 
+// SendInteractiveCarousel sends an interactive media carousel via AiSensy.
+func (c *Client) SendInteractiveCarousel(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText string, params whatsapp.CarouselMessageParams) (string, error) {
+	interactive, err := whatsapp.CarouselMessageInteractive(bodyText, params)
+	if err != nil {
+		return "", err
+	}
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"recipient_type":    "individual",
+		"type":              "interactive",
+		"interactive":       interactive,
+	}
+	rcpt.SetOnPayload(payload)
+	return c.sendMessage(ctx, account, payload)
+}
+
 // SendCTAURLButton sends an interactive CTA URL button message via AiSensy.
 func (c *Client) SendCTAURLButton(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText, buttonText, url string) (string, error) {
 	if len(buttonText) > 20 {

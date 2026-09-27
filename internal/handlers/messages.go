@@ -47,7 +47,7 @@ type OutgoingMessageRequest struct {
 	Caption       string
 
 	// Interactive messages
-	InteractiveType string            // "button", "list", "cta_url", "voice_call", "location_request", "address_message"
+	InteractiveType string            // "button", "list", "carousel", "cta_url", "voice_call", "location_request", "address_message"
 	BodyText        string            // Body text for interactive messages
 	Buttons         []whatsapp.Button // For button/list messages
 	ButtonText      string            // CTA URL label, or the list opener label
@@ -57,6 +57,7 @@ type OutgoingMessageRequest struct {
 	FooterText      string            // Optional text footer for list messages
 	SectionTitle    string            // List section title
 	ExplicitList    bool              // Buttons-node list message; 4–10 reply buttons keep SendInteractiveButtons
+	Carousel        whatsapp.CarouselMessageParams
 	AddressMessage  whatsapp.AddressMessageParams
 
 	// voice_call interactive (WhatsApp Business Calling)
@@ -287,6 +288,8 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 					SectionTitle: req.SectionTitle,
 					Rows:         rows,
 				})
+			case "carousel":
+				return client.SendInteractiveCarousel(sendCtx, waAccount, rcpt, req.BodyText, req.Carousel)
 			default: // "button"
 				return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, req.HeaderImageURL)
 			}
@@ -527,6 +530,32 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 			out["section_title"] = req.SectionTitle
 		}
 		return out
+	case "carousel":
+		stored := make([]any, 0, len(req.Carousel.Cards))
+		for _, card := range req.Carousel.Cards {
+			item := map[string]any{
+				"media_type": card.MediaType,
+				"media_url":  card.MediaURL,
+				"action":     card.Action,
+			}
+			if card.Body != "" {
+				item["body"] = card.Body
+			}
+			if card.URL != "" {
+				item["url"] = card.URL
+			}
+			replies := make([]any, 0, len(card.Replies))
+			for _, reply := range card.Replies {
+				replies = append(replies, map[string]string{"id": reply.ID, "title": reply.Title})
+			}
+			item["buttons"] = replies
+			stored = append(stored, item)
+		}
+		return models.JSONB{
+			"type":  "carousel",
+			"body":  req.BodyText,
+			"cards": stored,
+		}
 	default: // "button"
 		buttons := make([]any, len(req.Buttons))
 		for i, btn := range req.Buttons {

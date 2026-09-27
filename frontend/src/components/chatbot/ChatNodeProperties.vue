@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import KeyValueRows from '@/components/chatbot/KeyValueRows.vue'
 import type { ChatNode } from '@/services/api'
 import { tiqrStoreOperationDef, tiqrStoreOperationsFor, tiqrStoreApiType } from '@/components/chatbot/tiqrStoreApiCatalog'
 import { useTeamsStore } from '@/stores/teams'
@@ -137,8 +138,40 @@ const ctaCount = computed(() =>
   (config.value.buttons || []).filter((b: any) => b.type === 'url' || b.type === 'phone').length,
 )
 
-const buttonMode = computed(() => (config.value.mode === 'list' ? 'list' : 'reply'))
+const buttonMode = computed(() => {
+  const mode = config.value.mode
+  if (mode === 'list' || mode === 'carousel') return mode
+  return 'reply'
+})
 const buttonSource = computed(() => (config.value.source === 'dynamic' ? 'dynamic' : 'static'))
+const cardAction = computed(() => (config.value.card_action === 'url' ? 'url' : 'reply'))
+const carouselMediaType = computed(() => (config.value.media_type === 'video' ? 'video' : 'image'))
+
+const headerRows = ref<InstanceType<typeof KeyValueRows> | null>(null)
+const responseRows = ref<InstanceType<typeof KeyValueRows> | null>(null)
+const selectionRows = ref<InstanceType<typeof KeyValueRows> | null>(null)
+
+function setButtonMode(value: string) {
+  if (value === 'list' || value === 'carousel') updateConfig('mode', value)
+  else updateConfig('mode', 'reply')
+}
+
+function addCarouselCard() {
+  const buttons = [...(config.value.buttons || [])]
+  if (buttons.length >= 10) return
+  const id = `card_${Date.now()}_${buttons.length}`
+  buttons.push({
+    id,
+    title: '',
+    media_type: 'image',
+    media_url: '',
+    body: '',
+    url: '',
+    title_2: '',
+    id_2: '',
+  })
+  updateConfig('buttons', buttons)
+}
 const dynamicType = computed(() => {
   const t = config.value.dynamic_type
   if (t === 'url' || t === 'phone') return t
@@ -151,86 +184,6 @@ function addListRow() {
   const id = `row_${Date.now()}_${buttons.length}`
   buttons.push({ id, title: '', description: '' })
   updateConfig('buttons', buttons)
-}
-
-// HTTP headers helpers (api_call / webhook)
-function addHeader() {
-  const headers = { ...(config.value.headers || {}) }
-  headers[''] = ''
-  updateConfig('headers', headers)
-}
-
-function removeHeader(key: string) {
-  const headers = { ...(config.value.headers || {}) }
-  delete headers[key]
-  updateConfig('headers', headers)
-}
-
-function updateHeaderKey(oldKey: string, newKey: string) {
-  if (oldKey === newKey) return
-  const headers = { ...(config.value.headers || {}) }
-  headers[newKey] = headers[oldKey]
-  delete headers[oldKey]
-  updateConfig('headers', headers)
-}
-
-function updateHeaderValue(key: string, value: string) {
-  const headers = { ...(config.value.headers || {}) }
-  headers[key] = value
-  updateConfig('headers', headers)
-}
-
-// Response mapping helpers (api_call)
-function addResponseMapping() {
-  const m = { ...(config.value.response_mapping || {}) }
-  m[''] = ''
-  updateConfig('response_mapping', m)
-}
-
-function removeResponseMapping(key: string) {
-  const m = { ...(config.value.response_mapping || {}) }
-  delete m[key]
-  updateConfig('response_mapping', m)
-}
-
-function updateResponseMappingKey(oldKey: string, newKey: string) {
-  if (oldKey === newKey) return
-  const m = { ...(config.value.response_mapping || {}) }
-  m[newKey] = m[oldKey]
-  delete m[oldKey]
-  updateConfig('response_mapping', m)
-}
-
-function updateResponseMappingValue(key: string, value: string) {
-  const m = { ...(config.value.response_mapping || {}) }
-  m[key] = value
-  updateConfig('response_mapping', m)
-}
-
-function addSelectionMapping() {
-  const m = { ...(config.value.selection_mapping || {}) }
-  m[''] = ''
-  updateConfig('selection_mapping', m)
-}
-
-function removeSelectionMapping(key: string) {
-  const m = { ...(config.value.selection_mapping || {}) }
-  delete m[key]
-  updateConfig('selection_mapping', m)
-}
-
-function updateSelectionMappingKey(oldKey: string, newKey: string) {
-  if (oldKey === newKey) return
-  const m = { ...(config.value.selection_mapping || {}) }
-  m[newKey] = m[oldKey]
-  delete m[oldKey]
-  updateConfig('selection_mapping', m)
-}
-
-function updateSelectionMappingValue(key: string, value: string) {
-  const m = { ...(config.value.selection_mapping || {}) }
-  m[key] = value
-  updateConfig('selection_mapping', m)
 }
 
 function updateParam(key: string, value: string) {
@@ -389,11 +342,12 @@ const typeLabel: Record<string, string> = {
     <template v-if="node.type === 'buttons'">
       <div class="space-y-1.5">
         <Label class="text-xs">Message style</Label>
-        <Select :model-value="buttonMode" @update:model-value="(v: any) => updateConfig('mode', v === 'list' ? 'list' : 'reply')">
+        <Select :model-value="buttonMode" @update:model-value="(v: any) => setButtonMode(String(v))">
           <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="reply">Reply buttons</SelectItem>
             <SelectItem value="list">List</SelectItem>
+            <SelectItem value="carousel">Carousel</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -404,6 +358,17 @@ const typeLabel: Record<string, string> = {
           <SelectContent>
             <SelectItem value="static">Static</SelectItem>
             <SelectItem value="dynamic">Dynamic</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div v-if="buttonMode === 'carousel'" class="space-y-1.5">
+        <Label class="text-xs">Card action</Label>
+        <Select :model-value="cardAction" @update:model-value="(v: any) => updateConfig('card_action', v === 'url' ? 'url' : 'reply')">
+          <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="reply">Quick reply</SelectItem>
+            <SelectItem value="url">URL</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -457,6 +422,7 @@ const typeLabel: Record<string, string> = {
           :model-value="config.body || ''"
           @update:model-value="(v: string) => updateConfig('body', v)"
           placeholder="Message shown above the buttons"
+          :maxlength="buttonMode === 'carousel' ? 1024 : undefined"
           class="min-h-[60px] text-xs"
         />
       </div>
@@ -551,7 +517,79 @@ const typeLabel: Record<string, string> = {
         <p class="text-[10px] text-muted-foreground">Up to 10 rows. Each row needs a title and id. Wire rows to next nodes from the handles on the canvas.</p>
       </div>
 
-      <div v-if="buttonSource === 'dynamic'" class="space-y-1.5">
+      <div v-if="buttonMode === 'carousel' && buttonSource === 'static'" class="space-y-1.5">
+        <Label class="text-xs">Cards ({{ (config.buttons || []).length }}/10)</Label>
+        <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="(config.buttons || []).length >= 10" @click="addCarouselCard">
+          <Plus class="h-3 w-3 mr-0.5" /> Card
+        </Button>
+        <div v-for="(card, idx) in (config.buttons || [])" :key="card.id || idx" class="p-2 border rounded-md space-y-2 bg-muted/30">
+          <div class="flex items-center gap-1">
+            <Select :model-value="card.media_type === 'video' ? 'video' : 'image'" @update:model-value="(v: any) => updateButton(Number(idx), 'media_type', v === 'video' ? 'video' : 'image')">
+              <SelectTrigger class="h-7 text-xs w-24"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="image">Image</SelectItem>
+                <SelectItem value="video">Video</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input
+              :model-value="card.media_url || ''"
+              @update:model-value="(v: string) => updateButton(Number(idx), 'media_url', v)"
+              placeholder="https://example.com/image.jpg"
+              class="h-7 text-xs flex-1 font-mono"
+            />
+            <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeButton(Number(idx))">
+              <Trash2 class="h-3 w-3 text-destructive" />
+            </Button>
+          </div>
+          <Input
+            :model-value="card.body || ''"
+            @update:model-value="(v: string) => updateButton(Number(idx), 'body', v)"
+            placeholder="Card text"
+            maxlength="160"
+            class="h-7 text-xs"
+          />
+          <Input
+            :model-value="card.title || ''"
+            @update:model-value="(v: string) => updateButton(Number(idx), 'title', v)"
+            :placeholder="cardAction === 'url' ? 'Button label' : 'Button title'"
+            maxlength="20"
+            class="h-7 text-xs"
+          />
+          <Input
+            v-if="cardAction === 'url'"
+            :model-value="card.url || ''"
+            @update:model-value="(v: string) => updateButton(Number(idx), 'url', v)"
+            placeholder="https://example.com"
+            class="h-7 text-xs font-mono"
+          />
+          <template v-else>
+            <Input
+              :model-value="card.id || ''"
+              @update:model-value="(v: string) => updateButton(Number(idx), 'id', v)"
+              placeholder="button_id"
+              maxlength="256"
+              class="h-7 text-xs font-mono"
+            />
+            <Input
+              :model-value="card.title_2 || ''"
+              @update:model-value="(v: string) => updateButton(Number(idx), 'title_2', v)"
+              placeholder="Second button title"
+              maxlength="20"
+              class="h-7 text-xs"
+            />
+            <Input
+              :model-value="card.id_2 || ''"
+              @update:model-value="(v: string) => updateButton(Number(idx), 'id_2', v)"
+              placeholder="second_button_id"
+              maxlength="256"
+              class="h-7 text-xs font-mono"
+            />
+          </template>
+        </div>
+        <p class="text-[10px] text-muted-foreground">2 to 10 cards. Each card needs a public image or video URL. Every card uses the same action and the same number of quick replies.</p>
+      </div>
+
+      <div v-if="buttonSource === 'dynamic' && buttonMode !== 'carousel'" class="space-y-1.5">
         <div v-if="buttonMode === 'reply'" class="space-y-1.5">
           <Label class="text-xs">Button type</Label>
           <Select :model-value="dynamicType" @update:model-value="(v: any) => updateConfig('dynamic_type', v)">
@@ -621,6 +659,105 @@ const typeLabel: Record<string, string> = {
         <p class="text-[10px] text-muted-foreground">Rows are built from this array when the flow runs. Connect a single next step from the node.</p>
       </div>
 
+      <div v-if="buttonSource === 'dynamic' && buttonMode === 'carousel'" class="space-y-1.5">
+        <div class="space-y-1.5">
+          <Label class="text-xs">Items variable</Label>
+          <Input
+            :model-value="config.items_var || ''"
+            @update:model-value="(v: string) => updateConfig('items_var', v)"
+            placeholder="products"
+            class="h-8 text-sm font-mono"
+          />
+          <p class="text-[10px] text-muted-foreground">Session variable holding an array of objects.</p>
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">Media type</Label>
+          <Select :model-value="carouselMediaType" @update:model-value="(v: any) => updateConfig('media_type', v === 'video' ? 'video' : 'image')">
+            <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="image">Image</SelectItem>
+              <SelectItem value="video">Video</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">Media field</Label>
+          <Input
+            :model-value="config.media_field || ''"
+            @update:model-value="(v: string) => updateConfig('media_field', v)"
+            placeholder="image"
+            class="h-8 text-sm font-mono"
+          />
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">Body field</Label>
+          <Input
+            :model-value="config.body_field || ''"
+            @update:model-value="(v: string) => updateConfig('body_field', v)"
+            placeholder="description"
+            class="h-8 text-sm font-mono"
+          />
+        </div>
+        <div v-if="cardAction === 'url'" class="space-y-1.5">
+          <Label class="text-xs">Button label</Label>
+          <Input
+            :model-value="config.button_title || ''"
+            @update:model-value="(v: string) => updateConfig('button_title', v)"
+            placeholder="Buy now"
+            maxlength="20"
+            class="h-8 text-sm"
+          />
+        </div>
+        <div v-if="cardAction === 'url'" class="space-y-1.5">
+          <Label class="text-xs">URL field</Label>
+          <Input
+            :model-value="config.url_field || ''"
+            @update:model-value="(v: string) => updateConfig('url_field', v)"
+            placeholder="url"
+            class="h-8 text-sm font-mono"
+          />
+        </div>
+        <template v-else>
+          <div class="space-y-1.5">
+            <Label class="text-xs">Title field</Label>
+            <Input
+              :model-value="config.title_field || ''"
+              @update:model-value="(v: string) => updateConfig('title_field', v)"
+              placeholder="name"
+              class="h-8 text-sm font-mono"
+            />
+          </div>
+          <div class="space-y-1.5">
+            <Label class="text-xs">ID field</Label>
+            <Input
+              :model-value="config.id_field || ''"
+              @update:model-value="(v: string) => updateConfig('id_field', v)"
+              placeholder="id"
+              class="h-8 text-sm font-mono"
+            />
+          </div>
+          <div class="space-y-1.5">
+            <Label class="text-xs">Second title field</Label>
+            <Input
+              :model-value="config.title_field_2 || ''"
+              @update:model-value="(v: string) => updateConfig('title_field_2', v)"
+              placeholder="action_title"
+              class="h-8 text-sm font-mono"
+            />
+          </div>
+          <div class="space-y-1.5">
+            <Label class="text-xs">Second ID field</Label>
+            <Input
+              :model-value="config.id_field_2 || ''"
+              @update:model-value="(v: string) => updateConfig('id_field_2', v)"
+              placeholder="action_id"
+              class="h-8 text-sm font-mono"
+            />
+          </div>
+        </template>
+        <p class="text-[10px] text-muted-foreground">Cards are built from this array when the flow runs. Connect a single next step from the node.</p>
+      </div>
+
       <!-- Input — buttons always expect a button selection; surface this
            for visual consistency with text nodes. -->
       <div class="pt-2 border-t space-y-1.5">
@@ -647,18 +784,19 @@ const typeLabel: Record<string, string> = {
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
           <Label class="text-xs">Save selection fields</Label>
-          <Button variant="outline" size="sm" class="h-6 text-xs" @click="addSelectionMapping">
+          <Button variant="outline" size="sm" class="h-6 text-xs" @click="selectionRows?.add()">
             <Plus class="h-3 w-3 mr-1" /> Add field
           </Button>
         </div>
-        <p class="text-[10px] text-muted-foreground">Maps a field from the tapped row into a session variable. Use id, title, or description for the selected row, or a source field such as name.</p>
-        <div v-for="(val, key) in (config.selection_mapping || {})" :key="String(key)" class="flex items-center gap-1">
-          <Input :model-value="String(key)" @update:model-value="(v: string) => updateSelectionMappingKey(String(key), v)" placeholder="selected_item_id" class="h-7 text-xs flex-1 font-mono" />
-          <Input :model-value="String(val)" @update:model-value="(v: string) => updateSelectionMappingValue(String(key), v)" placeholder="id" class="h-7 text-xs flex-1 font-mono" />
-          <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeSelectionMapping(String(key))">
-            <Trash2 class="h-3 w-3 text-destructive" />
-          </Button>
-        </div>
+        <p class="text-[10px] text-muted-foreground">Maps a field from the tapped row into a session variable. id and title are the tapped quick reply. Other names are the card body, media_url, or a source field such as name.</p>
+        <KeyValueRows
+          ref="selectionRows"
+          :model-value="config.selection_mapping || {}"
+          key-placeholder="selected_item_id"
+          value-placeholder="id"
+          mono
+          @update:model-value="(v) => updateConfig('selection_mapping', v)"
+        />
       </div>
 
     </template>
@@ -689,17 +827,17 @@ const typeLabel: Record<string, string> = {
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
           <Label class="text-xs">Headers</Label>
-          <Button variant="outline" size="sm" class="h-6 text-xs" @click="addHeader">
+          <Button variant="outline" size="sm" class="h-6 text-xs" @click="headerRows?.add()">
             <Plus class="h-3 w-3 mr-1" /> Add
           </Button>
         </div>
-        <div v-for="(val, key) in (config.headers || {})" :key="String(key)" class="flex items-center gap-1">
-          <Input :model-value="String(key)" @update:model-value="(v: string) => updateHeaderKey(String(key), v)" placeholder="Key" class="h-7 text-xs flex-1" />
-          <Input :model-value="String(val)" @update:model-value="(v: string) => updateHeaderValue(String(key), v)" placeholder="Value" class="h-7 text-xs flex-1" />
-          <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeHeader(String(key))">
-            <Trash2 class="h-3 w-3 text-destructive" />
-          </Button>
-        </div>
+        <KeyValueRows
+          ref="headerRows"
+          :model-value="config.headers || {}"
+          key-placeholder="Key"
+          value-placeholder="Value"
+          @update:model-value="(v) => updateConfig('headers', v)"
+        />
       </div>
       <div class="space-y-1.5">
         <Label class="text-xs">Body</Label>
@@ -713,18 +851,19 @@ const typeLabel: Record<string, string> = {
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
           <Label class="text-xs">Response mapping</Label>
-          <Button variant="outline" size="sm" class="h-6 text-xs" @click="addResponseMapping">
+          <Button variant="outline" size="sm" class="h-6 text-xs" @click="responseRows?.add()">
             <Plus class="h-3 w-3 mr-1" /> Add
           </Button>
         </div>
         <p class="text-[10px] text-muted-foreground">Map JSON paths into session variables (e.g. <code>data.user.name</code>).</p>
-        <div v-for="(val, key) in (config.response_mapping || {})" :key="String(key)" class="flex items-center gap-1">
-          <Input :model-value="String(key)" @update:model-value="(v: string) => updateResponseMappingKey(String(key), v)" placeholder="var_name" class="h-7 text-xs flex-1 font-mono" />
-          <Input :model-value="String(val)" @update:model-value="(v: string) => updateResponseMappingValue(String(key), v)" placeholder="path.to.field" class="h-7 text-xs flex-1 font-mono" />
-          <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeResponseMapping(String(key))">
-            <Trash2 class="h-3 w-3 text-destructive" />
-          </Button>
-        </div>
+        <KeyValueRows
+          ref="responseRows"
+          :model-value="config.response_mapping || {}"
+          key-placeholder="var_name"
+          value-placeholder="path.to.field"
+          mono
+          @update:model-value="(v) => updateConfig('response_mapping', v)"
+        />
       </div>
       <div class="space-y-1.5">
         <Label class="text-xs">Message template (optional)</Label>
@@ -789,18 +928,19 @@ const typeLabel: Record<string, string> = {
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
           <Label class="text-xs">Response mapping</Label>
-          <Button variant="outline" size="sm" class="h-6 text-xs" @click="addResponseMapping">
+          <Button variant="outline" size="sm" class="h-6 text-xs" @click="responseRows?.add()">
             <Plus class="h-3 w-3 mr-1" /> Add
           </Button>
         </div>
         <p class="text-[10px] text-muted-foreground">Map JSON paths into session variables (e.g. <code>products[0].name</code>).</p>
-        <div v-for="(val, key) in (config.response_mapping || {})" :key="String(key)" class="flex items-center gap-1">
-          <Input :model-value="String(key)" @update:model-value="(v: string) => updateResponseMappingKey(String(key), v)" placeholder="var_name" class="h-7 text-xs flex-1 font-mono" />
-          <Input :model-value="String(val)" @update:model-value="(v: string) => updateResponseMappingValue(String(key), v)" placeholder="path.to.field" class="h-7 text-xs flex-1 font-mono" />
-          <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeResponseMapping(String(key))">
-            <Trash2 class="h-3 w-3 text-destructive" />
-          </Button>
-        </div>
+        <KeyValueRows
+          ref="responseRows"
+          :model-value="config.response_mapping || {}"
+          key-placeholder="var_name"
+          value-placeholder="path.to.field"
+          mono
+          @update:model-value="(v) => updateConfig('response_mapping', v)"
+        />
       </div>
       <div class="space-y-1.5">
         <Label class="text-xs">Message template (optional)</Label>
@@ -983,17 +1123,17 @@ const typeLabel: Record<string, string> = {
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
           <Label class="text-xs">Headers</Label>
-          <Button variant="outline" size="sm" class="h-6 text-xs" @click="addHeader">
+          <Button variant="outline" size="sm" class="h-6 text-xs" @click="headerRows?.add()">
             <Plus class="h-3 w-3 mr-1" /> Add
           </Button>
         </div>
-        <div v-for="(val, key) in (config.headers || {})" :key="String(key)" class="flex items-center gap-1">
-          <Input :model-value="String(key)" @update:model-value="(v: string) => updateHeaderKey(String(key), v)" placeholder="Key" class="h-7 text-xs flex-1" />
-          <Input :model-value="String(val)" @update:model-value="(v: string) => updateHeaderValue(String(key), v)" placeholder="Value" class="h-7 text-xs flex-1" />
-          <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeHeader(String(key))">
-            <Trash2 class="h-3 w-3 text-destructive" />
-          </Button>
-        </div>
+        <KeyValueRows
+          ref="headerRows"
+          :model-value="config.headers || {}"
+          key-placeholder="Key"
+          value-placeholder="Value"
+          @update:model-value="(v) => updateConfig('headers', v)"
+        />
       </div>
       <div class="space-y-1.5">
         <Label class="text-xs">Body</Label>
