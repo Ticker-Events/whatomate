@@ -1512,6 +1512,55 @@ func TestDynamicButtonsFromSession_URL(t *testing.T) {
 	assert.Equal(t, "url_1", buttons[0]["id"])
 }
 
+func TestDynamicButtonsFromSession_MapSlice(t *testing.T) {
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":            "dynamic",
+		"items_var":         "{{collections}}",
+		"title_field":       "name",
+		"id_field":          "id",
+		"description_field": "description",
+	}, models.JSONB{
+		"collections": []map[string]any{
+			{"id": "c1", "name": "Summer", "description": "Hot"},
+			{"id": "c2", "name": "Winter", "description": "Cold"},
+		},
+	}, "list")
+	require.NoError(t, err)
+	require.Len(t, buttons, 2)
+	assert.Equal(t, "c1", buttons[0]["id"])
+	assert.Equal(t, "Summer", buttons[0]["title"])
+	assert.Equal(t, "Hot", buttons[0]["description"])
+}
+
+func TestApplyButtonSelection_MapsFields(t *testing.T) {
+	session := models.JSONB{
+		"collections": []map[string]any{
+			{"id": "c1", "name": "Summer", "description": "Hot"},
+		},
+	}
+	out := applyButtonSelection(map[string]any{
+		"source":            "dynamic",
+		"mode":              "list",
+		"items_var":         "collections",
+		"title_field":       "name",
+		"id_field":          "id",
+		"description_field": "description",
+		"store_as":          "collection_name",
+		"selection_mapping": map[string]any{
+			"selected_item_id":    "id",
+			"selected_item_title": "title",
+			"selected_item_name":  "name",
+			"":                    "id",
+		},
+	}, session, "c1", "Summer")
+	assert.Equal(t, "Summer", out["collection_name"])
+	assert.Equal(t, "c1", out["selected_item_id"])
+	assert.Equal(t, "Summer", out["selected_item_title"])
+	assert.Equal(t, "Summer", out["selected_item_name"])
+	_, wroteEmpty := out[""]
+	assert.False(t, wroteEmpty)
+}
+
 func TestRunChatGraph_StaticListSelection(t *testing.T) {
 	app, org, account, contact, session := newGraphTestFixtures(t)
 	flow := &models.ChatbotFlow{

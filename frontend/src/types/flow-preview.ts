@@ -9,6 +9,8 @@ export interface ButtonConfig {
   phone_number?: string
   /** voice_call only: how long the button stays clickable; 0 = Meta default (15m). */
   ttl_minutes?: number
+  /** Original dynamic item, used to copy source fields when a row is tapped. */
+  source?: Record<string, any>
 }
 
 export interface ApiConfig {

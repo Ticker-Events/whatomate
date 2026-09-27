@@ -255,20 +255,7 @@ func (a *App) execChatMessage(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	if !ctx.consumed && ctx.buttonID != "" {
 		ctx.consumed = true
-		// Persist the selection when the node configures store_as, mirroring
-		// the prompt node so any node that receives a user response can feed
-		// {{var}} interpolation downstream. Store the visible title (what the
-		// user "said"), falling back to the button id if the title is empty.
-		if storeAs := stringFromConfig(node.Config, "store_as"); storeAs != "" {
-			if ctx.session.SessionData == nil {
-				ctx.session.SessionData = models.JSONB{}
-			}
-			value := ctx.userInput
-			if value == "" {
-				value = ctx.buttonID
-			}
-			ctx.session.SessionData[storeAs] = value
-		}
+		ctx.session.SessionData = applyButtonSelection(node.Config, ctx.session.SessionData, ctx.buttonID, ctx.userInput)
 		return nodeOutcome{outcome: "button:" + ctx.buttonID}, nil
 	}
 
@@ -1056,7 +1043,7 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 	if !ok || raw == nil {
 		return nil, fmt.Errorf("dynamic buttons variable %q is empty", key)
 	}
-	items, ok := raw.([]any)
+	items, ok := anySlice(raw)
 	if !ok {
 		return nil, fmt.Errorf("dynamic buttons variable %q is not an array", key)
 	}
@@ -1096,7 +1083,7 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 		if len(out) >= limit {
 			break
 		}
-		obj, ok := item.(map[string]any)
+		obj, ok := asStringMap(item)
 		if !ok {
 			continue
 		}
@@ -1127,9 +1114,119 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 				}
 			}
 		}
+		btn["_item"] = obj
 		out = append(out, btn)
 	}
 	return out, nil
+}
+
+// anySlice accepts the array shapes that land in session data. TiQR list
+// calls store []map[string]any in memory; a JSONB reload comes back as []any.
+func anySlice(raw any) ([]any, bool) {
+	switch v := raw.(type) {
+	case []any:
+		return v, true
+	case models.JSONBArray:
+		return []any(v), true
+	case []map[string]any:
+		out := make([]any, len(v))
+		for i := range v {
+			out[i] = v[i]
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func asStringMap(item any) (map[string]any, bool) {
+	switch v := item.(type) {
+	case map[string]any:
+		return v, true
+	case models.JSONB:
+		return map[string]any(v), true
+	default:
+		return nil, false
+	}
+}
+
+// applyButtonSelection writes store_as (the tapped title) and selection_mapping
+// (session variable → field on the tapped row). id, title, and description are
+// the row WhatsApp showed. Any other field name is read from the source object.
+func applyButtonSelection(cfg map[string]any, session models.JSONB, buttonID, title string) models.JSONB {
+	if session == nil {
+		session = models.JSONB{}
+	}
+	if cfg == nil {
+		return session
+	}
+	// Resolve the tapped row before writing, so a mapped variable cannot
+	// replace the source array that the lookup still needs.
+	var fields map[string]any
+	if _, ok := cfg["selection_mapping"].(map[string]any); ok {
+		fields = selectedItemFields(cfg, session, buttonID, title)
+	}
+	if storeAs := stringFromConfig(cfg, "store_as"); storeAs != "" {
+		value := title
+		if value == "" {
+			value = buttonID
+		}
+		session[storeAs] = value
+	}
+	mapping, ok := cfg["selection_mapping"].(map[string]any)
+	if !ok || len(mapping) == 0 {
+		return session
+	}
+	for variable, rawField := range mapping {
+		variable = strings.TrimSpace(variable)
+		field, _ := rawField.(string)
+		field = strings.TrimSpace(field)
+		if variable == "" || field == "" {
+			continue
+		}
+		value := fieldString(fields, field)
+		if value == "" {
+			continue
+		}
+		session[variable] = value
+	}
+	return session
+}
+
+func selectedItemFields(cfg map[string]any, data models.JSONB, buttonID, title string) map[string]any {
+	selected := map[string]any{
+		"id":    buttonID,
+		"title": title,
+	}
+	buttons, err := buttonsForNode(cfg, data)
+	if err != nil {
+		return selected
+	}
+	for _, b := range buttons {
+		if fieldString(b, "id") != buttonID {
+			continue
+		}
+		for k, v := range b {
+			if k == "_item" || k == "type" {
+				continue
+			}
+			selected[k] = v
+		}
+		if src, ok := asStringMap(b["_item"]); ok {
+			for k, v := range src {
+				selected[k] = v
+			}
+		}
+		if t := fieldString(b, "title"); t != "" {
+			selected["title"] = t
+		}
+		if d := fieldString(b, "description"); d != "" {
+			selected["description"] = d
+		}
+		selected["id"] = buttonID
+		break
+	}
+	return selected
 }
 
 func fieldString(obj map[string]any, key string) string {
