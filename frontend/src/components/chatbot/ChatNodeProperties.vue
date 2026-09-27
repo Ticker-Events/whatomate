@@ -231,35 +231,69 @@ const gotoFlowTargets = computed(() =>
   (props.availableFlows || []).filter((f) => f.id !== props.currentFlowId),
 )
 
-type SetAssignment = { name: string; value: string }
+type SetAssignmentOp = 'set' | 'append'
+type SetAssignmentValueType = 'expression' | 'json'
+type SetAssignment = { name: string; value: string; op: SetAssignmentOp; value_type: SetAssignmentValueType }
+
+const jsonAssignmentPlaceholder = `{
+  "id": "{{product_id}}",
+  "qty": 1
+}`
+
+function assignmentText(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function assignmentOp(value: unknown): SetAssignmentOp {
+  return value === 'append' ? 'append' : 'set'
+}
+
+function assignmentValueType(value: unknown): SetAssignmentValueType {
+  return value === 'json' ? 'json' : 'expression'
+}
 
 const setAssignments = computed<SetAssignment[]>(() => {
   const set = config.value.set
   if (Array.isArray(set)) {
     return set.map((row: any) => ({
       name: typeof row?.name === 'string' ? row.name : '',
-      value: row?.value == null ? '' : String(row.value),
+      value: assignmentText(row?.value),
+      op: assignmentOp(row?.op),
+      value_type: assignmentValueType(row?.value_type),
     }))
   }
   if (set && typeof set === 'object') {
     return Object.entries(set as Record<string, unknown>).map(([name, value]) => ({
       name,
-      value: value == null ? '' : String(value),
+      value: assignmentText(value),
+      op: 'set' as const,
+      value_type: 'expression' as const,
     }))
   }
   return []
 })
 
 function writeAssignments(rows: SetAssignment[]) {
-  updateConfig('set', rows.map((row) => ({ name: row.name, value: row.value })))
+  updateConfig('set', rows.map((row) => ({
+    name: row.name,
+    value: row.value,
+    op: row.op,
+    value_type: row.value_type,
+  })))
 }
 
 function addAssignment() {
-  writeAssignments([...setAssignments.value, { name: '', value: '' }])
+  writeAssignments([...setAssignments.value, { name: '', value: '', op: 'set', value_type: 'expression' }])
 }
 
-function updateAssignment(index: number, field: 'name' | 'value', value: string) {
-  const rows = setAssignments.value.map((row, i) => (i === index ? { ...row, [field]: value } : row))
+function updateAssignment(index: number, patch: Partial<SetAssignment>) {
+  const rows = setAssignments.value.map((row, i) => (i === index ? { ...row, ...patch } : row))
   writeAssignments(rows)
 }
 
@@ -1023,27 +1057,54 @@ const typeLabel: Record<string, string> = {
             <Plus class="h-3 w-3 mr-1" /> Add
           </Button>
         </div>
-        <div v-for="(row, idx) in setAssignments" :key="idx" class="flex items-center gap-1.5">
-          <Input
-            :model-value="row.name"
-            @update:model-value="(v: string) => updateAssignment(Number(idx), 'name', v)"
-            placeholder="name"
-            class="h-8 text-xs font-mono"
+        <div v-for="(row, idx) in setAssignments" :key="idx" class="space-y-1.5 rounded-md border p-2">
+          <div class="flex items-center gap-1.5">
+            <Input
+              :model-value="row.name"
+              @update:model-value="(v: string) => updateAssignment(Number(idx), { name: v })"
+              placeholder="name"
+              class="h-8 text-xs font-mono"
+            />
+            <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0" @click="removeAssignment(Number(idx))">
+              <Trash2 class="h-3.5 w-3.5 text-destructive" />
+            </Button>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <Select :model-value="row.op" @update:model-value="(v: any) => updateAssignment(Number(idx), { op: v === 'append' ? 'append' : 'set' })">
+              <SelectTrigger class="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="set">Set</SelectItem>
+                <SelectItem value="append">Append to array</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select :model-value="row.value_type" @update:model-value="(v: any) => updateAssignment(Number(idx), { value_type: v === 'json' ? 'json' : 'expression' })">
+              <SelectTrigger class="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="expression">Expression</SelectItem>
+                <SelectItem value="json">JSON</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Textarea
+            v-if="row.value_type === 'json'"
+            :model-value="row.value"
+            @update:model-value="(v: string) => updateAssignment(Number(idx), { value: v })"
+            :placeholder="jsonAssignmentPlaceholder"
+            class="min-h-[88px] text-xs font-mono"
           />
           <Input
+            v-else
             :model-value="row.value"
-            @update:model-value="(v: string) => updateAssignment(Number(idx), 'value', v)"
+            @update:model-value="(v: string) => updateAssignment(Number(idx), { value: v })"
             placeholder="options[0].id"
             class="h-8 text-xs font-mono"
           />
-          <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0" @click="removeAssignment(Number(idx))">
-            <Trash2 class="h-3.5 w-3.5 text-destructive" />
-          </Button>
         </div>
         <p class="text-[10px] text-muted-foreground">
-          Rows run top to bottom. Same expressions as Condition:
+          Rows run top to bottom. Expressions match Condition:
           <code>options[0].id</code>, <code>len(options)</code>, <code>price * quantity</code>.
-          Quote string literals (<code>"premium"</code>). Branch with a Condition node.
+          Quote string literals (<code>"premium"</code>). JSON may use <code v-pre>{{variable}}</code> placeholders.
+          Append pushes one value onto the named array. Branch with a Condition node.
         </p>
       </div>
     </template>

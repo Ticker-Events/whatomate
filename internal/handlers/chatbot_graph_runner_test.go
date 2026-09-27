@@ -1100,6 +1100,106 @@ func TestRunChatGraph_SetVariable_BadExpressionSkipsRow(t *testing.T) {
 	assert.Equal(t, "yes", session.SessionData["also"])
 }
 
+func TestRunChatGraph_SetVariable_JSONKeepsPlaceholderTypes(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData = models.JSONB{
+		"product_id": "sku_1",
+		"qty":        float64(2),
+	}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := newSetVariableFlow(t, app, org, account, []any{
+		map[string]any{
+			"name":       "item",
+			"op":         "set",
+			"value_type": "json",
+			"value":      `{"id":"{{product_id}}","label":"Item {{product_id}}","qty":"{{qty}}","count":1}`,
+		},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	item, ok := session.SessionData["item"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "sku_1", item["id"])
+	assert.Equal(t, "Item sku_1", item["label"])
+	assert.Equal(t, float64(2), item["qty"])
+	assert.Equal(t, float64(1), item["count"])
+}
+
+func TestRunChatGraph_SetVariable_AppendJSONToExistingArray(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData = models.JSONB{
+		"product_id": "sku_2",
+		"cart":       []any{map[string]any{"id": "sku_1"}},
+	}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := newSetVariableFlow(t, app, org, account, []any{
+		map[string]any{
+			"name":       "cart",
+			"op":         "append",
+			"value_type": "json",
+			"value":      `{"id":"{{product_id}}"}`,
+		},
+		map[string]any{
+			"name":       "cart",
+			"op":         "append",
+			"value_type": "json",
+			"value":      `{"id":"sku_3"}`,
+		},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	cart, ok := session.SessionData["cart"].([]any)
+	require.True(t, ok)
+	require.Len(t, cart, 3)
+	assert.Equal(t, map[string]any{"id": "sku_1"}, cart[0])
+	assert.Equal(t, map[string]any{"id": "sku_2"}, cart[1])
+	assert.Equal(t, map[string]any{"id": "sku_3"}, cart[2])
+}
+
+func TestRunChatGraph_SetVariable_AppendMissingCreatesArray(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData = models.JSONB{"product_id": "sku_1"}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := newSetVariableFlow(t, app, org, account, []any{
+		map[string]any{
+			"name":       "cart",
+			"op":         "append",
+			"value_type": "json",
+			"value":      `{"id":"{{product_id}}"}`,
+		},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, []any{map[string]any{"id": "sku_1"}}, session.SessionData["cart"])
+}
+
+func TestRunChatGraph_SetVariable_InvalidJSONAndNonArrayAppendSkip(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData = models.JSONB{"cart": "not-an-array"}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := newSetVariableFlow(t, app, org, account, []any{
+		map[string]any{"name": "good", "value": `"ok"`},
+		map[string]any{"name": "bad", "value_type": "json", "value": `{`},
+		map[string]any{"name": "cart", "op": "append", "value_type": "json", "value": `{"id":"x"}`},
+		map[string]any{"name": "also", "value": `"yes"`},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "ok", session.SessionData["good"])
+	_, hasBad := session.SessionData["bad"]
+	assert.False(t, hasBad)
+	assert.Equal(t, "not-an-array", session.SessionData["cart"])
+	assert.Equal(t, "yes", session.SessionData["also"])
+}
+
 // newAIResponseFlow builds a two-node graph (ai_response → end).
 func newAIResponseFlow(t *testing.T, app *App, org *models.Organization, account *models.WhatsAppAccount, promptTemplate string) *models.ChatbotFlow {
 	t.Helper()

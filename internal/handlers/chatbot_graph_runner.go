@@ -627,14 +627,23 @@ type scheduleLogger interface {
 }
 
 // setAssignment is one variable write. When isExpr is true, expr is an
-// expr-lang expression evaluated against the session. Otherwise raw is
-// stored as authored (numbers and booleans in the legacy map form).
+// expr-lang expression evaluated against the session. When isJSON is true,
+// jsonText is parsed and {{path}} placeholders are filled from the session.
+// Otherwise raw is stored as authored (numbers and booleans in the legacy
+// map form). append pushes the value onto an array instead of replacing it.
 type setAssignment struct {
-	name   string
-	expr   string
-	raw    any
-	isExpr bool
+	name     string
+	expr     string
+	jsonText string
+	raw      any
+	isExpr   bool
+	isJSON   bool
+	append   bool
 }
+
+// exactJSONTemplateVar matches a string whose entire value is one
+// {{path}} placeholder, so the session value can keep its original type.
+var exactJSONTemplateVar = regexp.MustCompile(`^\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*\}\}$`)
 
 // assignmentRows reads config.set. An array of {name, value} keeps author
 // order so a later row can read an earlier write. A map is the legacy
@@ -649,8 +658,7 @@ func assignmentRows(set any) []setAssignment {
 			if !ok {
 				continue
 			}
-			name, _ := row["name"].(string)
-			rows = append(rows, assignmentFromValue(name, row["value"]))
+			rows = append(rows, assignmentFromRow(row))
 		}
 		return rows
 	case map[string]any:
@@ -664,6 +672,24 @@ func assignmentRows(set any) []setAssignment {
 	}
 }
 
+func assignmentFromRow(row map[string]any) setAssignment {
+	name, _ := row["name"].(string)
+	op, _ := row["op"].(string)
+	valueType, _ := row["value_type"].(string)
+	if valueType == "json" {
+		text, _ := row["value"].(string)
+		return setAssignment{
+			name:     name,
+			jsonText: text,
+			isJSON:   true,
+			append:   op == "append",
+		}
+	}
+	assignment := assignmentFromValue(name, row["value"])
+	assignment.append = op == "append"
+	return assignment
+}
+
 func assignmentFromValue(name string, raw any) setAssignment {
 	if exprText, ok := raw.(string); ok {
 		return setAssignment{name: name, expr: exprText, isExpr: true}
@@ -671,19 +697,82 @@ func assignmentFromValue(name string, raw any) setAssignment {
 	return setAssignment{name: name, raw: raw}
 }
 
+func resolveSetAssignment(row setAssignment, data models.JSONB) (any, error) {
+	if row.isJSON {
+		return resolveJSONAssignment(row.jsonText, data)
+	}
+	if !row.isExpr {
+		return row.raw, nil
+	}
+	return evaluateExpression(row.expr, data)
+}
+
+func resolveJSONAssignment(text string, data map[string]any) (any, error) {
+	var parsed any
+	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
+		return nil, fmt.Errorf("json: %w", err)
+	}
+	return resolveJSONTemplates(parsed, data), nil
+}
+
+func resolveJSONTemplates(value any, data map[string]any) any {
+	switch v := value.(type) {
+	case string:
+		if match := exactJSONTemplateVar.FindStringSubmatch(v); match != nil {
+			return getNestedValue(data, match[1])
+		}
+		return processTemplate(v, data)
+	case map[string]any:
+		for key, child := range v {
+			v[key] = resolveJSONTemplates(child, data)
+		}
+		return v
+	case []any:
+		for i, child := range v {
+			v[i] = resolveJSONTemplates(child, data)
+		}
+		return v
+	default:
+		return value
+	}
+}
+
+func applySetAssignment(data models.JSONB, row setAssignment, value any) error {
+	if !row.append {
+		data[row.name] = value
+		return nil
+	}
+	current, exists := data[row.name]
+	if !exists || current == nil {
+		data[row.name] = []any{value}
+		return nil
+	}
+	switch arr := current.(type) {
+	case []any:
+		data[row.name] = append(arr, value)
+		return nil
+	case models.JSONBArray:
+		data[row.name] = append([]any(arr), value)
+		return nil
+	default:
+		return fmt.Errorf("%s is not an array", row.name)
+	}
+}
+
 // execChatSetVariable assigns one or more values into SessionData. Each
-// string value is an expr-lang expression (the same language as condition
-// nodes): len(options), price * quantity, options[0].id, "premium".
-// Rows run in order and each write is visible to the next row.
-// A row that fails to compile or run is skipped. Non-blocking; outcome
-// "default".
+// expression value is expr-lang (the same language as condition nodes):
+// len(options), price * quantity, options[0].id, "premium". A json value
+// is parsed and may contain {{variable}} placeholders. op "append" pushes
+// the value onto the named array. Rows run in order and each write is
+// visible to the next row. A row that fails is skipped. Non-blocking;
+// outcome "default".
 //
 // Config:
 //
 //	{
 //	  "set": [
 //	    { "name": "selected_option_id", "value": "options[0].id" },
-//	    { "name": "option_count", "value": "len(options)" }
+//	    { "name": "cart", "op": "append", "value_type": "json", "value": "{\"id\":\"{{product_id}}\"}" }
 //	  ]
 //	}
 func (a *App) execChatSetVariable(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
@@ -699,18 +788,25 @@ func (a *App) execChatSetVariable(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome
 		if row.name == "" {
 			continue
 		}
-		if !row.isExpr {
-			ctx.session.SessionData[row.name] = row.raw
-			continue
-		}
-		value, err := evaluateExpression(row.expr, ctx.session.SessionData)
+		value, err := resolveSetAssignment(row, ctx.session.SessionData)
 		if err != nil {
-			a.Log.Warn("set_variable expression failed",
-				"node", node.ID, "session", ctx.session.ID,
-				"name", row.name, "expression", row.expr, "error", err)
+			if row.isJSON {
+				a.Log.Warn("set_variable json failed",
+					"node", node.ID, "session", ctx.session.ID,
+					"name", row.name, "error", err)
+			} else {
+				a.Log.Warn("set_variable expression failed",
+					"node", node.ID, "session", ctx.session.ID,
+					"name", row.name, "expression", row.expr, "error", err)
+			}
 			continue
 		}
-		ctx.session.SessionData[row.name] = value
+		if err := applySetAssignment(ctx.session.SessionData, row, value); err != nil {
+			a.Log.Warn("set_variable append skipped",
+				"node", node.ID, "session", ctx.session.ID,
+				"name", row.name, "error", err)
+			continue
+		}
 	}
 	return nodeOutcome{outcome: "default"}, nil
 }

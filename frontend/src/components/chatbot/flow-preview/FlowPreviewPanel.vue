@@ -64,7 +64,7 @@ const controlNodeMeta: Record<string, { label: string; icon: any; description: s
   set_variable: {
     label: 'Assign',
     icon: Variable,
-    description: 'Assigns session variables from expressions. No WhatsApp message is sent.',
+    description: 'Assigns session variables from expressions or JSON. Append adds one value to an array. No WhatsApp message is sent.',
   },
   end: {
     label: 'End',

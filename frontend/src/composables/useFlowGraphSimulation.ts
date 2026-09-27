@@ -402,15 +402,25 @@ export function useFlowGraphSimulation(
   function execSetVariable(node: ChatNode): string {
     for (const row of readAssignments(node.config?.set)) {
       if (!row.name) continue
-      if (!row.isExpr) {
-        setVariable(row.name, row.raw)
-        continue
-      }
-      const result = evalExpression(row.expr, state.variables)
-      if (!result.ok) continue
-      setVariable(row.name, result.value)
+      const resolved = resolvePreviewAssignment(row, state.variables)
+      if (!resolved.ok) continue
+      applyPreviewAssignment(row.name, row.append, resolved.value)
     }
     return 'default'
+  }
+
+  function applyPreviewAssignment(name: string, append: boolean, value: unknown): void {
+    if (!append) {
+      setVariable(name, value)
+      return
+    }
+    const current = state.variables[name]
+    if (current == null) {
+      setVariable(name, [value])
+      return
+    }
+    if (!Array.isArray(current)) return
+    setVariable(name, [...current, value])
   }
 
   function execTiming(node: ChatNode): string {
@@ -976,15 +986,20 @@ function coerceExprBool(value: unknown): boolean {
   return true
 }
 
-type PreviewAssignment = { name: string; isExpr: boolean; expr: string; raw: unknown }
+type PreviewAssignment = {
+  name: string
+  isExpr: boolean
+  isJSON: boolean
+  append: boolean
+  expr: string
+  raw: unknown
+}
 
 function readAssignments(set: unknown): PreviewAssignment[] {
   if (Array.isArray(set)) {
     return set.flatMap((item) => {
       if (!item || typeof item !== 'object') return []
-      const row = item as Record<string, unknown>
-      const name = typeof row.name === 'string' ? row.name : ''
-      return [previewAssignment(name, row.value)]
+      return [previewAssignmentFromRow(item as Record<string, unknown>)]
     })
   }
   if (set && typeof set === 'object') {
@@ -993,9 +1008,61 @@ function readAssignments(set: unknown): PreviewAssignment[] {
   return []
 }
 
+function previewAssignmentFromRow(row: Record<string, unknown>): PreviewAssignment {
+  const name = typeof row.name === 'string' ? row.name : ''
+  const append = row.op === 'append'
+  if (row.value_type === 'json') {
+    return {
+      name,
+      isExpr: false,
+      isJSON: true,
+      append,
+      expr: typeof row.value === 'string' ? row.value : '',
+      raw: row.value,
+    }
+  }
+  return { ...previewAssignment(name, row.value), append }
+}
+
 function previewAssignment(name: string, raw: unknown): PreviewAssignment {
-  if (typeof raw === 'string') return { name, isExpr: true, expr: raw, raw }
-  return { name, isExpr: false, expr: '', raw }
+  if (typeof raw === 'string') return { name, isExpr: true, isJSON: false, append: false, expr: raw, raw }
+  return { name, isExpr: false, isJSON: false, append: false, expr: '', raw }
+}
+
+const EXACT_VAR_RE = /^\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*\}\}$/
+
+function resolvePreviewAssignment(row: PreviewAssignment, vars: Record<string, any>): { ok: boolean; value: unknown } {
+  if (row.isJSON) return resolveJSONAssignment(row.expr, vars)
+  if (!row.isExpr) return { ok: true, value: row.raw }
+  return evalExpression(row.expr, vars)
+}
+
+function resolveJSONAssignment(text: string, vars: Record<string, any>): { ok: boolean; value: unknown } {
+  try {
+    return { ok: true, value: resolveJSONTemplates(JSON.parse(text), vars) }
+  } catch {
+    return { ok: false, value: undefined }
+  }
+}
+
+function resolveJSONTemplates(value: unknown, vars: Record<string, any>): unknown {
+  if (typeof value === 'string') {
+    const match = value.match(EXACT_VAR_RE)
+    if (match) {
+      const looked = lookupPath(vars, match[1])
+      return looked === undefined ? null : looked
+    }
+    return interpolate(value, vars)
+  }
+  if (Array.isArray(value)) return value.map((item) => resolveJSONTemplates(item, vars))
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = resolveJSONTemplates(child, vars)
+    }
+    return out
+  }
+  return value
 }
 
 function translateExprToJs(expression: string): string {
