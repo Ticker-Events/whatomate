@@ -128,6 +128,14 @@ test.describe('Chatbot Flow Builder - Buttons node', () => {
     await expect(builder.addPhoneButton).toBeDisabled()
   })
 
+  test('maps a selected row field into a variable', async () => {
+    const panel = builder.page.locator('div.space-y-4').filter({ has: builder.page.getByRole('heading', { name: 'Buttons', exact: true }) })
+    await expect(panel.getByPlaceholder('selected_item_id')).toHaveCount(0)
+    await panel.getByRole('button', { name: 'Add field' }).click()
+    await expect(panel.getByPlaceholder('selected_item_id')).toBeVisible()
+    await expect(panel.getByPlaceholder('id')).toBeVisible()
+  })
+
   test('removes a button', async () => {
     await builder.addReplyButton.click()
     await expect(builder.buttonOptionsLabel).toContainText('1/10')

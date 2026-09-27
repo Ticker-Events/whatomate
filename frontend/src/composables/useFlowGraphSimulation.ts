@@ -488,6 +488,25 @@ export function useFlowGraphSimulation(
 
   // ---- Inputs from the UI ------------------------------------------------
 
+  function applyPreviewButtonSelection(node: ChatNode, btn: ButtonConfig) {
+    const storeAs = stringField(node, 'store_as')
+    if (storeAs) setVariable(storeAs, btn.title)
+    const mapping = node.config?.selection_mapping
+    if (!mapping || typeof mapping !== 'object') return
+    const selected: Record<string, any> = { ...(btn.source || {}) }
+    selected.id = btn.id
+    selected.title = btn.title
+    if (btn.description) selected.description = btn.description
+    for (const [variable, field] of Object.entries(mapping as Record<string, unknown>)) {
+      const name = variable.trim()
+      const key = typeof field === 'string' ? field.trim() : ''
+      if (!name || !key) continue
+      const value = selected[key]
+      if (value == null || value === '') continue
+      setVariable(name, typeof value === 'string' ? value : String(value))
+    }
+  }
+
   async function processUserInput(input: UserInput): Promise<void> {
     if (state.status !== 'waiting_input' || !state.currentStepName) return
     const node = nodeById(state.currentStepName)
@@ -528,6 +547,7 @@ export function useFlowGraphSimulation(
       const btn = input
       addMessage('user', btn.title)
       log('branch', node.id, { buttonId: btn.id })
+      applyPreviewButtonSelection(node, btn)
       await advance(node, `button:${btn.id}`)
     }
   }
@@ -745,16 +765,16 @@ function resolveNodeButtons(node: ChatNode, vars: Record<string, any>): ButtonCo
     const title = previewField(obj, titleField)
     if (!title) return
     if (kind === 'url') {
-      out.push({ id: `url_${index + 1}`, title, type: 'url', url: previewField(obj, urlField) })
+      out.push({ id: `url_${index + 1}`, title, type: 'url', url: previewField(obj, urlField), source: obj })
       return
     }
     if (kind === 'phone') {
-      out.push({ id: `phone_${index + 1}`, title, type: 'phone', phone_number: previewField(obj, phoneField) })
+      out.push({ id: `phone_${index + 1}`, title, type: 'phone', phone_number: previewField(obj, phoneField), source: obj })
       return
     }
     const id = previewField(obj, idField) || `btn_${index + 1}`
     const description = kind === 'list' && descField ? previewField(obj, descField) : undefined
-    out.push({ id, title, type: 'reply', description: description || undefined })
+    out.push({ id, title, type: 'reply', description: description || undefined, source: obj })
   })
   return out
 }

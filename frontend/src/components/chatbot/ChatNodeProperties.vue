@@ -207,6 +207,32 @@ function updateResponseMappingValue(key: string, value: string) {
   updateConfig('response_mapping', m)
 }
 
+function addSelectionMapping() {
+  const m = { ...(config.value.selection_mapping || {}) }
+  m[''] = ''
+  updateConfig('selection_mapping', m)
+}
+
+function removeSelectionMapping(key: string) {
+  const m = { ...(config.value.selection_mapping || {}) }
+  delete m[key]
+  updateConfig('selection_mapping', m)
+}
+
+function updateSelectionMappingKey(oldKey: string, newKey: string) {
+  if (oldKey === newKey) return
+  const m = { ...(config.value.selection_mapping || {}) }
+  m[newKey] = m[oldKey]
+  delete m[oldKey]
+  updateConfig('selection_mapping', m)
+}
+
+function updateSelectionMappingValue(key: string, value: string) {
+  const m = { ...(config.value.selection_mapping || {}) }
+  m[key] = value
+  updateConfig('selection_mapping', m)
+}
+
 function updateParam(key: string, value: string) {
   updateConfig('params', { ...(config.value.params || {}), [key]: value })
 }
@@ -616,6 +642,23 @@ const typeLabel: Record<string, string> = {
           class="h-8 text-sm font-mono"
         />
         <p class="text-[10px] text-muted-foreground">Saves the tapped button's title into this variable so later nodes can reference it.</p>
+      </div>
+
+      <div class="space-y-1.5">
+        <div class="flex items-center justify-between">
+          <Label class="text-xs">Save selection fields</Label>
+          <Button variant="outline" size="sm" class="h-6 text-xs" @click="addSelectionMapping">
+            <Plus class="h-3 w-3 mr-1" /> Add field
+          </Button>
+        </div>
+        <p class="text-[10px] text-muted-foreground">Maps a field from the tapped row into a session variable. Use id, title, or description for the selected row, or a source field such as name.</p>
+        <div v-for="(val, key) in (config.selection_mapping || {})" :key="String(key)" class="flex items-center gap-1">
+          <Input :model-value="String(key)" @update:model-value="(v: string) => updateSelectionMappingKey(String(key), v)" placeholder="selected_item_id" class="h-7 text-xs flex-1 font-mono" />
+          <Input :model-value="String(val)" @update:model-value="(v: string) => updateSelectionMappingValue(String(key), v)" placeholder="id" class="h-7 text-xs flex-1 font-mono" />
+          <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeSelectionMapping(String(key))">
+            <Trash2 class="h-3 w-3 text-destructive" />
+          </Button>
+        </div>
       </div>
 
     </template>
