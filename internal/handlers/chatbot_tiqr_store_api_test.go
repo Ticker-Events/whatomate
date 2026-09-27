@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -232,6 +233,57 @@ func TestRunChatGraph_TiqrStoreAPI_RESTMapsResponseOn2xx(t *testing.T) {
 	assert.Equal(t, "Chocolate Cake", session.SessionData["product_name"])
 	path := chatGraphPath(t, session)
 	assert.Equal(t, "http:2xx", path[0]["outcome"])
+}
+
+func TestRunChatGraph_TiqrStoreAPI_RESTListCollectionsLoopsNames(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/service/buyer/store/42/category/", r.URL.Path)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"count": 2,
+			"results": []map[string]any{
+				{"id": 57, "name": "Best Sellers"},
+				{"id": 51, "name": "Bracelets"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	prev := newTiqrStoreRESTClient
+	newTiqrStoreRESTClient = func(baseURL string) *ticker.Client {
+		return ticker.NewClient(baseURL, srv.Client())
+	}
+	t.Cleanup(func() { newTiqrStoreRESTClient = prev })
+
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	flow := newTiqrStoreFlow(t, app, org, account, map[string]any{
+		"api_type":  "rest",
+		"operation": "list_collections",
+		"response_mapping": map[string]any{
+			"collections": "results",
+		},
+		"message_template": "{{for c in collections}}\n{{c.name}}\n{{endfor}}",
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	path := chatGraphPath(t, session)
+	require.NotEmpty(t, path)
+	assert.Equal(t, "http:2xx", path[0]["outcome"])
+
+	var msgs []models.ChatbotSessionMessage
+	require.NoError(t, app.DB.Where("session_id = ? AND direction = ?", session.ID, models.DirectionOutgoing).Find(&msgs).Error)
+	rendered := ""
+	for _, m := range msgs {
+		if strings.Contains(m.Message, "Best Sellers") {
+			rendered = m.Message
+		}
+	}
+	assert.Contains(t, rendered, "Best Sellers")
+	assert.Contains(t, rendered, "Bracelets")
 }
 
 func TestRunChatGraph_TiqrStoreAPI_RESTMissingURLRoutesNon2xx(t *testing.T) {

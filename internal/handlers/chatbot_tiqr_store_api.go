@@ -110,6 +110,7 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	}
 
 	payload := tiqrStoreResultMap(operation, raw)
+	aliasBuyerListResults(payload)
 	applyChatResponseMapping(node.Config, payload, sessionData)
 
 	if tmpl := stringFromConfig(node.Config, "message_template"); tmpl != "" {
@@ -466,6 +467,23 @@ func templateTiqrParams(raw any, replace func(string) string) map[string]string 
 		out[key] = replace(s)
 	}
 	return out
+}
+
+// aliasBuyerListResults keeps the buyer JSON list key. REST and MCP list
+// calls store the page under categories or products; flow authors map results.
+func aliasBuyerListResults(payload map[string]any) {
+	if payload == nil {
+		return
+	}
+	if _, ok := payload["results"]; ok {
+		return
+	}
+	for _, key := range []string{"categories", "products"} {
+		if list, ok := payload[key]; ok {
+			payload["results"] = list
+			return
+		}
+	}
 }
 
 func tiqrStoreResultMap(operation string, raw any) map[string]any {
