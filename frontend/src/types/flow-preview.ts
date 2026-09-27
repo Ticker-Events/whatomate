@@ -11,6 +11,16 @@ export interface ButtonConfig {
   ttl_minutes?: number
   /** Original dynamic item, used to copy source fields when a row is tapped. */
   source?: Record<string, any>
+  body?: string
+  media_url?: string
+  media_type?: 'image' | 'video'
+}
+
+export type PreviewCarouselCard = {
+  mediaType: 'image' | 'video'
+  mediaUrl: string
+  body?: string
+  buttons: ButtonConfig[]
 }
 
 export interface ApiConfig {
@@ -75,7 +85,8 @@ export interface SimulationMessage {
   stepName?: string
   buttons?: ButtonConfig[]
   /** list messages always open the picker; reply buttons use a count split */
-  interactive?: 'buttons' | 'list'
+  interactive?: 'buttons' | 'list' | 'carousel'
+  cards?: PreviewCarouselCard[]
   header?: string
   footer?: string
   listButton?: string

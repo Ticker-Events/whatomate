@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import PreviewMessage from './PreviewMessage.vue'
 import PreviewButtonGroup from './PreviewButtonGroup.vue'
 import PreviewListPicker from './PreviewListPicker.vue'
+import PreviewCarousel from './PreviewCarousel.vue'
 import PreviewInputBar from './PreviewInputBar.vue'
 import DebugPanel from './DebugPanel.vue'
 import ApiMockDialog from './ApiMockDialog.vue'
@@ -61,15 +62,17 @@ const lastButtonMessage = computed(() => {
   if (!isWaitingForInput.value || !currentStep.value) return null
   if (currentStep.value.message_type !== 'buttons') return null
 
-  const lastBotMessage = [...state.messages].reverse().find(m => m.type === 'bot' && Array.isArray(m.buttons))
+  const lastBotMessage = [...state.messages].reverse().find(m => m.type === 'bot' && (Array.isArray(m.buttons) || Array.isArray(m.cards)))
   return lastBotMessage
 })
 
 const showReplyButtons = computed(() => {
   const message = lastButtonMessage.value
   if (!message?.buttons) return false
-  return message.interactive !== 'list' && message.buttons.length > 0 && message.buttons.length <= 3
+  return message.interactive !== 'list' && message.interactive !== 'carousel' && message.buttons.length > 0 && message.buttons.length <= 3
 })
+
+const showCarousel = computed(() => lastButtonMessage.value?.interactive === 'carousel')
 
 const showListPicker = computed(() => {
   const message = lastButtonMessage.value
@@ -228,8 +231,14 @@ function handleGoToStep(stepName: string) {
                 class="flex justify-start"
               >
                 <div class="max-w-[85%]">
+                  <PreviewCarousel
+                    v-if="showCarousel"
+                    :cards="lastButtonMessage.cards || []"
+                    :disabled="!isWaitingForInput"
+                    @select="handleButtonSelect"
+                  />
                   <PreviewButtonGroup
-                    v-if="showReplyButtons"
+                    v-else-if="showReplyButtons"
                     :buttons="lastButtonMessage.buttons"
                     :disabled="!isWaitingForInput"
                     @select="handleButtonSelect"

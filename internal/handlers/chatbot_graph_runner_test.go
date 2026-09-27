@@ -1561,6 +1561,58 @@ func TestApplyButtonSelection_MapsFields(t *testing.T) {
 	assert.False(t, wroteEmpty)
 }
 
+func TestCarouselCardsForNode_MapSlice(t *testing.T) {
+	cards, err := carouselCardsForNode(map[string]any{
+		"mode":        "carousel",
+		"source":      "dynamic",
+		"items_var":   "{{products}}",
+		"media_field": "image",
+		"body_field":  "blurb",
+		"title_field": "name",
+		"id_field":    "id",
+	}, models.JSONB{
+		"products": []map[string]any{
+			{"id": "p1", "name": "Aloe", "image": "https://example.com/a.jpg", "blurb": "Green"},
+			{"id": "p2", "name": "Fern", "image": "https://example.com/b.jpg", "blurb": "Leafy"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, cards, 2)
+	assert.Equal(t, "p1", cards[0]["id"])
+	assert.Equal(t, "Aloe", cards[0]["title"])
+	assert.Equal(t, "Green", cards[0]["body"])
+	assert.Equal(t, "https://example.com/a.jpg", cards[0]["media_url"])
+}
+
+func TestApplyButtonSelection_CarouselSecondReply(t *testing.T) {
+	session := models.JSONB{
+		"products": []map[string]any{
+			{"id": "p1", "name": "Aloe", "image": "https://example.com/a.jpg", "fav": "Save", "fav_id": "fav-aloe"},
+			{"id": "p2", "name": "Fern", "image": "https://example.com/b.jpg", "fav": "Save", "fav_id": "fav-fern"},
+		},
+	}
+	out := applyButtonSelection(map[string]any{
+		"mode":          "carousel",
+		"source":        "dynamic",
+		"items_var":     "products",
+		"media_field":   "image",
+		"title_field":   "name",
+		"id_field":      "id",
+		"title_field_2": "fav",
+		"id_field_2":    "fav_id",
+		"store_as":      "picked",
+		"selection_mapping": map[string]any{
+			"selected_item_id":    "id",
+			"selected_item_title": "title",
+			"selected_item_name":  "name",
+		},
+	}, session, "fav-fern", "Save")
+	assert.Equal(t, "Save", out["picked"])
+	assert.Equal(t, "fav-fern", out["selected_item_id"])
+	assert.Equal(t, "Save", out["selected_item_title"])
+	assert.Equal(t, "Fern", out["selected_item_name"])
+}
+
 func TestRunChatGraph_StaticListSelection(t *testing.T) {
 	app, org, account, contact, session := newGraphTestFixtures(t)
 	flow := &models.ChatbotFlow{

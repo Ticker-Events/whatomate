@@ -6,6 +6,7 @@ import type {
   SimulationMessage,
   ExecutionLogType,
   ButtonConfig,
+  PreviewCarouselCard,
   UserInput,
 } from '@/types/flow-preview'
 import { useApiMocker } from './useApiMocker'
@@ -351,6 +352,18 @@ export function useFlowGraphSimulation(
     const vars = state.variables
     const body = interpolate(stringField(node, 'body', 'message', 'text') || node.label, vars)
     const isList = node.config?.mode === 'list'
+    const isCarousel = node.config?.mode === 'carousel'
+    if (isCarousel) {
+      const cards = resolveNodeCarousel(node, vars)
+      addMessage('bot', body, {
+        stepName: node.id,
+        interactive: 'carousel',
+        cards,
+        buttons: cards.flatMap((card) => card.buttons),
+      })
+      state.status = 'waiting_input'
+      return '__yield__'
+    }
     const buttons = resolveNodeButtons(node, vars)
     addMessage('bot', body, {
       stepName: node.id,
@@ -494,6 +507,8 @@ export function useFlowGraphSimulation(
     const mapping = node.config?.selection_mapping
     if (!mapping || typeof mapping !== 'object') return
     const selected: Record<string, any> = { ...(btn.source || {}) }
+    if (btn.body && (selected.body == null || selected.body === '')) selected.body = btn.body
+    if (btn.media_url && (selected.media_url == null || selected.media_url === '')) selected.media_url = btn.media_url
     selected.id = btn.id
     selected.title = btn.title
     if (btn.description) selected.description = btn.description
@@ -724,6 +739,105 @@ function previewField(obj: Record<string, any>, key: string): string {
   const value = obj[key]
   if (value == null) return ''
   return String(value).trim()
+}
+
+function resolveNodeCarousel(node: ChatNode, vars: Record<string, any>): PreviewCarouselCard[] {
+  const cfg = node.config || {}
+  const action = cfg.card_action === 'url' ? 'url' : 'reply'
+  const cards: PreviewCarouselCard[] = []
+
+  const pushCard = (card: PreviewCarouselCard) => {
+    if (cards.length < 10 && card.mediaUrl && card.buttons.length > 0) cards.push(card)
+  }
+
+  if (cfg.source === 'dynamic') {
+    const key = String(cfg.items_var || '').trim().replace(/^\{\{/, '').replace(/\}\}$/, '').trim()
+    const raw = key ? vars[key] : undefined
+    if (!Array.isArray(raw)) return []
+    const mediaField = stringFromConfig(cfg, 'media_field') || 'image'
+    const bodyField = stringFromConfig(cfg, 'body_field')
+    const titleField = stringFromConfig(cfg, 'title_field') || 'title'
+    const idField = stringFromConfig(cfg, 'id_field') || 'id'
+    const titleField2 = stringFromConfig(cfg, 'title_field_2')
+    const idField2 = stringFromConfig(cfg, 'id_field_2')
+    const urlField = stringFromConfig(cfg, 'url_field') || 'url'
+    const buttonTitle = interpolate(stringFromConfig(cfg, 'button_title'), vars)
+    const mediaType = cfg.media_type === 'video' ? 'video' : 'image'
+    raw.forEach((item, index) => {
+      if (!item || typeof item !== 'object') return
+      const obj = item as Record<string, any>
+      const mediaUrl = previewField(obj, mediaField)
+      const body = bodyField ? previewField(obj, bodyField) : ''
+      const buttons = carouselButtons(action, {
+        title: action === 'url' ? (buttonTitle || previewField(obj, titleField)) : previewField(obj, titleField),
+        id: previewField(obj, idField) || `card_${index + 1}`,
+        url: previewField(obj, urlField),
+        title2: titleField2 ? previewField(obj, titleField2) : '',
+        id2: previewField(obj, idField2) || `card_${index + 1}_b`,
+        requireSecond: Boolean(titleField2),
+        body,
+        mediaUrl,
+        mediaType,
+        source: obj,
+      })
+      if (!buttons) return
+      pushCard({ mediaType, mediaUrl, body: body || undefined, buttons })
+    })
+    return cards
+  }
+
+  const buttons = (cfg.buttons as Record<string, any>[] | undefined) || []
+  buttons.forEach((card, index) => {
+    const mediaType = card.media_type === 'video' ? 'video' : 'image'
+    const mediaUrl = interpolate(String(card.media_url || ''), vars)
+    const body = interpolate(String(card.body || ''), vars)
+    const built = carouselButtons(action, {
+      title: interpolate(String(card.title || ''), vars),
+      id: interpolate(String(card.id || ''), vars) || `card_${index + 1}`,
+      url: interpolate(String(card.url || ''), vars),
+      title2: interpolate(String(card.title_2 || ''), vars),
+      id2: interpolate(String(card.id_2 || ''), vars) || `card_${index + 1}_b`,
+      requireSecond: false,
+      body,
+      mediaUrl,
+      mediaType,
+    })
+    if (!built) return
+    pushCard({ mediaType, mediaUrl, body: body || undefined, buttons: built })
+  })
+  return cards
+}
+
+function carouselButtons(action: 'url' | 'reply', card: {
+  title: string
+  id: string
+  url: string
+  title2: string
+  id2: string
+  requireSecond: boolean
+  body: string
+  mediaUrl: string
+  mediaType: 'image' | 'video'
+  source?: Record<string, any>
+}): ButtonConfig[] | null {
+  if (!card.mediaUrl || !card.title) return null
+  const shared = {
+    body: card.body || undefined,
+    media_url: card.mediaUrl,
+    media_type: card.mediaType,
+    source: card.source,
+  }
+  if (action === 'url') {
+    if (!card.url) return null
+    return [{ id: card.id, title: card.title, type: 'url', url: card.url, ...shared }]
+  }
+  const buttons: ButtonConfig[] = [{ id: card.id, title: card.title, type: 'reply', ...shared }]
+  if (card.title2) {
+    buttons.push({ id: card.id2, title: card.title2, type: 'reply', ...shared })
+  } else if (card.requireSecond) {
+    return null
+  }
+  return buttons
 }
 
 // resolveNodeButtons mirrors the backend buttonsForNode mapping so the

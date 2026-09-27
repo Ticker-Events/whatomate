@@ -137,6 +137,151 @@ func ListMessageInteractive(bodyText string, params ListMessageParams) (map[stri
 	return interactive, nil
 }
 
+// CarouselQuickReply is one quick-reply button on a media carousel card.
+type CarouselQuickReply struct {
+	ID    string
+	Title string
+}
+
+// CarouselCard is one horizontally scrolling card. Action is "url" or "reply".
+// URL cards use the first reply title as the button label and URL as the link.
+// Reply cards use one or two quick replies.
+type CarouselCard struct {
+	MediaType string
+	MediaURL  string
+	Body      string
+	Action    string
+	URL       string
+	Replies   []CarouselQuickReply
+}
+
+// CarouselMessageParams is an interactive media carousel (2–10 cards).
+type CarouselMessageParams struct {
+	Cards []CarouselCard
+}
+
+func limitLineBreaks(s string, max int) string {
+	if max < 0 {
+		return s
+	}
+	parts := strings.Split(s, "\n")
+	if len(parts) <= max+1 {
+		return s
+	}
+	return strings.Join(parts[:max+1], "\n")
+}
+
+// CarouselMessageInteractive builds the interactive payload for a media carousel.
+// Cards with an empty media URL or button label are skipped. At least 2 cards
+// are required, and every card must use the same action and button count.
+func CarouselMessageInteractive(bodyText string, params CarouselMessageParams) (map[string]any, error) {
+	bodyText = strings.TrimSpace(bodyText)
+	if bodyText == "" {
+		return nil, fmt.Errorf("body text is required")
+	}
+	bodyText = truncateRunes(bodyText, 1024)
+
+	cards := make([]map[string]any, 0, 10)
+	var action string
+	var replyCount int
+	for i, card := range params.Cards {
+		if len(cards) >= 10 {
+			break
+		}
+		mediaURL := strings.TrimSpace(card.MediaURL)
+		if mediaURL == "" {
+			continue
+		}
+		cardAction := card.Action
+		if cardAction != "url" {
+			cardAction = "reply"
+		}
+		replies := make([]CarouselQuickReply, 0, 2)
+		for _, reply := range card.Replies {
+			title := strings.TrimSpace(reply.Title)
+			if title == "" {
+				continue
+			}
+			replies = append(replies, CarouselQuickReply{
+				ID:    strings.TrimSpace(reply.ID),
+				Title: title,
+			})
+			if len(replies) == 2 {
+				break
+			}
+		}
+		if cardAction == "url" {
+			if len(replies) == 0 || strings.TrimSpace(card.URL) == "" {
+				continue
+			}
+			replies = replies[:1]
+		} else if len(replies) == 0 {
+			continue
+		}
+		if len(cards) == 0 {
+			action = cardAction
+			replyCount = len(replies)
+		} else if cardAction != action || len(replies) != replyCount {
+			return nil, fmt.Errorf("carousel cards must use the same buttons")
+		}
+
+		mediaType := card.MediaType
+		if mediaType != "video" {
+			mediaType = "image"
+		}
+		built := map[string]any{
+			"card_index": len(cards),
+			"type":       "cta_url",
+			"header": map[string]any{
+				"type": mediaType,
+				mediaType: map[string]any{
+					"link": mediaURL,
+				},
+			},
+		}
+		if body := strings.TrimSpace(card.Body); body != "" {
+			body = truncateRunes(limitLineBreaks(body, 2), 160)
+			built["body"] = map[string]any{"text": body}
+		}
+		if cardAction == "url" {
+			built["action"] = map[string]any{
+				"name": "cta_url",
+				"parameters": map[string]any{
+					"display_text": truncateRunes(replies[0].Title, 20),
+					"url":          strings.TrimSpace(card.URL),
+				},
+			}
+		} else {
+			buttons := make([]map[string]any, 0, len(replies))
+			for j, reply := range replies {
+				id := reply.ID
+				if id == "" {
+					id = fmt.Sprintf("card_%d_btn_%d", i+1, j+1)
+				}
+				buttons = append(buttons, map[string]any{
+					"type": "quick_reply",
+					"quick_reply": map[string]any{
+						"id":    truncateRunes(id, 256),
+						"title": truncateRunes(reply.Title, 20),
+					},
+				})
+			}
+			built["action"] = map[string]any{"buttons": buttons}
+		}
+		cards = append(cards, built)
+	}
+	if len(cards) < 2 {
+		return nil, fmt.Errorf("carousel needs at least 2 cards")
+	}
+	return map[string]any{
+		"type": "carousel",
+		"body": map[string]any{"text": bodyText},
+		"action": map[string]any{
+			"cards": cards,
+		},
+	}, nil
+}
+
 // AddressMessageParams are optional prefill and validation fields for an
 // India address_message interactive (WhatsApp Cloud API).
 type AddressMessageParams struct {

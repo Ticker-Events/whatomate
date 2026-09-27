@@ -881,6 +881,46 @@ func (a *App) sendAndSaveInteractiveList(account *models.WhatsAppAccount, contac
 	return err
 }
 
+func (a *App) sendAndSaveInteractiveCarousel(account *models.WhatsAppAccount, contact *models.Contact, bodyText string, cards []map[string]any) error {
+	params := whatsapp.CarouselMessageParams{Cards: make([]whatsapp.CarouselCard, 0, len(cards))}
+	for _, card := range cards {
+		action := fieldString(card, "type")
+		if action != "url" {
+			action = "reply"
+		}
+		built := whatsapp.CarouselCard{
+			MediaType: fieldString(card, "media_type"),
+			MediaURL:  fieldString(card, "media_url"),
+			Body:      fieldString(card, "body"),
+			Action:    action,
+			URL:       fieldString(card, "url"),
+		}
+		if title := fieldString(card, "title"); title != "" {
+			built.Replies = append(built.Replies, whatsapp.CarouselQuickReply{
+				ID:    fieldString(card, "id"),
+				Title: title,
+			})
+		}
+		if title := fieldString(card, "title_2"); title != "" {
+			built.Replies = append(built.Replies, whatsapp.CarouselQuickReply{
+				ID:    fieldString(card, "id_2"),
+				Title: title,
+			})
+		}
+		params.Cards = append(params.Cards, built)
+	}
+	ctx := context.Background()
+	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
+		Account:         account,
+		Contact:         contact,
+		Type:            models.MessageTypeInteractive,
+		InteractiveType: "carousel",
+		BodyText:        bodyText,
+		Carousel:        params,
+	}, ChatbotSendOptions())
+	return err
+}
+
 func whatsappReplyButtons(buttons []map[string]any) []whatsapp.Button {
 	waButtons := make([]whatsapp.Button, 0, len(buttons))
 	for i, btn := range buttons {
