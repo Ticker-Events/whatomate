@@ -29,10 +29,112 @@ type Account struct {
 
 // Button represents an interactive button
 type Button struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Type  string `json:"type,omitempty"` // "reply" (default) or "url"
-	URL   string `json:"url,omitempty"`  // URL for type="url" buttons
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"` // list row description
+	Type        string `json:"type,omitempty"`        // "reply" (default) or "url"
+	URL         string `json:"url,omitempty"`         // URL for type="url" buttons
+}
+
+// ListRow is one selectable row in an interactive list message.
+type ListRow struct {
+	ID          string
+	Title       string
+	Description string
+}
+
+// ListMessageParams configures a WhatsApp interactive list message.
+// Header and footer are optional text. ButtonText is the label that opens
+// the list. Rows are sent as a single section.
+type ListMessageParams struct {
+	Header       string
+	Footer       string
+	ButtonText   string
+	SectionTitle string
+	Rows         []ListRow
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 || s == "" {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
+}
+
+// ListMessageInteractive builds the interactive payload for a list message.
+// Empty titles are skipped. At most 10 rows are included. Text fields are
+// truncated to WhatsApp's limits.
+func ListMessageInteractive(bodyText string, params ListMessageParams) (map[string]any, error) {
+	bodyText = strings.TrimSpace(bodyText)
+	if bodyText == "" {
+		return nil, fmt.Errorf("body text is required")
+	}
+	bodyText = truncateRunes(bodyText, 4096)
+
+	rows := make([]map[string]any, 0, 10)
+	for i, row := range params.Rows {
+		if len(rows) >= 10 {
+			break
+		}
+		title := strings.TrimSpace(row.Title)
+		if title == "" {
+			continue
+		}
+		id := strings.TrimSpace(row.ID)
+		if id == "" {
+			id = fmt.Sprintf("row_%d", i+1)
+		}
+		item := map[string]any{
+			"id":    truncateRunes(id, 200),
+			"title": truncateRunes(title, 24),
+		}
+		if desc := strings.TrimSpace(row.Description); desc != "" {
+			item["description"] = truncateRunes(desc, 72)
+		}
+		rows = append(rows, item)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("at least one list row is required")
+	}
+
+	button := strings.TrimSpace(params.ButtonText)
+	if button == "" {
+		button = "Select"
+	}
+	section := strings.TrimSpace(params.SectionTitle)
+	if section == "" {
+		section = "Options"
+	}
+
+	interactive := map[string]any{
+		"type": "list",
+		"body": map[string]any{"text": bodyText},
+		"action": map[string]any{
+			"button": truncateRunes(button, 20),
+			"sections": []map[string]any{
+				{
+					"title": truncateRunes(section, 24),
+					"rows":  rows,
+				},
+			},
+		},
+	}
+	if header := strings.TrimSpace(params.Header); header != "" {
+		interactive["header"] = map[string]any{
+			"type": "text",
+			"text": truncateRunes(header, 60),
+		}
+	}
+	if footer := strings.TrimSpace(params.Footer); footer != "" {
+		interactive["footer"] = map[string]any{
+			"text": truncateRunes(footer, 60),
+		}
+	}
+	return interactive, nil
 }
 
 // AddressMessageParams are optional prefill and validation fields for an

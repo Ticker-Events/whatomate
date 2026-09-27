@@ -252,6 +252,44 @@ func (c *Client) SendAddressMessage(ctx context.Context, account *Account, rcpt 
 	return messageID, nil
 }
 
+// SendInteractiveList sends an interactive list message (header, body, footer, rows).
+func (c *Client) SendInteractiveList(ctx context.Context, account *Account, rcpt Recipient, bodyText string, params ListMessageParams) (string, error) {
+	interactive, err := ListMessageInteractive(bodyText, params)
+	if err != nil {
+		return "", err
+	}
+
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"recipient_type":    "individual",
+		"type":              "interactive",
+		"interactive":       interactive,
+	}
+	rcpt.SetOnPayload(payload)
+
+	url := c.buildMessagesURL(account)
+	c.Log.Debug("Sending interactive list", "phone", rcpt.Phone, "rows", len(params.Rows))
+
+	respBody, err := c.doRequest(ctx, "POST", url, payload, account.AccessToken)
+	if err != nil {
+		c.Log.Error("Failed to send interactive list", "error", err, "phone", rcpt.Phone)
+		return "", fmt.Errorf("failed to send interactive list: %w", err)
+	}
+
+	var resp MetaAPIResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if len(resp.Messages) == 0 {
+		return "", fmt.Errorf("no message ID in response")
+	}
+
+	messageID := resp.Messages[0].ID
+	c.Log.Info("Interactive list sent", "message_id", messageID, "phone", rcpt.Phone)
+	return messageID, nil
+}
+
 // SendCTAURLButton sends an interactive message with a CTA URL button
 // This opens a URL when clicked instead of sending a reply
 func (c *Client) SendCTAURLButton(ctx context.Context, account *Account, rcpt Recipient, bodyText, buttonText, url string) (string, error) {

@@ -50,9 +50,13 @@ type OutgoingMessageRequest struct {
 	InteractiveType string            // "button", "list", "cta_url", "voice_call", "location_request", "address_message"
 	BodyText        string            // Body text for interactive messages
 	Buttons         []whatsapp.Button // For button/list messages
-	ButtonText      string            // For CTA URL button
+	ButtonText      string            // CTA URL label, or the list opener label
 	URL             string            // For CTA URL button
 	HeaderImageURL  string            // Optional image header link for button/list interactive messages
+	HeaderText      string            // Optional text header for list messages
+	FooterText      string            // Optional text footer for list messages
+	SectionTitle    string            // List section title
+	ExplicitList    bool              // Buttons-node list message; 4–10 reply buttons keep SendInteractiveButtons
 	AddressMessage  whatsapp.AddressMessageParams
 
 	// voice_call interactive (WhatsApp Business Calling)
@@ -265,7 +269,25 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 				return client.SendLocationRequest(sendCtx, waAccount, rcpt, req.BodyText)
 			case "address_message":
 				return client.SendAddressMessage(sendCtx, waAccount, rcpt, req.BodyText, req.AddressMessage)
-			default: // "button" or "list"
+			case "list":
+				// Canned replies and the 4–10 reply-button path still go through
+				// SendInteractiveButtons, which picks the generic list shape.
+				// The buttons node sets ExplicitList for a configured list message.
+				if !req.ExplicitList {
+					return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, req.HeaderImageURL)
+				}
+				rows := make([]whatsapp.ListRow, 0, len(req.Buttons))
+				for _, btn := range req.Buttons {
+					rows = append(rows, whatsapp.ListRow{ID: btn.ID, Title: btn.Title, Description: btn.Description})
+				}
+				return client.SendInteractiveList(sendCtx, waAccount, rcpt, req.BodyText, whatsapp.ListMessageParams{
+					Header:       req.HeaderText,
+					Footer:       req.FooterText,
+					ButtonText:   req.ButtonText,
+					SectionTitle: req.SectionTitle,
+					Rows:         rows,
+				})
+			default: // "button"
 				return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, req.HeaderImageURL)
 			}
 
@@ -479,15 +501,32 @@ func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 		}
 		return out
 	case "list":
-		rows := make([]any, len(req.Buttons))
-		for i, btn := range req.Buttons {
-			rows[i] = map[string]string{"id": btn.ID, "title": btn.Title}
+		rows := make([]any, 0, len(req.Buttons))
+		for _, btn := range req.Buttons {
+			row := map[string]string{"id": btn.ID, "title": btn.Title}
+			if btn.Description != "" {
+				row["description"] = btn.Description
+			}
+			rows = append(rows, row)
 		}
-		return models.JSONB{
+		out := models.JSONB{
 			"type": "list",
 			"body": req.BodyText,
 			"rows": rows,
 		}
+		if req.ButtonText != "" {
+			out["button_text"] = req.ButtonText
+		}
+		if req.HeaderText != "" {
+			out["header"] = req.HeaderText
+		}
+		if req.FooterText != "" {
+			out["footer"] = req.FooterText
+		}
+		if req.SectionTitle != "" {
+			out["section_title"] = req.SectionTitle
+		}
+		return out
 	default: // "button"
 		buttons := make([]any, len(req.Buttons))
 		for i, btn := range req.Buttons {

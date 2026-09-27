@@ -839,6 +839,48 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 	return nil
 }
 
+// sendAndSaveInteractiveList sends a WhatsApp interactive list and stores it.
+func (a *App) sendAndSaveInteractiveList(account *models.WhatsAppAccount, contact *models.Contact, bodyText, header, footer, buttonText, sectionTitle string, buttons []map[string]any) error {
+	waButtons := make([]whatsapp.Button, 0, len(buttons))
+	for i, btn := range buttons {
+		if len(waButtons) >= 10 {
+			break
+		}
+		title, _ := btn["title"].(string)
+		if strings.TrimSpace(title) == "" {
+			continue
+		}
+		id, _ := btn["id"].(string)
+		if id == "" {
+			id = fmt.Sprintf("row_%d", i+1)
+		}
+		desc, _ := btn["description"].(string)
+		waButtons = append(waButtons, whatsapp.Button{
+			ID:          id,
+			Title:       title,
+			Description: desc,
+		})
+	}
+	if len(waButtons) == 0 {
+		return fmt.Errorf("at least one list row is required")
+	}
+	ctx := context.Background()
+	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
+		Account:         account,
+		Contact:         contact,
+		Type:            models.MessageTypeInteractive,
+		InteractiveType: "list",
+		ExplicitList:    true,
+		BodyText:        bodyText,
+		Buttons:         waButtons,
+		ButtonText:      buttonText,
+		HeaderText:      header,
+		FooterText:      footer,
+		SectionTitle:    sectionTitle,
+	}, ChatbotSendOptions())
+	return err
+}
+
 func whatsappReplyButtons(buttons []map[string]any) []whatsapp.Button {
 	waButtons := make([]whatsapp.Button, 0, len(buttons))
 	for i, btn := range buttons {

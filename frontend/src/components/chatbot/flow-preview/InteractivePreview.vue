@@ -61,8 +61,21 @@ const lastButtonMessage = computed(() => {
   if (!isWaitingForInput.value || !currentStep.value) return null
   if (currentStep.value.message_type !== 'buttons') return null
 
-  const lastBotMessage = [...state.messages].reverse().find(m => m.type === 'bot' && m.buttons?.length)
+  const lastBotMessage = [...state.messages].reverse().find(m => m.type === 'bot' && Array.isArray(m.buttons))
   return lastBotMessage
+})
+
+const showReplyButtons = computed(() => {
+  const message = lastButtonMessage.value
+  if (!message?.buttons) return false
+  return message.interactive !== 'list' && message.buttons.length > 0 && message.buttons.length <= 3
+})
+
+const showListPicker = computed(() => {
+  const message = lastButtonMessage.value
+  if (!message?.buttons) return false
+  if (message.interactive === 'list') return true
+  return message.buttons.length > 3
 })
 
 // Shim for DebugPanel which expects FlowStep[]-shaped objects with step_name.
@@ -216,17 +229,19 @@ function handleGoToStep(stepName: string) {
               >
                 <div class="max-w-[85%]">
                   <PreviewButtonGroup
-                    v-if="lastButtonMessage.buttons.length <= 3"
+                    v-if="showReplyButtons"
                     :buttons="lastButtonMessage.buttons"
                     :disabled="!isWaitingForInput"
                     @select="handleButtonSelect"
                   />
                   <PreviewListPicker
-                    v-else
+                    v-else-if="showListPicker"
                     :buttons="lastButtonMessage.buttons"
+                    :button-text="lastButtonMessage.listButton"
                     :disabled="!isWaitingForInput"
                     @select="handleButtonSelect"
                   />
+                  <p v-else class="text-xs text-gray-500 px-1">No options</p>
                 </div>
               </div>
             </div>

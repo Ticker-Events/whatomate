@@ -108,6 +108,26 @@ func (m *MockWhatsAppClient) SendInteractiveButtons(ctx context.Context, account
 	return msgID, nil
 }
 
+// SendInteractiveList mocks sending an interactive list message.
+func (m *MockWhatsAppClient) SendInteractiveList(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, body string, params whatsapp.ListMessageParams) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.Error != nil {
+		return "", m.Error
+	}
+
+	msgID := m.nextMessageID()
+	m.SentMessages = append(m.SentMessages, MockSentMessage{
+		Type:        "interactive_list",
+		PhoneNumber: rcpt.Phone,
+		Content:     map[string]any{"body": body, "params": params},
+		Account:     account,
+		MessageID:   msgID,
+	})
+	return msgID, nil
+}
+
 // SendTemplateMessage mocks sending a template message.
 func (m *MockWhatsAppClient) SendTemplateMessage(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, template, lang string, components []map[string]any) (string, error) {
 	m.mu.Lock()

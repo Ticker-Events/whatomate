@@ -134,6 +134,62 @@ test.describe('Chatbot Flow Builder - Buttons node', () => {
     await builder.getButtonDeleteButton(0).click()
     await expect(builder.buttonOptionsLabel).toContainText('0/10')
   })
+
+  test('dynamic reply shows the variable and title and id fields', async () => {
+    const panel = builder.page.locator('div.space-y-4').filter({ has: builder.page.getByRole('heading', { name: 'Buttons', exact: true }) })
+    await panel.getByRole('combobox').nth(1).click()
+    await builder.page.getByRole('option', { name: 'Dynamic', exact: true }).click()
+    await expect(builder.page.getByPlaceholder('products')).toBeVisible()
+    await expect(builder.page.getByPlaceholder('name')).toBeVisible()
+    await expect(builder.page.getByPlaceholder('id')).toBeVisible()
+    await expect(builder.addReplyButton).toHaveCount(0)
+  })
+
+  test('dynamic URL shows the url field', async () => {
+    const panel = builder.page.locator('div.space-y-4').filter({ has: builder.page.getByRole('heading', { name: 'Buttons', exact: true }) })
+    await panel.getByRole('combobox').nth(1).click()
+    await builder.page.getByRole('option', { name: 'Dynamic', exact: true }).click()
+    await panel.getByRole('combobox').nth(2).click()
+    await builder.page.getByRole('option', { name: 'URL', exact: true }).click()
+    await expect(builder.page.getByText('URL field')).toBeVisible()
+    await expect(builder.page.getByPlaceholder('url')).toBeVisible()
+    await expect(builder.page.getByText('ID field')).toHaveCount(0)
+  })
+
+  test('dynamic phone shows the phone field', async () => {
+    const panel = builder.page.locator('div.space-y-4').filter({ has: builder.page.getByRole('heading', { name: 'Buttons', exact: true }) })
+    await panel.getByRole('combobox').nth(1).click()
+    await builder.page.getByRole('option', { name: 'Dynamic', exact: true }).click()
+    await panel.getByRole('combobox').nth(2).click()
+    await builder.page.getByRole('option', { name: 'Phone', exact: true }).click()
+    await expect(builder.page.getByText('Phone field')).toBeVisible()
+    await expect(builder.page.getByPlaceholder('phone_number')).toBeVisible()
+  })
+
+  test('list static adds a row with a description', async () => {
+    const panel = builder.page.locator('div.space-y-4').filter({ has: builder.page.getByRole('heading', { name: 'Buttons', exact: true }) })
+    await panel.getByRole('combobox').nth(0).click()
+    await builder.page.getByRole('option', { name: 'List', exact: true }).click()
+    await expect(builder.page.getByPlaceholder('Optional header')).toBeVisible()
+    await expect(builder.page.getByPlaceholder('Optional footer')).toBeVisible()
+    await expect(builder.page.getByText('List rows (0/10)')).toBeVisible()
+    await builder.page.getByRole('button', { name: 'Row', exact: true }).click()
+    await expect(builder.page.getByPlaceholder('Description')).toBeVisible()
+    await expect(builder.page.getByText('List rows (1/10)')).toBeVisible()
+  })
+
+  test('list dynamic shows title, id, and description fields', async () => {
+    const panel = builder.page.locator('div.space-y-4').filter({ has: builder.page.getByRole('heading', { name: 'Buttons', exact: true }) })
+    await panel.getByRole('combobox').nth(0).click()
+    await builder.page.getByRole('option', { name: 'List', exact: true }).click()
+    await panel.getByRole('combobox').nth(1).click()
+    await builder.page.getByRole('option', { name: 'Dynamic', exact: true }).click()
+    await expect(builder.page.getByPlaceholder('products')).toBeVisible()
+    await expect(builder.page.getByText('Title field')).toBeVisible()
+    await expect(builder.page.getByText('ID field')).toBeVisible()
+    await expect(builder.page.getByText('Description field')).toBeVisible()
+    await expect(builder.page.getByPlaceholder('description')).toBeVisible()
+  })
 })
 
 test.describe('Chatbot Flow Builder - Other node types', () => {

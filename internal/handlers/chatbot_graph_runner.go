@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -276,18 +277,32 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		body = node.Label
 	}
 	body = processTemplate(body, ctx.session.SessionData)
-	buttons := buttonsFromConfig(node.Config)
+	buttons, err := buttonsForNode(node.Config, ctx.session.SessionData)
+	if err != nil {
+		return nodeOutcome{}, fmt.Errorf("buttons node %q: %w", node.ID, err)
+	}
 	if len(buttons) == 0 {
 		return nodeOutcome{}, fmt.Errorf("buttons node %q has no buttons configured", node.ID)
 	}
 	// Template each button's user-facing fields so authors can
 	// interpolate variables into titles / urls / phone numbers too.
 	for _, b := range buttons {
-		for _, key := range []string{"title", "url", "phone_number"} {
+		for _, key := range []string{"title", "url", "phone_number", "description"} {
 			if s, ok := b[key].(string); ok && s != "" {
 				b[key] = processTemplate(s, ctx.session.SessionData)
 			}
 		}
+	}
+	if stringFromConfig(node.Config, "mode") == "list" {
+		header := processTemplate(stringFromConfig(node.Config, "header"), ctx.session.SessionData)
+		footer := processTemplate(stringFromConfig(node.Config, "footer"), ctx.session.SessionData)
+		listButton := processTemplate(stringFromConfig(node.Config, "list_button"), ctx.session.SessionData)
+		section := processTemplate(stringFromConfig(node.Config, "section_title"), ctx.session.SessionData)
+		if err := a.sendAndSaveInteractiveList(ctx.account, ctx.contact, body, header, footer, listButton, section, buttons); err != nil {
+			return nodeOutcome{}, fmt.Errorf("send list: %w", err)
+		}
+		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
+		return nodeOutcome{yield: true}, nil
 	}
 	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
@@ -1010,4 +1025,130 @@ func buttonsFromConfig(cfg map[string]any) []map[string]any {
 		}
 	}
 	return out
+}
+
+// buttonsForNode returns static config buttons, or rows mapped from a
+// session-data array when source is dynamic.
+func buttonsForNode(cfg map[string]any, data models.JSONB) ([]map[string]any, error) {
+	if stringFromConfig(cfg, "source") != "dynamic" {
+		return buttonsFromConfig(cfg), nil
+	}
+	mode := stringFromConfig(cfg, "mode")
+	if mode == "" {
+		mode = "reply"
+	}
+	return dynamicButtonsFromSession(cfg, data, mode)
+}
+
+// dynamicButtonsFromSession maps SessionData[items_var] (an array of objects)
+// into button maps. List mode always builds list rows. Reply mode uses
+// dynamic_type to choose reply, url, or phone fields.
+func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode string) ([]map[string]any, error) {
+	key := strings.TrimSpace(stringFromConfig(cfg, "items_var"))
+	key = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(key, "{{"), "}}"))
+	if key == "" {
+		return nil, fmt.Errorf("dynamic buttons have no items variable")
+	}
+	if data == nil {
+		return nil, fmt.Errorf("dynamic buttons variable %q is empty", key)
+	}
+	raw, ok := data[key]
+	if !ok || raw == nil {
+		return nil, fmt.Errorf("dynamic buttons variable %q is empty", key)
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("dynamic buttons variable %q is not an array", key)
+	}
+
+	kind := "reply"
+	if mode == "list" {
+		kind = "list"
+	} else if t := stringFromConfig(cfg, "dynamic_type"); t == "url" || t == "phone" || t == "reply" {
+		kind = t
+	}
+
+	titleField := stringFromConfig(cfg, "title_field")
+	if titleField == "" {
+		titleField = "title"
+	}
+	idField := stringFromConfig(cfg, "id_field")
+	if idField == "" {
+		idField = "id"
+	}
+	descField := stringFromConfig(cfg, "description_field")
+	urlField := stringFromConfig(cfg, "url_field")
+	if urlField == "" {
+		urlField = "url"
+	}
+	phoneField := stringFromConfig(cfg, "phone_field")
+	if phoneField == "" {
+		phoneField = "phone_number"
+	}
+
+	limit := 10
+	if kind == "url" || kind == "phone" {
+		limit = 2
+	}
+
+	out := make([]map[string]any, 0, len(items))
+	for i, item := range items {
+		if len(out) >= limit {
+			break
+		}
+		obj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		title := fieldString(obj, titleField)
+		if title == "" {
+			continue
+		}
+		btn := map[string]any{"title": title}
+		switch kind {
+		case "url":
+			btn["type"] = "url"
+			btn["url"] = fieldString(obj, urlField)
+			btn["id"] = fmt.Sprintf("url_%d", i+1)
+		case "phone":
+			btn["type"] = "phone"
+			btn["phone_number"] = fieldString(obj, phoneField)
+			btn["id"] = fmt.Sprintf("phone_%d", i+1)
+		default:
+			id := fieldString(obj, idField)
+			if id == "" {
+				id = fmt.Sprintf("btn_%d", i+1)
+			}
+			btn["id"] = id
+			btn["type"] = "reply"
+			if kind == "list" && descField != "" {
+				if desc := fieldString(obj, descField); desc != "" {
+					btn["description"] = desc
+				}
+			}
+		}
+		out = append(out, btn)
+	}
+	return out, nil
+}
+
+func fieldString(obj map[string]any, key string) string {
+	if key == "" {
+		return ""
+	}
+	v, ok := obj[key]
+	if !ok || v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case float64:
+		if t == float64(int64(t)) {
+			return strconv.FormatInt(int64(t), 10)
+		}
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	default:
+		return strings.TrimSpace(fmt.Sprint(t))
+	}
 }
