@@ -137,6 +137,22 @@ const ctaCount = computed(() =>
   (config.value.buttons || []).filter((b: any) => b.type === 'url' || b.type === 'phone').length,
 )
 
+const buttonMode = computed(() => (config.value.mode === 'list' ? 'list' : 'reply'))
+const buttonSource = computed(() => (config.value.source === 'dynamic' ? 'dynamic' : 'static'))
+const dynamicType = computed(() => {
+  const t = config.value.dynamic_type
+  if (t === 'url' || t === 'phone') return t
+  return 'reply'
+})
+
+function addListRow() {
+  const buttons = [...(config.value.buttons || [])]
+  if (buttons.length >= 10) return
+  const id = `row_${Date.now()}_${buttons.length}`
+  buttons.push({ id, title: '', description: '' })
+  updateConfig('buttons', buttons)
+}
+
 // HTTP headers helpers (api_call / webhook)
 function addHeader() {
   const headers = { ...(config.value.headers || {}) }
@@ -346,6 +362,70 @@ const typeLabel: Record<string, string> = {
     <!-- buttons -->
     <template v-if="node.type === 'buttons'">
       <div class="space-y-1.5">
+        <Label class="text-xs">Message style</Label>
+        <Select :model-value="buttonMode" @update:model-value="(v: any) => updateConfig('mode', v === 'list' ? 'list' : 'reply')">
+          <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="reply">Reply buttons</SelectItem>
+            <SelectItem value="list">List</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div class="space-y-1.5">
+        <Label class="text-xs">Input</Label>
+        <Select :model-value="buttonSource" @update:model-value="(v: any) => updateConfig('source', v === 'dynamic' ? 'dynamic' : 'static')">
+          <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="static">Static</SelectItem>
+            <SelectItem value="dynamic">Dynamic</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <template v-if="buttonMode === 'list'">
+        <div class="space-y-1.5">
+          <Label class="text-xs">Header</Label>
+          <Input
+            :model-value="config.header || ''"
+            @update:model-value="(v: string) => updateConfig('header', v)"
+            placeholder="Optional header"
+            maxlength="60"
+            class="h-8 text-sm"
+          />
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">Footer</Label>
+          <Input
+            :model-value="config.footer || ''"
+            @update:model-value="(v: string) => updateConfig('footer', v)"
+            placeholder="Optional footer"
+            maxlength="60"
+            class="h-8 text-sm"
+          />
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">List button</Label>
+          <Input
+            :model-value="config.list_button || ''"
+            @update:model-value="(v: string) => updateConfig('list_button', v)"
+            placeholder="Select"
+            maxlength="20"
+            class="h-8 text-sm"
+          />
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">Section title</Label>
+          <Input
+            :model-value="config.section_title || ''"
+            @update:model-value="(v: string) => updateConfig('section_title', v)"
+            placeholder="Options"
+            maxlength="24"
+            class="h-8 text-sm"
+          />
+        </div>
+      </template>
+
+      <div class="space-y-1.5">
         <Label class="text-xs">Body</Label>
         <Textarea
           :model-value="config.body || ''"
@@ -354,7 +434,8 @@ const typeLabel: Record<string, string> = {
           class="min-h-[60px] text-xs"
         />
       </div>
-      <div class="space-y-1.5">
+
+      <div v-if="buttonMode === 'reply' && buttonSource === 'static'" class="space-y-1.5">
         <div class="flex items-center justify-between">
           <Label class="text-xs">Button Options ({{ (config.buttons || []).length }}/{{ hasCtaButtons ? 2 : 10 }})</Label>
         </div>
@@ -404,6 +485,114 @@ const typeLabel: Record<string, string> = {
           />
         </div>
         <p class="text-[10px] text-muted-foreground">Reply buttons (max 10) send the user's choice back. URL / Phone buttons (max 2 per node, mutually exclusive with Reply) open a link or call. Wire reply buttons to next nodes by dragging from the button handle on the canvas.</p>
+      </div>
+
+      <div v-if="buttonMode === 'list' && buttonSource === 'static'" class="space-y-1.5">
+        <div class="flex items-center justify-between">
+          <Label class="text-xs">List rows ({{ (config.buttons || []).length }}/10)</Label>
+        </div>
+        <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="(config.buttons || []).length >= 10" @click="addListRow">
+          <Plus class="h-3 w-3 mr-0.5" /> Row
+        </Button>
+        <div v-for="(btn, idx) in (config.buttons || [])" :key="btn.id || idx" class="p-2 border rounded-md space-y-2 bg-muted/30">
+          <div class="flex items-center gap-1">
+            <Input
+              :model-value="btn.title || ''"
+              @update:model-value="(v: string) => updateButton(Number(idx), 'title', v)"
+              placeholder="Button Title"
+              maxlength="24"
+              class="h-7 text-xs flex-1"
+            />
+            <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeButton(Number(idx))">
+              <Trash2 class="h-3 w-3 text-destructive" />
+            </Button>
+          </div>
+          <Input
+            :model-value="btn.id || ''"
+            @update:model-value="(v: string) => updateButton(Number(idx), 'id', v)"
+            placeholder="button_id"
+            maxlength="200"
+            class="h-7 text-xs font-mono"
+          />
+          <Input
+            :model-value="btn.description || ''"
+            @update:model-value="(v: string) => updateButton(Number(idx), 'description', v)"
+            placeholder="Description"
+            maxlength="72"
+            class="h-7 text-xs"
+          />
+        </div>
+        <p class="text-[10px] text-muted-foreground">Up to 10 rows. Each row needs a title and id. Wire rows to next nodes from the handles on the canvas.</p>
+      </div>
+
+      <div v-if="buttonSource === 'dynamic'" class="space-y-1.5">
+        <div v-if="buttonMode === 'reply'" class="space-y-1.5">
+          <Label class="text-xs">Button type</Label>
+          <Select :model-value="dynamicType" @update:model-value="(v: any) => updateConfig('dynamic_type', v)">
+            <SelectTrigger class="h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="reply">Reply</SelectItem>
+              <SelectItem value="url">URL</SelectItem>
+              <SelectItem value="phone">Phone</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">Items variable</Label>
+          <Input
+            :model-value="config.items_var || ''"
+            @update:model-value="(v: string) => updateConfig('items_var', v)"
+            placeholder="products"
+            class="h-8 text-sm font-mono"
+          />
+          <p class="text-[10px] text-muted-foreground">Session variable holding an array of objects.</p>
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">Title field</Label>
+          <Input
+            :model-value="config.title_field || ''"
+            @update:model-value="(v: string) => updateConfig('title_field', v)"
+            placeholder="name"
+            class="h-8 text-sm font-mono"
+          />
+        </div>
+        <div v-if="buttonMode === 'list' || dynamicType === 'reply'" class="space-y-1.5">
+          <Label class="text-xs">ID field</Label>
+          <Input
+            :model-value="config.id_field || ''"
+            @update:model-value="(v: string) => updateConfig('id_field', v)"
+            placeholder="id"
+            class="h-8 text-sm font-mono"
+          />
+        </div>
+        <div v-if="buttonMode === 'list'" class="space-y-1.5">
+          <Label class="text-xs">Description field</Label>
+          <Input
+            :model-value="config.description_field || ''"
+            @update:model-value="(v: string) => updateConfig('description_field', v)"
+            placeholder="description"
+            class="h-8 text-sm font-mono"
+          />
+        </div>
+        <div v-if="buttonMode === 'reply' && dynamicType === 'url'" class="space-y-1.5">
+          <Label class="text-xs">URL field</Label>
+          <Input
+            :model-value="config.url_field || ''"
+            @update:model-value="(v: string) => updateConfig('url_field', v)"
+            placeholder="url"
+            class="h-8 text-sm font-mono"
+          />
+        </div>
+        <div v-if="buttonMode === 'reply' && dynamicType === 'phone'" class="space-y-1.5">
+          <Label class="text-xs">Phone field</Label>
+          <Input
+            :model-value="config.phone_field || ''"
+            @update:model-value="(v: string) => updateConfig('phone_field', v)"
+            placeholder="phone_number"
+            class="h-8 text-sm font-mono"
+          />
+        </div>
+        <p class="text-[10px] text-muted-foreground">Rows are built from this array when the flow runs. Connect a single next step from the node.</p>
       </div>
 
       <!-- Input — buttons always expect a button selection; surface this

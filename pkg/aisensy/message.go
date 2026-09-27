@@ -229,6 +229,22 @@ func (c *Client) SendAddressMessage(ctx context.Context, account *whatsapp.Accou
 	return c.sendMessage(ctx, account, payload)
 }
 
+// SendInteractiveList sends an interactive list message via AiSensy.
+func (c *Client) SendInteractiveList(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText string, params whatsapp.ListMessageParams) (string, error) {
+	interactive, err := whatsapp.ListMessageInteractive(bodyText, params)
+	if err != nil {
+		return "", err
+	}
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"recipient_type":    "individual",
+		"type":              "interactive",
+		"interactive":       interactive,
+	}
+	rcpt.SetOnPayload(payload)
+	return c.sendMessage(ctx, account, payload)
+}
+
 // SendCTAURLButton sends an interactive CTA URL button message via AiSensy.
 func (c *Client) SendCTAURLButton(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, bodyText, buttonText, url string) (string, error) {
 	if len(buttonText) > 20 {

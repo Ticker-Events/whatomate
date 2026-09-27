@@ -3,6 +3,7 @@
 export interface ButtonConfig {
   id: string
   title: string
+  description?: string
   type?: 'reply' | 'url' | 'phone' | 'voice_call'
   url?: string
   phone_number?: string
@@ -71,6 +72,11 @@ export interface SimulationMessage {
   timestamp: Date
   stepName?: string
   buttons?: ButtonConfig[]
+  /** list messages always open the picker; reply buttons use a count split */
+  interactive?: 'buttons' | 'list'
+  header?: string
+  footer?: string
+  listButton?: string
   inputType?: string
   inputConfig?: Record<string, any>
   isValidationError?: boolean

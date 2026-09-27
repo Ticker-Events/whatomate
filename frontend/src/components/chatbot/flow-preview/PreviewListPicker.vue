@@ -5,6 +5,7 @@ import { ExternalLink, X, List } from 'lucide-vue-next'
 
 defineProps<{
   buttons: ButtonConfig[]
+  buttonText?: string
   disabled?: boolean
 }>()
 
@@ -33,7 +34,7 @@ function handleSelect(button: ButtonConfig) {
       @click="isOpen = !isOpen"
     >
       <List class="h-4 w-4" />
-      Select an option
+      {{ buttonText || 'Select an option' }}
     </button>
 
     <!-- List Picker Overlay - renders via slot in parent -->
@@ -58,12 +59,15 @@ function handleSelect(button: ButtonConfig) {
             >
               <X class="h-5 w-5" />
             </button>
-            <span class="font-medium text-sm">Select an option</span>
+            <span class="font-medium text-sm">{{ buttonText || 'Select an option' }}</span>
             <div class="w-7" />
           </div>
 
           <!-- Options List -->
           <div class="max-h-[250px] overflow-y-auto">
+            <p v-if="buttons.length === 0" class="px-4 py-6 text-sm text-center text-gray-500">
+              No options
+            </p>
             <div
               v-for="(btn, idx) in buttons"
               :key="btn.id"
@@ -82,9 +86,14 @@ function handleSelect(button: ButtonConfig) {
               >
                 <span class="text-[10px] text-[#00a884] font-medium">{{ idx + 1 }}</span>
               </div>
-              <span class="text-sm text-gray-800 dark:text-gray-200 flex-1">
-                {{ btn.title || `Option ${idx + 1}` }}
-              </span>
+              <div class="flex-1 min-w-0">
+                <span class="text-sm text-gray-800 dark:text-gray-200 block">
+                  {{ btn.title || `Option ${idx + 1}` }}
+                </span>
+                <span v-if="btn.description" class="text-xs text-gray-500 dark:text-gray-400 block truncate">
+                  {{ btn.description }}
+                </span>
+              </div>
               <ExternalLink v-if="btn.type === 'url'" class="h-3 w-3 text-gray-400" />
             </div>
           </div>

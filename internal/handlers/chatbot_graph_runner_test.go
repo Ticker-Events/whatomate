@@ -1488,3 +1488,168 @@ func TestRunChatGraph_Prompt_NoRegexAcceptsAnything(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	assert.Equal(t, "literally anything", session.SessionData["email"])
 }
+
+func TestDynamicButtonsFromSession_URL(t *testing.T) {
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":       "dynamic",
+		"dynamic_type": "url",
+		"items_var":    "links",
+		"title_field":  "name",
+		"url_field":    "link",
+	}, models.JSONB{
+		"links": []any{
+			map[string]any{"name": "Site", "link": "https://example.com"},
+			map[string]any{"name": "Docs", "link": "https://example.com/docs"},
+			map[string]any{"name": "Extra", "link": "https://example.com/extra"},
+			map[string]any{"name": ""},
+		},
+	}, "reply")
+	require.NoError(t, err)
+	require.Len(t, buttons, 2)
+	assert.Equal(t, "url", buttons[0]["type"])
+	assert.Equal(t, "Site", buttons[0]["title"])
+	assert.Equal(t, "https://example.com", buttons[0]["url"])
+	assert.Equal(t, "url_1", buttons[0]["id"])
+}
+
+func TestRunChatGraph_StaticListSelection(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "static-list",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "b1",
+			"nodes": []any{
+				map[string]any{
+					"id": "b1", "type": "buttons", "label": "ship",
+					"config": map[string]any{
+						"mode":        "list",
+						"body":        "Choose shipping",
+						"header":      "Shipping",
+						"footer":      "Thanks",
+						"list_button": "Options",
+						"buttons": []any{
+							map[string]any{"id": "opt_a", "title": "Express", "description": "Fast"},
+						},
+					},
+				},
+				map[string]any{"id": "e1", "type": "end", "label": "done"},
+			},
+			"edges": []any{
+				map[string]any{"from": "b1", "to": "e1", "condition": "button:opt_a"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "b1", session.CurrentStep)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "Express", "opt_a", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	path := chatGraphPath(t, session)
+	assert.Equal(t, "button:opt_a", path[1]["outcome"])
+}
+
+func TestRunChatGraph_DynamicListFollowsDefault(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData = models.JSONB{
+		"products": []any{
+			map[string]any{"name": "Express", "sku": "exp", "blurb": "Fast"},
+		},
+	}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "dynamic-list",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "b1",
+			"nodes": []any{
+				map[string]any{
+					"id": "b1", "type": "buttons", "label": "ship",
+					"config": map[string]any{
+						"mode":              "list",
+						"source":            "dynamic",
+						"items_var":         "products",
+						"title_field":       "name",
+						"id_field":          "sku",
+						"description_field": "blurb",
+						"body":              "Choose",
+						"store_as":          "choice",
+					},
+				},
+				map[string]any{"id": "e1", "type": "end", "label": "done"},
+			},
+			"edges": []any{
+				map[string]any{"from": "b1", "to": "e1", "condition": "default"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "Express", "exp", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Equal(t, "Express", session.SessionData["choice"])
+	path := chatGraphPath(t, session)
+	assert.Equal(t, "button:exp", path[1]["outcome"])
+}
+
+func TestRunChatGraph_DynamicReplyFollowsDefault(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData = models.JSONB{
+		"topics": []any{
+			map[string]any{"label": "Billing", "key": "bill"},
+		},
+	}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "dynamic-reply",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "b1",
+			"nodes": []any{
+				map[string]any{
+					"id": "b1", "type": "buttons", "label": "topic",
+					"config": map[string]any{
+						"source":       "dynamic",
+						"dynamic_type": "reply",
+						"items_var":    "topics",
+						"title_field":  "label",
+						"id_field":     "key",
+						"body":         "Pick",
+						"store_as":     "topic",
+					},
+				},
+				map[string]any{"id": "e1", "type": "end", "label": "done"},
+			},
+			"edges": []any{
+				map[string]any{"from": "b1", "to": "e1", "condition": "default"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "Billing", "bill", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Equal(t, "Billing", session.SessionData["topic"])
+}

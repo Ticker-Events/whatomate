@@ -348,9 +348,18 @@ export function useFlowGraphSimulation(
   }
 
   function execButtons(node: ChatNode): string {
-    const body = interpolate(stringField(node, 'body', 'message', 'text') || node.label, state.variables)
-    const buttons = (node.config?.buttons as ButtonConfig[] | undefined) || []
-    addMessage('bot', body, { stepName: node.id, buttons })
+    const vars = state.variables
+    const body = interpolate(stringField(node, 'body', 'message', 'text') || node.label, vars)
+    const isList = node.config?.mode === 'list'
+    const buttons = resolveNodeButtons(node, vars)
+    addMessage('bot', body, {
+      stepName: node.id,
+      buttons,
+      interactive: isList ? 'list' : 'buttons',
+      header: isList ? interpolate(stringField(node, 'header'), vars) : undefined,
+      footer: isList ? interpolate(stringField(node, 'footer'), vars) : undefined,
+      listButton: isList ? (interpolate(stringField(node, 'list_button'), vars) || 'Select') : undefined,
+    })
     state.status = 'waiting_input'
     return '__yield__'
   }
@@ -688,6 +697,66 @@ function stringFromConfig(cfg: Record<string, any>, ...keys: string[]): string {
     if (typeof cfg[k] === 'string' && cfg[k] !== '') return cfg[k]
   }
   return ''
+}
+
+function previewField(obj: Record<string, any>, key: string): string {
+  if (!key) return ''
+  const value = obj[key]
+  if (value == null) return ''
+  return String(value).trim()
+}
+
+// resolveNodeButtons mirrors the backend buttonsForNode mapping so the
+// preview shows static cards or rows built from a simulation variable.
+function resolveNodeButtons(node: ChatNode, vars: Record<string, any>): ButtonConfig[] {
+  const cfg = node.config || {}
+  const mode = cfg.mode === 'list' ? 'list' : 'reply'
+  if (cfg.source !== 'dynamic') {
+    const buttons = ((cfg.buttons as ButtonConfig[] | undefined) || []).map((btn) => ({
+      ...btn,
+      title: interpolate(btn.title || '', vars),
+      description: btn.description ? interpolate(btn.description, vars) : btn.description,
+      url: btn.url ? interpolate(btn.url, vars) : btn.url,
+      phone_number: btn.phone_number ? interpolate(btn.phone_number, vars) : btn.phone_number,
+    }))
+    return mode === 'list' ? buttons.slice(0, 10) : buttons
+  }
+
+  const key = String(cfg.items_var || '').trim().replace(/^\{\{/, '').replace(/\}\}$/, '').trim()
+  const raw = key ? vars[key] : undefined
+  if (!Array.isArray(raw)) return []
+
+  let kind = 'reply'
+  if (mode === 'list') kind = 'list'
+  else if (cfg.dynamic_type === 'url' || cfg.dynamic_type === 'phone' || cfg.dynamic_type === 'reply') {
+    kind = cfg.dynamic_type
+  }
+  const titleField = stringFromConfig(cfg, 'title_field') || 'title'
+  const idField = stringFromConfig(cfg, 'id_field') || 'id'
+  const descField = stringFromConfig(cfg, 'description_field')
+  const urlField = stringFromConfig(cfg, 'url_field') || 'url'
+  const phoneField = stringFromConfig(cfg, 'phone_field') || 'phone_number'
+  const limit = kind === 'url' || kind === 'phone' ? 2 : 10
+
+  const out: ButtonConfig[] = []
+  raw.forEach((item, index) => {
+    if (out.length >= limit || !item || typeof item !== 'object') return
+    const obj = item as Record<string, any>
+    const title = previewField(obj, titleField)
+    if (!title) return
+    if (kind === 'url') {
+      out.push({ id: `url_${index + 1}`, title, type: 'url', url: previewField(obj, urlField) })
+      return
+    }
+    if (kind === 'phone') {
+      out.push({ id: `phone_${index + 1}`, title, type: 'phone', phone_number: previewField(obj, phoneField) })
+      return
+    }
+    const id = previewField(obj, idField) || `btn_${index + 1}`
+    const description = kind === 'list' && descField ? previewField(obj, descField) : undefined
+    out.push({ id, title, type: 'reply', description: description || undefined })
+  })
+  return out
 }
 
 // evalCondition runs the expression in a sandboxed Function call with the
