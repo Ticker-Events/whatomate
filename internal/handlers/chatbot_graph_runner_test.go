@@ -1568,7 +1568,7 @@ func TestCarouselCardsForNode_MapSlice(t *testing.T) {
 		"items_var":   "{{products}}",
 		"media_field": "image",
 		"body_field":  "blurb",
-		"title_field": "name",
+		"title_field": "{{name}}",
 		"id_field":    "id",
 	}, models.JSONB{
 		"products": []map[string]any{
@@ -1626,6 +1626,55 @@ func TestCarouselCardsForNode_NestedMediaPath(t *testing.T) {
 	assert.Equal(t, "https://example.com/fallback.jpg", cards[1]["media_url"])
 }
 
+func TestCarouselCardsForNode_LiteralButtonTitle(t *testing.T) {
+	cards, err := carouselCardsForNode(map[string]any{
+		"mode":               "carousel",
+		"source":             "dynamic",
+		"items_var":          "{{products}}",
+		"body_field":         "name",
+		"media_field":        "",
+		"title_field":        "Add To Cart",
+		"id_field":           "id",
+		"fallback_media_url": "https://example.com/fallback.jpg",
+	}, models.JSONB{
+		"products": []map[string]any{
+			{"id": "p1", "name": "Mango Kunafa Parfait"},
+			{"id": float64(2), "name": "Sadya Sweet Canapes", "image": map[string]any{"url": "https://example.com/b.jpg"}},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, cards, 2)
+	assert.Equal(t, "Add To Cart", cards[0]["title"])
+	assert.Equal(t, "Mango Kunafa Parfait", cards[0]["body"])
+	assert.Equal(t, "https://example.com/fallback.jpg", cards[0]["media_url"])
+	assert.Equal(t, "p1", cards[0]["id"])
+	assert.Equal(t, "2", cards[1]["id"])
+	assert.Equal(t, "https://example.com/fallback.jpg", cards[1]["media_url"])
+}
+
+func TestCarouselCardsForNode_ActionTitleVariables(t *testing.T) {
+	cards, err := carouselCardsForNode(map[string]any{
+		"mode":          "carousel",
+		"source":        "dynamic",
+		"items_var":     "products",
+		"media_field":   "image",
+		"title_field":   "Add {{name}}",
+		"id_field":      "id",
+		"title_field_2": "{{selected_collection_name}}",
+	}, models.JSONB{
+		"selected_collection_name": "Sweets",
+		"products": []map[string]any{
+			{"id": "p1", "name": "Aloe", "image": "https://example.com/a.jpg"},
+			{"id": "p2", "name": "Fern", "image": "https://example.com/b.jpg"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, cards, 2)
+	assert.Equal(t, "Add Aloe", cards[0]["title"])
+	assert.Equal(t, "Sweets", cards[0]["title_2"])
+	assert.Equal(t, "Add Fern", cards[1]["title"])
+}
+
 func TestApplyButtonSelection_CarouselSecondReply(t *testing.T) {
 	session := models.JSONB{
 		"products": []map[string]any{
@@ -1638,9 +1687,9 @@ func TestApplyButtonSelection_CarouselSecondReply(t *testing.T) {
 		"source":        "dynamic",
 		"items_var":     "products",
 		"media_field":   "image",
-		"title_field":   "name",
+		"title_field":   "Details",
 		"id_field":      "id",
-		"title_field_2": "fav",
+		"title_field_2": "Save",
 		"id_field_2":    "fav_id",
 		"store_as":      "picked",
 		"selection_mapping": map[string]any{

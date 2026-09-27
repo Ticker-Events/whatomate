@@ -1267,7 +1267,7 @@ func carouselCardsForNode(cfg map[string]any, data models.JSONB) ([]map[string]a
 		if err != nil {
 			return nil, err
 		}
-		cards = dynamicCarouselCards(cfg, items, action)
+		cards = dynamicCarouselCards(cfg, items, action, data)
 	} else {
 		cards = staticCarouselCards(buttonsFromConfig(cfg), action, stringFromConfig(cfg, "fallback_media_url"))
 	}
@@ -1345,21 +1345,18 @@ func staticCarouselCards(buttons []map[string]any, action, fallbackMedia string)
 	return out
 }
 
-func dynamicCarouselCards(cfg map[string]any, items []any, action string) []map[string]any {
+func dynamicCarouselCards(cfg map[string]any, items []any, action string, session models.JSONB) []map[string]any {
 	mediaField := stringFromConfig(cfg, "media_field")
 	if mediaField == "" {
 		mediaField = "image"
 	}
 	bodyField := stringFromConfig(cfg, "body_field")
-	titleField := stringFromConfig(cfg, "title_field")
-	if titleField == "" {
-		titleField = "title"
-	}
+	titleTemplate := strings.TrimSpace(stringFromConfig(cfg, "title_field"))
 	idField := stringFromConfig(cfg, "id_field")
 	if idField == "" {
 		idField = "id"
 	}
-	titleField2 := stringFromConfig(cfg, "title_field_2")
+	titleTemplate2 := strings.TrimSpace(stringFromConfig(cfg, "title_field_2"))
 	idField2 := stringFromConfig(cfg, "id_field_2")
 	urlField := stringFromConfig(cfg, "url_field")
 	if urlField == "" {
@@ -1388,11 +1385,15 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string) []map[
 			card["body"] = fieldString(obj, bodyField)
 		}
 		if action == "url" {
-			title := buttonTitle
-			if title == "" {
-				title = fieldString(obj, titleField)
+			label := strings.TrimSpace(buttonTitle)
+			if label == "" {
+				field := titleTemplate
+				if field == "" {
+					field = "title"
+				}
+				label = fieldString(obj, field)
 			}
-			card["title"] = title
+			card["title"] = label
 			card["url"] = fieldString(obj, urlField)
 			id := fieldString(obj, idField)
 			if id == "" {
@@ -1400,15 +1401,14 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string) []map[
 			}
 			card["id"] = id
 		} else {
-			title := fieldString(obj, titleField)
 			id := fieldString(obj, idField)
 			if id == "" {
 				id = fmt.Sprintf("card_%d", i+1)
 			}
-			card["title"] = title
+			card["title"] = carouselActionTitle(titleTemplate, obj, session)
 			card["id"] = id
-			if titleField2 != "" {
-				title2 := fieldString(obj, titleField2)
+			if titleTemplate2 != "" {
+				title2 := carouselActionTitle(titleTemplate2, obj, session)
 				if title2 == "" {
 					continue
 				}
@@ -1439,6 +1439,24 @@ func nestedFieldString(obj map[string]any, path string) string {
 		return ""
 	}
 	return strings.TrimSpace(formatValue(value))
+}
+
+// carouselActionTitle renders a reply-carousel button label. The text is
+// not an item property name. {{name}} reads the current item first, then
+// the rest of the session.
+func carouselActionTitle(template string, item map[string]any, session models.JSONB) string {
+	template = strings.TrimSpace(template)
+	if template == "" {
+		return ""
+	}
+	merged := make(map[string]any, len(session)+len(item))
+	for k, v := range session {
+		merged[k] = v
+	}
+	for k, v := range item {
+		merged[k] = v
+	}
+	return strings.TrimSpace(processTemplate(template, merged))
 }
 
 func carouselMediaURL(primary, fallback string) string {

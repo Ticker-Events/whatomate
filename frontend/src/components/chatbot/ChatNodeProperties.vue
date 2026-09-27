@@ -740,13 +740,14 @@ const typeLabel: Record<string, string> = {
         </div>
         <template v-else>
           <div class="space-y-1.5">
-            <Label class="text-xs">Title field</Label>
+            <Label class="text-xs">Primary Action Title</Label>
             <Input
               :model-value="config.title_field || ''"
               @update:model-value="(v: string) => updateConfig('title_field', v)"
-              placeholder="name"
-              class="h-8 text-sm font-mono"
+              placeholder="Add to cart"
+              class="h-8 text-sm"
             />
+            <p class="text-[10px] text-muted-foreground">Button text on every card. Variables such as {{ '{{name}}' }} use the current item, then session data.</p>
           </div>
           <div class="space-y-1.5">
             <Label class="text-xs">ID field</Label>
@@ -758,13 +759,14 @@ const typeLabel: Record<string, string> = {
             />
           </div>
           <div class="space-y-1.5">
-            <Label class="text-xs">Second title field</Label>
+            <Label class="text-xs">Second Action Title</Label>
             <Input
               :model-value="config.title_field_2 || ''"
               @update:model-value="(v: string) => updateConfig('title_field_2', v)"
-              placeholder="action_title"
-              class="h-8 text-sm font-mono"
+              placeholder="View details"
+              class="h-8 text-sm"
             />
+            <p class="text-[10px] text-muted-foreground">Optional second button. Leave blank for one button. Supports the same variables.</p>
           </div>
           <div class="space-y-1.5">
             <Label class="text-xs">Second ID field</Label>

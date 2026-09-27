@@ -734,6 +734,12 @@ function stringFromConfig(cfg: Record<string, any>, ...keys: string[]): string {
   return ''
 }
 
+function carouselActionTitle(template: string, item: Record<string, any>, vars: Record<string, any>): string {
+  const text = template.trim()
+  if (!text) return ''
+  return interpolate(text, { ...vars, ...item }).trim()
+}
+
 function previewField(obj: Record<string, any>, key: string): string {
   if (!key) return ''
   const value = obj[key]
@@ -762,9 +768,9 @@ function resolveNodeCarousel(node: ChatNode, vars: Record<string, any>): Preview
     if (!Array.isArray(raw)) return []
     const mediaField = stringFromConfig(cfg, 'media_field') || 'image'
     const bodyField = stringFromConfig(cfg, 'body_field')
-    const titleField = stringFromConfig(cfg, 'title_field') || 'title'
+    const titleTemplate = stringFromConfig(cfg, 'title_field')
     const idField = stringFromConfig(cfg, 'id_field') || 'id'
-    const titleField2 = stringFromConfig(cfg, 'title_field_2')
+    const titleTemplate2 = stringFromConfig(cfg, 'title_field_2')
     const idField2 = stringFromConfig(cfg, 'id_field_2')
     const urlField = stringFromConfig(cfg, 'url_field') || 'url'
     const buttonTitle = interpolate(stringFromConfig(cfg, 'button_title'), vars)
@@ -776,12 +782,14 @@ function resolveNodeCarousel(node: ChatNode, vars: Record<string, any>): Preview
       const mediaUrl = previewPath(obj, mediaField) || fallbackMedia
       const body = bodyField ? previewField(obj, bodyField) : ''
       const buttons = carouselButtons(action, {
-        title: action === 'url' ? (buttonTitle || previewField(obj, titleField)) : previewField(obj, titleField),
+        title: action === 'url'
+          ? (buttonTitle || previewField(obj, titleTemplate || 'title'))
+          : carouselActionTitle(titleTemplate, obj, vars),
         id: previewField(obj, idField) || `card_${index + 1}`,
         url: previewField(obj, urlField),
-        title2: titleField2 ? previewField(obj, titleField2) : '',
+        title2: action === 'url' || !titleTemplate2 ? '' : carouselActionTitle(titleTemplate2, obj, vars),
         id2: previewField(obj, idField2) || `card_${index + 1}_b`,
-        requireSecond: Boolean(titleField2),
+        requireSecond: action !== 'url' && Boolean(titleTemplate2),
         body,
         mediaUrl,
         mediaType,
