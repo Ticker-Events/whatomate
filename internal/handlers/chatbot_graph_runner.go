@@ -1174,6 +1174,8 @@ func asStringMap(item any) (map[string]any, bool) {
 // applyButtonSelection writes store_as (the tapped title) and selection_mapping
 // (session variable → field on the tapped row). id, title, and description are
 // the row WhatsApp showed. Any other field name is read from the source object.
+// Scalars are stored as strings. Arrays and objects stay structured so a later
+// dynamic buttons node can use them as items_var.
 func applyButtonSelection(cfg map[string]any, session models.JSONB, buttonID, title string) models.JSONB {
 	if session == nil {
 		session = models.JSONB{}
@@ -1205,13 +1207,34 @@ func applyButtonSelection(cfg map[string]any, session models.JSONB, buttonID, ti
 		if variable == "" || field == "" {
 			continue
 		}
-		value := fieldString(fields, field)
-		if value == "" {
+		value, ok := selectionFieldValue(fields, field)
+		if !ok {
 			continue
 		}
 		session[variable] = value
 	}
 	return session
+}
+
+// selectionFieldValue copies one mapped field. Collections stay as arrays or
+// objects; everything else is the same string fieldString would produce.
+func selectionFieldValue(fields map[string]any, field string) (any, bool) {
+	if fields == nil || field == "" {
+		return nil, false
+	}
+	v, ok := fields[field]
+	if !ok || v == nil {
+		return nil, false
+	}
+	switch v.(type) {
+	case []any, []map[string]any, models.JSONBArray, map[string]any, models.JSONB:
+		return v, true
+	}
+	s := fieldString(fields, field)
+	if s == "" {
+		return nil, false
+	}
+	return s, true
 }
 
 func selectedItemFields(cfg map[string]any, data models.JSONB, buttonID, title string) map[string]any {

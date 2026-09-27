@@ -518,7 +518,7 @@ export function useFlowGraphSimulation(
       if (!name || !key) continue
       const value = selected[key]
       if (value == null || value === '') continue
-      setVariable(name, typeof value === 'string' ? value : String(value))
+      setVariable(name, previewMappedValue(value))
     }
   }
 
@@ -738,6 +738,11 @@ function carouselActionTitle(template: string, item: Record<string, any>, vars: 
   const text = template.trim()
   if (!text) return ''
   return interpolate(text, { ...vars, ...item }).trim()
+}
+
+function previewMappedValue(value: unknown): unknown {
+  if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return value
+  return typeof value === 'string' ? value : String(value)
 }
 
 function previewField(obj: Record<string, any>, key: string): string {

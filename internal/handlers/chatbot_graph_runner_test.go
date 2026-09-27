@@ -1675,6 +1675,59 @@ func TestCarouselCardsForNode_ActionTitleVariables(t *testing.T) {
 	assert.Equal(t, "Add Fern", cards[1]["title"])
 }
 
+func TestApplyButtonSelection_PreservesOptionArray(t *testing.T) {
+	options := []any{
+		map[string]any{"id": float64(11), "name": "Regular", "price": float64(25000)},
+		map[string]any{"id": float64(12), "name": "Large", "price": float64(35000)},
+	}
+	session := models.JSONB{
+		"products": []map[string]any{
+			{
+				"id":      "p1",
+				"name":    "Mango Kunafa Parfait",
+				"image":   "https://example.com/a.jpg",
+				"options": options,
+			},
+			{
+				"id":      "p2",
+				"name":    "Sadya Sweet Canapes",
+				"image":   "https://example.com/b.jpg",
+				"options": []map[string]any{{"id": "o2", "name": "Box"}},
+			},
+		},
+	}
+	out := applyButtonSelection(map[string]any{
+		"mode":               "carousel",
+		"source":             "dynamic",
+		"items_var":          "products",
+		"media_field":        "image",
+		"body_field":         "name",
+		"title_field":        "Add To Cart",
+		"id_field":           "id",
+		"fallback_media_url": "https://example.com/fallback.jpg",
+		"selection_mapping": map[string]any{
+			"selected_product_id":      "id",
+			"selected_product_options": "options",
+		},
+	}, session, "p1", "Add To Cart")
+
+	assert.Equal(t, "p1", out["selected_product_id"])
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":            "dynamic",
+		"mode":              "list",
+		"items_var":         "selected_product_options",
+		"id_field":          "id",
+		"title_field":       "name",
+		"description_field": "price",
+	}, out, "list")
+	require.NoError(t, err)
+	require.Len(t, buttons, 2)
+	assert.Equal(t, "11", buttons[0]["id"])
+	assert.Equal(t, "Regular", buttons[0]["title"])
+	assert.Equal(t, "25000", buttons[0]["description"])
+	assert.Equal(t, "Large", buttons[1]["title"])
+}
+
 func TestApplyButtonSelection_CarouselSecondReply(t *testing.T) {
 	session := models.JSONB{
 		"products": []map[string]any{
