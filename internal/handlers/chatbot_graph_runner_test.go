@@ -943,8 +943,9 @@ func TestRunChatGraph_Timing_RoutesByCurrentTime(t *testing.T) {
 }
 
 // newSetVariableFlow builds a two-node graph (set_variable → end) whose
-// set_variable config is supplied by the caller.
-func newSetVariableFlow(t *testing.T, app *App, org *models.Organization, account *models.WhatsAppAccount, set map[string]any) *models.ChatbotFlow {
+// set_variable config is supplied by the caller. set is either a map
+// (legacy) or an ordered []any of {name, value} rows.
+func newSetVariableFlow(t *testing.T, app *App, org *models.Organization, account *models.WhatsAppAccount, set any) *models.ChatbotFlow {
 	t.Helper()
 	flow := &models.ChatbotFlow{
 		BaseModel:       models.BaseModel{ID: uuid.New()},
@@ -971,7 +972,7 @@ func newSetVariableFlow(t *testing.T, app *App, org *models.Organization, accoun
 func TestRunChatGraph_SetVariable_Constant(t *testing.T) {
 	app, org, account, contact, session := newGraphTestFixtures(t)
 	flow := newSetVariableFlow(t, app, org, account, map[string]any{
-		"tier": "premium",
+		"tier": `"premium"`,
 	})
 
 	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
@@ -979,13 +980,13 @@ func TestRunChatGraph_SetVariable_Constant(t *testing.T) {
 	assert.Equal(t, "premium", session.SessionData["tier"])
 }
 
-func TestRunChatGraph_SetVariable_TemplateReferencesExisting(t *testing.T) {
+func TestRunChatGraph_SetVariable_ExpressionReferencesExisting(t *testing.T) {
 	app, org, account, contact, session := newGraphTestFixtures(t)
 	session.SessionData = models.JSONB{"customer_name": "Shri"}
 	require.NoError(t, app.DB.Save(session).Error)
 
 	flow := newSetVariableFlow(t, app, org, account, map[string]any{
-		"greeting": "Hello {{customer_name}}!",
+		"greeting": `"Hello " + customer_name`,
 	})
 
 	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
@@ -996,9 +997,9 @@ func TestRunChatGraph_SetVariable_TemplateReferencesExisting(t *testing.T) {
 func TestRunChatGraph_SetVariable_MultipleAtOnce(t *testing.T) {
 	app, org, account, contact, session := newGraphTestFixtures(t)
 	flow := newSetVariableFlow(t, app, org, account, map[string]any{
-		"a": "1",
-		"b": "2",
-		"c": "3",
+		"a": `"1"`,
+		"b": `"2"`,
+		"c": `"3"`,
 	})
 
 	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
@@ -1028,6 +1029,75 @@ func TestRunChatGraph_SetVariable_NonStringStoredVerbatim(t *testing.T) {
 	require.NoError(t, app.DB.First(session, session.ID).Error)
 	assert.Equal(t, float64(42), session.SessionData["count"])
 	assert.Equal(t, true, session.SessionData["is_active"])
+}
+
+func TestRunChatGraph_SetVariable_IndexField(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData = models.JSONB{
+		"options": []any{map[string]any{"id": "opt_1"}},
+	}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := newSetVariableFlow(t, app, org, account, []any{
+		map[string]any{"name": "selected_option_id", "value": "options[0].id"},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "opt_1", session.SessionData["selected_option_id"])
+}
+
+func TestRunChatGraph_SetVariable_LenArithmeticAndLogic(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData = models.JSONB{
+		"options":  []any{map[string]any{"id": "opt_1"}},
+		"price":    float64(10),
+		"quantity": float64(3),
+	}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := newSetVariableFlow(t, app, org, account, []any{
+		map[string]any{"name": "option_count", "value": "len(options)"},
+		map[string]any{"name": "line_total", "value": "price * quantity"},
+		map[string]any{"name": "is_single", "value": "len(options) == 1"},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	// JSON numbers round-trip as float64.
+	assert.Equal(t, float64(1), session.SessionData["option_count"])
+	assert.Equal(t, float64(30), session.SessionData["line_total"])
+	assert.Equal(t, true, session.SessionData["is_single"])
+}
+
+func TestRunChatGraph_SetVariable_LaterRowReadsEarlier(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	flow := newSetVariableFlow(t, app, org, account, []any{
+		map[string]any{"name": "base", "value": "10"},
+		map[string]any{"name": "doubled", "value": "base * 2"},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, float64(10), session.SessionData["base"])
+	assert.Equal(t, float64(20), session.SessionData["doubled"])
+}
+
+func TestRunChatGraph_SetVariable_BadExpressionSkipsRow(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	flow := newSetVariableFlow(t, app, org, account, []any{
+		map[string]any{"name": "good", "value": `"ok"`},
+		map[string]any{"name": "bad", "value": "options["},
+		map[string]any{"name": "also", "value": `"yes"`},
+		map[string]any{"name": "", "value": `"ignored"`},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "ok", session.SessionData["good"])
+	_, hasBad := session.SessionData["bad"]
+	assert.False(t, hasBad)
+	assert.Equal(t, "yes", session.SessionData["also"])
 }
 
 // newAIResponseFlow builds a two-node graph (ai_response → end).

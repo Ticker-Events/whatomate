@@ -28,6 +28,7 @@ import {
   MessageCircle,
   Users,
   GitBranch,
+  Variable,
   Clock,
   ExternalLink,
   StopCircle,
@@ -55,6 +56,7 @@ import ChatbotTiqrStoreApiNode from '@/components/chatbot/nodes/ChatbotTiqrStore
 import ChatbotWhatsAppFlowNode from '@/components/chatbot/nodes/ChatbotWhatsAppFlowNode.vue'
 import ChatbotTransferNode from '@/components/chatbot/nodes/ChatbotTransferNode.vue'
 import ChatbotConditionNode from '@/components/chatbot/nodes/ChatbotConditionNode.vue'
+import ChatbotSetVariableNode from '@/components/chatbot/nodes/ChatbotSetVariableNode.vue'
 import ChatbotTimingNode from '@/components/chatbot/nodes/ChatbotTimingNode.vue'
 import ChatbotGotoFlowNode from '@/components/chatbot/nodes/ChatbotGotoFlowNode.vue'
 import ChatbotEndNode from '@/components/chatbot/nodes/ChatbotEndNode.vue'
@@ -119,6 +121,7 @@ const nodeTypes: any = {
   whatsapp_flow: markRaw(ChatbotWhatsAppFlowNode),
   transfer: markRaw(ChatbotTransferNode),
   condition: markRaw(ChatbotConditionNode),
+  set_variable: markRaw(ChatbotSetVariableNode),
   timing: markRaw(ChatbotTimingNode),
   goto_flow: markRaw(ChatbotGotoFlowNode),
   end: markRaw(ChatbotEndNode),
@@ -135,6 +138,7 @@ const palette: { type: ChatNodeType; label: string; icon: any; color: string }[]
   { type: 'whatsapp_flow', label: 'WA Flow', icon: MessageCircle, color: 'bg-green-600' },
   { type: 'transfer', label: 'Transfer', icon: Users, color: 'bg-amber-600' },
   { type: 'condition', label: 'Condition', icon: GitBranch, color: 'bg-indigo-600' },
+  { type: 'set_variable', label: 'Assign', icon: Variable, color: 'bg-violet-600' },
   { type: 'timing', label: 'Timing', icon: Clock, color: 'bg-cyan-600' },
   { type: 'goto_flow', label: 'Go to Flow', icon: ExternalLink, color: 'bg-teal-600' },
   { type: 'end', label: 'End', icon: StopCircle, color: 'bg-slate-600' },
@@ -207,6 +211,8 @@ function defaultConfigFor(type: ChatNodeType): Record<string, any> {
       return { body: '', team_id: '_general', notes: '' }
     case 'condition':
       return { expression: '' }
+    case 'set_variable':
+      return { set: [] }
     case 'timing':
       return {
         schedule: [
@@ -239,6 +245,7 @@ const paletteLabels: Record<string, string> = {
   whatsapp_flow: 'WhatsApp Flow',
   transfer: 'Transfer',
   condition: 'Condition',
+  set_variable: 'Assign',
   timing: 'Timing',
   goto_flow: 'Go to Flow',
   webhook: 'Webhook',

@@ -62,9 +62,9 @@ const controlNodeMeta: Record<string, { label: string; icon: any; description: s
     description: 'Jumps execution to another flow. Session variables carry forward.',
   },
   set_variable: {
-    label: 'Set Variable',
+    label: 'Assign',
     icon: Variable,
-    description: 'Assigns values to session variables. No WhatsApp message is sent.',
+    description: 'Assigns session variables from expressions. No WhatsApp message is sent.',
   },
   end: {
     label: 'End',

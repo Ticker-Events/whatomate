@@ -231,6 +231,42 @@ const gotoFlowTargets = computed(() =>
   (props.availableFlows || []).filter((f) => f.id !== props.currentFlowId),
 )
 
+type SetAssignment = { name: string; value: string }
+
+const setAssignments = computed<SetAssignment[]>(() => {
+  const set = config.value.set
+  if (Array.isArray(set)) {
+    return set.map((row: any) => ({
+      name: typeof row?.name === 'string' ? row.name : '',
+      value: row?.value == null ? '' : String(row.value),
+    }))
+  }
+  if (set && typeof set === 'object') {
+    return Object.entries(set as Record<string, unknown>).map(([name, value]) => ({
+      name,
+      value: value == null ? '' : String(value),
+    }))
+  }
+  return []
+})
+
+function writeAssignments(rows: SetAssignment[]) {
+  updateConfig('set', rows.map((row) => ({ name: row.name, value: row.value })))
+}
+
+function addAssignment() {
+  writeAssignments([...setAssignments.value, { name: '', value: '' }])
+}
+
+function updateAssignment(index: number, field: 'name' | 'value', value: string) {
+  const rows = setAssignments.value.map((row, i) => (i === index ? { ...row, [field]: value } : row))
+  writeAssignments(rows)
+}
+
+function removeAssignment(index: number) {
+  writeAssignments(setAssignments.value.filter((_, i) => i !== index))
+}
+
 const typeLabel: Record<string, string> = {
   start: 'Start',
   message: 'Message',
@@ -239,6 +275,7 @@ const typeLabel: Record<string, string> = {
   api_call: 'API Call',
   tiqr_store_api: 'TiQR Store API',
   condition: 'Condition',
+  set_variable: 'Assign',
   timing: 'Timing',
   transfer: 'Transfer',
   end: 'End',
@@ -974,6 +1011,40 @@ const typeLabel: Record<string, string> = {
           class="min-h-[50px] text-xs"
         />
         <p class="text-[10px] text-muted-foreground">Sent on success after mappings are applied. Fields support <code v-pre>{{variable}}</code> templates.</p>
+      </div>
+    </template>
+
+    <!-- set_variable -->
+    <template v-if="node.type === 'set_variable'">
+      <div class="space-y-1.5">
+        <div class="flex items-center justify-between">
+          <Label class="text-xs">Assignments</Label>
+          <Button variant="outline" size="sm" class="h-6 text-xs" @click="addAssignment">
+            <Plus class="h-3 w-3 mr-1" /> Add
+          </Button>
+        </div>
+        <div v-for="(row, idx) in setAssignments" :key="idx" class="flex items-center gap-1.5">
+          <Input
+            :model-value="row.name"
+            @update:model-value="(v: string) => updateAssignment(Number(idx), 'name', v)"
+            placeholder="name"
+            class="h-8 text-xs font-mono"
+          />
+          <Input
+            :model-value="row.value"
+            @update:model-value="(v: string) => updateAssignment(Number(idx), 'value', v)"
+            placeholder="options[0].id"
+            class="h-8 text-xs font-mono"
+          />
+          <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0" @click="removeAssignment(Number(idx))">
+            <Trash2 class="h-3.5 w-3.5 text-destructive" />
+          </Button>
+        </div>
+        <p class="text-[10px] text-muted-foreground">
+          Rows run top to bottom. Same expressions as Condition:
+          <code>options[0].id</code>, <code>len(options)</code>, <code>price * quantity</code>.
+          Quote string literals (<code>"premium"</code>). Branch with a Condition node.
+        </p>
       </div>
     </template>
 

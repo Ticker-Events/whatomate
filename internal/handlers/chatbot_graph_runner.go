@@ -516,20 +516,31 @@ func (a *App) execChatCondition(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, 
 	return nodeOutcome{outcome: "false"}, nil
 }
 
-// evaluateConditionExpression compiles + runs a boolean expression via
-// expr-lang/expr against SessionData. The result is coerced to bool —
-// non-bool truthy values count as true (matches expr's natural casting).
-func evaluateConditionExpression(expression string, data models.JSONB) (bool, error) {
+// evaluateExpression compiles and runs an expr-lang expression against
+// SessionData and returns the raw result. Session keys are top-level
+// identifiers. Unknown identifiers resolve to nil.
+func evaluateExpression(expression string, data models.JSONB) (any, error) {
 	env := make(map[string]any, len(data))
 	maps.Copy(env, data)
 
 	program, err := expr.Compile(expression, expr.Env(env), expr.AllowUndefinedVariables())
 	if err != nil {
-		return false, fmt.Errorf("compile: %w", err)
+		return nil, fmt.Errorf("compile: %w", err)
 	}
 	out, err := expr.Run(program, env)
 	if err != nil {
-		return false, fmt.Errorf("run: %w", err)
+		return nil, fmt.Errorf("run: %w", err)
+	}
+	return out, nil
+}
+
+// evaluateConditionExpression compiles + runs a boolean expression via
+// expr-lang/expr against SessionData. The result is coerced to bool —
+// non-bool truthy values count as true (matches expr's natural casting).
+func evaluateConditionExpression(expression string, data models.JSONB) (bool, error) {
+	out, err := evaluateExpression(expression, data)
+	if err != nil {
+		return false, err
 	}
 	switch v := out.(type) {
 	case bool:
@@ -615,41 +626,91 @@ type scheduleLogger interface {
 	Warn(msg string, args ...any)
 }
 
+// setAssignment is one variable write. When isExpr is true, expr is an
+// expr-lang expression evaluated against the session. Otherwise raw is
+// stored as authored (numbers and booleans in the legacy map form).
+type setAssignment struct {
+	name   string
+	expr   string
+	raw    any
+	isExpr bool
+}
+
+// assignmentRows reads config.set. An array of {name, value} keeps author
+// order so a later row can read an earlier write. A map is the legacy
+// form: string values are expressions, other values are stored as-is, and
+// iteration order is not guaranteed.
+func assignmentRows(set any) []setAssignment {
+	switch v := set.(type) {
+	case []any:
+		rows := make([]setAssignment, 0, len(v))
+		for _, item := range v {
+			row, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := row["name"].(string)
+			rows = append(rows, assignmentFromValue(name, row["value"]))
+		}
+		return rows
+	case map[string]any:
+		rows := make([]setAssignment, 0, len(v))
+		for name, raw := range v {
+			rows = append(rows, assignmentFromValue(name, raw))
+		}
+		return rows
+	default:
+		return nil
+	}
+}
+
+func assignmentFromValue(name string, raw any) setAssignment {
+	if exprText, ok := raw.(string); ok {
+		return setAssignment{name: name, expr: exprText, isExpr: true}
+	}
+	return setAssignment{name: name, raw: raw}
+}
+
 // execChatSetVariable assigns one or more values into SessionData. Each
-// value runs through processTemplate against current SessionData first,
-// so authors can compose new variables from existing ones (e.g.
-// "greeting" = "Hello {{customer_name}}!"). Non-blocking; outcome
+// string value is an expr-lang expression (the same language as condition
+// nodes): len(options), price * quantity, options[0].id, "premium".
+// Rows run in order and each write is visible to the next row.
+// A row that fails to compile or run is skipped. Non-blocking; outcome
 // "default".
 //
 // Config:
 //
 //	{
-//	  "set": {
-//	    "greeting":  "Hello {{customer_name}}!",
-//	    "tier":      "premium"
-//	  }
+//	  "set": [
+//	    { "name": "selected_option_id", "value": "options[0].id" },
+//	    { "name": "option_count", "value": "len(options)" }
+//	  ]
 //	}
 func (a *App) execChatSetVariable(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
-	assignments, _ := node.Config["set"].(map[string]any)
-	if len(assignments) == 0 {
+	rows := assignmentRows(node.Config["set"])
+	if len(rows) == 0 {
 		return nodeOutcome{outcome: "default"}, nil
 	}
 
 	if ctx.session.SessionData == nil {
 		ctx.session.SessionData = models.JSONB{}
 	}
-	for name, raw := range assignments {
-		if name == "" {
+	for _, row := range rows {
+		if row.name == "" {
 			continue
 		}
-		tmpl, ok := raw.(string)
-		if !ok {
-			// Non-string assignments are stored verbatim — useful for
-			// numbers or booleans authored directly in the editor.
-			ctx.session.SessionData[name] = raw
+		if !row.isExpr {
+			ctx.session.SessionData[row.name] = row.raw
 			continue
 		}
-		ctx.session.SessionData[name] = processTemplate(tmpl, ctx.session.SessionData)
+		value, err := evaluateExpression(row.expr, ctx.session.SessionData)
+		if err != nil {
+			a.Log.Warn("set_variable expression failed",
+				"node", node.ID, "session", ctx.session.ID,
+				"name", row.name, "expression", row.expr, "error", err)
+			continue
+		}
+		ctx.session.SessionData[row.name] = value
 	}
 	return nodeOutcome{outcome: "default"}, nil
 }

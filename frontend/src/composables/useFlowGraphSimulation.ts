@@ -288,15 +288,6 @@ export function useFlowGraphSimulation(
   // ---- Per-node executors ------------------------------------------------
 
   async function execute(node: ChatNode): Promise<string> {
-    // Universal pre-step: node.config.set (matches backend applyNodeSetConfig).
-    const set = node.config?.set as Record<string, any> | undefined
-    if (set && typeof set === 'object') {
-      for (const [k, v] of Object.entries(set)) {
-        const value = typeof v === 'string' ? interpolate(v, state.variables) : v
-        setVariable(k, value)
-      }
-    }
-
     switch (node.type) {
       case 'start':
         // Entry sentinel — mirror backend ChatNodeStart (no side effect).
@@ -314,8 +305,7 @@ export function useFlowGraphSimulation(
       case 'prompt':
         return execPrompt(node)
       case 'set_variable':
-        // The pre-step already applied; nothing more to do.
-        return 'default'
+        return execSetVariable(node)
       case 'transfer':
         return execTransfer(node)
       case 'api_call':
@@ -407,6 +397,20 @@ export function useFlowGraphSimulation(
     const result = evalCondition(expression, state.variables)
     log('condition_eval', node.id, { expression, result })
     return result ? 'true' : 'false'
+  }
+
+  function execSetVariable(node: ChatNode): string {
+    for (const row of readAssignments(node.config?.set)) {
+      if (!row.name) continue
+      if (!row.isExpr) {
+        setVariable(row.name, row.raw)
+        continue
+      }
+      const result = evalExpression(row.expr, state.variables)
+      if (!result.ok) continue
+      setVariable(row.name, result.value)
+    }
+    return 'default'
   }
 
   function execTiming(node: ChatNode): string {
@@ -914,23 +918,245 @@ function resolveNodeButtons(node: ChatNode, vars: Record<string, any>): ButtonCo
   return out
 }
 
-// evalCondition runs the expression in a sandboxed Function call with the
-// session variables bound. Mirrors the backend's expr-lang/expr semantics
-// well enough for the most common operators (==, !=, &&, ||, !, parens).
-// Falls back to false on any compile/runtime error.
-function evalCondition(expression: string, vars: Record<string, any>): boolean {
+// evalExpression runs an expr-lang-style expression and returns the raw
+// value. Unknown names resolve to undefined. A compile or runtime error
+// returns ok: false so the caller can skip that assignment.
+// evalCondition coerces the same result to bool.
+function evalExpression(expression: string, vars: Record<string, any>): { ok: boolean; value: unknown } {
+  const trimmed = expression.trim()
+  if (!trimmed) return { ok: false, value: undefined }
   try {
-    // Translate expr-lang keywords to JS equivalents for client-side eval.
-    const js = expression
-      .replace(/\band\b/gi, '&&')
-      .replace(/\bor\b/gi, '||')
-      .replace(/\bnot\b/gi, '!')
-      .replace(/\bcontains\b/gi, '.includes')
-    const keys = Object.keys(vars)
+    const js = translateExprToJs(trimmed)
     // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-    const fn = new Function(...keys, `try { return !!(${js}); } catch (_) { return false; }`)
-    return !!fn(...keys.map((k) => vars[k]))
+    const fn = new Function('vars', `
+      const len = (value) => {
+        if (typeof value === 'string' || Array.isArray(value)) return value.length
+        if (value && typeof value === 'object') return Object.keys(value).length
+        return 0
+      }
+      const __in = (collection, value) => {
+        if (typeof collection === 'string') return collection.includes(String(value ?? ''))
+        if (Array.isArray(collection)) return collection.includes(value)
+        if (collection && typeof collection === 'object') return Object.prototype.hasOwnProperty.call(collection, String(value))
+        return false
+      }
+      const env = new Proxy(vars, {
+        has(_target, prop) {
+          return prop !== 'len' && prop !== '__in'
+        },
+        get(target, prop) {
+          if (prop === Symbol.unscopables) return undefined
+          if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(target, prop)) return target[prop]
+          return undefined
+        },
+      })
+      try {
+        with (env) { return { ok: true, value: (${js}) } }
+      } catch (_) {
+        return { ok: false, value: undefined }
+      }
+    `)
+    return fn(vars) as { ok: boolean; value: unknown }
   } catch {
-    return false
+    return { ok: false, value: undefined }
   }
+}
+
+function evalCondition(expression: string, vars: Record<string, any>): boolean {
+  const result = evalExpression(expression, vars)
+  if (!result.ok) return false
+  return coerceExprBool(result.value)
+}
+
+function coerceExprBool(value: unknown): boolean {
+  if (typeof value === 'boolean') return value
+  if (value == null) return false
+  if (typeof value === 'string') return value !== '' && value.toLowerCase() !== 'false'
+  if (typeof value === 'number') return value !== 0 && !Number.isNaN(value)
+  return true
+}
+
+type PreviewAssignment = { name: string; isExpr: boolean; expr: string; raw: unknown }
+
+function readAssignments(set: unknown): PreviewAssignment[] {
+  if (Array.isArray(set)) {
+    return set.flatMap((item) => {
+      if (!item || typeof item !== 'object') return []
+      const row = item as Record<string, unknown>
+      const name = typeof row.name === 'string' ? row.name : ''
+      return [previewAssignment(name, row.value)]
+    })
+  }
+  if (set && typeof set === 'object') {
+    return Object.entries(set as Record<string, unknown>).map(([name, value]) => previewAssignment(name, value))
+  }
+  return []
+}
+
+function previewAssignment(name: string, raw: unknown): PreviewAssignment {
+  if (typeof raw === 'string') return { name, isExpr: true, expr: raw, raw }
+  return { name, isExpr: false, expr: '', raw }
+}
+
+function translateExprToJs(expression: string): string {
+  let js = expression
+  js = replaceInfix(js, 'startsWith', (left, right) => `(${left}).startsWith(${right})`)
+  js = replaceInfix(js, 'contains', (left, right) => `(${left}).includes(${right})`)
+  js = replaceInfix(js, 'in', (left, right) => `__in(${right}, ${left})`)
+  return js
+    .replace(/\band\b/gi, '&&')
+    .replace(/\bor\b/gi, '||')
+    .replace(/\bnot\b/gi, '!')
+}
+
+function replaceInfix(
+  source: string,
+  keyword: string,
+  wrap: (left: string, right: string) => string,
+): string {
+  let result = source
+  for (;;) {
+    const match = findInfixKeyword(result, keyword)
+    if (!match) return result
+    const left = readOperandBackward(result, match.start)
+    const right = readOperandForward(result, match.end)
+    if (!left || !right) return result
+    result = result.slice(0, left.start) + wrap(left.text, right.text) + result.slice(right.end)
+  }
+}
+
+function findInfixKeyword(source: string, keyword: string): { start: number; end: number } | null {
+  const lower = keyword.toLowerCase()
+  let quote: string | null = null
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i]
+    if (quote) {
+      if (ch === '\\') { i++; continue }
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue }
+    if (source.slice(i, i + keyword.length).toLowerCase() !== lower) continue
+    const before = i === 0 ? ' ' : source[i - 1]
+    const after = source[i + keyword.length] ?? ' '
+    const isBoundary = (c: string) => !/[A-Za-z0-9_]/.test(c)
+    if (!isBoundary(before) || !isBoundary(after) || before === '.') continue
+    return { start: i, end: i + keyword.length }
+  }
+  return null
+}
+
+function readOperandBackward(source: string, endExclusive: number): { text: string; start: number } | null {
+  let i = endExclusive - 1
+  while (i >= 0 && /\s/.test(source[i])) i--
+  if (i < 0) return null
+  const operandEnd = i + 1
+  while (i >= 0) {
+    const ch = source[i]
+    if (ch === ')' || ch === ']') {
+      const open = ch === ')' ? '(' : '['
+      let depth = 1
+      i--
+      while (i >= 0 && depth > 0) {
+        const current = source[i]
+        if (current === '"' || current === "'") {
+          const q = current
+          i--
+          while (i >= 0 && source[i] !== q) {
+            if (source[i] === '\\') i--
+            i--
+          }
+          i--
+          continue
+        }
+        if (current === ch) depth++
+        else if (current === open) depth--
+        i--
+      }
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      i--
+      while (i >= 0 && source[i] !== ch) {
+        if (source[i] === '\\') i--
+        i--
+      }
+      i--
+      continue
+    }
+    if (/[A-Za-z0-9_.]/.test(ch)) {
+      while (i >= 0 && /[A-Za-z0-9_.]/.test(source[i])) i--
+      continue
+    }
+    break
+  }
+  const start = i + 1
+  const text = source.slice(start, operandEnd).trim()
+  if (!text) return null
+  return { text, start }
+}
+
+function readOperandForward(source: string, start: number): { text: string; end: number } | null {
+  let i = start
+  while (i < source.length && /\s/.test(source[i])) i++
+  if (i >= source.length) return null
+  const begin = i
+  const ch = source[i]
+  if (ch === '"' || ch === "'") {
+    i++
+    while (i < source.length && source[i] !== ch) {
+      if (source[i] === '\\') i++
+      i++
+    }
+    return { text: source.slice(begin, i + 1), end: i + 1 }
+  }
+  if (ch === '(' || ch === '[') {
+    const close = ch === '(' ? ')' : ']'
+    i = skipGroup(source, i, ch, close)
+    i = skipMemberTail(source, i)
+    return { text: source.slice(begin, i), end: i }
+  }
+  if (!/[A-Za-z0-9_]/.test(ch)) return null
+  while (i < source.length && /[A-Za-z0-9_.]/.test(source[i])) i++
+  i = skipMemberTail(source, i)
+  return { text: source.slice(begin, i), end: i }
+}
+
+function skipGroup(source: string, start: number, open: string, close: string): number {
+  let i = start
+  let depth = 0
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '"' || ch === "'") {
+      i++
+      while (i < source.length && source[i] !== ch) {
+        if (source[i] === '\\') i++
+        i++
+      }
+      i++
+      continue
+    }
+    if (ch === open) depth++
+    else if (ch === close) {
+      depth--
+      i++
+      if (depth === 0) return i
+      continue
+    }
+    i++
+  }
+  return i
+}
+
+function skipMemberTail(source: string, start: number): number {
+  let i = start
+  while (i < source.length && (source[i] === '.' || source[i] === '[')) {
+    if (source[i] === '.') {
+      i++
+      while (i < source.length && /[A-Za-z0-9_]/.test(source[i])) i++
+      continue
+    }
+    i = skipGroup(source, i, '[', ']')
+  }
+  return i
 }
