@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,6 +24,31 @@ func TestProcessTemplate_VariablesOnly(t *testing.T) {
 	data := map[string]any{"name": "Alice", "age": 30}
 	result := processTemplate("Hello {{name}}, age {{age}}", data)
 	assert.Equal(t, "Hello Alice, age 30", result)
+}
+
+func TestProcessTemplate_CollectionNameLoop(t *testing.T) {
+	t.Parallel()
+	var payload map[string]any
+	assert.NoError(t, json.Unmarshal([]byte(`{
+		"results": [
+			{"id": 57, "name": "Best Sellers"},
+			{"id": 51, "name": "Bracelets"}
+		]
+	}`), &payload))
+	data := map[string]any{"collections": payload["results"]}
+	result := processTemplate("{{for c in collections}}\n{{c.name}}\n{{endfor}}", data)
+	assert.Equal(t, "\nBest Sellers\n\nBracelets\n", result)
+}
+
+func TestProcessTemplate_ForLoopAllowsSpacesInsideBraces(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{
+		"collections": []any{
+			map[string]any{"name": "Rings"},
+		},
+	}
+	result := processTemplate("{{ for c in collections }}\n{{ c.name }}\n{{ endfor }}", data)
+	assert.Equal(t, "\nRings\n", result)
 }
 
 func TestProcessTemplate_LoopsOnly(t *testing.T) {

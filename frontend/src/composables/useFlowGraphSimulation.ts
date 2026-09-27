@@ -18,18 +18,62 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-const TEMPLATE_RE = /\{\{\s*([^}]+?)\s*\}\}/g
+const FOR_RE = /\{\{\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}([\s\S]*?)\{\{\s*endfor\s*\}\}/
+const VAR_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*\}\}/g
+const MAX_LOOP_ITEMS = 50
 
-// Lightweight `{{var}}` interpolation; matches the backend's processTemplate
-// for the simple case (no helpers or filters). Sufficient for previewing the
-// node-config message templates.
+// Mirrors the backend processTemplate: {{for item in items}}...{{endfor}},
+// then {{variable}} / {{object.field}} / {{items[0].name}}.
+function lookupPath(vars: Record<string, any>, path: string): unknown {
+  let current: unknown = vars
+  for (const part of path.trim().split('.')) {
+    if (current == null || typeof current !== 'object') return undefined
+    const arrayMatch = part.match(/^([A-Za-z_][A-Za-z0-9_]*)\[(\d+)\]$/)
+    if (arrayMatch) {
+      const list = (current as Record<string, unknown>)[arrayMatch[1]]
+      if (!Array.isArray(list)) return undefined
+      current = list[Number(arrayMatch[2])]
+      continue
+    }
+    current = (current as Record<string, unknown>)[part]
+  }
+  return current
+}
+
+function replaceVariables(template: string, vars: Record<string, any>): string {
+  return template.replace(VAR_RE, (_, path: string) => {
+    const value = lookupPath(vars, path)
+    if (value == null) return ''
+    if (typeof value === 'object') return ''
+    return String(value)
+  })
+}
+
 function interpolate(template: string, vars: Record<string, any>): string {
   if (!template) return ''
-  return template.replace(TEMPLATE_RE, (_, expr: string) => {
-    const path = expr.trim()
-    const value = path.split('.').reduce<any>((acc, key) => (acc == null ? acc : acc[key]), vars)
-    return value == null ? '' : String(value)
-  })
+  let result = template
+  for (let pass = 0; pass < MAX_LOOP_ITEMS; pass++) {
+    const match = FOR_RE.exec(result)
+    if (!match) break
+    const itemVar = match[1]
+    const body = match[3]
+    const arrayValue = lookupPath(vars, match[2])
+    let rendered = ''
+    if (Array.isArray(arrayValue)) {
+      const parts: string[] = []
+      const limit = Math.min(arrayValue.length, MAX_LOOP_ITEMS)
+      for (let i = 0; i < limit; i++) {
+        parts.push(replaceVariables(body, {
+          ...vars,
+          [itemVar]: arrayValue[i],
+          [`${itemVar}_index`]: i,
+        }))
+      }
+      rendered = parts.join('')
+    }
+    result = result.slice(0, match.index) + rendered + result.slice(match.index + match[0].length)
+  }
+  return replaceVariables(result, vars)
 }
 
 /**

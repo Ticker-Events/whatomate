@@ -10,7 +10,8 @@ import (
 // Template syntax patterns
 var (
 	// {{for item in items}}...{{endfor}}
-	forLoopPattern = regexp.MustCompile(`\{\{for\s+(\w+)\s+in\s+(\w+(?:\.\w+)*)\}\}([\s\S]*?)\{\{endfor\}\}`)
+	// Spaces inside the braces are allowed: {{ for item in items }} ... {{ endfor }}
+	forLoopPattern = regexp.MustCompile(`\{\{\s*for\s+(\w+)\s+in\s+(\w+(?:\.\w+)*)\s*\}\}([\s\S]*?)\{\{\s*endfor\s*\}\}`)
 
 	// {{if condition}}...{{else}}...{{endif}} or {{if condition}}...{{endif}}
 	ifElsePattern = regexp.MustCompile(`\{\{if\s+([^}]+)\}\}([\s\S]*?)\{\{endif\}\}`)
@@ -154,8 +155,8 @@ func processConditionals(template string, data map[string]any) string {
 // processVariables replaces {{variable}} and {{object.path}} with values
 func processVariables(template string, data map[string]any) string {
 	return variablePattern.ReplaceAllStringFunc(template, func(match string) string {
-		// Remove {{ and }}
-		path := match[2 : len(match)-2]
+		// Drop {{ }} and ignore spaces authors put inside the braces.
+		path := strings.TrimSpace(match[2 : len(match)-2])
 
 		value := getNestedValue(data, path)
 		return formatValue(value)
