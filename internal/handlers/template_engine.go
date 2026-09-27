@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/shridarpatil/whatomate/internal/models"
 )
 
 // Template syntax patterns
@@ -189,12 +191,11 @@ func getNestedValue(data map[string]any, path string) any {
 
 			// Get the field first
 			if field != "" {
-				switch v := current.(type) {
-				case map[string]any:
-					current = v[field]
-				default:
+				m, ok := nestedMap(current)
+				if !ok {
 					return nil
 				}
+				current = m[field]
 			}
 
 			// Then index into the array
@@ -211,21 +212,36 @@ func getNestedValue(data map[string]any, path string) any {
 				} else {
 					return nil
 				}
+			case models.JSONBArray:
+				if index >= 0 && index < len(arr) {
+					current = arr[index]
+				} else {
+					return nil
+				}
 			default:
 				return nil
 			}
 		} else {
-			// Regular field access
-			switch v := current.(type) {
-			case map[string]any:
-				current = v[part]
-			default:
+			m, ok := nestedMap(current)
+			if !ok {
 				return nil
 			}
+			current = m[part]
 		}
 	}
 
 	return current
+}
+
+func nestedMap(current any) (map[string]any, bool) {
+	switch v := current.(type) {
+	case map[string]any:
+		return v, true
+	case models.JSONB:
+		return map[string]any(v), true
+	default:
+		return nil, false
+	}
 }
 
 // splitPath splits a path like "user.profile.name" or "items[0].name" into parts

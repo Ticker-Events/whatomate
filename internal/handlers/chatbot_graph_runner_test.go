@@ -1584,6 +1584,48 @@ func TestCarouselCardsForNode_MapSlice(t *testing.T) {
 	assert.Equal(t, "https://example.com/a.jpg", cards[0]["media_url"])
 }
 
+func TestCarouselCardsForNode_FallbackMediaURL(t *testing.T) {
+	cards, err := carouselCardsForNode(map[string]any{
+		"mode":               "carousel",
+		"source":             "dynamic",
+		"items_var":          "products",
+		"media_field":        "image",
+		"title_field":        "name",
+		"id_field":           "id",
+		"fallback_media_url": "https://example.com/fallback.jpg",
+	}, models.JSONB{
+		"products": []map[string]any{
+			{"id": "p1", "name": "Aloe", "image": ""},
+			{"id": "p2", "name": "Fern", "image": "https://example.com/b.jpg"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, cards, 2)
+	assert.Equal(t, "https://example.com/fallback.jpg", cards[0]["media_url"])
+	assert.Equal(t, "https://example.com/b.jpg", cards[1]["media_url"])
+}
+
+func TestCarouselCardsForNode_NestedMediaPath(t *testing.T) {
+	cards, err := carouselCardsForNode(map[string]any{
+		"mode":               "carousel",
+		"source":             "dynamic",
+		"items_var":          "products",
+		"media_field":        "images[0].image",
+		"title_field":        "name",
+		"id_field":           "id",
+		"fallback_media_url": "https://example.com/fallback.jpg",
+	}, models.JSONB{
+		"products": []map[string]any{
+			{"id": "p1", "name": "Aloe", "images": []any{map[string]any{"image": "https://example.com/a.jpg"}}},
+			{"id": "p2", "name": "Fern", "images": []map[string]any{}},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, cards, 2)
+	assert.Equal(t, "https://example.com/a.jpg", cards[0]["media_url"])
+	assert.Equal(t, "https://example.com/fallback.jpg", cards[1]["media_url"])
+}
+
 func TestApplyButtonSelection_CarouselSecondReply(t *testing.T) {
 	session := models.JSONB{
 		"products": []map[string]any{

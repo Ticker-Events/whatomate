@@ -741,6 +741,12 @@ function previewField(obj: Record<string, any>, key: string): string {
   return String(value).trim()
 }
 
+function previewPath(obj: Record<string, any>, path: string): string {
+  const value = lookupPath(obj, path)
+  if (value == null || typeof value === 'object') return ''
+  return String(value).trim()
+}
+
 function resolveNodeCarousel(node: ChatNode, vars: Record<string, any>): PreviewCarouselCard[] {
   const cfg = node.config || {}
   const action = cfg.card_action === 'url' ? 'url' : 'reply'
@@ -763,10 +769,11 @@ function resolveNodeCarousel(node: ChatNode, vars: Record<string, any>): Preview
     const urlField = stringFromConfig(cfg, 'url_field') || 'url'
     const buttonTitle = interpolate(stringFromConfig(cfg, 'button_title'), vars)
     const mediaType = cfg.media_type === 'video' ? 'video' : 'image'
+    const fallbackMedia = interpolate(stringFromConfig(cfg, 'fallback_media_url'), vars)
     raw.forEach((item, index) => {
       if (!item || typeof item !== 'object') return
       const obj = item as Record<string, any>
-      const mediaUrl = previewField(obj, mediaField)
+      const mediaUrl = previewPath(obj, mediaField) || fallbackMedia
       const body = bodyField ? previewField(obj, bodyField) : ''
       const buttons = carouselButtons(action, {
         title: action === 'url' ? (buttonTitle || previewField(obj, titleField)) : previewField(obj, titleField),
@@ -787,9 +794,10 @@ function resolveNodeCarousel(node: ChatNode, vars: Record<string, any>): Preview
   }
 
   const buttons = (cfg.buttons as Record<string, any>[] | undefined) || []
+  const fallbackMedia = interpolate(stringFromConfig(cfg, 'fallback_media_url'), vars)
   buttons.forEach((card, index) => {
     const mediaType = card.media_type === 'video' ? 'video' : 'image'
-    const mediaUrl = interpolate(String(card.media_url || ''), vars)
+    const mediaUrl = interpolate(String(card.media_url || ''), vars) || fallbackMedia
     const body = interpolate(String(card.body || ''), vars)
     const built = carouselButtons(action, {
       title: interpolate(String(card.title || ''), vars),

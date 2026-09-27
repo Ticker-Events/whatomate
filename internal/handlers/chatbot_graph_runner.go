@@ -1269,7 +1269,7 @@ func carouselCardsForNode(cfg map[string]any, data models.JSONB) ([]map[string]a
 		}
 		cards = dynamicCarouselCards(cfg, items, action)
 	} else {
-		cards = staticCarouselCards(buttonsFromConfig(cfg), action)
+		cards = staticCarouselCards(buttonsFromConfig(cfg), action, stringFromConfig(cfg, "fallback_media_url"))
 	}
 	if len(cards) < 2 {
 		return nil, fmt.Errorf("carousel needs at least 2 cards")
@@ -1306,13 +1306,13 @@ func sessionItemSlice(cfg map[string]any, data models.JSONB) ([]any, error) {
 	return items, nil
 }
 
-func staticCarouselCards(buttons []map[string]any, action string) []map[string]any {
+func staticCarouselCards(buttons []map[string]any, action, fallbackMedia string) []map[string]any {
 	out := make([]map[string]any, 0, len(buttons))
 	for i, button := range buttons {
 		card := map[string]any{
 			"type":       action,
 			"media_type": carouselMediaType(fieldString(button, "media_type")),
-			"media_url":  fieldString(button, "media_url"),
+			"media_url":  carouselMediaURL(fieldString(button, "media_url"), fallbackMedia),
 			"body":       fieldString(button, "body"),
 			"title":      fieldString(button, "title"),
 		}
@@ -1367,6 +1367,7 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string) []map[
 	}
 	buttonTitle := stringFromConfig(cfg, "button_title")
 	mediaType := carouselMediaType(stringFromConfig(cfg, "media_type"))
+	fallbackMedia := stringFromConfig(cfg, "fallback_media_url")
 
 	out := make([]map[string]any, 0, len(items))
 	for i, item := range items {
@@ -1380,7 +1381,7 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string) []map[
 		card := map[string]any{
 			"type":       action,
 			"media_type": mediaType,
-			"media_url":  fieldString(obj, mediaField),
+			"media_url":  carouselMediaURL(nestedFieldString(obj, mediaField), fallbackMedia),
 			"_item":      obj,
 		}
 		if bodyField != "" {
@@ -1425,6 +1426,26 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string) []map[
 		out = append(out, card)
 	}
 	return out
+}
+
+func nestedFieldString(obj map[string]any, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || obj == nil {
+		return ""
+	}
+	value := getNestedValue(obj, path)
+	switch value.(type) {
+	case nil, map[string]any, []any, []map[string]any, models.JSONB, models.JSONBArray:
+		return ""
+	}
+	return strings.TrimSpace(formatValue(value))
+}
+
+func carouselMediaURL(primary, fallback string) string {
+	if strings.TrimSpace(primary) != "" {
+		return strings.TrimSpace(primary)
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func carouselCardReady(card map[string]any, action string) bool {

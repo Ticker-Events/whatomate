@@ -518,6 +518,16 @@ const typeLabel: Record<string, string> = {
       </div>
 
       <div v-if="buttonMode === 'carousel' && buttonSource === 'static'" class="space-y-1.5">
+        <div class="space-y-1.5">
+          <Label class="text-xs">Fallback media URL</Label>
+          <Input
+            :model-value="config.fallback_media_url || ''"
+            @update:model-value="(v: string) => updateConfig('fallback_media_url', v)"
+            placeholder="https://example.com/placeholder.jpg"
+            class="h-8 text-sm font-mono"
+          />
+          <p class="text-[10px] text-muted-foreground">Used when a card's media URL is blank.</p>
+        </div>
         <Label class="text-xs">Cards ({{ (config.buttons || []).length }}/10)</Label>
         <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="(config.buttons || []).length >= 10" @click="addCarouselCard">
           <Plus class="h-3 w-3 mr-0.5" /> Card
@@ -685,9 +695,20 @@ const typeLabel: Record<string, string> = {
           <Input
             :model-value="config.media_field || ''"
             @update:model-value="(v: string) => updateConfig('media_field', v)"
-            placeholder="image"
+            placeholder="images[0].image"
             class="h-8 text-sm font-mono"
           />
+          <p class="text-[10px] text-muted-foreground">Path on each item. Use dots and indexes, such as images[0].image.</p>
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">Fallback media URL</Label>
+          <Input
+            :model-value="config.fallback_media_url || ''"
+            @update:model-value="(v: string) => updateConfig('fallback_media_url', v)"
+            placeholder="https://example.com/placeholder.jpg"
+            class="h-8 text-sm font-mono"
+          />
+          <p class="text-[10px] text-muted-foreground">Used when the media field is blank.</p>
         </div>
         <div class="space-y-1.5">
           <Label class="text-xs">Body field</Label>
