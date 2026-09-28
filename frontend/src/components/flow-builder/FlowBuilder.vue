@@ -83,13 +83,18 @@ const emit = defineEmits<{
 const screens = ref<FlowScreen[]>(props.modelValue?.screens || [])
 const selectedScreenIndex = ref<number>(0)
 const selectedComponentIndex = ref<number | null>(null)
+const draggingScreenIndex = ref<number | null>(null)
+const dragOverScreenIndex = ref<number | null>(null)
 
-// Watch for external changes
-watch(() => props.modelValue, (newVal) => {
-  if (newVal?.screens) {
-    screens.value = newVal.screens
+// Sync when the parent swaps in a different screen list. Skip same-array
+// updates so a local reorder is not overwritten by the v-model echo.
+watch(() => props.modelValue?.screens, (incoming) => {
+  if (!incoming || incoming === screens.value) return
+  screens.value = incoming
+  if (selectedScreenIndex.value >= incoming.length) {
+    selectedScreenIndex.value = Math.max(0, incoming.length - 1)
   }
-}, { deep: true })
+})
 
 // Emit changes
 watch(screens, (newScreens) => {
@@ -171,6 +176,50 @@ function removeScreen(index: number) {
 function selectScreen(index: number) {
   selectedScreenIndex.value = index
   selectedComponentIndex.value = null
+}
+
+function reorderScreens(from: number, to: number) {
+  if (from === to || from < 0 || to < 0 || from >= screens.value.length || to >= screens.value.length) return
+  const selectedId = screens.value[selectedScreenIndex.value]?.id
+  const [moved] = screens.value.splice(from, 1)
+  screens.value.splice(to, 0, moved)
+  if (!selectedId) return
+  const nextIndex = screens.value.findIndex((screen) => screen.id === selectedId)
+  if (nextIndex !== -1) selectedScreenIndex.value = nextIndex
+}
+
+function onScreenDragStart(index: number, event: DragEvent) {
+  draggingScreenIndex.value = index
+  if (!event.dataTransfer) return
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', String(index))
+  const row = event.currentTarget
+  if (row instanceof HTMLElement) event.dataTransfer.setDragImage(row, 16, 16)
+}
+
+function onScreenDragOver(index: number) {
+  if (draggingScreenIndex.value === null || dragOverScreenIndex.value === index) return
+  dragOverScreenIndex.value = index
+}
+
+function onScreenDrop(index: number) {
+  const from = draggingScreenIndex.value
+  if (from !== null) reorderScreens(from, index)
+  clearScreenDrag()
+}
+
+function onScreenDragEnd() {
+  // drop is dispatched before dragend. Defer the reset so a drop that
+  // arrives in the same turn still sees the source index.
+  const from = draggingScreenIndex.value
+  queueMicrotask(() => {
+    if (draggingScreenIndex.value === from) clearScreenDrag()
+  })
+}
+
+function clearScreenDrag() {
+  draggingScreenIndex.value = null
+  dragOverScreenIndex.value = null
 }
 
 function addComponent(type: string) {
@@ -363,24 +412,34 @@ defineExpose({
         </div>
       </CardHeader>
       <Separator />
-      <ScrollArea class="flex-1">
-        <div class="p-2 space-y-1">
+      <div class="flex-1 min-h-0 overflow-y-auto">
+        <div class="p-2 flex flex-col gap-1">
           <div
             v-for="(screen, index) in screens"
             :key="screen.id"
             :class="[
-              'flex items-center gap-2 p-2 rounded-md cursor-pointer text-sm',
-              selectedScreenIndex === index ? 'bg-primary text-primary-foreground light:bg-primary light:text-primary-foreground' : 'hover:bg-muted'
+              'flex items-center gap-2 p-2 rounded-md cursor-grab active:cursor-grabbing text-sm',
+              selectedScreenIndex === index ? 'bg-primary text-primary-foreground light:bg-primary light:text-primary-foreground' : 'hover:bg-muted',
+              draggingScreenIndex === index ? 'opacity-40' : '',
+              dragOverScreenIndex === index && draggingScreenIndex !== index ? 'ring-2 ring-primary' : ''
             ]"
+            draggable="true"
             @click="selectScreen(index)"
+            @dragstart="onScreenDragStart(index, $event)"
+            @dragend="onScreenDragEnd"
+            @dragenter.prevent
+            @dragover.prevent="onScreenDragOver(index)"
+            @drop.prevent="onScreenDrop(index)"
           >
-            <GripVertical class="h-4 w-4 opacity-50" />
+            <GripVertical class="h-4 w-4 shrink-0 opacity-50" />
             <span class="flex-1 truncate">{{ screen.title }}</span>
             <Button
               v-if="screens.length > 1"
               variant="ghost"
               size="icon"
               class="h-6 w-6 opacity-50 hover:opacity-100"
+              draggable="false"
+              @dragstart.stop.prevent
               @click.stop="removeScreen(index)"
             >
               <Trash2 class="h-3 w-3" />
@@ -393,7 +452,7 @@ defineExpose({
             No screens yet
           </div>
         </div>
-      </ScrollArea>
+      </div>
     </Card>
 
     <!-- Screen Editor -->
