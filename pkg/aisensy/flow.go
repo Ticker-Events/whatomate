@@ -1,10 +1,14 @@
 package aisensy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
@@ -35,16 +39,17 @@ func (c *Client) CreateFlow(ctx context.Context, account *whatsapp.Account, name
 }
 
 // UpdateFlowJSON updates the JSON definition of an existing flow via AiSensy.
+// Meta rejects application/json on this endpoint and requires the definition
+// as a multipart file field named "file".
 func (c *Client) UpdateFlowJSON(ctx context.Context, account *whatsapp.Account, flowID string, flowJSON *whatsapp.FlowJSON) error {
 	url := fmt.Sprintf("%s/flows/%s/assets/", c.baseURL, flowID)
 
-	payload := map[string]any{
-		"asset_type": "FLOW_JSON",
-		"name":       "flow.json",
-		"data":       flowJSON,
+	body, contentType, err := encodeFlowJSONUpload(flowJSON)
+	if err != nil {
+		return err
 	}
 
-	respBody, err := c.doRequest(ctx, http.MethodPost, url, payload, account)
+	respBody, err := c.postFlowAsset(ctx, url, body, contentType, account)
 	if err != nil {
 		return fmt.Errorf("failed to update flow JSON via aisensy: %w", err)
 	}
@@ -66,6 +71,96 @@ func (c *Client) UpdateFlowJSON(ctx context.Context, account *whatsapp.Account, 
 
 	c.Log.Info("Flow JSON updated via AiSensy", "flow_id", flowID)
 	return nil
+}
+
+func encodeFlowJSONUpload(flowJSON *whatsapp.FlowJSON) ([]byte, string, error) {
+	jsonBytes, err := json.Marshal(flowJSON)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to marshal flow JSON: %w", err)
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", `form-data; name="file"; filename="flow.json"`)
+	h.Set("Content-Type", "application/json")
+	part, err := writer.CreatePart(h)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create form file: %w", err)
+	}
+	if _, err := part.Write(jsonBytes); err != nil {
+		return nil, "", fmt.Errorf("failed to write flow JSON: %w", err)
+	}
+	if err := writer.WriteField("name", "flow.json"); err != nil {
+		return nil, "", fmt.Errorf("failed to write name field: %w", err)
+	}
+	if err := writer.WriteField("asset_type", "FLOW_JSON"); err != nil {
+		return nil, "", fmt.Errorf("failed to write asset_type field: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	return buf.Bytes(), writer.FormDataContentType(), nil
+}
+
+// postFlowAsset uploads the flow JSON file. On 401 it refreshes the token once
+// and retries, matching doRequest.
+func (c *Client) postFlowAsset(ctx context.Context, url string, body []byte, contentType string, account *whatsapp.Account) ([]byte, error) {
+	token, err := c.getToken(ctx, account)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get aisensy token: %w", err)
+	}
+
+	respBody, statusCode, err := c.sendFlowAsset(ctx, url, body, contentType, token)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode == http.StatusUnauthorized {
+		_, _, projectID, _ := accountFromWA(account)
+		c.invalidateToken(projectID)
+
+		token, err = c.GenerateToken(ctx, account.AiSensyEmail, account.AiSensyPassword, account.AiSensyProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to refresh aisensy token: %w", err)
+		}
+		c.cacheAndPersistToken(ctx, account, account.AiSensyProjectID, token)
+
+		respBody, statusCode, err = c.sendFlowAsset(ctx, url, body, contentType, token)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if statusCode < 200 || statusCode >= 300 {
+		return nil, parseAPIError(statusCode, respBody)
+	}
+
+	return respBody, nil
+}
+
+func (c *Client) sendFlowAsset(ctx context.Context, url string, body []byte, contentType, token string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	return respBody, resp.StatusCode, nil
 }
 
 // PublishFlow publishes a draft flow via AiSensy.
