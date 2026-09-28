@@ -429,6 +429,12 @@ func buildGuestOrderPayload(storeID int, phone string, params map[string]string)
 		if err != nil {
 			return nil, fmt.Errorf("new_address must be JSON: %w", err)
 		}
+		// Guest checkout requires email on the address, not only on the order.
+		if addr, ok := parsed.(map[string]any); ok {
+			if _, exists := addr["email"]; !exists && email != "" {
+				addr["email"] = email
+			}
+		}
 		order["new_address"] = parsed
 	}
 	if notes := strings.TrimSpace(params["notes"]); notes != "" {

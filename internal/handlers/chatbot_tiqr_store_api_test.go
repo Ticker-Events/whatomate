@@ -214,7 +214,7 @@ func TestRunChatGraph_TiqrStoreAPI_CreateOrderJSONEncodesCart(t *testing.T) {
 	assert.Equal(t, []any{
 		map[string]any{"product_option": 7, "quantity": 2},
 	}, order["items"])
-	assert.Equal(t, map[string]any{"name": "Aswin"}, order["new_address"])
+	assert.Equal(t, map[string]any{"name": "Aswin", "email": "buyer@example.com"}, order["new_address"])
 }
 
 func TestOrderMapToCreateRequest_CoercesStringOptionIDs(t *testing.T) {
@@ -229,6 +229,21 @@ func TestOrderMapToCreateRequest_CoercesStringOptionIDs(t *testing.T) {
 	require.Len(t, body.Items, 1)
 	assert.Equal(t, 11, body.Items[0].ProductOption)
 	assert.Equal(t, 1, body.Items[0].Quantity)
+}
+
+func TestBuildGuestOrderPayload_CopiesEmailOntoNewAddress(t *testing.T) {
+	order, err := buildGuestOrderPayload(21, "919800000000", map[string]string{
+		"items":         `[{"product_option":11,"quantity":1}]`,
+		"email":         "aswin@tiqr.events",
+		"delivery_mode": "PICKUP_FROM_STORE",
+		"new_address":   `{"name":"Aswin Divakar"}`,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "aswin@tiqr.events", order["email"])
+	assert.Equal(t, map[string]any{
+		"name":  "Aswin Divakar",
+		"email": "aswin@tiqr.events",
+	}, order["new_address"])
 }
 
 func TestBuildTiqrStoreToolArgs_SearchCollectionsRequiresQuery(t *testing.T) {
