@@ -1,0 +1,509 @@
+{
+  "edges": [
+    {
+      "to": "node_1789646935001_0",
+      "from": "__start__",
+      "condition": "default"
+    },
+    {
+      "to": "node_1789658122385_0",
+      "from": "node_1789646935001_0",
+      "condition": "http:non2xx"
+    },
+    {
+      "to": "node_1790512630941_1",
+      "from": "node_1789646935001_0",
+      "condition": "http:2xx"
+    },
+    {
+      "to": "node_1789658122385_0",
+      "from": "node_1790515279396_3",
+      "condition": "http:non2xx"
+    },
+    {
+      "to": "node_1790517294050_0",
+      "from": "node_1790515279396_3",
+      "condition": "http:2xx"
+    },
+    {
+      "to": "node_1790515279396_3",
+      "from": "node_1790512630941_1",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790512630941_1",
+      "from": "node_1790521375685_1",
+      "condition": "button:btn_1790521433317_0"
+    },
+    {
+      "to": "node_1790523667025_1",
+      "from": "node_1790523500658_0",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790525867229_3",
+      "from": "node_1790517294050_0",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790525913185_4",
+      "from": "node_1790525867229_3",
+      "condition": "true"
+    },
+    {
+      "to": "node_1790525943911_5",
+      "from": "node_1790525867229_3",
+      "condition": "false"
+    },
+    {
+      "to": "node_1790521375685_1",
+      "from": "node_1790525943911_5",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790523500658_0",
+      "from": "node_1790525913185_4",
+      "condition": "true"
+    },
+    {
+      "to": "node_1790528069662_0",
+      "from": "node_1790525913185_4",
+      "condition": "false"
+    },
+    {
+      "to": "node_1790523667025_1",
+      "from": "node_1790528069662_0",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790531548069_0",
+      "from": "node_1790523667025_1",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790532523437_0",
+      "from": "node_1790531548069_0",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790532550529_1",
+      "from": "node_1790532523437_0",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790521375685_1",
+      "from": "node_1790532550529_1",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790532931543_1",
+      "from": "node_1790532737492_0",
+      "condition": "http:2xx"
+    },
+    {
+      "to": "node_1790532958118_2",
+      "from": "node_1790532737492_0",
+      "condition": "http:non2xx"
+    },
+    {
+      "to": "node_1789658122385_0",
+      "from": "node_1790532958118_2",
+      "condition": "default"
+    },
+    {
+      "to": "node_1789658122385_0",
+      "from": "node_1790532931543_1",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790590889753_0",
+      "from": "node_1790521375685_1",
+      "condition": "button:btn_1790521457603_1"
+    },
+    {
+      "to": "node_1790532737492_0",
+      "from": "node_1790590889753_0",
+      "condition": "default"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "__start__",
+      "type": "start",
+      "label": "Start",
+      "config": {},
+      "position": {
+        "x": -560,
+        "y": 20
+      }
+    },
+    {
+      "id": "node_1789646935001_0",
+      "type": "tiqr_store_api",
+      "label": "List Collections",
+      "config": {
+        "params": {
+          "limit": "20"
+        },
+        "api_type": "rest",
+        "operation": "list_collections",
+        "message_template": "",
+        "response_mapping": {
+          "count": "count",
+          "collections": "results"
+        }
+      },
+      "position": {
+        "x": -480,
+        "y": 260
+      }
+    },
+    {
+      "id": "node_1789658122385_0",
+      "type": "end",
+      "label": "End",
+      "config": {
+        "message": "Thank you for buying {{selected_product_id}}!"
+      },
+      "position": {
+        "x": -400,
+        "y": 1140
+      }
+    },
+    {
+      "id": "node_1790512630941_1",
+      "type": "buttons",
+      "label": "Show Collections",
+      "config": {
+        "body": "Select Collection",
+        "mode": "list",
+        "footer": "Footer",
+        "header": "Header",
+        "source": "dynamic",
+        "buttons": [],
+        "id_field": "id",
+        "store_as": "",
+        "items_var": "{{collections}}",
+        "list_button": "Select",
+        "title_field": "{{name}}",
+        "section_title": "Options",
+        "description_field": "{{description}}",
+        "selection_mapping": {
+          "collection_id": "id",
+          "collection_name": "title"
+        }
+      },
+      "position": {
+        "x": -820,
+        "y": 400
+      }
+    },
+    {
+      "id": "node_1790515279396_3",
+      "type": "tiqr_store_api",
+      "label": "Lis Products",
+      "config": {
+        "params": {
+          "category_id": "{{collection_id}}"
+        },
+        "api_type": "rest",
+        "operation": "list_products",
+        "message_template": "",
+        "response_mapping": {
+          "count": "count",
+          "products": "results"
+        }
+      },
+      "position": {
+        "x": -880,
+        "y": 680
+      }
+    },
+    {
+      "id": "node_1790517294050_0",
+      "type": "buttons",
+      "label": "Show Products",
+      "config": {
+        "body": "Select your product.",
+        "mode": "carousel",
+        "source": "dynamic",
+        "buttons": [
+          {
+            "id": "card_1790517579678_0",
+            "url": "",
+            "body": "Mango Kunafa Parfait",
+            "id_2": "",
+            "title": "Add To Cart",
+            "title_2": "",
+            "media_url": "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/ed52707c465a4a17a3b74f548578ad17-de453de9b5c2421399dea5be9e943fc6-p.jpg",
+            "media_type": "image"
+          },
+          {
+            "id": "card_1790517633719_1",
+            "url": "",
+            "body": "Sadya Sweet Canapes",
+            "id_2": "",
+            "title": "Add To Cart",
+            "title_2": "",
+            "media_url": "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/d592fabca6314ee5a749da835b40cf5a-589041f37b35417d8122b31a1b645eee-p.jpg",
+            "media_type": "image"
+          }
+        ],
+        "id_field": "{{id}}",
+        "store_as": "product_selected",
+        "items_var": "{{products}}",
+        "body_field": "{{name}}(₹{{min_price}})",
+        "media_field": "{{images[0].original_url}}",
+        "title_field": "Add To Cart",
+        "selection_mapping": {
+          "options": "options",
+          "product_id": "id"
+        },
+        "fallback_media_url": "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/d592fabca6314ee5a749da835b40cf5a-589041f37b35417d8122b31a1b645eee-p.jpg"
+      },
+      "position": {
+        "x": -900,
+        "y": 940
+      }
+    },
+    {
+      "id": "node_1790521375685_1",
+      "type": "buttons",
+      "label": "Buttons",
+      "config": {
+        "body": "Do you want anything else from our collections?",
+        "mode": "reply",
+        "source": "static",
+        "buttons": [
+          {
+            "id": "btn_1790521433317_0",
+            "type": "reply",
+            "title": "Yes, show collections"
+          },
+          {
+            "id": "btn_1790521457603_1",
+            "type": "reply",
+            "title": "No, checkout"
+          }
+        ],
+        "store_as": ""
+      },
+      "position": {
+        "x": -1800,
+        "y": 1200
+      }
+    },
+    {
+      "id": "node_1790523500658_0",
+      "type": "buttons",
+      "label": "Product Options",
+      "config": {
+        "body": "Select Option",
+        "mode": "list",
+        "header": "Select Option",
+        "source": "dynamic",
+        "buttons": [],
+        "id_field": "id",
+        "items_var": "options",
+        "list_button": "Select",
+        "title_field": "{{name}}(₹{{price}})",
+        "section_title": "Option",
+        "description_field": "{{description}}",
+        "selection_mapping": {
+          "option_id": "id",
+          "option_name": "name"
+        }
+      },
+      "position": {
+        "x": -980,
+        "y": 1680
+      }
+    },
+    {
+      "id": "node_1790523667025_1",
+      "type": "prompt",
+      "label": "Quantity message",
+      "config": {
+        "body": "How many of {{option_name}} do you want?",
+        "store_as": "quantity",
+        "input_type": "number",
+        "validation_error": "Please provide a valid quantity",
+        "validation_regex": "^[0-9]+$"
+      },
+      "position": {
+        "x": -1600,
+        "y": 1680
+      }
+    },
+    {
+      "id": "node_1790525867229_3",
+      "type": "condition",
+      "label": "Has options?",
+      "config": {
+        "expression": "len(options) > 0"
+      },
+      "position": {
+        "x": -860,
+        "y": 1240
+      }
+    },
+    {
+      "id": "node_1790525913185_4",
+      "type": "condition",
+      "label": "Has more than 1 option?",
+      "config": {
+        "expression": "len(options) > 1"
+      },
+      "position": {
+        "x": -880,
+        "y": 1440
+      }
+    },
+    {
+      "id": "node_1790525943911_5",
+      "type": "message",
+      "label": "Product not available",
+      "config": {
+        "message": "Sorry, this product is not available right now."
+      },
+      "position": {
+        "x": -1300,
+        "y": 1400
+      }
+    },
+    {
+      "id": "node_1790528069662_0",
+      "type": "set_variable",
+      "label": "Assign",
+      "config": {
+        "set": [
+          {
+            "name": "option_id",
+            "value": "options[0].id"
+          },
+          {
+            "name": "option_name",
+            "value": "options[0].name"
+          }
+        ]
+      },
+      "position": {
+        "x": -640,
+        "y": 1560
+      }
+    },
+    {
+      "id": "node_1790531548069_0",
+      "type": "set_variable",
+      "label": "Assign",
+      "config": {
+        "set": [
+          {
+            "op": "append",
+            "name": "tiqr_cart",
+            "value": "{\n  \"product_option\": \"{{option_id}}\",\n  \"quantity\": \"{{quantity}}\"\n}",
+            "value_type": "json"
+          }
+        ]
+      },
+      "position": {
+        "x": -1700,
+        "y": 1920
+      }
+    },
+    {
+      "id": "node_1790532523437_0",
+      "type": "set_variable",
+      "label": "Assign",
+      "config": {
+        "set": [
+          {
+            "op": "set",
+            "name": "cart_count",
+            "value": "len(tiqr_cart)",
+            "value_type": "expression"
+          }
+        ]
+      },
+      "position": {
+        "x": -1640,
+        "y": 2100
+      }
+    },
+    {
+      "id": "node_1790532550529_1",
+      "type": "message",
+      "label": "Message",
+      "config": {
+        "message": "Cart count: {{cart_count}}"
+      },
+      "position": {
+        "x": -1920,
+        "y": 2240
+      }
+    },
+    {
+      "id": "node_1790532737492_0",
+      "type": "tiqr_store_api",
+      "label": "TiQR Store API",
+      "config": {
+        "params": {
+          "email": "{{customer_email}}",
+          "items": "{{tiqr_cart}}",
+          "notes": "{{customer_notes}}",
+          "new_address": "{\n\"name\": \"{{customer_name}}\",\n\"address_line_1\": \"{{address_line_one}}\",\n\"address_line_2\": \"{{address_line_two}}\",\n\"city\": \"{{city}}\",\n\"state\": \"{{state}}\",\n\"country\": \"{{country}}\",\n\"pincode\": \"{{pincode}}\",\n\"email\": \"{{customer_email}}\",\n\"phone_number\":\"{{customer_phone}}\",\n\"phone\":\"{{customer_phone}}\"\n}",
+          "delivery_mode": "PICKUP_FROM_STORE"
+        },
+        "api_type": "rest",
+        "operation": "create_order",
+        "message_template": "",
+        "response_mapping": {}
+      },
+      "position": {
+        "x": -820,
+        "y": 2600
+      }
+    },
+    {
+      "id": "node_1790532931543_1",
+      "type": "message",
+      "label": "Message",
+      "config": {
+        "message": "Success"
+      },
+      "position": {
+        "x": -900,
+        "y": 3020
+      }
+    },
+    {
+      "id": "node_1790532958118_2",
+      "type": "message",
+      "label": "Message",
+      "config": {
+        "message": "Failed"
+      },
+      "position": {
+        "x": -680,
+        "y": 3020
+      }
+    },
+    {
+      "id": "node_1790590889753_0",
+      "type": "whatsapp_flow",
+      "label": "WhatsApp Flow",
+      "config": {
+        "cta": "Provide Details",
+        "body": "Please provide your details for placing the order!",
+        "header": "Customer Details",
+        "flow_id": "1557965846018132"
+      },
+      "position": {
+        "x": -1180,
+        "y": 2060
+      }
+    }
+  ],
+  "version": 2,
+  "entry_node": "__start__"
+}
