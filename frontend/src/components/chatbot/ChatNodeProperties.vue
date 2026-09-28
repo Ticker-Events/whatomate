@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import ItemTextHint from '@/components/chatbot/ItemTextHint.vue'
 import KeyValueRows from '@/components/chatbot/KeyValueRows.vue'
 import type { ChatNode } from '@/services/api'
 import { tiqrStoreOperationDef, tiqrStoreOperationsFor, tiqrStoreApiType } from '@/components/chatbot/tiqrStoreApiCatalog'
@@ -693,7 +694,10 @@ const typeLabel: Record<string, string> = {
           <p class="text-[10px] text-muted-foreground">Session variable holding an array of objects.</p>
         </div>
         <div class="space-y-1.5">
-          <Label class="text-xs">Title field</Label>
+          <div class="flex items-center gap-1">
+            <Label class="text-xs">Title field</Label>
+            <ItemTextHint />
+          </div>
           <Input
             :model-value="config.title_field || ''"
             @update:model-value="(v: string) => updateConfig('title_field', v)"
@@ -711,7 +715,10 @@ const typeLabel: Record<string, string> = {
           />
         </div>
         <div v-if="buttonMode === 'list'" class="space-y-1.5">
-          <Label class="text-xs">Description field</Label>
+          <div class="flex items-center gap-1">
+            <Label class="text-xs">Description field</Label>
+            <ItemTextHint />
+          </div>
           <Input
             :model-value="config.description_field || ''"
             @update:model-value="(v: string) => updateConfig('description_field', v)"
@@ -720,7 +727,10 @@ const typeLabel: Record<string, string> = {
           />
         </div>
         <div v-if="buttonMode === 'reply' && dynamicType === 'url'" class="space-y-1.5">
-          <Label class="text-xs">URL field</Label>
+          <div class="flex items-center gap-1">
+            <Label class="text-xs">URL field</Label>
+            <ItemTextHint />
+          </div>
           <Input
             :model-value="config.url_field || ''"
             @update:model-value="(v: string) => updateConfig('url_field', v)"
@@ -729,7 +739,10 @@ const typeLabel: Record<string, string> = {
           />
         </div>
         <div v-if="buttonMode === 'reply' && dynamicType === 'phone'" class="space-y-1.5">
-          <Label class="text-xs">Phone field</Label>
+          <div class="flex items-center gap-1">
+            <Label class="text-xs">Phone field</Label>
+            <ItemTextHint />
+          </div>
           <Input
             :model-value="config.phone_field || ''"
             @update:model-value="(v: string) => updateConfig('phone_field', v)"
@@ -782,7 +795,10 @@ const typeLabel: Record<string, string> = {
           <p class="text-[10px] text-muted-foreground">Used when the media field is blank.</p>
         </div>
         <div class="space-y-1.5">
-          <Label class="text-xs">Body field</Label>
+          <div class="flex items-center gap-1">
+            <Label class="text-xs">Body field</Label>
+            <ItemTextHint />
+          </div>
           <Input
             :model-value="config.body_field || ''"
             @update:model-value="(v: string) => updateConfig('body_field', v)"
@@ -791,7 +807,10 @@ const typeLabel: Record<string, string> = {
           />
         </div>
         <div v-if="cardAction === 'url'" class="space-y-1.5">
-          <Label class="text-xs">Button label</Label>
+          <div class="flex items-center gap-1">
+            <Label class="text-xs">Button label</Label>
+            <ItemTextHint />
+          </div>
           <Input
             :model-value="config.button_title || ''"
             @update:model-value="(v: string) => updateConfig('button_title', v)"
@@ -801,7 +820,10 @@ const typeLabel: Record<string, string> = {
           />
         </div>
         <div v-if="cardAction === 'url'" class="space-y-1.5">
-          <Label class="text-xs">URL field</Label>
+          <div class="flex items-center gap-1">
+            <Label class="text-xs">URL field</Label>
+            <ItemTextHint />
+          </div>
           <Input
             :model-value="config.url_field || ''"
             @update:model-value="(v: string) => updateConfig('url_field', v)"
@@ -811,14 +833,16 @@ const typeLabel: Record<string, string> = {
         </div>
         <template v-else>
           <div class="space-y-1.5">
-            <Label class="text-xs">Primary Action Title</Label>
+            <div class="flex items-center gap-1">
+              <Label class="text-xs">Primary Action Title</Label>
+              <ItemTextHint />
+            </div>
             <Input
               :model-value="config.title_field || ''"
               @update:model-value="(v: string) => updateConfig('title_field', v)"
               placeholder="Add to cart"
               class="h-8 text-sm"
             />
-            <p v-pre class="text-[10px] text-muted-foreground">Button text on every card. Variables such as {{name}} use the current item, then session data.</p>
           </div>
           <div class="space-y-1.5">
             <Label class="text-xs">ID field</Label>
@@ -830,14 +854,16 @@ const typeLabel: Record<string, string> = {
             />
           </div>
           <div class="space-y-1.5">
-            <Label class="text-xs">Second Action Title</Label>
+            <div class="flex items-center gap-1">
+              <Label class="text-xs">Second Action Title</Label>
+              <ItemTextHint />
+            </div>
             <Input
               :model-value="config.title_field_2 || ''"
               @update:model-value="(v: string) => updateConfig('title_field_2', v)"
               placeholder="View details"
               class="h-8 text-sm"
             />
-            <p class="text-[10px] text-muted-foreground">Optional second button. Leave blank for one button. Supports the same variables.</p>
           </div>
           <div class="space-y-1.5">
             <Label class="text-xs">Second ID field</Label>

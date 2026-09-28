@@ -1234,22 +1234,13 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 	}
 
 	titleField := stringFromConfig(cfg, "title_field")
-	if titleField == "" {
-		titleField = "title"
-	}
 	idField := stringFromConfig(cfg, "id_field")
 	if idField == "" {
 		idField = "id"
 	}
 	descField := stringFromConfig(cfg, "description_field")
 	urlField := stringFromConfig(cfg, "url_field")
-	if urlField == "" {
-		urlField = "url"
-	}
 	phoneField := stringFromConfig(cfg, "phone_field")
-	if phoneField == "" {
-		phoneField = "phone_number"
-	}
 
 	limit := 10
 	if kind == "url" || kind == "phone" {
@@ -1265,7 +1256,7 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 		if !ok {
 			continue
 		}
-		title := fieldString(obj, titleField)
+		title := itemTextOrColumn(titleField, "title", obj, data)
 		if title == "" {
 			continue
 		}
@@ -1273,11 +1264,11 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 		switch kind {
 		case "url":
 			btn["type"] = "url"
-			btn["url"] = fieldString(obj, urlField)
+			btn["url"] = itemTextOrColumn(urlField, "url", obj, data)
 			btn["id"] = fmt.Sprintf("url_%d", i+1)
 		case "phone":
 			btn["type"] = "phone"
-			btn["phone_number"] = fieldString(obj, phoneField)
+			btn["phone_number"] = itemTextOrColumn(phoneField, "phone_number", obj, data)
 			btn["id"] = fmt.Sprintf("phone_%d", i+1)
 		default:
 			id := fieldString(obj, idField)
@@ -1287,7 +1278,7 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 			btn["id"] = id
 			btn["type"] = "reply"
 			if kind == "list" && descField != "" {
-				if desc := fieldString(obj, descField); desc != "" {
+				if desc := itemDisplayText(descField, obj, data); desc != "" {
 					btn["description"] = desc
 				}
 			}
@@ -1539,9 +1530,6 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string, sessio
 	titleTemplate2 := strings.TrimSpace(stringFromConfig(cfg, "title_field_2"))
 	idField2 := stringFromConfig(cfg, "id_field_2")
 	urlField := stringFromConfig(cfg, "url_field")
-	if urlField == "" {
-		urlField = "url"
-	}
 	buttonTitle := stringFromConfig(cfg, "button_title")
 	mediaType := carouselMediaType(stringFromConfig(cfg, "media_type"))
 	fallbackMedia := stringFromConfig(cfg, "fallback_media_url")
@@ -1562,19 +1550,17 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string, sessio
 			"_item":      obj,
 		}
 		if bodyField != "" {
-			card["body"] = fieldString(obj, bodyField)
+			card["body"] = itemDisplayText(bodyField, obj, session)
 		}
 		if action == "url" {
-			label := strings.TrimSpace(buttonTitle)
-			if label == "" {
-				field := titleTemplate
-				if field == "" {
-					field = "title"
-				}
-				label = fieldString(obj, field)
+			var label string
+			if strings.TrimSpace(buttonTitle) != "" {
+				label = itemDisplayText(buttonTitle, obj, session)
+			} else {
+				label = itemTextOrColumn(titleTemplate, "title", obj, session)
 			}
 			card["title"] = label
-			card["url"] = fieldString(obj, urlField)
+			card["url"] = itemTextOrColumn(urlField, "url", obj, session)
 			id := fieldString(obj, idField)
 			if id == "" {
 				id = fmt.Sprintf("card_%d", i+1)
@@ -1585,10 +1571,10 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string, sessio
 			if id == "" {
 				id = fmt.Sprintf("card_%d", i+1)
 			}
-			card["title"] = carouselActionTitle(titleTemplate, obj, session)
+			card["title"] = itemDisplayText(titleTemplate, obj, session)
 			card["id"] = id
 			if titleTemplate2 != "" {
-				title2 := carouselActionTitle(titleTemplate2, obj, session)
+				title2 := itemDisplayText(titleTemplate2, obj, session)
 				if title2 == "" {
 					continue
 				}
@@ -1619,6 +1605,36 @@ func nestedFieldString(obj map[string]any, path string) string {
 		return ""
 	}
 	return strings.TrimSpace(formatValue(value))
+}
+
+// itemDisplayText renders a per-row label. A value containing {{ }} is a
+// template: the row wins over a session variable of the same name. A bare
+// string that is a column on the row is that column. Anything else is
+// literal text.
+func itemDisplayText(template string, item map[string]any, session models.JSONB) string {
+	template = strings.TrimSpace(template)
+	if template == "" {
+		return ""
+	}
+	if strings.Contains(template, "{{") {
+		return carouselActionTitle(template, item, session)
+	}
+	if item != nil {
+		if _, ok := item[template]; ok {
+			return fieldString(item, template)
+		}
+	}
+	return template
+}
+
+// itemTextOrColumn uses itemDisplayText when the author set a value. A blank
+// value stays a column lookup so a missing default column still skips the row
+// instead of becoming the word "title" or "url".
+func itemTextOrColumn(template, column string, item map[string]any, session models.JSONB) string {
+	if strings.TrimSpace(template) == "" {
+		return fieldString(item, column)
+	}
+	return itemDisplayText(template, item, session)
 }
 
 // carouselActionTitle renders a reply-carousel button label. The text is

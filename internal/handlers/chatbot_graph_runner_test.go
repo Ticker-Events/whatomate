@@ -1702,6 +1702,124 @@ func TestDynamicButtonsFromSession_MapSlice(t *testing.T) {
 	assert.Equal(t, "Hot", buttons[0]["description"])
 }
 
+func TestDynamicButtonsFromSession_CompositeAndLiteralText(t *testing.T) {
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":            "dynamic",
+		"items_var":         "options",
+		"id_field":          "id",
+		"title_field":       "{{name}}({{price}})",
+		"description_field": "{{name}} · {{currency}}",
+	}, models.JSONB{
+		"name":     "Store",
+		"currency": "INR",
+		"options": []map[string]any{
+			{"id": "o1", "name": "Aloe", "price": float64(250)},
+			{"id": "o2", "name": "Fern", "price": float64(180)},
+			{"id": "o3", "name": "Moss"},
+		},
+	}, "list")
+	require.NoError(t, err)
+	require.Len(t, buttons, 3)
+	assert.Equal(t, "Aloe(250)", buttons[0]["title"])
+	assert.Equal(t, "Aloe · INR", buttons[0]["description"])
+	assert.Equal(t, "Fern(180)", buttons[1]["title"])
+	assert.Equal(t, "Moss()", buttons[2]["title"])
+}
+
+func TestDynamicButtonsFromSession_RowOverridesSessionName(t *testing.T) {
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":      "dynamic",
+		"items_var":   "options",
+		"title_field": "{{name}} · {{currency}}",
+	}, models.JSONB{
+		"name":     "Store",
+		"currency": "INR",
+		"options": []any{
+			map[string]any{"name": "Aloe"},
+		},
+	}, "reply")
+	require.NoError(t, err)
+	require.Len(t, buttons, 1)
+	assert.Equal(t, "Aloe · INR", buttons[0]["title"])
+	assert.Equal(t, "reply", buttons[0]["type"])
+}
+
+func TestDynamicButtonsFromSession_URLTemplate(t *testing.T) {
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":       "dynamic",
+		"dynamic_type": "url",
+		"items_var":    "links",
+		"title_field":  "Buy now",
+		"url_field":    "https://shop/{{slug}}",
+	}, models.JSONB{
+		"links": []any{
+			map[string]any{"slug": "aloe", "name": "Aloe"},
+		},
+	}, "reply")
+	require.NoError(t, err)
+	require.Len(t, buttons, 1)
+	assert.Equal(t, "Buy now", buttons[0]["title"])
+	assert.Equal(t, "https://shop/aloe", buttons[0]["url"])
+}
+
+func TestDynamicButtonsFromSession_EmptyColumnSkipsRow(t *testing.T) {
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":      "dynamic",
+		"items_var":   "options",
+		"title_field": "name",
+	}, models.JSONB{
+		"options": []any{
+			map[string]any{"name": ""},
+			map[string]any{"name": "Aloe"},
+			map[string]any{"label": "No name column"},
+		},
+	}, "reply")
+	require.NoError(t, err)
+	require.Len(t, buttons, 2)
+	assert.Equal(t, "Aloe", buttons[0]["title"])
+	assert.Equal(t, "name", buttons[1]["title"])
+}
+
+func TestDynamicButtonsFromSession_BlankTitleUsesTitleColumn(t *testing.T) {
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":    "dynamic",
+		"items_var": "options",
+	}, models.JSONB{
+		"options": []any{
+			map[string]any{"name": "Aloe"},
+			map[string]any{"title": "Shown"},
+		},
+	}, "reply")
+	require.NoError(t, err)
+	require.Len(t, buttons, 1)
+	assert.Equal(t, "Shown", buttons[0]["title"])
+}
+
+func TestCarouselCardsForNode_BodyAndButtonTemplates(t *testing.T) {
+	cards, err := carouselCardsForNode(map[string]any{
+		"mode":               "carousel",
+		"source":             "dynamic",
+		"card_action":        "url",
+		"items_var":          "products",
+		"body_field":         "{{name}}({{price}})",
+		"button_title":       "Buy {{name}}",
+		"url_field":          "https://shop/{{slug}}",
+		"fallback_media_url": "https://example.com/fallback.jpg",
+	}, models.JSONB{
+		"name": "Store",
+		"products": []map[string]any{
+			{"name": "Aloe", "price": float64(250), "slug": "aloe"},
+			{"name": "Fern", "price": float64(180), "slug": "fern"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, cards, 2)
+	assert.Equal(t, "Aloe(250)", cards[0]["body"])
+	assert.Equal(t, "Buy Aloe", cards[0]["title"])
+	assert.Equal(t, "https://shop/aloe", cards[0]["url"])
+	assert.Equal(t, "Buy Fern", cards[1]["title"])
+}
+
 func TestApplyButtonSelection_MapsFields(t *testing.T) {
 	session := models.JSONB{
 		"collections": []map[string]any{

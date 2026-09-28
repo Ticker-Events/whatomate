@@ -754,6 +754,19 @@ function carouselActionTitle(template: string, item: Record<string, any>, vars: 
   return interpolate(text, { ...vars, ...item }).trim()
 }
 
+function itemDisplayText(template: string, item: Record<string, any>, vars: Record<string, any>): string {
+  const text = template.trim()
+  if (!text) return ''
+  if (text.includes('{{')) return carouselActionTitle(text, item, vars)
+  if (Object.prototype.hasOwnProperty.call(item, text)) return previewField(item, text)
+  return text
+}
+
+function itemTextOrColumn(template: string, column: string, item: Record<string, any>, vars: Record<string, any>): string {
+  if (!template.trim()) return previewField(item, column)
+  return itemDisplayText(template, item, vars)
+}
+
 function previewMappedValue(value: unknown): unknown {
   if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return value
   return typeof value === 'string' ? value : String(value)
@@ -791,22 +804,24 @@ function resolveNodeCarousel(node: ChatNode, vars: Record<string, any>): Preview
     const idField = stringFromConfig(cfg, 'id_field') || 'id'
     const titleTemplate2 = stringFromConfig(cfg, 'title_field_2')
     const idField2 = stringFromConfig(cfg, 'id_field_2')
-    const urlField = stringFromConfig(cfg, 'url_field') || 'url'
-    const buttonTitle = interpolate(stringFromConfig(cfg, 'button_title'), vars)
+    const urlField = stringFromConfig(cfg, 'url_field')
+    const buttonTitleTemplate = stringFromConfig(cfg, 'button_title')
     const mediaType = cfg.media_type === 'video' ? 'video' : 'image'
     const fallbackMedia = interpolate(stringFromConfig(cfg, 'fallback_media_url'), vars)
     raw.forEach((item, index) => {
       if (!item || typeof item !== 'object') return
       const obj = item as Record<string, any>
       const mediaUrl = previewPath(obj, mediaField) || fallbackMedia
-      const body = bodyField ? previewField(obj, bodyField) : ''
+      const body = bodyField ? itemDisplayText(bodyField, obj, vars) : ''
       const buttons = carouselButtons(action, {
         title: action === 'url'
-          ? (buttonTitle || previewField(obj, titleTemplate || 'title'))
-          : carouselActionTitle(titleTemplate, obj, vars),
+          ? (buttonTitleTemplate.trim()
+            ? itemDisplayText(buttonTitleTemplate, obj, vars)
+            : itemTextOrColumn(titleTemplate, 'title', obj, vars))
+          : itemDisplayText(titleTemplate, obj, vars),
         id: previewField(obj, idField) || `card_${index + 1}`,
-        url: previewField(obj, urlField),
-        title2: action === 'url' || !titleTemplate2 ? '' : carouselActionTitle(titleTemplate2, obj, vars),
+        url: itemTextOrColumn(urlField, 'url', obj, vars),
+        title2: action === 'url' || !titleTemplate2 ? '' : itemDisplayText(titleTemplate2, obj, vars),
         id2: previewField(obj, idField2) || `card_${index + 1}_b`,
         requireSecond: action !== 'url' && Boolean(titleTemplate2),
         body,
@@ -900,29 +915,29 @@ function resolveNodeButtons(node: ChatNode, vars: Record<string, any>): ButtonCo
   else if (cfg.dynamic_type === 'url' || cfg.dynamic_type === 'phone' || cfg.dynamic_type === 'reply') {
     kind = cfg.dynamic_type
   }
-  const titleField = stringFromConfig(cfg, 'title_field') || 'title'
+  const titleField = stringFromConfig(cfg, 'title_field')
   const idField = stringFromConfig(cfg, 'id_field') || 'id'
   const descField = stringFromConfig(cfg, 'description_field')
-  const urlField = stringFromConfig(cfg, 'url_field') || 'url'
-  const phoneField = stringFromConfig(cfg, 'phone_field') || 'phone_number'
+  const urlField = stringFromConfig(cfg, 'url_field')
+  const phoneField = stringFromConfig(cfg, 'phone_field')
   const limit = kind === 'url' || kind === 'phone' ? 2 : 10
 
   const out: ButtonConfig[] = []
   raw.forEach((item, index) => {
     if (out.length >= limit || !item || typeof item !== 'object') return
     const obj = item as Record<string, any>
-    const title = previewField(obj, titleField)
+    const title = itemTextOrColumn(titleField, 'title', obj, vars)
     if (!title) return
     if (kind === 'url') {
-      out.push({ id: `url_${index + 1}`, title, type: 'url', url: previewField(obj, urlField), source: obj })
+      out.push({ id: `url_${index + 1}`, title, type: 'url', url: itemTextOrColumn(urlField, 'url', obj, vars), source: obj })
       return
     }
     if (kind === 'phone') {
-      out.push({ id: `phone_${index + 1}`, title, type: 'phone', phone_number: previewField(obj, phoneField), source: obj })
+      out.push({ id: `phone_${index + 1}`, title, type: 'phone', phone_number: itemTextOrColumn(phoneField, 'phone_number', obj, vars), source: obj })
       return
     }
     const id = previewField(obj, idField) || `btn_${index + 1}`
-    const description = kind === 'list' && descField ? previewField(obj, descField) : undefined
+    const description = kind === 'list' && descField ? itemDisplayText(descField, obj, vars) : undefined
     out.push({ id, title, type: 'reply', description: description || undefined, source: obj })
   })
   return out
