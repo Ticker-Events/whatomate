@@ -29,6 +29,12 @@ const isDebug = computed(() => props.message.type === 'debug')
         class="bg-white dark:bg-[#202c33] rounded-lg rounded-tl-none p-3 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] dark:shadow-[0_1px_0.5px_rgba(0,0,0,0.5)] ring-1 ring-black/5 dark:ring-white/5"
         :class="{ 'border-l-2 border-red-400': message.isValidationError }"
       >
+        <img
+          v-if="message.headerImage"
+          :src="message.headerImage"
+          alt=""
+          class="mb-2 max-h-40 w-full rounded-md object-cover"
+        />
         <p v-if="message.header" class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">
           {{ message.header }}
         </p>

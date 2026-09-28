@@ -355,11 +355,13 @@ export function useFlowGraphSimulation(
       return '__yield__'
     }
     const buttons = resolveNodeButtons(node, vars)
+    const headerImage = isList ? '' : replyHeaderImage(node, vars)
     addMessage('bot', body, {
       stepName: node.id,
       buttons,
       interactive: isList ? 'list' : 'buttons',
       header: isList ? interpolate(stringField(node, 'header'), vars) : undefined,
+      headerImage: headerImage || undefined,
       footer: isList ? interpolate(stringField(node, 'footer'), vars) : undefined,
       listButton: isList ? (interpolate(stringField(node, 'list_button'), vars) || 'Select') : undefined,
     })
@@ -888,6 +890,13 @@ function carouselButtons(action: 'url' | 'reply', card: {
     return null
   }
   return buttons
+}
+
+function replyHeaderImage(node: ChatNode, vars: Record<string, any>): string {
+  const cfg = node.config || {}
+  const rendered = interpolate(String(cfg.header_image || ''), vars).trim()
+  if (rendered) return rendered
+  return interpolate(String(cfg.fallback_media_url || ''), vars).trim()
 }
 
 // resolveNodeButtons mirrors the backend buttonsForNode mapping so the

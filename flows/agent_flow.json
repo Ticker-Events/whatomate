@@ -21,9 +21,39 @@
       "condition": "http:non2xx"
     },
     {
-      "to": "node_1790517294050_0",
+      "to": "node_1790592100000_0",
       "from": "node_1790515279396_3",
       "condition": "http:2xx"
+    },
+    {
+      "to": "node_1790592100001_0",
+      "from": "node_1790592100000_0",
+      "condition": "true"
+    },
+    {
+      "to": "node_1790592100002_0",
+      "from": "node_1790592100000_0",
+      "condition": "false"
+    },
+    {
+      "to": "node_1790517294050_0",
+      "from": "node_1790592100002_0",
+      "condition": "true"
+    },
+    {
+      "to": "node_1790592100003_0",
+      "from": "node_1790592100002_0",
+      "condition": "false"
+    },
+    {
+      "to": "node_1790525867229_3",
+      "from": "node_1790592100001_0",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790521375685_1",
+      "from": "node_1790592100003_0",
+      "condition": "default"
     },
     {
       "to": "node_1790515279396_3",
@@ -501,6 +531,67 @@
       "position": {
         "x": -1180,
         "y": 2060
+      }
+    },
+    {
+      "id": "node_1790592100000_0",
+      "type": "condition",
+      "label": "One product?",
+      "config": {
+        "expression": "len(products) == 1"
+      },
+      "position": {
+        "x": -560,
+        "y": 800
+      }
+    },
+    {
+      "id": "node_1790592100002_0",
+      "type": "condition",
+      "label": "Multiple products?",
+      "config": {
+        "expression": "len(products) > 1"
+      },
+      "position": {
+        "x": -200,
+        "y": 800
+      }
+    },
+    {
+      "id": "node_1790592100001_0",
+      "type": "buttons",
+      "label": "Show Product",
+      "config": {
+        "body": "{{products[0].name}} (₹{{products[0].min_price}})\n{{products[0].description}}",
+        "mode": "reply",
+        "source": "dynamic",
+        "buttons": [],
+        "id_field": "{{id}}",
+        "store_as": "product_selected",
+        "items_var": "{{products}}",
+        "title_field": "Add To Cart",
+        "header_image": "{{products[0].images[0].original_url}}",
+        "fallback_media_url": "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/d592fabca6314ee5a749da835b40cf5a-589041f37b35417d8122b31a1b645eee-p.jpg",
+        "selection_mapping": {
+          "options": "options",
+          "product_id": "id"
+        }
+      },
+      "position": {
+        "x": -1400,
+        "y": 940
+      }
+    },
+    {
+      "id": "node_1790592100003_0",
+      "type": "message",
+      "label": "No products",
+      "config": {
+        "message": "There are no products in this collection right now."
+      },
+      "position": {
+        "x": 80,
+        "y": 980
       }
     }
   ],

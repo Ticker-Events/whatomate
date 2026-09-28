@@ -309,7 +309,7 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
 		return nodeOutcome{yield: true}, nil
 	}
-	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons); err != nil {
+	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons, replyHeaderImage(node.Config, ctx.session.SessionData)); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
@@ -1653,6 +1653,18 @@ func carouselActionTitle(template string, item map[string]any, session models.JS
 		merged[k] = v
 	}
 	return strings.TrimSpace(processTemplate(template, merged))
+}
+
+// replyHeaderImage renders an optional image header for reply-button
+// messages. header_image is a session template (for example
+// {{products[0].images[0].original_url}}). An empty result uses
+// fallback_media_url, matching carousel cards.
+func replyHeaderImage(cfg map[string]any, data models.JSONB) string {
+	rendered := ""
+	if raw := stringFromConfig(cfg, "header_image"); raw != "" {
+		rendered = strings.TrimSpace(processTemplate(raw, data))
+	}
+	return carouselMediaURL(rendered, stringFromConfig(cfg, "fallback_media_url"))
 }
 
 func carouselMediaURL(primary, fallback string) string {

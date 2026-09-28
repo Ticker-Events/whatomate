@@ -499,6 +499,28 @@ const typeLabel: Record<string, string> = {
         />
       </div>
 
+      <template v-if="buttonMode === 'reply'">
+        <div class="space-y-1.5">
+          <Label class="text-xs">Header image</Label>
+          <Input
+            :model-value="config.header_image || ''"
+            @update:model-value="(v: string) => updateConfig('header_image', v)"
+            placeholder="{{products[0].images[0].original_url}}"
+            class="h-8 text-xs font-mono"
+          />
+          <p class="text-[10px] text-muted-foreground">JPEG or PNG shown above the message. Leave blank for a text-only button message.</p>
+        </div>
+        <div class="space-y-1.5">
+          <Label class="text-xs">Fallback image URL</Label>
+          <Input
+            :model-value="config.fallback_media_url || ''"
+            @update:model-value="(v: string) => updateConfig('fallback_media_url', v)"
+            placeholder="https://example.com/fallback.jpg"
+            class="h-8 text-xs font-mono"
+          />
+        </div>
+      </template>
+
       <div v-if="buttonMode === 'reply' && buttonSource === 'static'" class="space-y-1.5">
         <div class="flex items-center justify-between">
           <Label class="text-xs">Button Options ({{ (config.buttons || []).length }}/{{ hasCtaButtons ? 2 : 10 }})</Label>

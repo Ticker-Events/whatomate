@@ -2214,3 +2214,90 @@ func TestRunChatGraph_DynamicReplyFollowsDefault(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	assert.Equal(t, "Billing", session.SessionData["topic"])
 }
+
+func TestReplyHeaderImage(t *testing.T) {
+	product := map[string]any{
+		"images": []any{
+			map[string]any{"original_url": "https://cdn.example.com/mango.jpg"},
+		},
+	}
+	got := replyHeaderImage(map[string]any{
+		"header_image":       "{{products[0].images[0].original_url}}",
+		"fallback_media_url": "https://cdn.example.com/fallback.jpg",
+	}, models.JSONB{"products": []any{product}})
+	assert.Equal(t, "https://cdn.example.com/mango.jpg", got)
+
+	got = replyHeaderImage(map[string]any{
+		"header_image":       "{{products[0].images[0].original_url}}",
+		"fallback_media_url": "https://cdn.example.com/fallback.jpg",
+	}, models.JSONB{"products": []any{map[string]any{}}})
+	assert.Equal(t, "https://cdn.example.com/fallback.jpg", got)
+}
+
+func TestRunChatGraph_SingleProductImageButton(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	options := []any{map[string]any{"id": float64(7), "name": "Regular"}}
+	session.SessionData = models.JSONB{
+		"products": []any{
+			map[string]any{
+				"id":          float64(42),
+				"name":        "Mango Kunafa",
+				"description": "Layered dessert",
+				"min_price":   float64(250),
+				"images": []any{
+					map[string]any{"original_url": "https://cdn.example.com/mango.jpg"},
+				},
+				"options": options,
+			},
+		},
+	}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "single-product",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "b1",
+			"nodes": []any{
+				map[string]any{
+					"id": "b1", "type": "buttons", "label": "Show Product",
+					"config": map[string]any{
+						"body":         "{{products[0].name}} (₹{{products[0].min_price}})\n{{products[0].description}}",
+						"mode":         "reply",
+						"source":       "dynamic",
+						"items_var":    "{{products}}",
+						"id_field":     "{{id}}",
+						"title_field":  "Add To Cart",
+						"header_image": "{{products[0].images[0].original_url}}",
+						"store_as":     "product_selected",
+						"selection_mapping": map[string]any{
+							"options":    "options",
+							"product_id": "id",
+						},
+					},
+				},
+				map[string]any{"id": "e1", "type": "end", "label": "done"},
+			},
+			"edges": []any{
+				map[string]any{"from": "b1", "to": "e1", "condition": "default"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+
+	var msg models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND message_type = ?", contact.ID, models.MessageTypeInteractive).First(&msg).Error)
+	assert.Equal(t, "https://cdn.example.com/mango.jpg", msg.InteractiveData["header_image_url"])
+	assert.Equal(t, "Mango Kunafa (₹250)\nLayered dessert", msg.InteractiveData["body"])
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "Add To Cart", "42", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "42", session.SessionData["product_id"])
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+}

@@ -88,6 +88,7 @@ export interface SimulationMessage {
   interactive?: 'buttons' | 'list' | 'carousel'
   cards?: PreviewCarouselCard[]
   header?: string
+  headerImage?: string
   footer?: string
   listButton?: string
   inputType?: string

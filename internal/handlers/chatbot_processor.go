@@ -759,7 +759,7 @@ func (a *App) sendAndSaveTextMessage(account *models.WhatsAppAccount, contact *m
 // sendAndSaveInteractiveButtons sends an interactive button message and saves it to the database.
 // Buttons with type "url" are automatically separated and sent as CTA URL messages,
 // since WhatsApp doesn't allow mixing reply buttons and URL buttons in the same message.
-func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, contact *models.Contact, bodyText string, buttons []map[string]any) error {
+func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, contact *models.Contact, bodyText string, buttons []map[string]any, headerImageURL ...string) error {
 	// Separate reply buttons from CTA buttons (url / phone)
 	replyButtons := make([]map[string]any, 0, len(buttons))
 	ctaButtons := make([]map[string]any, 0)
@@ -798,6 +798,10 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 				interactiveType = "list"
 			}
 			ctx := context.Background()
+			headerImage := ""
+			if len(headerImageURL) > 0 {
+				headerImage = strings.TrimSpace(headerImageURL[0])
+			}
 			if _, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
 				Account:         account,
 				Contact:         contact,
@@ -805,6 +809,7 @@ func (a *App) sendAndSaveInteractiveButtons(account *models.WhatsAppAccount, con
 				InteractiveType: interactiveType,
 				BodyText:        bodyText,
 				Buttons:         waButtons,
+				HeaderImageURL:  headerImage,
 			}, ChatbotSendOptions()); err != nil {
 				return err
 			}
