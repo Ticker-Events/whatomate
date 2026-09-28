@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { CircleHelp } from 'lucide-vue-next'
+import { HelpCircle } from 'lucide-vue-next'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 const open = ref(false)
@@ -34,7 +34,7 @@ function setOpen(value: boolean) {
         @focus="show"
         @blur="hide"
       >
-        <CircleHelp class="h-3.5 w-3.5" />
+        <HelpCircle class="h-3.5 w-3.5" />
       </button>
     </PopoverTrigger>
     <PopoverContent
