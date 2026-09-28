@@ -175,6 +175,48 @@ func TestRunChatGraph_TiqrStoreAPI_CreateOrderInjectsStoreAndPhone(t *testing.T)
 	assert.Equal(t, "buyer@example.com", order["email"])
 }
 
+func TestRunChatGraph_TiqrStoreAPI_CreateOrderJSONEncodesCart(t *testing.T) {
+	stub := &stubTiqrInvoker{
+		result: map[string]any{"display_uid": "ST-2", "uuid": "ord-2"},
+	}
+	withTiqrInvoker(t, stub)
+
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	session.SessionData = models.JSONB{
+		"order_items": []any{
+			map[string]any{"product_option": "7", "quantity": "2"},
+		},
+		"new_address": map[string]any{"name": "Aswin"},
+	}
+	require.NoError(t, app.DB.Save(session).Error)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceEnabled: true,
+		CommerceMCPURL:  "http://mcp.test/mcp",
+		CommerceStoreID: "99",
+	})
+	flow := newTiqrStoreFlow(t, app, org, account, map[string]any{
+		"operation": "create_order",
+		"params": map[string]any{
+			"items":         "{{order_items}}",
+			"email":         "buyer@example.com",
+			"delivery_mode": "PICKUP_FROM_STORE",
+			"new_address":   "{{new_address}}",
+		},
+	})
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	path := chatGraphPath(t, session)
+	assert.Equal(t, "http:2xx", path[0]["outcome"])
+
+	order, ok := stub.lastArgs["order"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []any{
+		map[string]any{"product_option": 7, "quantity": 2},
+	}, order["items"])
+	assert.Equal(t, map[string]any{"name": "Aswin"}, order["new_address"])
+}
+
 func TestBuildTiqrStoreToolArgs_SearchCollectionsRequiresQuery(t *testing.T) {
 	_, _, err := buildTiqrStoreToolArgs("search_collections", 1, "", map[string]string{})
 	require.Error(t, err)

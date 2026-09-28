@@ -88,7 +88,7 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	sessionData["store_id"] = storeID
 
 	operation := stringFromConfig(node.Config, "operation")
-	replaceVar := func(s string) string { return processTemplate(s, sessionData) }
+	replaceVar := func(s string) string { return processTiqrParamTemplate(s, sessionData) }
 	params := templateTiqrParams(node.Config["params"], replaceVar)
 
 	callCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -402,6 +402,7 @@ func buildGuestOrderPayload(storeID int, phone string, params map[string]string)
 	if err != nil {
 		return nil, fmt.Errorf("items must be JSON: %w", err)
 	}
+	items = coerceOrderItemNumbers(items)
 	email := strings.TrimSpace(params["email"])
 	if email == "" {
 		return nil, fmt.Errorf("email is required")
@@ -439,6 +440,33 @@ func buildGuestOrderPayload(storeID int, phone string, params map[string]string)
 	return order, nil
 }
 
+// coerceOrderItemNumbers turns numeric strings on line items into ints.
+// Flow variables store option id and quantity as text; create order requires ints.
+func coerceOrderItemNumbers(items any) any {
+	arr, ok := items.([]any)
+	if !ok {
+		return items
+	}
+	for _, raw := range arr {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"product_option", "quantity"} {
+			text, ok := item[key].(string)
+			if !ok {
+				continue
+			}
+			n, err := strconv.Atoi(strings.TrimSpace(text))
+			if err != nil {
+				continue
+			}
+			item[key] = n
+		}
+	}
+	return arr
+}
+
 func applyLimitOffset(args map[string]any, params map[string]string) {
 	if n, ok := optionalPositiveInt(params["limit"]); ok {
 		args["limit"] = n
@@ -462,7 +490,7 @@ func templateTiqrParams(raw any, replace func(string) string) map[string]string 
 		case nil:
 			continue
 		default:
-			s = fmt.Sprint(v)
+			s = formatTiqrParamValue(v)
 		}
 		out[key] = replace(s)
 	}

@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,28 +31,46 @@ var (
 
 const maxLoopIterations = 50
 
-// processTemplate processes a template string with variables, conditionals, and loops
+type valueFormatter func(any) string
+
+// processTemplate processes a template string with variables, conditionals, and loops.
+// Maps and slices are rendered with Go's default formatting. Chat messages use this.
 func processTemplate(template string, data map[string]any) string {
+	return renderTemplate(template, data, formatValue)
+}
+
+// processTiqrParamTemplate is the TiQR API param renderer. Strings, numbers, and
+// bools stay plain text. Maps, slices, and arrays are JSON so values like
+// {{order_items}} and {{new_address}} are valid request JSON.
+func processTiqrParamTemplate(template string, data map[string]any) string {
+	return renderTemplate(template, data, formatTiqrParamValue)
+}
+
+func renderTemplate(template string, data map[string]any, format valueFormatter) string {
 	if data == nil {
 		data = make(map[string]any)
 	}
+	if format == nil {
+		format = formatValue
+	}
 
 	result := template
-
-	// 1. Process for loops first (they may contain if blocks and variables)
-	result = processForLoops(result, data)
-
-	// 2. Process if/else conditionals
+	result = processForLoops(result, data, format)
 	result = processConditionals(result, data)
-
-	// 3. Process remaining variable replacements
-	result = processVariables(result, data)
-
-	return result
+	return processVariables(result, data, format)
 }
 
-// processForLoops handles {{for item in items}}...{{endfor}} blocks
-func processForLoops(template string, data map[string]any) string {
+// processForLoops handles {{for item in items}}...{{endfor}} blocks.
+// Message templates call this with formatValue.
+func processForLoops(template string, data map[string]any, format ...valueFormatter) string {
+	formatter := formatValue
+	if len(format) > 0 && format[0] != nil {
+		formatter = format[0]
+	}
+	return processForLoopsFormatted(template, data, formatter)
+}
+
+func processForLoopsFormatted(template string, data map[string]any, format valueFormatter) string {
 	result := template
 
 	for {
@@ -85,7 +105,7 @@ func processForLoops(template string, data map[string]any) string {
 
 				// Process the loop body with the loop context
 				processedBody := processConditionals(loopBody, loopData)
-				processedBody = processVariables(processedBody, loopData)
+				processedBody = processVariables(processedBody, loopData, format)
 				output.WriteString(processedBody)
 			}
 
@@ -100,7 +120,7 @@ func processForLoops(template string, data map[string]any) string {
 				loopData[itemVar+"_index"] = i
 
 				processedBody := processConditionals(loopBody, loopData)
-				processedBody = processVariables(processedBody, loopData)
+				processedBody = processVariables(processedBody, loopData, format)
 				output.WriteString(processedBody)
 			}
 		}
@@ -154,14 +174,19 @@ func processConditionals(template string, data map[string]any) string {
 	return result
 }
 
-// processVariables replaces {{variable}} and {{object.path}} with values
-func processVariables(template string, data map[string]any) string {
+// processVariables replaces {{variable}} and {{object.path}} with values.
+// Message templates call this with formatValue.
+func processVariables(template string, data map[string]any, format ...valueFormatter) string {
+	formatter := formatValue
+	if len(format) > 0 && format[0] != nil {
+		formatter = format[0]
+	}
 	return variablePattern.ReplaceAllStringFunc(template, func(match string) string {
 		// Drop {{ }} and ignore spaces authors put inside the braces.
 		path := strings.TrimSpace(match[2 : len(match)-2])
 
 		value := getNestedValue(data, path)
-		return formatValue(value)
+		return formatter(value)
 	})
 }
 
@@ -450,6 +475,28 @@ func formatValue(value any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// formatTiqrParamValue renders a TiQR API param. Scalars stay unquoted text.
+// Maps, slices, and arrays are JSON.
+func formatTiqrParamValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch value.(type) {
+	case string, bool, int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, float32, float64, json.Number:
+		return formatValue(value)
+	}
+	kind := reflect.TypeOf(value).Kind()
+	if kind != reflect.Map && kind != reflect.Slice && kind != reflect.Array {
+		return formatValue(value)
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return formatValue(value)
+	}
+	return string(raw)
 }
 
 // copyMap creates a shallow copy of a map

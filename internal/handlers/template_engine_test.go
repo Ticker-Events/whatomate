@@ -729,3 +729,20 @@ func TestExtractResponseMapping_PartialMatch(t *testing.T) {
 	_, hasEmail := result["email"]
 	assert.False(t, hasEmail)
 }
+
+func TestProcessTiqrParamTemplate_JSONEncodesObjectsAndArrays(t *testing.T) {
+	t.Parallel()
+
+	data := map[string]any{
+		"query": "cake",
+		"order_items": []any{
+			map[string]any{"product_option": "7", "quantity": "2"},
+		},
+		"new_address": map[string]any{"name": "Aswin"},
+	}
+
+	assert.Equal(t, "cake", processTiqrParamTemplate("{{query}}", data))
+	assert.JSONEq(t, `[{"product_option":"7","quantity":"2"}]`, processTiqrParamTemplate("{{order_items}}", data))
+	assert.JSONEq(t, `{"name":"Aswin"}`, processTiqrParamTemplate("{{new_address}}", data))
+	assert.Equal(t, "map[name:Aswin]", processTemplate("{{new_address}}", data))
+}
