@@ -1271,7 +1271,7 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 			btn["phone_number"] = itemTextOrColumn(phoneField, "phone_number", obj, data)
 			btn["id"] = fmt.Sprintf("phone_%d", i+1)
 		default:
-			id := fieldString(obj, idField)
+			id := itemID(idField, obj, data)
 			if id == "" {
 				id = fmt.Sprintf("btn_%d", i+1)
 			}
@@ -1561,13 +1561,13 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string, sessio
 			}
 			card["title"] = label
 			card["url"] = itemTextOrColumn(urlField, "url", obj, session)
-			id := fieldString(obj, idField)
+			id := itemID(idField, obj, session)
 			if id == "" {
 				id = fmt.Sprintf("card_%d", i+1)
 			}
 			card["id"] = id
 		} else {
-			id := fieldString(obj, idField)
+			id := itemID(idField, obj, session)
 			if id == "" {
 				id = fmt.Sprintf("card_%d", i+1)
 			}
@@ -1578,7 +1578,7 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string, sessio
 				if title2 == "" {
 					continue
 				}
-				id2 := fieldString(obj, idField2)
+				id2 := itemID(idField2, obj, session)
 				if id2 == "" {
 					id2 = fmt.Sprintf("card_%d_b", i+1)
 				}
@@ -1684,6 +1684,22 @@ func carouselMediaType(raw string) string {
 		return "video"
 	}
 	return "image"
+}
+
+// itemID resolves a list or carousel id. A column name ("id"), a nested
+// path ("images[0].id"), and a template ("{{id}}") all read the row.
+func itemID(template string, item map[string]any, session models.JSONB) string {
+	template = strings.TrimSpace(template)
+	if template == "" {
+		return ""
+	}
+	if strings.Contains(template, "{{") {
+		return strings.TrimSpace(itemDisplayText(template, item, session))
+	}
+	if strings.ContainsAny(template, ".[") {
+		return nestedFieldString(item, template)
+	}
+	return fieldString(item, template)
 }
 
 func fieldString(obj map[string]any, key string) string {

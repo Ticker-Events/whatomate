@@ -2016,6 +2016,34 @@ func TestApplyButtonSelection_PreservesOptionArray(t *testing.T) {
 	assert.Equal(t, "Large", buttons[1]["title"])
 }
 
+func TestApplyButtonSelection_TemplateIDFieldUsesOptionID(t *testing.T) {
+	options := []any{
+		map[string]any{"id": float64(11), "name": "Regular", "price": float64(25000)},
+		map[string]any{"id": float64(12), "name": "Large", "price": float64(35000)},
+	}
+	session := models.JSONB{"options": options}
+	cfg := map[string]any{
+		"mode":        "list",
+		"source":      "dynamic",
+		"items_var":   "options",
+		"id_field":    "{{id}}",
+		"title_field": "{{name}}",
+		"selection_mapping": map[string]any{
+			"option_id":   "id",
+			"option_name": "name",
+		},
+	}
+	buttons, err := dynamicButtonsFromSession(cfg, session, "list")
+	require.NoError(t, err)
+	require.Len(t, buttons, 2)
+	assert.Equal(t, "11", buttons[0]["id"])
+	assert.Equal(t, "12", buttons[1]["id"])
+
+	out := applyButtonSelection(cfg, session, "11", "Regular")
+	assert.Equal(t, "11", out["option_id"])
+	assert.Equal(t, "Regular", out["option_name"])
+}
+
 func TestApplyButtonSelection_CarouselSecondReply(t *testing.T) {
 	session := models.JSONB{
 		"products": []map[string]any{

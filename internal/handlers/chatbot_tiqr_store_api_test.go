@@ -217,6 +217,20 @@ func TestRunChatGraph_TiqrStoreAPI_CreateOrderJSONEncodesCart(t *testing.T) {
 	assert.Equal(t, map[string]any{"name": "Aswin"}, order["new_address"])
 }
 
+func TestOrderMapToCreateRequest_CoercesStringOptionIDs(t *testing.T) {
+	order, err := buildGuestOrderPayload(21, "919800000000", map[string]string{
+		"items":         `[{"product_option":"11","quantity":"1"}]`,
+		"email":         "buyer@example.com",
+		"delivery_mode": "PICKUP_FROM_STORE",
+	})
+	require.NoError(t, err)
+	body, err := orderMapToCreateRequest(order)
+	require.NoError(t, err)
+	require.Len(t, body.Items, 1)
+	assert.Equal(t, 11, body.Items[0].ProductOption)
+	assert.Equal(t, 1, body.Items[0].Quantity)
+}
+
 func TestBuildTiqrStoreToolArgs_SearchCollectionsRequiresQuery(t *testing.T) {
 	_, _, err := buildTiqrStoreToolArgs("search_collections", 1, "", map[string]string{})
 	require.Error(t, err)
