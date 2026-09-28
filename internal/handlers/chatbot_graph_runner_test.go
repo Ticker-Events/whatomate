@@ -1744,6 +1744,28 @@ func TestDynamicButtonsFromSession_RowOverridesSessionName(t *testing.T) {
 	assert.Equal(t, "reply", buttons[0]["type"])
 }
 
+func TestDynamicButtonsFromSession_ExtraCheckoutReply(t *testing.T) {
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":        "dynamic",
+		"items_var":     "products",
+		"id_field":      "id",
+		"title_field":   "Add to cart",
+		"title_field_2": "Checkout",
+		"id_field_2":    "checkout",
+	}, models.JSONB{
+		"products": []any{
+			map[string]any{"id": "p1", "name": "Mango Kunafa"},
+		},
+	}, "reply")
+	require.NoError(t, err)
+	require.Len(t, buttons, 2)
+	assert.Equal(t, "p1", buttons[0]["id"])
+	assert.Equal(t, "Add to cart", buttons[0]["title"])
+	assert.Equal(t, "checkout", buttons[1]["id"])
+	assert.Equal(t, "Checkout", buttons[1]["title"])
+	assert.Nil(t, buttons[1]["_item"])
+}
+
 func TestDynamicButtonsFromSession_URLTemplate(t *testing.T) {
 	buttons, err := dynamicButtonsFromSession(map[string]any{
 		"source":       "dynamic",

@@ -1286,7 +1286,31 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 		btn["_item"] = obj
 		out = append(out, btn)
 	}
+	if kind == "reply" && len(out) < limit {
+		if extra := extraReplyButton(cfg); extra != nil {
+			out = append(out, extra)
+		}
+	}
 	return out, nil
+}
+
+// extraReplyButton is one message-level reply, such as Checkout next to a
+// single product's Add to cart. title_field_2 is the label. A bare
+// id_field_2 is the button id, not a column on the product.
+func extraReplyButton(cfg map[string]any) map[string]any {
+	title := strings.TrimSpace(stringFromConfig(cfg, "title_field_2"))
+	if title == "" || strings.Contains(title, "{{") {
+		return nil
+	}
+	id := strings.TrimSpace(stringFromConfig(cfg, "id_field_2"))
+	if id == "" || strings.Contains(id, "{{") || strings.ContainsAny(id, ".[") {
+		id = "btn_extra"
+	}
+	return map[string]any{
+		"id":    id,
+		"title": title,
+		"type":  "reply",
+	}
 }
 
 // anySlice accepts the array shapes that land in session data. TiQR list

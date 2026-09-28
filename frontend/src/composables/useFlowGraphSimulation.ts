@@ -949,6 +949,14 @@ function resolveNodeButtons(node: ChatNode, vars: Record<string, any>): ButtonCo
     const description = kind === 'list' && descField ? itemDisplayText(descField, obj, vars) : undefined
     out.push({ id, title, type: 'reply', description: description || undefined, source: obj })
   })
+  if (kind === 'reply' && out.length < limit) {
+    const extraTitle = stringFromConfig(cfg, 'title_field_2').trim()
+    if (extraTitle && !extraTitle.includes('{{')) {
+      let extraID = stringFromConfig(cfg, 'id_field_2').trim()
+      if (!extraID || extraID.includes('{{') || extraID.includes('.') || extraID.includes('[')) extraID = 'btn_extra'
+      out.push({ id: extraID, title: extraTitle, type: 'reply' })
+    }
+  }
   return out
 }
 

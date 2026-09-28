@@ -6,7 +6,7 @@
       "condition": "default"
     },
     {
-      "to": "node_1789658122385_0",
+      "to": "node_1790592200000_0",
       "from": "node_1789646935001_0",
       "condition": "http:non2xx"
     },
@@ -16,7 +16,7 @@
       "condition": "http:2xx"
     },
     {
-      "to": "node_1789658122385_0",
+      "to": "node_1790592200000_0",
       "from": "node_1790515279396_3",
       "condition": "http:non2xx"
     },
@@ -46,7 +46,7 @@
       "condition": "false"
     },
     {
-      "to": "node_1790525867229_3",
+      "to": "node_1790592300002_0",
       "from": "node_1790592100001_0",
       "condition": "default"
     },
@@ -61,7 +61,7 @@
       "condition": "default"
     },
     {
-      "to": "node_1790512630941_1",
+      "to": "node_1790592300000_0",
       "from": "node_1790521375685_1",
       "condition": "button:btn_1790521433317_0"
     },
@@ -71,7 +71,7 @@
       "condition": "default"
     },
     {
-      "to": "node_1790525867229_3",
+      "to": "node_1790592300002_0",
       "from": "node_1790517294050_0",
       "condition": "default"
     },
@@ -137,6 +137,11 @@
     },
     {
       "to": "node_1789658122385_0",
+      "from": "node_1790592200000_0",
+      "condition": "default"
+    },
+    {
+      "to": "node_1789658122385_0",
       "from": "node_1790532958118_2",
       "condition": "default"
     },
@@ -153,6 +158,51 @@
     {
       "to": "node_1790532737492_0",
       "from": "node_1790590889753_0",
+      "condition": "default"
+    },
+    {
+      "to": "node_1790592300001_0",
+      "from": "node_1790592300000_0",
+      "condition": "true"
+    },
+    {
+      "to": "node_1790512630941_1",
+      "from": "node_1790592300000_0",
+      "condition": "false"
+    },
+    {
+      "to": "node_1790512630941_1",
+      "from": "node_1790592300001_0",
+      "condition": "button:btn_1790592300100_0"
+    },
+    {
+      "to": "node_1790590889753_0",
+      "from": "node_1790592300001_0",
+      "condition": "button:btn_1790592300100_1"
+    },
+    {
+      "to": "node_1790592300003_0",
+      "from": "node_1790592300002_0",
+      "condition": "true"
+    },
+    {
+      "to": "node_1790525867229_3",
+      "from": "node_1790592300002_0",
+      "condition": "false"
+    },
+    {
+      "to": "node_1790590889753_0",
+      "from": "node_1790592300003_0",
+      "condition": "true"
+    },
+    {
+      "to": "node_1790592300004_0",
+      "from": "node_1790592300003_0",
+      "condition": "false"
+    },
+    {
+      "to": "node_1790512630941_1",
+      "from": "node_1790592300004_0",
       "condition": "default"
     }
   ],
@@ -193,7 +243,7 @@
       "type": "end",
       "label": "End",
       "config": {
-        "message": "Thank you for buying {{selected_product_id}}!"
+        "message": ""
       },
       "position": {
         "x": -400,
@@ -205,18 +255,18 @@
       "type": "buttons",
       "label": "Show Collections",
       "config": {
-        "body": "Select Collection",
+        "body": "What would you like to browse?",
         "mode": "list",
-        "footer": "Footer",
-        "header": "Header",
+        "footer": "",
+        "header": "Collections",
         "source": "dynamic",
         "buttons": [],
         "id_field": "id",
         "store_as": "",
         "items_var": "{{collections}}",
-        "list_button": "Select",
+        "list_button": "Browse",
         "title_field": "{{name}}",
-        "section_title": "Options",
+        "section_title": "Collections",
         "description_field": "{{description}}",
         "selection_mapping": {
           "collection_id": "id",
@@ -254,7 +304,7 @@
       "type": "buttons",
       "label": "Show Products",
       "config": {
-        "body": "Select your product.",
+        "body": "Tap *Add to cart* on an item, or *Checkout* to finish with what you already have.",
         "mode": "carousel",
         "source": "dynamic",
         "buttons": [
@@ -263,7 +313,7 @@
             "url": "",
             "body": "Mango Kunafa Parfait",
             "id_2": "",
-            "title": "Add To Cart",
+            "title": "Add to cart",
             "title_2": "",
             "media_url": "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/ed52707c465a4a17a3b74f548578ad17-de453de9b5c2421399dea5be9e943fc6-p.jpg",
             "media_type": "image"
@@ -273,7 +323,7 @@
             "url": "",
             "body": "Sadya Sweet Canapes",
             "id_2": "",
-            "title": "Add To Cart",
+            "title": "Add to cart",
             "title_2": "",
             "media_url": "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/d592fabca6314ee5a749da835b40cf5a-589041f37b35417d8122b31a1b645eee-p.jpg",
             "media_type": "image"
@@ -282,9 +332,11 @@
         "id_field": "{{id}}",
         "store_as": "product_selected",
         "items_var": "{{products}}",
-        "body_field": "{{name}}(₹{{min_price}})",
+        "body_field": "{{name}}\n₹{{min_price}}",
         "media_field": "{{images[0].original_url}}",
-        "title_field": "Add To Cart",
+        "title_field": "Add to cart",
+        "title_field_2": "Checkout",
+        "id_field_2": "checkout",
         "selection_mapping": {
           "options": "options",
           "product_id": "id"
@@ -301,19 +353,19 @@
       "type": "buttons",
       "label": "Buttons",
       "config": {
-        "body": "Do you want anything else from our collections?",
+        "body": "Would you like anything else?",
         "mode": "reply",
         "source": "static",
         "buttons": [
           {
             "id": "btn_1790521433317_0",
             "type": "reply",
-            "title": "Yes, show collections"
+            "title": "Add more"
           },
           {
             "id": "btn_1790521457603_1",
             "type": "reply",
-            "title": "No, checkout"
+            "title": "Checkout"
           }
         ],
         "store_as": ""
@@ -328,16 +380,16 @@
       "type": "buttons",
       "label": "Product Options",
       "config": {
-        "body": "Select Option",
+        "body": "Which option would you like?",
         "mode": "list",
-        "header": "Select Option",
+        "header": "Options",
         "source": "dynamic",
         "buttons": [],
         "id_field": "id",
         "items_var": "options",
-        "list_button": "Select",
-        "title_field": "{{name}}(₹{{price}})",
-        "section_title": "Option",
+        "list_button": "Choose",
+        "title_field": "{{name}} · ₹{{price}}",
+        "section_title": "Options",
         "description_field": "{{description}}",
         "selection_mapping": {
           "option_id": "id",
@@ -354,10 +406,10 @@
       "type": "prompt",
       "label": "Quantity message",
       "config": {
-        "body": "How many of {{option_name}} do you want?",
+        "body": "How many *{{option_name}}* would you like?\n\nSend a number, for example 1.",
         "store_as": "quantity",
         "input_type": "number",
-        "validation_error": "Please provide a valid quantity",
+        "validation_error": "Please send a whole number, such as 1 or 2.",
         "validation_regex": "^[0-9]+$"
       },
       "position": {
@@ -394,7 +446,7 @@
       "type": "message",
       "label": "Product not available",
       "config": {
-        "message": "Sorry, this product is not available right now."
+        "message": "Sorry, that item isn't available right now.\n\nYou can browse something else, or check out what's already in your cart."
       },
       "position": {
         "x": -1300,
@@ -465,7 +517,7 @@
       "type": "message",
       "label": "Message",
       "config": {
-        "message": "Cart count: {{cart_count}}"
+        "message": "Added to your cart.\n\nYou have *{{cart_count}}* in your cart."
       },
       "position": {
         "x": -1920,
@@ -487,7 +539,9 @@
         "api_type": "rest",
         "operation": "create_order",
         "message_template": "",
-        "response_mapping": {}
+        "response_mapping": {
+          "order_number": "display_uid"
+        }
       },
       "position": {
         "x": -820,
@@ -499,7 +553,7 @@
       "type": "message",
       "label": "Message",
       "config": {
-        "message": "Success"
+        "message": "Your order is confirmed.{{if order_number}}\n\n*{{order_number}}*{{endif}}\n\nIt's a store pickup. We'll have it ready for you.\n\nThank you for shopping with us."
       },
       "position": {
         "x": -900,
@@ -511,7 +565,7 @@
       "type": "message",
       "label": "Message",
       "config": {
-        "message": "Failed"
+        "message": "We couldn't place your order just now.\n\nPlease try again in a moment."
       },
       "position": {
         "x": -680,
@@ -523,9 +577,9 @@
       "type": "whatsapp_flow",
       "label": "WhatsApp Flow",
       "config": {
-        "cta": "Provide Details",
-        "body": "Please provide your details for placing the order!",
-        "header": "Customer Details",
+        "cta": "Continue",
+        "body": "Please share a few details so we can place your pickup order.",
+        "header": "Your details",
         "flow_id": "1557965846018132"
       },
       "position": {
@@ -562,14 +616,16 @@
       "type": "buttons",
       "label": "Show Product",
       "config": {
-        "body": "{{products[0].name}} (₹{{products[0].min_price}})\n{{products[0].description}}",
+        "body": "*{{products[0].name}}*\n₹{{products[0].min_price}}\n\n{{products[0].description}}\n\nTap *Add to cart*, or *Checkout* if you're done.",
         "mode": "reply",
         "source": "dynamic",
         "buttons": [],
         "id_field": "{{id}}",
         "store_as": "product_selected",
         "items_var": "{{products}}",
-        "title_field": "Add To Cart",
+        "title_field": "Add to cart",
+        "title_field_2": "Checkout",
+        "id_field_2": "checkout",
         "header_image": "{{products[0].images[0].original_url}}",
         "fallback_media_url": "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/d592fabca6314ee5a749da835b40cf5a-589041f37b35417d8122b31a1b645eee-p.jpg",
         "selection_mapping": {
@@ -587,11 +643,98 @@
       "type": "message",
       "label": "No products",
       "config": {
-        "message": "There are no products in this collection right now."
+        "message": "There's nothing available in this collection right now.\n\nYou can browse another collection, or check out if your cart already has items."
       },
       "position": {
         "x": 80,
         "y": 980
+      }
+    },
+    {
+      "id": "node_1790592200000_0",
+      "type": "message",
+      "label": "Couldn't load",
+      "config": {
+        "message": "Sorry, we couldn't load that just now.\n\nPlease try again in a moment."
+      },
+      "position": {
+        "x": 40,
+        "y": 680
+      }
+    },
+    {
+      "id": "node_1790592300000_0",
+      "type": "condition",
+      "label": "Cart has items?",
+      "config": {
+        "expression": "len(tiqr_cart) > 0"
+      },
+      "position": {
+        "x": -1500,
+        "y": 400
+      }
+    },
+    {
+      "id": "node_1790592300001_0",
+      "type": "buttons",
+      "label": "Browse or checkout",
+      "config": {
+        "body": "You already have items in your cart.\n\nBrowse another collection, or check out with what you have.",
+        "mode": "reply",
+        "source": "static",
+        "buttons": [
+          {
+            "id": "btn_1790592300100_0",
+            "type": "reply",
+            "title": "Browse more"
+          },
+          {
+            "id": "btn_1790592300100_1",
+            "type": "reply",
+            "title": "Checkout"
+          }
+        ],
+        "store_as": ""
+      },
+      "position": {
+        "x": -1500,
+        "y": 560
+      }
+    },
+    {
+      "id": "node_1790592300002_0",
+      "type": "condition",
+      "label": "Checkout tapped?",
+      "config": {
+        "expression": "product_selected == \"Checkout\""
+      },
+      "position": {
+        "x": -1100,
+        "y": 1100
+      }
+    },
+    {
+      "id": "node_1790592300003_0",
+      "type": "condition",
+      "label": "Cart ready?",
+      "config": {
+        "expression": "len(tiqr_cart) > 0"
+      },
+      "position": {
+        "x": -1100,
+        "y": 1280
+      }
+    },
+    {
+      "id": "node_1790592300004_0",
+      "type": "message",
+      "label": "Cart empty",
+      "config": {
+        "message": "Your cart is empty. Pick something to add before checking out."
+      },
+      "position": {
+        "x": -1100,
+        "y": 1460
       }
     }
   ],
