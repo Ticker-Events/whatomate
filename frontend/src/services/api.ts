@@ -375,6 +375,18 @@ export type CodedPreviewCard = {
   buttons?: CodedPreviewButton[]
 }
 
+export type CodedPreviewAICall = {
+  role: string
+  prompt?: string
+  response?: string
+  parsed?: Record<string, unknown>
+  error?: string
+  language?: string
+  route?: string
+  confidence?: number
+  grounded?: boolean
+}
+
 export type CodedPreviewMessage = {
   type: string
   content: string
@@ -386,6 +398,8 @@ export type CodedPreviewMessage = {
   header_image?: string
   footer?: string
   list_button?: string
+  context?: Record<string, unknown>
+  ai?: CodedPreviewAICall[]
 }
 
 export type CodedPreviewResponse = {
@@ -396,6 +410,8 @@ export type CodedPreviewResponse = {
   flow_cta?: string
   mock_operation?: string
   messages: CodedPreviewMessage[]
+  context?: Record<string, unknown>
+  ai_calls?: CodedPreviewAICall[]
 }
 
 export type CodedPreviewRequest = {

@@ -51,6 +51,21 @@ type CodedPreviewMessage struct {
 	HeaderImage string               `json:"header_image,omitempty"`
 	Footer      string               `json:"footer,omitempty"`
 	ListButton  string               `json:"list_button,omitempty"`
+	Context     map[string]any       `json:"context,omitempty"`
+	AI          []CodedPreviewAICall `json:"ai,omitempty"`
+}
+
+// CodedPreviewAICall is one intent, guide, or translate call made during a preview turn.
+type CodedPreviewAICall struct {
+	Role       string         `json:"role"`
+	Prompt     string         `json:"prompt,omitempty"`
+	Response   string         `json:"response,omitempty"`
+	Parsed     map[string]any `json:"parsed,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Language   string         `json:"language,omitempty"`
+	Route      string         `json:"route,omitempty"`
+	Confidence float64        `json:"confidence,omitempty"`
+	Grounded   *bool          `json:"grounded,omitempty"`
 }
 
 // CodedPreviewResponse is one turn of a coded-flow preview.
@@ -63,6 +78,8 @@ type CodedPreviewResponse struct {
 	FlowCTA       string                `json:"flow_cta,omitempty"`
 	MockOperation string                `json:"mock_operation,omitempty"`
 	Messages      []CodedPreviewMessage `json:"messages"`
+	Context       map[string]any        `json:"context,omitempty"`
+	AICalls       []CodedPreviewAICall  `json:"ai_calls,omitempty"`
 }
 
 // codedPreviewSink collects messages a coded flow would have sent.
@@ -74,6 +91,9 @@ type codedPreviewSink struct {
 	mock      bool
 	mocks     map[string]any
 	needsMock string
+	session   *models.ChatbotSession
+	aiCalls   []CodedPreviewAICall
+	pendingAI []CodedPreviewAICall
 }
 
 // errCodedPreviewNeedsMock stops a preview turn so the client can supply JSON.
@@ -101,11 +121,87 @@ func (ctx *chatNodeCtx) capturing() bool {
 	return ctx != nil && ctx.preview != nil
 }
 
+func (s *codedPreviewSink) noteAI(call CodedPreviewAICall) {
+	if s == nil {
+		return
+	}
+	s.aiCalls = append(s.aiCalls, call)
+	s.pendingAI = append(s.pendingAI, call)
+}
+
+func (s *codedPreviewSink) takePendingAI() []CodedPreviewAICall {
+	if s == nil || len(s.pendingAI) == 0 {
+		return nil
+	}
+	out := append([]CodedPreviewAICall(nil), s.pendingAI...)
+	s.pendingAI = nil
+	return out
+}
+
+func (s *codedPreviewSink) appendMessage(msg CodedPreviewMessage) {
+	if s == nil {
+		return
+	}
+	msg.Context = previewSessionContext(s.session)
+	msg.AI = s.takePendingAI()
+	s.messages = append(s.messages, msg)
+}
+
+func previewSessionContext(session *models.ChatbotSession) map[string]any {
+	if session == nil || session.SessionData == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(session.SessionData)+2)
+	for key, value := range session.SessionData {
+		switch key {
+		case codedPreviewWaitKey, codedPreviewCTAKey:
+			continue
+		case codedCallsKey:
+			items, _ := anySlice(value)
+			out[key] = map[string]any{
+				"count": len(items),
+				"names": codedCallNames(items),
+			}
+			continue
+		case codedTranslationsKey:
+			switch typed := value.(type) {
+			case map[string]string:
+				out[key] = map[string]any{"count": len(typed)}
+			case map[string]any:
+				out[key] = map[string]any{"count": len(typed)}
+			default:
+				out[key] = map[string]any{"count": 0}
+			}
+			continue
+		}
+		out[key] = value
+	}
+	if step := strings.TrimSpace(session.CurrentStep); step != "" {
+		out["_current_step"] = step
+	}
+	out["_session_status"] = string(session.Status)
+	return out
+}
+
+func codedCallNames(items []any) []string {
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		rec, ok := asStringMap(item)
+		if !ok {
+			continue
+		}
+		if name := asString(rec["name"]); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func (s *codedPreviewSink) text(step, content string) {
 	if s == nil || strings.TrimSpace(content) == "" {
 		return
 	}
-	s.messages = append(s.messages, CodedPreviewMessage{
+	s.appendMessage(CodedPreviewMessage{
 		Type:    "bot",
 		Content: content,
 		Step:    step,
@@ -124,7 +220,7 @@ func (s *codedPreviewSink) buttons(step, body, mode string, buttons []map[string
 	if s == nil {
 		return
 	}
-	s.messages = append(s.messages, CodedPreviewMessage{
+	s.appendMessage(CodedPreviewMessage{
 		Type:        "bot",
 		Content:     body,
 		Step:        step,
@@ -144,7 +240,7 @@ func (s *codedPreviewSink) carousel(step, body string, cards []map[string]any) {
 		return
 	}
 	rendered, flat := previewCards(cards)
-	s.messages = append(s.messages, CodedPreviewMessage{
+	s.appendMessage(CodedPreviewMessage{
 		Type:        "bot",
 		Content:     body,
 		Step:        step,
@@ -160,7 +256,7 @@ func (s *codedPreviewSink) flow(step, header, body, cta string) {
 	if s == nil {
 		return
 	}
-	s.messages = append(s.messages, CodedPreviewMessage{
+	s.appendMessage(CodedPreviewMessage{
 		Type:    "bot",
 		Content: body,
 		Step:    step,
@@ -168,6 +264,31 @@ func (s *codedPreviewSink) flow(step, header, body, cta string) {
 	})
 	s.input = "whatsapp_flow"
 	s.flowCTA = cta
+}
+
+// flushPendingAIDebug emits any AI calls that did not attach to an outbound
+// message as standalone debug bubbles (for example a routed choice with no
+// immediate Say).
+func (s *codedPreviewSink) flushPendingAIDebug() {
+	if s == nil || len(s.pendingAI) == 0 {
+		return
+	}
+	for _, call := range s.takePendingAI() {
+		content := "AI " + call.Role
+		if call.Route != "" {
+			content += " → " + call.Route
+		}
+		if call.Error != "" {
+			content += ": " + call.Error
+		}
+		s.messages = append(s.messages, CodedPreviewMessage{
+			Type:    "debug",
+			Content: content,
+			Step:    asString(previewSessionContext(s.session)["_current_step"]),
+			Context: previewSessionContext(s.session),
+			AI:      []CodedPreviewAICall{call},
+		})
+	}
 }
 
 // deliverCodedText sends a chatbot line, or records it when this run is a preview.
@@ -180,6 +301,7 @@ func (a *App) deliverCodedText(ctx *chatNodeCtx, step, text string) error {
 		return err
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, text, step)
+	a.logCodedFlowWhatsApp(ctx, step, "text", text)
 	return nil
 }
 
@@ -291,7 +413,7 @@ func (a *App) previewCodedTurn(orgID, userID uuid.UUID, accountName, flowKey str
 		hold.session.PhoneNumber = phone
 	}
 
-	sink := &codedPreviewSink{mock: hold.mock, mocks: in.Mocks}
+	sink := &codedPreviewSink{mock: hold.mock, mocks: in.Mocks, session: hold.session}
 	runErr := a.runCodedFlowPreview(
 		hold.account, hold.contact, hold.session, flow,
 		in.Text, in.ButtonID, in.FlowResponse, sink,
@@ -302,6 +424,7 @@ func (a *App) previewCodedTurn(orgID, userID uuid.UUID, accountName, flowKey str
 	if errors.Is(runErr, errCodedPreviewNeedsMock) {
 		runErr = nil
 	}
+	sink.flushPendingAIDebug()
 	return previewResponse(hold, sink, runErr), nil
 }
 
@@ -338,6 +461,10 @@ func previewResponse(hold *codedPreviewHold, sink *codedPreviewSink, runErr erro
 	if messages == nil {
 		messages = []CodedPreviewMessage{}
 	}
+	aiCalls := sink.aiCalls
+	if aiCalls == nil {
+		aiCalls = []CodedPreviewAICall{}
+	}
 	return CodedPreviewResponse{
 		SessionID:     hold.session.ID.String(),
 		Status:        status,
@@ -346,6 +473,8 @@ func previewResponse(hold *codedPreviewHold, sink *codedPreviewSink, runErr erro
 		FlowCTA:       cta,
 		MockOperation: sink.needsMock,
 		Messages:      messages,
+		Context:       previewSessionContext(session),
+		AICalls:       aiCalls,
 	}
 }
 

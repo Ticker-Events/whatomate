@@ -111,7 +111,7 @@ func (c *Conv) AskButtons(name string, prompt ButtonPrompt) (Choice, bool) {
 	if choice, done, ok := c.replayChoice(); done {
 		return choice, ok
 	}
-	return c.askChoice(name, c.buttonConfig(prompt), "Tap one of the buttons.")
+	return c.askChoice(name, c.buttonConfig(prompt))
 }
 
 // AskList accepts only a row id from the items just shown.
@@ -122,7 +122,7 @@ func (c *Conv) AskList(name string, items []any, prompt ListPrompt) (Choice, boo
 	if prompt.ItemsKey != "" && items != nil {
 		c.session().SessionData[prompt.ItemsKey] = items
 	}
-	return c.askChoice(name, c.listConfig(prompt), "Choose one of the ids from the list.")
+	return c.askChoice(name, c.listConfig(prompt))
 }
 
 // AskCarousel accepts only a product id from the cards just shown.
@@ -133,7 +133,7 @@ func (c *Conv) AskCarousel(name string, items []any, prompt CarouselPrompt) (Cho
 	if prompt.ItemsKey != "" && items != nil {
 		c.session().SessionData[prompt.ItemsKey] = items
 	}
-	return c.askChoice(name, c.carouselConfig(prompt), "Choose one of the products.")
+	return c.askChoice(name, c.carouselConfig(prompt))
 }
 
 // AskNumber accepts only text that matches pattern.
@@ -166,7 +166,7 @@ func (c *Conv) AskNumber(name, body, pattern string) (string, bool) {
 	}
 	input := strings.TrimSpace(c.chat.userInput)
 	if !re.MatchString(input) {
-		c.divert(name, "Reply with a whole number, such as 1 or 2.")
+		_, _ = c.resolveFreeText(name, map[string]any{}, RouteOptions{})
 		return "", false
 	}
 	c.chat.consumed = true
@@ -206,7 +206,7 @@ func (c *Conv) AskFlow(name string, prompt FlowPrompt) bool {
 		c.wait(name)
 		return false
 	}
-	c.divert(name, "Submit the details form.")
+	_, _ = c.resolveFreeText(name, map[string]any{}, RouteOptions{})
 	return false
 }
 
@@ -360,7 +360,7 @@ func (c *Conv) replayChoice() (Choice, bool, bool) {
 	return Choice{ID: asString(rec["id"]), Title: asString(rec["title"])}, true, true
 }
 
-func (c *Conv) askChoice(name string, cfg map[string]any, expected string) (Choice, bool) {
+func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 	if c.stop {
 		return Choice{}, false
 	}
@@ -393,8 +393,11 @@ func (c *Conv) askChoice(name string, cfg map[string]any, expected string) (Choi
 		}
 		return Choice{}, false
 	}
-	c.divert(name, expected)
-	return Choice{}, false
+	route, ok := c.resolveFreeText(name, cfg, RouteOptions{})
+	if !ok || route.Kind != codedRouteChoice {
+		return Choice{}, false
+	}
+	return Choice{ID: route.ID, Title: route.Title}, true
 }
 
 const codedAgentHandoff = "I'm connecting you with a team member who can help."
@@ -453,24 +456,6 @@ func (c *Conv) acceptButton(name string, cfg map[string]any) (Choice, bool) {
 		"fields": snapshotFields(c.session().SessionData, cfg),
 	})
 	return choice, true
-}
-
-func (c *Conv) divert(name, expected string) {
-	c.chat.consumed = true
-	c.session().CurrentStep = name
-	result, err := answerCodedDiversion(c.app, c.chat.account, c.session(), name, expected, c.chat.userInput)
-	if err != nil || !result.Handled {
-		_ = c.Transfer(codedAgentHandoff)
-		return
-	}
-	if strings.TrimSpace(result.Reply) != "" {
-		text := c.text(result.Reply)
-		if err := c.app.deliverCodedText(c.chat, name, text); err != nil {
-			c.fail(err)
-			return
-		}
-	}
-	c.stop = true
 }
 
 func (c *Conv) wait(name string) {

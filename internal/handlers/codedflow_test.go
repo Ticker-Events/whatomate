@@ -14,6 +14,55 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPickupOrderParams_MapsFlowContext(t *testing.T) {
+	params := pickupOrderParams(map[string]any{
+		"customer_name":    "Aswin Divakar",
+		"customer_email":   "buyer@example.com",
+		"customer_phone":   "9846435358",
+		"phone_number":     "919846435358",
+		"address_line_one": "Infopark Rd",
+		"address_line_two": "TCS",
+		"city":             "Kakkanad",
+		"state":            "Keralam",
+		"country":          "India",
+		"pincode":          "682042",
+		"customer_notes":   "Note",
+		"tiqr_cart":        []any{map[string]any{"product_option": "1312", "quantity": "2"}},
+	})
+
+	assert.Equal(t, "buyer@example.com", params["email"])
+	assert.Equal(t, "Note", params["notes"])
+	assert.Equal(t, "PICKUP_FROM_STORE", params["delivery_mode"])
+	assert.JSONEq(t, `[{"product_option":"1312","quantity":"2"}]`, params["items"])
+	assert.JSONEq(t, `{
+		"name": "Aswin Divakar",
+		"address_line_1": "Infopark Rd",
+		"address_line_2": "TCS",
+		"city": "Kakkanad",
+		"state": "Keralam",
+		"country": "India",
+		"pincode": "682042",
+		"email": "buyer@example.com",
+		"phone_number": "9846435358",
+		"phone": "9846435358"
+	}`, params["new_address"])
+}
+
+func TestPickupOrderParams_DoesNotUsePhoneAsEmail(t *testing.T) {
+	params := pickupOrderParams(map[string]any{
+		"customer_email": "9846435358",
+		"customer_phone": "9846435358",
+		"phone_number":   "919846435358",
+		"email":          "buyer@example.com",
+	})
+	assert.Equal(t, "buyer@example.com", params["email"])
+
+	var address map[string]string
+	require.NoError(t, json.Unmarshal([]byte(params["new_address"]), &address))
+	assert.Equal(t, "buyer@example.com", address["email"])
+	assert.Equal(t, "9846435358", address["phone"])
+}
+
 func useStoreREST(t *testing.T, srv *httptest.Server) {
 	t.Helper()
 	prev := newTiqrStoreRESTClient
@@ -39,38 +88,38 @@ func enableTiqrEcommerce(t *testing.T, app *App, orgID uuid.UUID, accountName, k
 	}
 }
 
-func useCodedLanguage(t *testing.T, detect func(string) string, translate func(string) (string, error)) {
+func useCodedTranslate(t *testing.T, translate func(lang, text string) (string, error)) {
 	t.Helper()
-	prevDetect, prevTranslate := detectCodedLanguage, translateCodedLine
-	detectCodedLanguage = func(_ *App, _ *models.ChatbotSession, text string) (string, error) {
-		if detect == nil {
-			return "en", nil
-		}
-		return detect(text), nil
-	}
-	translateCodedLine = func(_ *App, _ *models.ChatbotSession, _, text string) (string, error) {
+	prev := translateCodedLine
+	translateCodedLine = func(_ *App, _ *models.ChatbotSession, lang, text string) (string, error) {
 		if translate == nil {
 			t.Errorf("translated %q", text)
 			return text, nil
 		}
-		return translate(text)
+		return translate(lang, text)
 	}
-	t.Cleanup(func() {
-		detectCodedLanguage = prevDetect
-		translateCodedLine = prevTranslate
-	})
+	t.Cleanup(func() { translateCodedLine = prev })
 }
 
-func useCodedDiversion(t *testing.T, fn func(string) (codedDiversion, error)) {
+func useCodedIntent(t *testing.T, intent func(string, codedIntentContext) (codedIntentResult, error), guide func(string) (string, error)) {
 	t.Helper()
-	prev := answerCodedDiversion
-	answerCodedDiversion = func(_ *App, _ *models.WhatsAppAccount, _ *models.ChatbotSession, _, _, userText string) (codedDiversion, error) {
-		if fn == nil {
-			t.Fatal("AI diversion was called")
+	prevIntent, prevGuide := identifyCodedIntent, guideCodedIntent
+	identifyCodedIntent = func(_ *App, _ *models.ChatbotSession, message string, ctx codedIntentContext) (codedIntentResult, error) {
+		if intent == nil {
+			t.Fatal("intent identifier was called")
 		}
-		return fn(userText)
+		return intent(message, ctx)
 	}
-	t.Cleanup(func() { answerCodedDiversion = prev })
+	guideCodedIntent = func(_ *App, _ *models.ChatbotSession, message, _ string, _ codedIntentContext) (string, error) {
+		if guide == nil {
+			t.Fatal("guide was called")
+		}
+		return guide(message)
+	}
+	t.Cleanup(func() {
+		identifyCodedIntent = prevIntent
+		guideCodedIntent = prevGuide
+	})
 }
 
 func outgoingBlob(t *testing.T, app *App, session *models.ChatbotSession) string {
@@ -105,6 +154,9 @@ func reloadSession(t *testing.T, app *App, session *models.ChatbotSession) {
 type storeCounts struct {
 	store       int
 	collections int
+	products    int
+	searches    int
+	lastSearch  string
 }
 
 func newStoreServer(t *testing.T, products []any, counts *storeCounts) *httptest.Server {
@@ -116,12 +168,20 @@ func newStoreServer(t *testing.T, products []any, counts *storeCounts) *httptest
 				counts.collections++
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"count": 1,
+				"count": 2,
 				"results": []any{
 					map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"},
+					map[string]any{"id": "58", "name": "Cakes", "description": "Celebration cakes"},
 				},
 			})
 		case strings.Contains(r.URL.Path, "/product/"):
+			if counts != nil {
+				counts.products++
+				if q := r.URL.Query().Get("search"); q != "" {
+					counts.searches++
+					counts.lastSearch = q
+				}
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"count":   len(products),
 				"results": products,
@@ -275,8 +335,10 @@ func TestTiqrEcommerce_OptionBranches(t *testing.T) {
 }
 
 func TestTiqrEcommerce_AppendsCartAndAddMoreSkipsCollections(t *testing.T) {
-	useCodedDiversion(t, func(string) (codedDiversion, error) {
-		return codedDiversion{Handled: true, Reply: "Send a whole number."}, nil
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{Language: "en", Route: codedRouteUnclear, Confidence: 0.4}, nil
+	}, func(string) (string, error) {
+		return "Send a whole number.", nil
 	})
 	var counts storeCounts
 	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
@@ -318,9 +380,11 @@ func TestTiqrEcommerce_AppendsCartAndAddMoreSkipsCollections(t *testing.T) {
 	assert.Equal(t, 1, counts.store)
 }
 
-func TestTiqrEcommerce_HandledDiversionStays(t *testing.T) {
-	useCodedDiversion(t, func(string) (codedDiversion, error) {
-		return codedDiversion{Handled: true, Reply: "We sell sweets. Please choose a collection."}, nil
+func TestTiqrEcommerce_GuideUnclearStays(t *testing.T) {
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{Language: "en", Route: codedRouteUnclear, Confidence: 0.4}, nil
+	}, func(string) (string, error) {
+		return "Would you like to buy something, check an order, or talk to staff?", nil
 	})
 	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
@@ -332,22 +396,22 @@ func TestTiqrEcommerce_HandledDiversionStays(t *testing.T) {
 	assert.Equal(t, "collection", session.CurrentStep)
 	assert.Equal(t, models.SessionStatusActive, session.Status)
 	assert.Nil(t, session.SessionData["collection_id"])
-	assert.Contains(t, outgoingBlob(t, app, session), "We sell sweets.")
+	assert.Contains(t, outgoingBlob(t, app, session), "Would you like to buy something")
 	var transfers int64
 	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
 	assert.Zero(t, transfers)
 }
 
-func TestTiqrEcommerce_UnhandledDiversionTransfers(t *testing.T) {
-	useCodedDiversion(t, func(string) (codedDiversion, error) {
-		return codedDiversion{Handled: false}, nil
-	})
+func TestTiqrEcommerce_HandoffTransfers(t *testing.T) {
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{Language: "en", Route: codedRouteHandoff, Confidence: 0.95}, nil
+	}, nil)
 	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
 	reloadSession(t, app, session)
 
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I want a refund", "", nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I want to talk to a person", "", nil))
 	reloadSession(t, app, session)
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	assert.Nil(t, session.SessionData[codedFlowDataKey])
@@ -358,9 +422,9 @@ func TestTiqrEcommerce_UnhandledDiversionTransfers(t *testing.T) {
 }
 
 func TestTiqrEcommerce_AIErrorTransfers(t *testing.T) {
-	useCodedDiversion(t, func(string) (codedDiversion, error) {
-		return codedDiversion{}, assert.AnError
-	})
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{}, assert.AnError
+	}, nil)
 	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
@@ -374,10 +438,10 @@ func TestTiqrEcommerce_AIErrorTransfers(t *testing.T) {
 }
 
 func TestTiqrEcommerce_TalkToAgentSkipsAI(t *testing.T) {
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
 	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Talk to agent", tiqrTalkToAgent, nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Talk to staff", tiqrTalkToAgent, nil))
 	reloadSession(t, app, session)
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	assert.Contains(t, outgoingBlob(t, app, session), "connecting you with a team member")
@@ -387,7 +451,7 @@ func TestTiqrEcommerce_TalkToAgentSkipsAI(t *testing.T) {
 }
 
 func TestTiqrEcommerce_IntentTitleOnlySelectsBuy(t *testing.T) {
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
 	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", "", nil))
@@ -397,7 +461,7 @@ func TestTiqrEcommerce_IntentTitleOnlySelectsBuy(t *testing.T) {
 }
 
 func TestTiqrEcommerce_IntentPaddedButtonIDSelectsBuy(t *testing.T) {
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
 	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", " buy_products ", nil))
@@ -407,7 +471,7 @@ func TestTiqrEcommerce_IntentPaddedButtonIDSelectsBuy(t *testing.T) {
 }
 
 func TestTiqrEcommerce_IntentTitleOnlyOrderStatus(t *testing.T) {
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
 	prev := lookupLatestOrder
 	lookupLatestOrder = func(*App, *models.WhatsAppAccount, *models.ChatbotSession) (map[string]any, error) {
 		return map[string]any{"display_uid": "ST-1", "status": "CONFIRMED"}, nil
@@ -425,7 +489,7 @@ func TestTiqrEcommerce_IntentTitleOnlyOrderStatus(t *testing.T) {
 }
 
 func TestTiqrEcommerce_UnknownButtonRepromptsIntent(t *testing.T) {
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
 	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Nope", "not_a_menu_button", nil))
@@ -466,22 +530,22 @@ func TestTiqrEcommerce_OrderStatusMissing(t *testing.T) {
 	assert.Contains(t, outgoingBlob(t, app, session), "couldn't find a recent order")
 }
 
-func TestTiqrEcommerce_TranslatesAndCaches(t *testing.T) {
+func TestTiqrEcommerce_PreferredLanguageFromIntent(t *testing.T) {
 	var welcomeCalls int
-	useCodedLanguage(t,
-		func(text string) string {
-			if strings.Contains(strings.ToLower(text), "hola") {
-				return "es"
-			}
-			return "en"
-		},
-		func(text string) (string, error) {
-			if strings.Contains(text, "Welcome to") {
-				welcomeCalls++
-			}
-			return "ES:" + text, nil
-		},
-	)
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{
+			Language:   "hi",
+			Route:      codedRouteChoice,
+			ChoiceID:   tiqrBuyProducts,
+			Confidence: 0.92,
+		}, nil
+	}, nil)
+	useCodedTranslate(t, func(_, text string) (string, error) {
+		if strings.Contains(text, "Welcome to") {
+			welcomeCalls++
+		}
+		return "HI:" + text, nil
+	})
 	app, org, account, contact, session := newGraphTestFixtures(t)
 	srv := newStoreServer(t, twoProducts(nil), nil)
 	useStoreREST(t, srv)
@@ -491,25 +555,127 @@ func TestTiqrEcommerce_TranslatesAndCaches(t *testing.T) {
 	})
 	flow := codedFlowByKey(tiqrEcommerceKey)
 
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "hola shop", "", nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "es", session.SessionData[customerLanguageKey])
-	assert.Contains(t, outgoingBlob(t, app, session), "ES:Welcome to Demo")
-	assert.Equal(t, 1, welcomeCalls)
+	assert.Equal(t, "intent", session.CurrentStep)
+	assert.Empty(t, session.SessionData[customerLanguageKey])
+	assert.Contains(t, outgoingBlob(t, app, session), "Welcome to Demo")
+	assert.Zero(t, welcomeCalls)
 
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "mujhe kharidna hai", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, 1, welcomeCalls)
-	assert.Contains(t, outgoingBlob(t, app, session), "ES:Choose a collection")
+	assert.Equal(t, "hi", session.SessionData[customerLanguageKey])
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "HI:Choose a collection")
 }
 
 func TestTiqrEcommerce_EnglishSkipsTranslation(t *testing.T) {
-	useCodedLanguage(t, func(string) string { return "en" }, nil)
+	useCodedIntent(t, nil, nil)
+	useCodedTranslate(t, nil)
 	app, _, _, session := startEcommerce(t, twoProducts(nil), nil)
-	assert.Equal(t, "en", session.SessionData[customerLanguageKey])
+	assert.Empty(t, session.SessionData[customerLanguageKey])
 	blob := outgoingBlob(t, app, session)
 	assert.Contains(t, blob, "Welcome to Demo")
-	assert.NotContains(t, blob, "ES:")
+	assert.NotContains(t, blob, "HI:")
+}
+
+func TestTiqrEcommerce_ProductSearchFromMenu(t *testing.T) {
+	var counts storeCounts
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{
+			Language:     "en",
+			Route:        codedRouteProduct,
+			ProductQuery: "Themed Cake",
+			Confidence:   0.91,
+		}, nil
+	}, nil)
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), &counts)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I want to purchase Themed Cake", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "product", session.CurrentStep)
+	assert.Equal(t, 1, counts.searches)
+	assert.Equal(t, "Themed Cake", counts.lastSearch)
+	assert.Equal(t, "Themed Cake", session.SessionData["collection_name"])
+	assert.Nil(t, session.SessionData["collection_id"])
+}
+
+func TestTiqrEcommerce_CollectionRouteFromMenu(t *testing.T) {
+	var counts storeCounts
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{
+			Language:     "en",
+			Route:        codedRouteCollection,
+			CollectionID: "58",
+			Confidence:   0.9,
+		}, nil
+	}, nil)
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), &counts)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "what cakes are available", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "product", session.CurrentStep)
+	assert.Equal(t, "58", session.SessionData["collection_id"])
+	assert.Equal(t, "Cakes", session.SessionData["collection_name"])
+	assert.Equal(t, 1, counts.products)
+	assert.Zero(t, counts.searches)
+}
+
+func TestTiqrEcommerce_InventedCollectionTransfers(t *testing.T) {
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{
+			Language:     "en",
+			Route:        codedRouteCollection,
+			CollectionID: "999",
+			Confidence:   0.99,
+		}, nil
+	}, nil)
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "show me muffins", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(1), transfers)
+}
+
+func TestTiqrEcommerce_GuideExhaustionTransfers(t *testing.T) {
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{Language: "en", Route: codedRouteUnclear, Confidence: 0.2}, nil
+	}, func(string) (string, error) {
+		return "Please choose buy, order status, or staff.", nil
+	})
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	for i := 0; i < codedIntentSettings.MaxGuideTurns; i++ {
+		require.NoError(t, app.runCodedFlow(account, contact, session, flow, "hmm", "", nil))
+		reloadSession(t, app, session)
+		assert.Equal(t, "intent", session.CurrentStep)
+		assert.Equal(t, models.SessionStatusActive, session.Status)
+	}
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "still lost", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(1), transfers)
+}
+
+func TestValidateCodedIntent_RejectsInventedIDs(t *testing.T) {
+	ctx := codedIntentContext{
+		AllowCatalog: true,
+		ChoiceIDs:    map[string]string{tiqrBuyProducts: "Buy products"},
+		Collections:  map[string]string{"57": "Sweets"},
+	}
+	_, ok := validateCodedIntent(codedIntentResult{Route: codedRouteCollection, CollectionID: "999", Confidence: 1}, ctx)
+	assert.False(t, ok)
+	_, ok = validateCodedIntent(codedIntentResult{Route: codedRouteProduct, ProductQuery: "Cake", ChoiceID: "x", Confidence: 1}, ctx)
+	assert.False(t, ok)
+	_, ok = validateCodedIntent(codedIntentResult{Route: codedRouteChoice, ChoiceID: tiqrBuyProducts, Confidence: 1}, ctx)
+	assert.True(t, ok)
+	_, ok = validateCodedIntent(codedIntentResult{Route: codedRouteHandoff, Confidence: 1}, ctx)
+	assert.True(t, ok)
 }
 
 // A step that records a call must not hand that record to the next step in

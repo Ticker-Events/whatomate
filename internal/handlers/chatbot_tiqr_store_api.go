@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -115,11 +116,39 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	var raw any
 	if apiType == "rest" {
 		client := newTiqrStoreRESTClient(settings.AI.CommerceRESTURL)
+		if a.shouldTraceCodedFlow(ctx.session) && !ctx.capturing() {
+			client.OnHTTP = func(method, rawURL string, reqBody []byte, status int, respBody []byte, callErr error) {
+				headers := map[string]string{"Accept": "application/json"}
+				if strings.EqualFold(method, http.MethodPost) {
+					headers["Content-Type"] = "application/json"
+				}
+				curl := formatHTTPCurl(method, rawURL, headers, string(reqBody))
+				a.logCodedFlowTiqrRequest(ctx.session, apiType, operation, curl, params)
+				errMsg := ""
+				if callErr != nil {
+					errMsg = callErr.Error()
+				}
+				var parsed any
+				if len(respBody) > 0 {
+					_ = json.Unmarshal(respBody, &parsed)
+					if parsed == nil {
+						parsed = string(respBody)
+					}
+				}
+				a.logCodedFlowTiqrResponse(ctx.session, apiType, operation, status, parsed, errMsg)
+			}
+		}
 		raw, err = invokeTiqrStoreRESTOperation(callCtx, client, operation, storeID, ctx.session.PhoneNumber, params)
 	} else {
+		a.logCodedFlowTiqrRequest(ctx.session, apiType, operation, "", params)
 		invoker := newTiqrStoreInvoker(settings.AI.CommerceMCPURL, settings.AI.CommerceMCPAPIKey)
 		defer func() { _ = invoker.Close() }()
 		raw, err = invokeTiqrStoreOperation(callCtx, invoker, operation, storeID, ctx.session.PhoneNumber, params)
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		a.logCodedFlowTiqrResponse(ctx.session, apiType, operation, 0, raw, errMsg)
 	}
 	if err != nil {
 		a.Log.Error("tiqr_store_api node request failed",

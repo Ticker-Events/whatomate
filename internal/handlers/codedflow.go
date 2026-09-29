@@ -134,16 +134,24 @@ func (a *App) runCodedFlowPreview(
 		preview:          preview,
 	}
 	conv := &Conv{app: a, chat: chat}
-	conv.ensureLanguage(userInput)
 	if session.CurrentStep == "" {
 		chat.userInput = ""
 		chat.buttonID = ""
 		chat.flowResponseData = nil
+	} else if preview == nil {
+		a.logCodedFlowInbound(chat)
+	}
+
+	if preview == nil {
+		a.logCodedFlowContext(session, "turn_start")
 	}
 
 	err := flow.run(conv)
 	if err == nil {
 		err = conv.err
+	}
+	if preview == nil {
+		a.logCodedFlowContext(session, "turn_end")
 	}
 	if chat.preview == nil {
 		if perr := a.persistChatSession(session); perr != nil && err == nil {

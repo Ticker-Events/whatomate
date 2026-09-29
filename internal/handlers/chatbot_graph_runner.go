@@ -285,6 +285,7 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 			return nodeOutcome{}, fmt.Errorf("send carousel: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
+		a.logCodedFlowWhatsApp(ctx, node.ID, "carousel", body, "card_count", len(cards))
 		return nodeOutcome{yield: true}, nil
 	}
 	buttons, err := buttonsForNode(node.Config, ctx.session.SessionData)
@@ -316,6 +317,7 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 			return nodeOutcome{}, fmt.Errorf("send list: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
+		a.logCodedFlowWhatsApp(ctx, node.ID, "list", body, "button_count", len(buttons))
 		return nodeOutcome{yield: true}, nil
 	}
 	headerImage := replyHeaderImage(node.Config, ctx.session.SessionData)
@@ -327,6 +329,7 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
+	a.logCodedFlowWhatsApp(ctx, node.ID, "buttons", body, "button_count", len(buttons))
 	return nodeOutcome{yield: true}, nil
 }
 

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"strings"
 )
 
@@ -26,18 +27,7 @@ const (
 
 	tiqrEcommerceOrderMissing = "I couldn't find a recent order for this phone number."
 
-	tiqrEcommerceNewAddress = `{
-"name": "{{customer_name}}",
-"address_line_1": "{{address_line_one}}",
-"address_line_2": "{{address_line_two}}",
-"city": "{{city}}",
-"state": "{{state}}",
-"country": "{{country}}",
-"pincode": "{{pincode}}",
-"email": "{{customer_email}}",
-"phone_number":"{{customer_phone}}",
-"phone":"{{customer_phone}}"
-}`
+	tiqrEcommerceSearchEmpty = "I couldn't find that in our store.\n\nPlease choose a collection below, or tell me another item."
 
 	tiqrBuyProducts      = "buy_products"
 	tiqrCheckOrderStatus = "check_order_status"
@@ -78,15 +68,24 @@ func tiqrEcommerce(c *Conv) error {
 		c.Say(tiqrEcommerceThanks)
 		return c.End()
 	}
-	choice, ok := c.AskButtons("intent", menuButtons(store))
+	route, ok := c.askRouteButtons("intent", menuButtons(store), RouteOptions{AllowCatalog: true})
 	if !ok {
 		return nil
 	}
-	switch choice.ID {
-	case tiqrBuyProducts:
-		return buyProducts(c, collections)
-	case tiqrCheckOrderStatus:
-		return orderStatus(c)
+	switch route.Kind {
+	case codedRouteCollection:
+		return buyProducts(c, collections, route)
+	case codedRouteProduct:
+		return buyProducts(c, collections, route)
+	case codedRouteChoice:
+		switch route.ID {
+		case tiqrBuyProducts:
+			return buyProducts(c, collections, Route{})
+		case tiqrCheckOrderStatus:
+			return orderStatus(c)
+		default:
+			return c.Transfer(codedAgentHandoff)
+		}
 	default:
 		return c.Transfer(codedAgentHandoff)
 	}
@@ -103,35 +102,42 @@ func menuButtons(store map[string]any) ButtonPrompt {
 		Buttons: []Button{
 			{ID: tiqrBuyProducts, Title: "Buy products"},
 			{ID: tiqrCheckOrderStatus, Title: "Check order status"},
-			{ID: tiqrTalkToAgent, Title: "Talk to agent"},
+			{ID: tiqrTalkToAgent, Title: "Talk to staff"},
 		},
 	}
 }
 
-func buyProducts(c *Conv, collections []any) error {
+func buyProducts(c *Conv, collections []any, first Route) error {
 	for {
-		pick, ok := c.AskList("collection", collections, ListPrompt{
-			Body:        "Choose a collection below and we'll show you the items in it.",
-			Header:      "Our collections",
-			Footer:      "Tap Browse to continue",
-			Button:      "Browse",
-			Section:     "Collections",
-			ItemsKey:    "collections",
-			IDField:     "id",
-			Title:       "{{name}}",
-			Description: "{{description}}",
-			Select: map[string]string{
-				"collection_id":   "id",
-				"collection_name": "title",
-			},
-		})
-		if !ok {
-			return nil
+		route := first
+		first = Route{}
+		if route.Kind == "" {
+			var ok bool
+			route, ok = c.askRouteList("collection", collections, ListPrompt{
+				Body:        "Choose a collection below and we'll show you the items in it.",
+				Header:      "Our collections",
+				Footer:      "Tap Browse to continue",
+				Button:      "Browse",
+				Section:     "Collections",
+				ItemsKey:    "collections",
+				IDField:     "id",
+				Title:       "{{name}}",
+				Description: "{{description}}",
+				Select: map[string]string{
+					"collection_id":   "id",
+					"collection_name": "title",
+				},
+			}, RouteOptions{AllowCatalog: true})
+			if !ok {
+				return nil
+			}
 		}
-		products, ok := c.StoreList("products", "list_products", map[string]string{"category_id": pick.ID})
+		products, ok := productsForRoute(c, route)
 		if !ok {
-			c.Say(tiqrEcommerceThanks)
-			return c.End()
+			if c.stop || c.ended {
+				return nil
+			}
+			continue
 		}
 		_, ok = askProducts(c, products)
 		if !ok {
@@ -155,6 +161,51 @@ func buyProducts(c *Conv, collections []any) error {
 		}
 	}
 	return checkout(c)
+}
+
+func productsForRoute(c *Conv, route Route) ([]any, bool) {
+	switch route.Kind {
+	case codedRouteProduct:
+		query := strings.TrimSpace(route.Query)
+		if query == "" {
+			c.Say(tiqrEcommerceSearchEmpty)
+			return nil, false
+		}
+		c.session().SessionData["collection_name"] = query
+		payload, ok := c.Store("products", "search_products", map[string]string{
+			"search": query,
+			"limit":  "20",
+		})
+		if !ok {
+			return nil, false
+		}
+		items, _ := anySlice(payload["results"])
+		if len(items) == 0 {
+			c.Say(tiqrEcommerceSearchEmpty)
+			return nil, false
+		}
+		c.session().SessionData["products"] = items
+		return items, true
+	case codedRouteChoice, codedRouteCollection:
+		id := strings.TrimSpace(route.ID)
+		if id == "" {
+			c.Say(tiqrEcommerceSearchEmpty)
+			return nil, false
+		}
+		if route.Kind == codedRouteCollection {
+			c.applyCollectionSelection(route)
+		}
+		products, ok := c.StoreList("products", "list_products", map[string]string{"category_id": id})
+		if !ok {
+			c.Say(tiqrEcommerceThanks)
+			_ = c.End()
+			return nil, false
+		}
+		return products, true
+	default:
+		_ = c.Transfer(codedAgentHandoff)
+		return nil, false
+	}
 }
 
 // askProducts shows one product as a list. WhatsApp carousels need at least
@@ -282,6 +333,75 @@ func listLen(c *Conv, key string) int {
 	return len(items)
 }
 
+// pickupOrderParams maps the WhatsApp Flow session values onto create_order.
+// The email is the form's email field. Phone numbers are never used as the email.
+func pickupOrderParams(data map[string]any) map[string]string {
+	email := contextEmail(data)
+	phone := contextValue(data, "customer_phone", "phone", "phone_number")
+	address, err := json.Marshal(map[string]string{
+		"name":           contextValue(data, "customer_name", "name"),
+		"address_line_1": contextValue(data, "address_line_one", "address_line_1"),
+		"address_line_2": contextValue(data, "address_line_two", "address_line_2"),
+		"city":           contextValue(data, "city"),
+		"state":          contextValue(data, "state"),
+		"country":        contextValue(data, "country"),
+		"pincode":        contextValue(data, "pincode"),
+		"email":          email,
+		"phone_number":   phone,
+		"phone":          phone,
+	})
+	if err != nil {
+		address = []byte("{}")
+	}
+	items := "[]"
+	if raw, err := json.Marshal(data["tiqr_cart"]); err == nil && string(raw) != "null" {
+		items = string(raw)
+	}
+	return map[string]string{
+		"email":         email,
+		"items":         items,
+		"notes":         contextValue(data, "customer_notes", "notes"),
+		"new_address":   string(address),
+		"delivery_mode": "PICKUP_FROM_STORE",
+	}
+}
+
+func contextEmail(data map[string]any) string {
+	for _, key := range []string{"customer_email", "email"} {
+		if value := contextValue(data, key); simpleEmailRE.MatchString(value) {
+			return value
+		}
+	}
+	for key, value := range data {
+		if isPhoneContextKey(key) {
+			continue
+		}
+		text := strings.TrimSpace(asString(value))
+		if simpleEmailRE.MatchString(text) {
+			return text
+		}
+	}
+	return ""
+}
+
+func isPhoneContextKey(key string) bool {
+	switch key {
+	case "customer_phone", "phone_number", "phone":
+		return true
+	default:
+		return false
+	}
+}
+
+func contextValue(data map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(asString(data[key])); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func checkout(c *Conv) error {
 	ok := c.AskFlow("details", FlowPrompt{
 		FlowID: tiqrEcommerceFlowID,
@@ -292,13 +412,14 @@ func checkout(c *Conv) error {
 	if !ok {
 		return nil
 	}
-	_, ok = c.Store("order", "create_order", map[string]string{
-		"email":         "{{customer_email}}",
-		"items":         "{{tiqr_cart}}",
-		"notes":         "{{customer_notes}}",
-		"new_address":   tiqrEcommerceNewAddress,
-		"delivery_mode": "PICKUP_FROM_STORE",
-	})
+	params := pickupOrderParams(c.session().SessionData)
+	if params["email"] == "" {
+		c.app.Log.Error("tiqr order is missing a valid email from the WhatsApp flow",
+			"session", c.session().ID,
+			"customer_email", contextValue(c.session().SessionData, "customer_email", "email"),
+		)
+	}
+	_, ok = c.Store("order", "create_order", params)
 	if ok {
 		c.Say(tiqrEcommerceConfirmed)
 	} else {

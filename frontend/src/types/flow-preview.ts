@@ -95,6 +95,18 @@ export interface SimulationMessage {
   inputConfig?: Record<string, any>
   isValidationError?: boolean
   isApiMessage?: boolean
+  context?: Record<string, unknown>
+  ai?: Array<{
+    role: string
+    prompt?: string
+    response?: string
+    parsed?: Record<string, unknown>
+    error?: string
+    language?: string
+    route?: string
+    confidence?: number
+    grounded?: boolean
+  }>
 }
 
 export interface SimulationSnapshot {

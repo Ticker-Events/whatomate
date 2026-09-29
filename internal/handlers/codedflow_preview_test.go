@@ -42,8 +42,8 @@ func countRows(t *testing.T, app *App, orgID uuid.UUID, accountName string) (mes
 }
 
 func TestPreviewCodedFlow_MenuDoesNotSend(t *testing.T) {
-	useCodedLanguage(t, nil, nil)
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
+	useCodedTranslate(t, nil)
 	srv := newStoreServer(t, twoProducts(nil), nil)
 	useStoreREST(t, srv)
 	app, org, account, _, _ := newGraphTestFixtures(t)
@@ -60,6 +60,13 @@ func TestPreviewCodedFlow_MenuDoesNotSend(t *testing.T) {
 	assert.Equal(t, "button", resp.Input)
 	assert.Contains(t, previewMessageText(resp.Messages), "Buy products")
 	assert.NotEmpty(t, resp.SessionID)
+	require.NotEmpty(t, resp.Messages)
+	assert.NotNil(t, resp.Messages[0].Context)
+	assert.Contains(t, resp.Messages[0].Context, "store")
+	assert.Contains(t, resp.Messages[0].Context, "collections")
+	assert.NotNil(t, resp.Context)
+	assert.Equal(t, "intent", resp.Context["_current_step"])
+	assert.NotNil(t, resp.AICalls)
 
 	var stored models.ChatbotSession
 	err = app.DB.First(&stored, "id = ?", resp.SessionID).Error
@@ -72,8 +79,8 @@ func TestPreviewCodedFlow_MenuDoesNotSend(t *testing.T) {
 }
 
 func TestPreviewCodedFlow_ButtonAdvances(t *testing.T) {
-	useCodedLanguage(t, nil, nil)
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
+	useCodedTranslate(t, nil)
 	srv := newStoreServer(t, twoProducts(nil), nil)
 	useStoreREST(t, srv)
 	app, org, account, _, _ := newGraphTestFixtures(t)
@@ -102,9 +109,57 @@ func TestPreviewCodedFlow_ButtonAdvances(t *testing.T) {
 	assert.Contains(t, previewMessageText(next.Messages), "Sweets")
 }
 
+func TestPreviewCodedFlow_IncludesAIDetails(t *testing.T) {
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{
+			Language:   "en",
+			Route:      codedRouteChoice,
+			ChoiceID:   tiqrBuyProducts,
+			Confidence: 0.93,
+		}, nil
+	}, nil)
+	useCodedTranslate(t, nil)
+	srv := newStoreServer(t, twoProducts(nil), nil)
+	useStoreREST(t, srv)
+	app, org, account, _, _ := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	userID := uuid.New()
+
+	first, err := app.previewCodedTurn(org.ID, userID, account.Name, tiqrEcommerceKey, codedPreviewInput{Mock: previewLive()})
+	require.NoError(t, err)
+	sessionID, err := uuid.Parse(first.SessionID)
+	require.NoError(t, err)
+
+	next, err := app.previewCodedTurn(org.ID, userID, account.Name, tiqrEcommerceKey, codedPreviewInput{
+		SessionID: sessionID,
+		Text:      "I want to buy something",
+		Mock:      previewLive(),
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, next.AICalls)
+	assert.Equal(t, "intent", next.AICalls[0].Role)
+	assert.Equal(t, codedRouteChoice, next.AICalls[0].Route)
+	assert.InDelta(t, 0.93, next.AICalls[0].Confidence, 0.001)
+	require.NotNil(t, next.AICalls[0].Grounded)
+	assert.True(t, *next.AICalls[0].Grounded)
+	require.NotEmpty(t, next.Messages)
+	foundAI := false
+	for _, msg := range next.Messages {
+		if len(msg.AI) > 0 {
+			foundAI = true
+			assert.Equal(t, "intent", msg.AI[0].Role)
+			break
+		}
+	}
+	assert.True(t, foundAI)
+}
+
 func TestPreviewCodedFlow_MockAsksBeforeTiqrCalls(t *testing.T) {
-	useCodedLanguage(t, nil, nil)
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
+	useCodedTranslate(t, nil)
 	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
@@ -141,8 +196,8 @@ func TestPreviewCodedFlow_MockAsksBeforeTiqrCalls(t *testing.T) {
 }
 
 func TestPreviewCodedFlow_MockCreateOrderIsNotSent(t *testing.T) {
-	useCodedLanguage(t, nil, nil)
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
+	useCodedTranslate(t, nil)
 	var orders int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/order") {
@@ -207,13 +262,15 @@ func TestPreviewCodedFlow_MockCreateOrderIsNotSent(t *testing.T) {
 }
 
 func TestPreviewCodedFlow_LiveCreateOrderIsSent(t *testing.T) {
-	useCodedLanguage(t, nil, nil)
-	useCodedDiversion(t, nil)
+	useCodedIntent(t, nil, nil)
+	useCodedTranslate(t, nil)
 	var orders int
+	var orderBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/order"):
 			orders++
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&orderBody))
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "real-order"})
 		case strings.Contains(r.URL.Path, "/category/"):
@@ -279,6 +336,13 @@ func TestPreviewCodedFlow_LiveCreateOrderIsSent(t *testing.T) {
 	assert.Equal(t, "completed", done.Status)
 	assert.Contains(t, previewMessageText(done.Messages), "Your order is confirmed.")
 	assert.Equal(t, 1, orders)
+	assert.Equal(t, "preview@example.com", orderBody["email"])
+	address, ok := orderBody["new_address"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "preview@example.com", address["email"])
+	assert.Equal(t, "910000000000", address["phone"])
+	assert.Equal(t, "Preview Customer", address["name"])
+	assert.Equal(t, "1 Preview Street", address["address_line_1"])
 
 	_, _, transfers := countRows(t, app, org.ID, account.Name)
 	assert.Zero(t, transfers)

@@ -2073,7 +2073,11 @@
     "previewError": "Preview failed. Please try again.",
     "previewFlow": "Customer details",
     "previewFlowHint": "These stand in for the WhatsApp form.",
-    "previewFlowSubmit": "Submit details"
+    "previewFlowSubmit": "Submit details",
+    "previewContext": "Context variables",
+    "previewContextEmpty": "No session variables yet.",
+    "previewAI": "AI this turn",
+    "previewAIEmpty": "No AI calls on the last turn."
   },
   "chatbotFlows": {
     "title": "Conversation Flows",

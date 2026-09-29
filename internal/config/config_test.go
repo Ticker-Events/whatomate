@@ -46,6 +46,8 @@ func TestLoad_AppliesDefaultsForMissingFields(t *testing.T) {
 	assert.Equal(t, "./uploads", cfg.Storage.LocalPath)
 	assert.Equal(t, "admin@admin.com", cfg.DefaultAdmin.Email)
 	assert.Equal(t, "admin", cfg.DefaultAdmin.Password)
+	require.NotNil(t, cfg.CodedFlow.Trace)
+	assert.True(t, cfg.CodedFlow.TraceEnabled())
 }
 
 func TestLoad_FileValuesOverrideDefaults(t *testing.T) {

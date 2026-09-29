@@ -31,6 +31,22 @@ type Config struct {
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
 	Firebase     FirebaseConfig     `koanf:"firebase"`
+	CodedFlow    CodedFlowConfig    `koanf:"codedflow"`
+}
+
+// CodedFlowConfig controls coded-flow runtime behaviour.
+type CodedFlowConfig struct {
+	// Trace enables detailed SignOz-oriented logs (WhatsApp, AI, TiQR).
+	// Env WHATOMATE_CODEDFLOW_TRACE overrides this. Default true when unset.
+	Trace *bool `koanf:"trace"`
+}
+
+// TraceEnabled returns whether coded-flow tracing is on. Nil means enabled.
+func (c CodedFlowConfig) TraceEnabled() bool {
+	if c.Trace == nil {
+		return true
+	}
+	return *c.Trace
 }
 
 // FirebaseConfig holds Firebase Admin SDK settings for Firestore real-time sync.
@@ -298,6 +314,10 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.DefaultAdmin.FullName == "" {
 		cfg.DefaultAdmin.FullName = "Admin"
+	}
+	if cfg.CodedFlow.Trace == nil {
+		enabled := true
+		cfg.CodedFlow.Trace = &enabled
 	}
 	// Cookie defaults
 	if cfg.App.Environment == "production" {

@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { SimulationMessage } from '@/types/flow-preview'
-import { Bug, Info } from 'lucide-vue-next'
+import { Bug, Braces, ChevronDown, ChevronRight, Info, Sparkles } from 'lucide-vue-next'
 
 const props = defineProps<{
   message: SimulationMessage
 }>()
+
+const showContext = ref(false)
+const showAI = ref(false)
 
 const formattedTime = computed(() => {
   return props.message.timestamp.toLocaleTimeString('en-US', {
@@ -19,6 +22,16 @@ const isBot = computed(() => props.message.type === 'bot')
 const isUser = computed(() => props.message.type === 'user')
 const isSystem = computed(() => props.message.type === 'system')
 const isDebug = computed(() => props.message.type === 'debug')
+
+const contextEntries = computed(() => Object.entries(props.message.context || {}))
+const hasContext = computed(() => contextEntries.value.length > 0)
+const hasAI = computed(() => Array.isArray(props.message.ai) && props.message.ai.length > 0)
+
+function formatValue(value: unknown) {
+  if (value === null || value === undefined) return String(value)
+  if (typeof value === 'object') return JSON.stringify(value, null, 2)
+  return String(value)
+}
 </script>
 
 <template>
@@ -47,10 +60,64 @@ const isDebug = computed(() => props.message.type === 'debug')
         <p class="text-[10px] text-gray-400 text-right mt-1">{{ formattedTime }}</p>
       </div>
 
-      <!-- Show step name for debugging -->
       <p v-if="message.stepName" class="text-[10px] text-gray-400 mt-0.5 ml-1">
         Step: {{ message.stepName }}
       </p>
+
+      <div v-if="hasContext || hasAI" class="mt-1 ml-1 space-y-1">
+        <button
+          v-if="hasContext"
+          type="button"
+          class="flex items-center gap-1 text-[10px] text-purple-600 dark:text-purple-400 hover:underline"
+          @click="showContext = !showContext"
+        >
+          <ChevronDown v-if="showContext" class="h-3 w-3" />
+          <ChevronRight v-else class="h-3 w-3" />
+          <Braces class="h-3 w-3" />
+          Context ({{ contextEntries.length }})
+        </button>
+        <pre
+          v-if="showContext"
+          class="text-[10px] leading-snug bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 rounded p-2 overflow-x-auto max-h-40 whitespace-pre-wrap"
+        >{{ formatValue(message.context) }}</pre>
+
+        <button
+          v-if="hasAI"
+          type="button"
+          class="flex items-center gap-1 text-[10px] text-sky-600 dark:text-sky-400 hover:underline"
+          @click="showAI = !showAI"
+        >
+          <ChevronDown v-if="showAI" class="h-3 w-3" />
+          <ChevronRight v-else class="h-3 w-3" />
+          <Sparkles class="h-3 w-3" />
+          AI ({{ message.ai?.length }})
+        </button>
+        <div v-if="showAI" class="space-y-2">
+          <div
+            v-for="(call, idx) in message.ai"
+            :key="`${call.role}-${idx}`"
+            class="text-[10px] leading-snug bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 rounded p-2 space-y-1"
+          >
+            <p class="font-medium">{{ call.role }}<span v-if="call.route"> → {{ call.route }}</span></p>
+            <p v-if="call.language">language: {{ call.language }}</p>
+            <p v-if="call.confidence != null">confidence: {{ call.confidence }}</p>
+            <p v-if="call.grounded != null">grounded: {{ call.grounded }}</p>
+            <p v-if="call.error" class="text-red-600 dark:text-red-400">error: {{ call.error }}</p>
+            <details v-if="call.prompt">
+              <summary class="cursor-pointer">prompt</summary>
+              <pre class="mt-1 whitespace-pre-wrap">{{ call.prompt }}</pre>
+            </details>
+            <details v-if="call.response">
+              <summary class="cursor-pointer">response</summary>
+              <pre class="mt-1 whitespace-pre-wrap">{{ call.response }}</pre>
+            </details>
+            <details v-if="call.parsed">
+              <summary class="cursor-pointer">parsed</summary>
+              <pre class="mt-1 whitespace-pre-wrap">{{ formatValue(call.parsed) }}</pre>
+            </details>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -79,9 +146,33 @@ const isDebug = computed(() => props.message.type === 'debug')
 
   <!-- Debug Message -->
   <div v-else-if="isDebug" class="flex justify-center">
-    <div class="bg-purple-100 dark:bg-purple-900/30 text-xs text-purple-700 dark:text-purple-400 px-3 py-1.5 rounded-lg flex items-center gap-1.5 max-w-[90%]">
-      <Bug class="h-3 w-3 flex-shrink-0" />
-      <span class="break-all">{{ message.content }}</span>
+    <div class="bg-purple-100 dark:bg-purple-900/30 text-xs text-purple-700 dark:text-purple-400 px-3 py-1.5 rounded-lg max-w-[90%] space-y-1">
+      <div class="flex items-center gap-1.5">
+        <Bug class="h-3 w-3 flex-shrink-0" />
+        <span class="break-all">{{ message.content }}</span>
+      </div>
+      <div v-if="hasContext || hasAI" class="space-y-1">
+        <button
+          v-if="hasContext"
+          type="button"
+          class="flex items-center gap-1 text-[10px] hover:underline"
+          @click="showContext = !showContext"
+        >
+          <Braces class="h-3 w-3" />
+          Context
+        </button>
+        <pre v-if="showContext" class="text-[10px] whitespace-pre-wrap max-h-32 overflow-auto">{{ formatValue(message.context) }}</pre>
+        <button
+          v-if="hasAI"
+          type="button"
+          class="flex items-center gap-1 text-[10px] hover:underline"
+          @click="showAI = !showAI"
+        >
+          <Sparkles class="h-3 w-3" />
+          AI details
+        </button>
+        <pre v-if="showAI" class="text-[10px] whitespace-pre-wrap max-h-40 overflow-auto">{{ formatValue(message.ai) }}</pre>
+      </div>
     </div>
   </div>
 </template>
