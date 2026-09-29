@@ -1,0 +1,283 @@
+---
+title: Coded flows
+description: How compiled-in conversations run, and how the TiQR Ecommerce flow shops, checks orders, and hands off to an agent
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Coded flows are conversations written in Go and shipped in the binary. An admin assigns the keywords that start one and can turn it on or off. The steps cannot be edited in the flow builder.
+
+Visual flows under **Chatbot → Flows** are a graph stored in the database. A coded flow is a function. The outline shown in **Chatbot → Coded flows** is a label list for people. The function is what runs.
+
+The flow that ships today is **TiQR Ecommerce** (`tiqr_ecommerce`). It loads a TiQR store, then lets the customer buy for store pickup, check an order, or talk to an agent.
+
+## Turning a flow on
+
+<Steps>
+
+1. Open **Chatbot → Coded flows**.
+2. Pick the WhatsApp account. Keywords belong to that account.
+3. Enter keywords separated by commas. A message starts the flow when it contains one of them. Matching ignores case. Blank keywords are dropped. A keyword longer than 200 characters is rejected. Duplicates that differ only by case are stored once.
+4. Turn the flow on and save.
+
+</Steps>
+
+Saving needs the `flows.chatbot` write permission. Listing and preview need read. A new binding is off until someone enables it.
+
+If a visual flow uses the same keyword, the coded flow starts. An empty keyword list never matches. A disabled binding never matches. The check is limited to the organization and the WhatsApp account on the inbound message.
+
+The message that contains the keyword is the trigger. It is not treated as the customer's answer to the first question.
+
+## How a turn runs
+
+Every inbound message runs the flow function from the top. Finished calls return the result they saved last time. They do not send the message again and they do not call the store again. The first call that is still waiting sends the next prompt, or accepts the reply that just arrived, and then the function returns.
+
+That is why the function can be straight-line Go, including loops, and still pause between WhatsApp messages.
+
+The session stores the log in `SessionData._coded_calls`. Each entry records the call name and whether it succeeded. A choice also stores the button or row id. A store call stores the payload. On the next message the function walks that log in order. Call order is the identity of a step. Inserting, removing, or reordering a call in the middle of a function changes what an in-progress session replays.
+
+While a coded flow is active the session has:
+
+| Field | Meaning |
+| --- | --- |
+| `SessionData._coded_flow` | Flow key, for example `tiqr_ecommerce` |
+| `CurrentFlowID` | Left empty so the visual graph runner does not take the session |
+| `CurrentStep` | Name of the call that is waiting for a reply |
+| `Status` | `active` until the flow ends or transfers |
+
+An active coded flow is resumed before commerce checkout, cart quantity, keyword rules, and visual flows. A WhatsApp Flow submission in the middle of a coded flow stays inside that flow.
+
+When the flow ends or transfers, `_coded_flow` is cleared, `CurrentStep` is cleared, and the session is marked completed.
+
+### What the function can do
+
+The flow is a `func(*Conv) error`. These calls are the whole API.
+
+| Call | What it does the first time | What a later message does |
+| --- | --- | --- |
+| `Say` | Sends one text message | Skips it |
+| `AskButtons` | Sends reply buttons and waits | Accepts a button from that prompt |
+| `AskList` | Sends a list built from items and waits | Accepts a row id from that list |
+| `AskCarousel` | Sends a product carousel and waits | Accepts a product id from those cards |
+| `AskNumber` | Sends the prompt and waits for text | Accepts text that matches the pattern |
+| `AskFlow` | Opens a WhatsApp Flow and waits | Accepts the form submission |
+| `Store` | Calls one TiQR REST operation and saves the object | Returns the saved object |
+| `StoreList` | Calls a list operation and saves `results` | Returns the saved list |
+| `LookupOrder` | Loads the latest order for this phone through TiQR MCP | Returns the saved order |
+| `Once` | Runs a function one time, such as appending the cart | Skips it |
+| `Transfer` | Tells the customer, queues an agent transfer, and ends | Already ended |
+| `End` | Marks the session completed | Already ended |
+
+A call that returns `false` means the function should return now. The customer has not answered yet, the answer was diverted, or the call failed. A call that returns `true` means the function can continue in the same turn.
+
+`Store` and `StoreList` read the TiQR REST base URL and store id from the chatbot settings for that WhatsApp account (`CommerceRESTURL`, `CommerceStoreID`). `LookupOrder` does not use those REST operations. It calls TiQR MCP `lookup_order_status` with the store id and the customer's WhatsApp number.
+
+Placeholder strings such as `{{option_name}}` and `{{tiqr_cart}}` are filled from `SessionData` before a message is sent or a store call is made.
+
+### Which reply counts
+
+Reply buttons, list rows, and carousel cards accept an answer in two ways:
+
+- The button or row id matches after trimming spaces.
+- The message text matches the title, ignoring case.
+
+Ids stay in English. Titles are what the customer sees. A button id that was not offered on this step is not a request for an agent. The same choices are shown again.
+
+Free text that is not one of those titles leaves the script. So does a number that fails `AskNumber`, and so does text sent while a WhatsApp Flow is waiting. The flow asks the configured AI, with the store name and collection names as context, to answer in JSON:
+
+```json
+{"handled": true, "reply": "We are open until 9pm. Please choose a collection."}
+```
+
+`handled: true` sends `reply` and stays on the same step. `handled: false`, or an AI error, transfers the chat. The customer sees: "I'm connecting you with a team member who can help." A button the flow offered, including **Talk to agent**, does not go through this AI step.
+
+AI is the chatbot AI already configured for the account (provider, model, and API key). If AI is not configured, an off-script reply transfers.
+
+### Language
+
+The language is detected once, from the message that started the flow, and stored as `customer_language`. English (`en` or `en-*`) is sent as written. Any other language is translated before send. `{{placeholders}}`, asterisks, and line breaks are kept. Translations are cached on the session in `_translations`, so the same line is not translated again on the next turn.
+
+Catalog text is not translated. Collection names, product names, option names, and prices stay as the store sent them. Button titles are limited to 20 characters after translation, list buttons to 20, section titles to 24, and list headers and footers to 60.
+
+### Preview
+
+**Preview** on the coded-flow card runs the same function without sending WhatsApp messages and without creating an agent transfer. The preview session lives in memory for 30 minutes.
+
+**Mock TiQR responses** is on by default. Each store or order lookup stops and asks for a JSON object instead of calling TiQR. Turn it off before **Start** to call the real store. In that mode checkout can place a real order.
+
+The customer phone in the preview is used when the flow looks up an order. The default is `910000000000`.
+
+## TiQR Ecommerce
+
+Key: `tiqr_ecommerce`.
+
+The customer can buy products for pickup, check the latest order on their phone number, or talk to an agent. Customer details at checkout are collected with WhatsApp Flow `1557965846018132`. That flow has to exist in Whatomate under the same Meta flow id, so the form can open on its first screen.
+
+The outline in the admin UI is:
+
+1. Load store and collections
+2. Buy, order status, or agent
+3. Add items and check out
+4. Check order status
+5. Talk to an agent
+
+```text
+keyword
+  → get_store
+  → list_collections (limit 20)
+  → menu
+       ├─ Buy products → collection → products → cart → checkout → end
+       ├─ Check order status → latest order for this phone → end
+       └─ Talk to agent → transfer
+```
+
+If the store cannot be loaded, or it has no collections, the customer gets the thank-you message and the flow ends. Those failed calls stay failed for the rest of the session. The next message replays them and does not retry TiQR.
+
+### Menu
+
+When the store has a name, the menu is:
+
+```text
+Welcome to {store name}.
+
+What would you like to do?
+```
+
+Without a name, the first line is omitted. The buttons are:
+
+| Id | Title |
+| --- | --- |
+| `buy_products` | Buy products |
+| `check_order_status` | Check order status |
+| `talk_to_agent` | Talk to agent |
+
+`talk_to_agent` transfers immediately. It does not ask the AI.
+
+### Buying
+
+Buying is a loop. The customer can add more than one item before checkout. Store and collection data from the opening calls are reused. They are not fetched again when the customer adds another item.
+
+<Steps>
+
+1. **Collection.** The customer gets a list titled "Our collections". The button is "Browse". Each row uses the collection `name` as the title and `description` as the description. The chosen row saves `collection_id` from `id` and `collection_name` from `title`.
+2. **Products.** `list_products` is called with `category_id` set to that collection id. The cards are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". The tap saves `product_id`, the product `options` array, and `product_selected`.
+3. **Option.** What happens next depends on how many options the product has.
+4. **Quantity.** The customer replies with a whole number. The pattern is `^[0-9]+$`.
+5. **Cart line.** The option and quantity are appended once. A replay does not add the line again.
+6. **Next.** The customer chooses "Add more items" or "Checkout".
+
+</Steps>
+
+Option handling:
+
+| Options on the product | What the customer sees |
+| --- | --- |
+| None | "Sorry, this item isn't available right now." The flow still asks whether to add something else or check out. Nothing is added. |
+| One | That option is selected. No extra list. The flow asks for a quantity. `option_id` and `option_name` are set from that option. |
+| More than one | A list titled "Choose an option". Each row is `{name} (₹{price})`. The choice saves `option_id` and `option_name`. Then the flow asks for a quantity. |
+
+The quantity prompt is: "How many *{option name}* would you like?" A reply that is not a whole number stays on this step and is handled as an off-script message. The cart is not changed.
+
+A valid quantity appends one line:
+
+```json
+{ "product_option": "9", "quantity": "2" }
+```
+
+`tiqr_cart` is the list of those lines. `cart_count` is how many lines are in the cart, not the sum of quantities. The customer then sees: "*{option name}* has been added to your cart. You now have *{cart count}* in your cart."
+
+"Add more items" returns to the collection list. "Checkout" leaves the loop.
+
+If `list_products` fails or returns no products, the customer gets the thank-you message and the flow ends.
+
+### Checkout
+
+Checkout opens WhatsApp Flow `1557965846018132` with the button "Enter details". The form asks for the name, phone number, and address used to place the pickup order. Text sent instead of the form is an off-script reply. The form's fields are copied onto the session under the field names the flow submits.
+
+The order is placed with `create_order` only after that form is submitted. The payload is:
+
+| Field | Value |
+| --- | --- |
+| `email` | `{{customer_email}}` |
+| `items` | `{{tiqr_cart}}` |
+| `notes` | `{{customer_notes}}` |
+| `delivery_mode` | `PICKUP_FROM_STORE` |
+| `new_address` | JSON below |
+| `phone_number` | The WhatsApp number on the session, when the form does not set one on the order itself |
+
+`product_option` and `quantity` are stored as text and sent to TiQR as integers.
+
+```json
+{
+  "name": "{{customer_name}}",
+  "address_line_1": "{{address_line_one}}",
+  "address_line_2": "{{address_line_two}}",
+  "city": "{{city}}",
+  "state": "{{state}}",
+  "country": "{{country}}",
+  "pincode": "{{pincode}}",
+  "email": "{{customer_email}}",
+  "phone_number": "{{customer_phone}}",
+  "phone": "{{customer_phone}}"
+}
+```
+
+The WhatsApp Flow has to submit those field names. `email` is required to create the order. Guest checkout also needs `email` on the address. If the form omits it, the order email is copied onto the address.
+
+There is no second confirmation step. A successful create tells the customer the order is confirmed and set for store pickup. A failed create says the order could not be placed. The session does not stay open for another attempt. Either way, the thank-you message is sent and the flow ends:
+
+```text
+Thank you for shopping with us.
+
+Message us anytime if you need help.
+```
+
+### Order status
+
+**Check order status** calls TiQR MCP `lookup_order_status` for the WhatsApp number. It does not ask for an order id.
+
+| Result | Message |
+| --- | --- |
+| Order found | `Order {display_uid} is {status}.` Underscores in the status become spaces, and the status is lowercased. Example: `Order ST-1 is confirmed.` |
+| No display id | `Your latest order status is {status}.` |
+| Nothing found, or the lookup fails | `I couldn't find a recent order for this phone number.` |
+
+The flow ends after that message. This path does not attach a payment link. Payment retry stays on the separate commerce checkout path.
+
+### Agent handoff
+
+**Talk to agent**, an off-script reply the AI will not handle, and an AI error all end the same way. The customer is told a team member will help, an agent transfer is created, and the coded flow session is completed.
+
+### Session values
+
+These are the values later messages and the order payload read back.
+
+| Key | Set when |
+| --- | --- |
+| `phone_number` | Every turn, from the session |
+| `contact_name` | Every turn, from the contact profile |
+| `customer_language` | Once, from the trigger message |
+| `store` | `get_store` succeeds |
+| `collections` | `list_collections` returns rows |
+| `collection_id`, `collection_name` | A collection row is chosen |
+| `products` | `list_products` returns rows |
+| `product_id`, `options`, `product_selected` | A product card is chosen |
+| `option_id`, `option_name` | An option is selected |
+| `quantity` | A whole number is accepted |
+| `tiqr_cart`, `cart_count` | A line is appended |
+| `customer_name`, `customer_email`, `customer_phone`, address fields, `customer_notes` | The WhatsApp Flow is submitted, using the form's own field names |
+| `order` | `create_order` succeeds |
+
+## Where the code lives
+
+| File | Role |
+| --- | --- |
+| `internal/handlers/codedflow.go` | Registration, session marker, replay entry, keyword match |
+| `internal/handlers/codedflow_conv.go` | `Conv` calls: prompts, store, cart-once, transfer, end |
+| `internal/handlers/codedflow_ai.go` | Language detection, translation, off-script answers, order lookup |
+| `internal/handlers/codedflow_api.go` | List and keyword binding |
+| `internal/handlers/codedflow_preview.go` | In-memory preview |
+| `internal/handlers/codedflow_tiqr_ecommerce.go` | TiQR Ecommerce |
+| `internal/handlers/chatbot_processor.go` | Resume and trigger, ahead of visual flows |
+
+A new flow is a `CodedFlow` value passed to `registerCodedFlow` from `init`. It needs a unique `Key`, a `Name`, a `Description`, the outline `Steps`, and a `run` function. The admin UI picks it up from the binary. There is no API to create or delete the definition.
