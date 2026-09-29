@@ -108,7 +108,7 @@ Go checks every id against an allow-list. An invented id, a product route that a
 
 Language, translation, guide, and recover questions are separate roles so each can later use a different model. Provider `jev` is reserved for the intent role. Today they use the chatbot AI already configured for the account. If AI is not configured, an off-script reply transfers (recover falls back to a canned customer message).
 
-When a TiQR fetch fails (store, collections, products), the recover role writes a short customer message such as “try again later”. WhatsApp never sees URLs, HTTP status text, curl, tokens, or request payloads. When `create_order` fails, recover may ask for one missing customer field from an allow-list; the flow retries with the updated session values. Retries after the first attempt are controlled by `[codedflow] order_retries` (default `2`).
+When a TiQR fetch fails (store, collections, products), the recover role writes a short customer message such as “try again later”. WhatsApp never sees URLs, HTTP status text, curl, tokens, or request payloads. When `create_order` fails because customer details are missing, every missing field named in the error is asked one at a time, in a fixed order (name, phone, email, address, city, state, country, pincode, notes). The order is retried only after each of those replies is stored. Retries after the first attempt are controlled by `[codedflow] order_retries` (default `2`).
 
 ### Language
 
@@ -270,7 +270,7 @@ The order is placed with `create_order` only after that form is submitted. Each 
 
 The WhatsApp Flow has to submit those field names. The Email input must be an email address. `email` is required to create the order. Guest checkout also needs `email` on the address. If the address omits it, the order email is copied onto the address.
 
-There is no second confirmation step. A successful create tells the customer the order is confirmed and set for store pickup. If create fails because a customer field is missing, the recover role may ask for that field (for example email) and retry `create_order` with the same cart and the updated session values. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details. The thank-you message is sent and the flow ends:
+There is no second confirmation step. A successful create tells the customer the order is confirmed and set for store pickup. If create fails because customer details are missing, the recover role asks for every missing field from the error, one reply at a time, in this order: name, phone, email, address line 1, address line 2, city, state, country, pincode, notes. `create_order` is retried only after all of those replies are saved on the session, with the same cart. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details. The thank-you message is sent and the flow ends:
 
 ```text
 Thank you for shopping with us.
@@ -311,7 +311,7 @@ These are the values later messages and the order payload read back.
 | `option_id`, `option_name` | An option is selected |
 | `quantity` | A whole number is accepted |
 | `tiqr_cart`, `cart_count` | A line is appended |
-| `customer_name`, `customer_email`, `customer_phone`, address fields, `customer_notes` | The WhatsApp Flow is submitted, using the form's own field names |
+| `customer_name`, `customer_email`, `customer_phone`, address fields, `customer_notes` | The WhatsApp Flow is submitted, using the form's own field names. A failed `create_order` can also fill any of these that the error said were missing |
 | `order` | `create_order` succeeds |
 
 ## Where the code lives

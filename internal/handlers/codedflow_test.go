@@ -777,6 +777,18 @@ func TestBuildIntentPrompt_IncludesStepContext(t *testing.T) {
 	assert.Contains(t, prompt, "A product from the cards.")
 	assert.Contains(t, prompt, "Kunafa (₹40) — Add to cart")
 	assert.Contains(t, prompt, "route answer:")
+	assert.Contains(t, prompt, "At most 200 words")
+	assert.Contains(t, prompt, `"reasoning":""`)
+}
+
+func TestLimitWords_CapsAtOneHundred(t *testing.T) {
+	words := make([]string, 120)
+	for i := range words {
+		words[i] = "word"
+	}
+	got := limitWords(strings.Join(words, " "), 200)
+	assert.Equal(t, 100, len(strings.Fields(got)))
+	assert.Equal(t, "keep this", limitWords("  keep   this  ", 100))
 }
 
 func TestTiqrEcommerce_QuantityWordAccepted(t *testing.T) {
@@ -883,6 +895,52 @@ func TestValidateCodedRecover_MissingField(t *testing.T) {
 		Kind: codedRecoverMissingField, Field: "email", Message: "Please share your email.", Confidence: 0.9,
 	}, codedRecoverContext{Kind: "fetch"})
 	assert.False(t, ok)
+}
+
+func TestCanonicalFieldsFromHint_OrdersEveryMissingField(t *testing.T) {
+	hint := sanitizeRecoverHint(`{"pincode":["required"],"new_address":{"city":["required"]},"email":["required"],"phone_number":["required"]}`)
+	assert.Equal(t, []string{
+		"customer_phone",
+		"customer_email",
+		"city",
+		"pincode",
+	}, canonicalFieldsFromHint(hint))
+}
+
+func TestExpandRecoverAsks_AsksEveryHintField(t *testing.T) {
+	hint := sanitizeRecoverHint(`{"pincode":["required"],"email":["required"]}`)
+	got := expandRecoverAsks(codedRecoverResult{
+		Kind:    codedRecoverMissingField,
+		Field:   "customer_email",
+		Message: "Could you reply with your email address?",
+		Fields: []codedRecoverAsk{{
+			Field: "customer_email", Message: "Could you reply with your email address?",
+		}},
+	}, hint)
+	require.Equal(t, codedRecoverMissingField, got.Kind)
+	require.Len(t, got.Fields, 2)
+	assert.Equal(t, "customer_email", got.Fields[0].Field)
+	assert.Equal(t, "Could you reply with your email address?", got.Fields[0].Message)
+	assert.Equal(t, "pincode", got.Fields[1].Field)
+	assert.Equal(t, "Could you share your pincode?", got.Fields[1].Message)
+}
+
+func TestParseCodedRecover_AllFields(t *testing.T) {
+	got, err := parseCodedRecover(`{"kind":"missing_field","field":"pincode","fields":[{"field":"pincode","message":"What is your pincode?"},{"field":"email","message":"What is your email?"}],"message":"I need a couple of details.","confidence":0.9,"reasoning":"both missing"}`)
+	require.NoError(t, err)
+	valid, ok := validateCodedRecover(got, codedRecoverContext{Kind: "create"})
+	require.True(t, ok)
+	require.Len(t, valid.Fields, 2)
+	assert.Equal(t, "customer_email", valid.Fields[0].Field)
+	assert.Equal(t, "What is your email?", valid.Fields[0].Message)
+	assert.Equal(t, "pincode", valid.Fields[1].Field)
+	assert.Equal(t, "What is your pincode?", valid.Fields[1].Message)
+
+	fromNames, err := parseCodedRecover(`{"kind":"missing_field","fields":["phone_number","city"],"message":"Please share the missing details.","confidence":0.8}`)
+	require.NoError(t, err)
+	valid, ok = validateCodedRecover(fromNames, codedRecoverContext{Kind: "create"})
+	require.True(t, ok)
+	assert.Equal(t, []string{"customer_phone", "city"}, recoverAskFields(valid.Fields))
 }
 
 func TestBuildRecoverPrompt_NoSecrets(t *testing.T) {
@@ -1062,6 +1120,113 @@ func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
 	assert.NotContains(t, blob, "This field is required")
 }
 
+func TestTiqrEcommerce_CreateOrderAsksEveryMissingFieldBeforeRetry(t *testing.T) {
+	orderCalls := 0
+	recoverCalls := 0
+	var placed map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/category/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{
+					map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"},
+				},
+			})
+		case strings.Contains(r.URL.Path, "/product/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{
+					map[string]any{
+						"id": "101", "name": "Kunafa", "min_price": "40",
+						"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "40"}},
+					},
+				},
+			})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
+			orderCalls++
+			if orderCalls == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"pincode":["This field is required."],"email":["This field is required."]}`))
+				return
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&placed))
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ord-1", "display_uid": "TQ-1"})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "Demo"})
+		}
+	}))
+	t.Cleanup(srv.Close)
+	useStoreREST(t, srv)
+	useCodedRecover(t, func(ctx codedRecoverContext) (codedRecoverResult, error) {
+		recoverCalls++
+		assert.Equal(t, "create", ctx.Kind)
+		assert.Contains(t, ctx.Hint, "email")
+		assert.Contains(t, ctx.Hint, "pincode")
+		return codedRecoverResult{
+			Kind: codedRecoverMissingField, Field: "email",
+			Message: "Could you reply with your email address?", Confidence: 0.95,
+		}, nil
+	})
+
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrCheckout, nil))
+	reloadSession(t, app, session)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
+		"customer_name":    "Ada",
+		"customer_phone":   "910000000000",
+		"address_line_one": "1 Main",
+		"city":             "Kochi",
+		"state":            "KL",
+		"country":          "India",
+	}))
+	reloadSession(t, app, session)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Could you reply with your email address?")
+	assert.NotContains(t, blob, "Could you share your pincode?")
+	assert.Equal(t, 1, orderCalls)
+	assert.Equal(t, 1, recoverCalls)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "ada@example.com", "", nil))
+	reloadSession(t, app, session)
+	blob = outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Could you share your pincode?")
+	assert.Equal(t, "order_fix_pincode", session.CurrentStep)
+	assert.Equal(t, 1, orderCalls)
+	assert.Equal(t, 1, recoverCalls)
+	assert.Equal(t, models.SessionStatusActive, session.Status)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "682020", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, 2, orderCalls)
+	assert.Equal(t, 1, recoverCalls)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Equal(t, "ada@example.com", placed["email"])
+	address, ok := placed["new_address"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "682020", address["pincode"])
+	blob = outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "order is confirmed")
+	assert.NotContains(t, blob, "ticker api")
+	assert.NotContains(t, blob, "This field is required")
+}
+
 func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {
 	prev := codedIntentSettings.OrderRetries
 	codedIntentSettings.OrderRetries = 0
@@ -1071,7 +1236,7 @@ func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {
 		switch {
 		case strings.Contains(r.URL.Path, "/category/"):
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"count": 1,
+				"count":   1,
 				"results": []any{map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"}},
 			})
 		case strings.Contains(r.URL.Path, "/product/"):

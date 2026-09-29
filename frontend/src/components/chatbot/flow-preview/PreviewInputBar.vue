@@ -49,7 +49,7 @@ const inputTypeAttr = computed(() => {
 })
 
 const isEnabled = computed(() => {
-  return !props.disabled && props.inputType && props.inputType !== 'none' && props.inputType !== 'button'
+  return !props.disabled && props.inputType && props.inputType !== 'none'
 })
 
 // Convert input to string (handles number inputs)

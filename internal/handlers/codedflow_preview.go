@@ -66,6 +66,7 @@ type CodedPreviewAICall struct {
 	Route      string         `json:"route,omitempty"`
 	Confidence float64        `json:"confidence,omitempty"`
 	Grounded   *bool          `json:"grounded,omitempty"`
+	Reasoning  string         `json:"reasoning,omitempty"`
 }
 
 // CodedPreviewResponse is one turn of a coded-flow preview.

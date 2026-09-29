@@ -345,14 +345,14 @@ func askProducts(c *Conv, products []any) (Choice, bool) {
 
 func singleProductCTA() ImageButtonPrompt {
 	return ImageButtonPrompt{
-		Body: "*{{products[0].name}}* (₹{{products[0].min_price}})\n\n{{products[0].description}}",
-		HeaderImage: "{{products[0].images[0].original_url}}",
+		Body:          "*{{products[0].name}}* (₹{{products[0].min_price}})\n\n{{products[0].description}}",
+		HeaderImage:   "{{products[0].images[0].original_url}}",
 		FallbackMedia: tiqrEcommerceFallbackMedia,
-		ItemsKey: "products",
-		IDField:  "id",
-		BodyField: "{{name}} (₹{{min_price}})",
-		Title:     "Add to cart",
-		StoreAs:   "product_selected",
+		ItemsKey:      "products",
+		IDField:       "id",
+		BodyField:     "{{name}} (₹{{min_price}})",
+		Title:         "Add to cart",
+		StoreAs:       "product_selected",
 		Select: map[string]string{
 			"options":    "options",
 			"product_id": "id",
@@ -589,25 +589,11 @@ func checkout(c *Conv) error {
 		if c.stop || c.ended {
 			return nil
 		}
-		recoverCtx := c.lastTiqrRecoverContext("create_order", "order", "create")
-		result := c.runRecover(recoverCtx, tiqrEcommerceFailed)
-		if result.Kind == codedRecoverMissingField && attempt < retries {
-			label := codedRecoverFields[result.Field]
-			if label == "" {
-				label = result.Field
-			}
-			askBody := result.Message
-			if askBody == "" {
-				askBody = "Could you share your " + label + " again?"
-			}
-			value, got := c.AskText(name+"_fix_"+result.Field, askBody, StepNote{
-				Doing:  "Collecting a missing checkout field after create_order failed.",
-				Expect: "A plain reply with the missing " + label + ".",
-			})
-			if !got {
+		result := c.createRecoverPlan(name+"_recover", tiqrEcommerceFailed)
+		if result.Kind == codedRecoverMissingField && len(result.Fields) > 0 && attempt < retries {
+			if !collectRecoverFields(c, name, result.Fields) {
 				return nil
 			}
-			c.session().SessionData[result.Field] = value
 			continue
 		}
 		msg := result.Message
@@ -621,6 +607,30 @@ func checkout(c *Conv) error {
 	c.Say(tiqrEcommerceFailed)
 	c.Say(tiqrEcommerceThanks)
 	return c.End()
+}
+
+// collectRecoverFields asks for every missing checkout field, one reply at a
+// time, and writes each answer onto the session before the caller retries.
+func collectRecoverFields(c *Conv, name string, asks []codedRecoverAsk) bool {
+	for _, ask := range asks {
+		label := codedRecoverFields[ask.Field]
+		if label == "" {
+			label = ask.Field
+		}
+		body := strings.TrimSpace(ask.Message)
+		if body == "" {
+			body = defaultRecoverAsk(ask.Field)
+		}
+		value, got := c.AskText(name+"_fix_"+ask.Field, body, StepNote{
+			Doing:  "Collecting every missing checkout field after create_order failed. Ask each one before the order is retried.",
+			Expect: "A plain reply with the missing " + label + ".",
+		})
+		if !got {
+			return false
+		}
+		c.session().SessionData[ask.Field] = strings.TrimSpace(value)
+	}
+	return true
 }
 
 func orderStatus(c *Conv) error {

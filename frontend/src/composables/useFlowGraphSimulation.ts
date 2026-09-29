@@ -572,7 +572,12 @@ export function useFlowGraphSimulation(
         await advance(node, 'default')
         return
       }
-      // Treat free-text into a buttons node as no-op (re-yield).
+      // A typed reply while buttons, a list, or a carousel is showing stays
+      // on this step and shows the choices again, matching WhatsApp.
+      if (node.type === 'buttons') {
+        execButtons(node)
+        return
+      }
       state.status = 'waiting_input'
     } else {
       const btn = input

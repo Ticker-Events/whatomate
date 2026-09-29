@@ -63,7 +63,7 @@ const showListPicker = computed(() => {
   return message.buttons.length > 3
 })
 
-const inputDisabled = computed(() => props.busy || !props.waiting || props.inputType === 'button' || props.inputType === 'whatsapp_flow')
+const inputDisabled = computed(() => props.busy || !props.waiting || props.inputType === 'whatsapp_flow')
 </script>
 
 <template>

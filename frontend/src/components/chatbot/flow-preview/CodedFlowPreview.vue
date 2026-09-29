@@ -270,7 +270,8 @@ function selectButton(button: ButtonConfig) {
 
 function submitText(value: string) {
   const text = value.trim()
-  if (!text || !waiting.value || input.value !== 'text') return
+  // Reply buttons, lists, and carousels still accept a typed message on WhatsApp.
+  if (!text || !waiting.value || (input.value !== 'text' && input.value !== 'button')) return
   turn({ text }, text)
 }
 
@@ -424,6 +425,7 @@ function submitFlow() {
                     {{ call.role }}
                     <span v-if="call.route" class="text-muted-foreground">→ {{ call.route }}</span>
                   </p>
+                  <p v-if="call.reasoning" class="whitespace-pre-wrap">{{ call.reasoning }}</p>
                   <p v-if="call.language">language: {{ call.language }}</p>
                   <p v-if="call.confidence != null">confidence: {{ call.confidence }}</p>
                   <p v-if="call.grounded != null">grounded: {{ call.grounded }}</p>

@@ -102,6 +102,7 @@ function formatValue(value: unknown) {
             class="text-[10px] leading-snug bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 rounded p-2 space-y-1"
           >
             <p class="font-medium">{{ call.role }}<span v-if="call.route"> → {{ call.route }}</span></p>
+            <p v-if="call.reasoning" class="whitespace-pre-wrap">{{ call.reasoning }}</p>
             <p v-if="call.language">language: {{ call.language }}</p>
             <p v-if="call.confidence != null">confidence: {{ call.confidence }}</p>
             <p v-if="call.error" class="text-red-600 dark:text-red-400">error: {{ call.error }}</p>

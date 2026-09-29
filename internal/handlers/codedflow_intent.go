@@ -68,6 +68,7 @@ type codedIntentResult struct {
 	ProductQuery string  `json:"product_query"`
 	Answer       string  `json:"answer"`
 	Confidence   float64 `json:"confidence"`
+	Reasoning    string  `json:"reasoning"`
 }
 
 type codedIntentContext struct {
@@ -180,11 +181,13 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 	ctx := c.intentContext(cfg, opts)
 	prompt := buildIntentPrompt(c.chat.userInput, ctx)
 	raw, err := identifyCodedIntent(c.app, c.session(), c.chat.userInput, ctx)
+	raw.Reasoning = limitWords(raw.Reasoning, 200)
 	call := CodedPreviewAICall{
-		Role:     "intent",
-		Prompt:   prompt,
-		Language: raw.Language,
-		Route:    raw.Route,
+		Role:      "intent",
+		Prompt:    prompt,
+		Language:  raw.Language,
+		Route:     raw.Route,
+		Reasoning: raw.Reasoning,
 	}
 	if err != nil {
 		call.Error = err.Error()
@@ -202,6 +205,7 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		"product_query": raw.ProductQuery,
 		"answer":        raw.Answer,
 		"confidence":    raw.Confidence,
+		"reasoning":     raw.Reasoning,
 	}
 	call.Confidence = raw.Confidence
 	result, grounded := validateCodedIntent(raw, ctx)
@@ -218,6 +222,7 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		"product_query", result.ProductQuery,
 		"answer", result.Answer,
 		"language", result.Language,
+		"reasoning", raw.Reasoning,
 	)
 	c.rememberLanguage(result.Language)
 	if !grounded {
@@ -458,6 +463,7 @@ func validateCodedIntent(raw codedIntentResult, ctx codedIntentContext) (codedIn
 	raw.ProductQuery = strings.TrimSpace(raw.ProductQuery)
 	raw.Answer = strings.TrimSpace(raw.Answer)
 	raw.Language = strings.TrimSpace(raw.Language)
+	raw.Reasoning = limitWords(raw.Reasoning, 200)
 	if raw.Language == "" {
 		raw.Language = "en"
 	}
@@ -638,9 +644,10 @@ route unclear: more than one shopping route fits, or none of them fit, and they 
 
 confidence is from 0 to 1. Use 0.9 or higher for an obvious route, including a clear request for a person, a clearly confused customer, a clear typo of an allowed choice, a clear checkout request, and a clear normalized answer. Use a value below 0.75 when you are unsure. If you are unsure whether a catalog id exists, use handoff instead of guessing an id.
 language is a short label for the language the customer is writing in. English is en. Any other language, including mixed forms such as Manglish, gets its own label. Do not translate the message.
+reasoning explains why you chose this route, for an operator debugging the flow. At most 200 words. Do not address the customer.
 
 Reply with JSON only:
-{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","confidence":0}
+{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","confidence":0,"reasoning":""}
 
 Customer message:
 %s`, question, doing, expect, patternLine, choices.String(), collections.String(), message)
@@ -689,6 +696,18 @@ Customer message:
 %s`, collectionNames, question, doing, expect, lang, message)
 }
 
+func limitWords(text string, max int) string {
+	text = strings.TrimSpace(text)
+	if text == "" || max <= 0 {
+		return ""
+	}
+	words := strings.Fields(text)
+	if len(words) <= max {
+		return strings.Join(words, " ")
+	}
+	return strings.Join(words[:max], " ")
+}
+
 func parseCodedIntent(raw string) (codedIntentResult, error) {
 	raw = strings.TrimSpace(raw)
 	if start := strings.Index(raw, "{"); start >= 0 {
@@ -700,5 +719,6 @@ func parseCodedIntent(raw string) (codedIntentResult, error) {
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		return codedIntentResult{}, err
 	}
+	body.Reasoning = limitWords(body.Reasoning, 200)
 	return body, nil
 }

@@ -385,6 +385,7 @@ export type CodedPreviewAICall = {
   route?: string
   confidence?: number
   grounded?: boolean
+  reasoning?: string
 }
 
 export type CodedPreviewMessage = {
