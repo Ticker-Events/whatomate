@@ -59,6 +59,7 @@ func tiqrStoreAPIType(cfg map[string]any) string {
 //	  "message_template": "Found {{product_name}}"
 //	}
 func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
+	ctx.lastTiqr = nil
 	if ctx.session.SessionData == nil {
 		ctx.session.SessionData = models.JSONB{}
 	}
@@ -111,6 +112,7 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 
 	payload := tiqrStoreResultMap(operation, raw)
 	aliasBuyerListResults(payload)
+	ctx.lastTiqr = payload
 	applyChatResponseMapping(node.Config, payload, sessionData)
 
 	if tmpl := stringFromConfig(node.Config, "message_template"); tmpl != "" {

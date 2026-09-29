@@ -41,12 +41,12 @@ func TestApp_ListCodedFlows(t *testing.T) {
 
 	var pickup *handlers.CodedFlowBindingResponse
 	for i := range resp.Data.Flows {
-		if resp.Data.Flows[i].Key == "store_pickup" {
+		if resp.Data.Flows[i].Key == "tiqr_ecommerce" {
 			pickup = &resp.Data.Flows[i]
 		}
 	}
 	require.NotNil(t, pickup)
-	assert.Equal(t, "Store pickup order", pickup.Name)
+	assert.Equal(t, "TiQR Ecommerce", pickup.Name)
 	assert.Empty(t, pickup.Keywords)
 	assert.False(t, pickup.IsEnabled)
 	assert.NotEmpty(t, pickup.Steps)
@@ -101,7 +101,7 @@ func TestApp_UpdateCodedFlowBinding_OrgIsolation(t *testing.T) {
 	})
 	testutil.SetAuthContext(save, org.ID, user.ID)
 	testutil.SetQueryParam(save, "account", account.Name)
-	testutil.SetPathParam(save, "key", "store_pickup")
+	testutil.SetPathParam(save, "key", "tiqr_ecommerce")
 	require.NoError(t, app.UpdateCodedFlowBinding(save))
 	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(save))
 
@@ -125,7 +125,7 @@ func TestApp_UpdateCodedFlowBinding_OrgIsolation(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(listOther), &listed))
 	for _, flow := range listed.Data.Flows {
-		if flow.Key == "store_pickup" {
+		if flow.Key == "tiqr_ecommerce" {
 			assert.Empty(t, flow.Keywords)
 			assert.False(t, flow.IsEnabled)
 		}
@@ -133,7 +133,7 @@ func TestApp_UpdateCodedFlowBinding_OrgIsolation(t *testing.T) {
 
 	var count int64
 	require.NoError(t, app.DB.Model(&models.CodedFlowBinding{}).
-		Where("organization_id = ? AND flow_key = ?", other.ID, "store_pickup").
+		Where("organization_id = ? AND flow_key = ?", other.ID, "tiqr_ecommerce").
 		Count(&count).Error)
 	assert.Zero(t, count)
 }
@@ -152,7 +152,7 @@ func TestApp_UpdateCodedFlowBinding_RequiresWrite(t *testing.T) {
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 	testutil.SetQueryParam(req, "account", account.Name)
-	testutil.SetPathParam(req, "key", "store_pickup")
+	testutil.SetPathParam(req, "key", "tiqr_ecommerce")
 
 	err := app.UpdateCodedFlowBinding(req)
 	require.NoError(t, err)

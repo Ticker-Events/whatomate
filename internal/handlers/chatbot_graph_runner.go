@@ -36,6 +36,7 @@ type chatNodeCtx struct {
 	buttonID         string
 	flowResponseData map[string]any // form fields from a WhatsApp Flow submission
 	consumed         bool
+	lastTiqr         map[string]any // payload from the latest tiqr_store_api call
 }
 
 // nodeOutcome is the return value of a node executor.

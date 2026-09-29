@@ -883,8 +883,8 @@ func (a *App) sendAndSaveInteractiveList(account *models.WhatsAppAccount, contac
 		desc, _ := btn["description"].(string)
 		waButtons = append(waButtons, whatsapp.Button{
 			ID:          id,
-			Title:       title,
-			Description: desc,
+			Title:       truncateRunes(title, 24),
+			Description: truncateRunes(desc, 72),
 		})
 	}
 	if len(waButtons) == 0 {
@@ -899,10 +899,10 @@ func (a *App) sendAndSaveInteractiveList(account *models.WhatsAppAccount, contac
 		ExplicitList:    true,
 		BodyText:        bodyText,
 		Buttons:         waButtons,
-		ButtonText:      buttonText,
-		HeaderText:      header,
-		FooterText:      footer,
-		SectionTitle:    sectionTitle,
+		ButtonText:      truncateRunes(buttonText, 20),
+		HeaderText:      truncateRunes(header, 60),
+		FooterText:      truncateRunes(footer, 60),
+		SectionTitle:    truncateRunes(sectionTitle, 24),
 	}, ChatbotSendOptions())
 	return err
 }
@@ -963,7 +963,7 @@ func whatsappReplyButtons(buttons []map[string]any) []whatsapp.Button {
 		}
 		waButtons = append(waButtons, whatsapp.Button{
 			ID:    buttonID,
-			Title: buttonTitle,
+			Title: truncateRunes(buttonTitle, 20),
 		})
 	}
 	return waButtons

@@ -12,8 +12,7 @@ import (
 // CurrentFlowID stays empty so this is not treated as a saved graph.
 const codedFlowDataKey = "_coded_flow"
 
-// CodedStep is one named step shown to admins. The function that runs it
-// lives on the flow and is not part of the API payload.
+// CodedStep is one line of the outline shown to admins. It is not executed.
 type CodedStep struct {
 	Name  string `json:"name"`
 	Label string `json:"label"`
@@ -26,25 +25,8 @@ type CodedFlow struct {
 	Name        string
 	Description string
 	Steps       []CodedStep
-	start       string
-	fns         map[string]codedStepFn
+	run         func(*Conv) error
 }
-
-type codedStepFn func(c *codedCtx) (codedJump, error)
-
-// codedJump is how a step continues. Exactly one of yield, end, or next
-// should be set. outcome is the button or validation result the step
-// just consumed, used by the step itself before it picks next.
-type codedJump struct {
-	next    string
-	yield   bool
-	end     bool
-	outcome string
-}
-
-func stay() codedJump            { return codedJump{yield: true} }
-func finishCoded() codedJump     { return codedJump{end: true} }
-func goTo(step string) codedJump { return codedJump{next: step} }
 
 var (
 	codedFlowList  []*CodedFlow
@@ -52,7 +34,7 @@ var (
 )
 
 func registerCodedFlow(flow CodedFlow) {
-	if flow.Key == "" || flow.start == "" || len(flow.fns) == 0 {
+	if flow.Key == "" || flow.run == nil {
 		panic("coded flow is incomplete")
 	}
 	if _, exists := codedFlowIndex[flow.Key]; exists {
@@ -102,93 +84,11 @@ func codedFlowSessionKey(session *models.ChatbotSession) string {
 	if session == nil || session.SessionData == nil {
 		return ""
 	}
-	key, _ := session.SessionData[codedFlowDataKey].(string)
-	return strings.TrimSpace(key)
+	return strings.TrimSpace(asString(session.SessionData[codedFlowDataKey]))
 }
 
-// codedCtx is one inbound message running through a coded flow.
-// chat is shared for the whole run so a step that consumes the message
-// hides it from the next step, matching the graph runner.
-type codedCtx struct {
-	app  *App
-	chat *chatNodeCtx
-}
-
-func (c *codedCtx) session() *models.ChatbotSession {
-	return c.chat.session
-}
-
-func (c *codedCtx) listLen(key string) int {
-	if c.session().SessionData == nil {
-		return 0
-	}
-	items, ok := anySlice(c.session().SessionData[key])
-	if !ok {
-		return 0
-	}
-	return len(items)
-}
-
-func (c *codedCtx) tiqr(id string, cfg map[string]any) (bool, error) {
-	node := &ChatNode{ID: id, Type: ChatNodeTiqrStoreAPI, Label: id, Config: cfg}
-	out, err := c.app.execChatTiqrStoreAPI(node, c.chat)
-	if err != nil {
-		return false, err
-	}
-	return out.outcome == "http:2xx", nil
-}
-
-func (c *codedCtx) buttons(id string, cfg map[string]any) (codedJump, error) {
-	node := &ChatNode{ID: id, Type: ChatNodeButtons, Label: id, Config: cfg}
-	out, err := c.app.execChatButtons(node, c.chat)
-	if err != nil {
-		return codedJump{}, err
-	}
-	if out.yield {
-		return stay(), nil
-	}
-	return codedJump{outcome: out.outcome}, nil
-}
-
-func (c *codedCtx) prompt(id string, cfg map[string]any) (codedJump, error) {
-	node := &ChatNode{ID: id, Type: ChatNodePrompt, Label: id, Config: cfg}
-	out, err := c.app.execChatPrompt(node, c.chat)
-	if err != nil {
-		return codedJump{}, err
-	}
-	if out.yield {
-		return stay(), nil
-	}
-	return codedJump{outcome: out.outcome}, nil
-}
-
-func (c *codedCtx) whatsappFlow(id string, cfg map[string]any) (codedJump, error) {
-	node := &ChatNode{ID: id, Type: ChatNodeWhatsAppFlow, Label: id, Config: cfg}
-	out, err := c.app.execChatWhatsAppFlow(node, c.chat)
-	if err != nil {
-		return codedJump{}, err
-	}
-	if out.yield {
-		return stay(), nil
-	}
-	return codedJump{outcome: out.outcome}, nil
-}
-
-func (c *codedCtx) say(id, message string) error {
-	node := &ChatNode{ID: id, Type: ChatNodeMessage, Label: id, Config: map[string]any{"message": message}}
-	_, err := c.app.execChatMessage(node, c.chat)
-	return err
-}
-
-func (c *codedCtx) set(id string, rows []any) error {
-	node := &ChatNode{ID: id, Type: ChatNodeSetVariable, Label: id, Config: map[string]any{"set": rows}}
-	_, err := c.app.execChatSetVariable(node, c.chat)
-	return err
-}
-
-// runCodedFlow walks named steps until one waits for the user or the
-// flow finishes. An empty CurrentStep means this inbound started the flow,
-// so the trigger text is not treated as an answer.
+// runCodedFlow replays the flow function from the top. Finished calls
+// return their saved result. The trigger text is not treated as an answer.
 func (a *App) runCodedFlow(
 	account *models.WhatsAppAccount,
 	contact *models.Contact,
@@ -197,7 +97,7 @@ func (a *App) runCodedFlow(
 	userInput, buttonID string,
 	flowResponseData map[string]any,
 ) error {
-	if flow == nil {
+	if flow == nil || flow.run == nil {
 		return fmt.Errorf("coded flow is nil")
 	}
 	if session.SessionData == nil {
@@ -208,6 +108,7 @@ func (a *App) runCodedFlow(
 		session.SessionData["contact_name"] = contact.ProfileName
 	}
 	session.SessionData[codedFlowDataKey] = flow.Key
+	session.CurrentFlowID = nil
 
 	chat := &chatNodeCtx{
 		account:          account,
@@ -217,42 +118,22 @@ func (a *App) runCodedFlow(
 		buttonID:         buttonID,
 		flowResponseData: flowResponseData,
 	}
+	conv := &Conv{app: a, chat: chat}
+	conv.ensureLanguage(userInput)
 	if session.CurrentStep == "" {
-		session.CurrentStep = flow.start
 		chat.userInput = ""
 		chat.buttonID = ""
 		chat.flowResponseData = nil
 	}
 
-	ctx := &codedCtx{app: a, chat: chat}
-	for range maxChatGraphIterations {
-		fn := flow.fns[session.CurrentStep]
-		if fn == nil {
-			_ = a.persistChatSession(session)
-			return fmt.Errorf("coded flow %q step %q not found", flow.Key, session.CurrentStep)
-		}
-		stepName := session.CurrentStep
-		jump, err := fn(ctx)
-		if err != nil {
-			_ = a.persistChatSession(session)
-			return err
-		}
-		appendCodedPath(session, stepName, jump)
-		if jump.yield {
-			return a.persistChatSession(session)
-		}
-		if jump.end {
-			finishCodedSession(session)
-			return a.persistChatSession(session)
-		}
-		if jump.next == "" {
-			_ = a.persistChatSession(session)
-			return fmt.Errorf("coded flow %q step %q has no next step", flow.Key, stepName)
-		}
-		session.CurrentStep = jump.next
+	err := flow.run(conv)
+	if err == nil {
+		err = conv.err
 	}
-	_ = a.persistChatSession(session)
-	return errChatGraphRunaway
+	if perr := a.persistChatSession(session); perr != nil && err == nil {
+		err = perr
+	}
+	return err
 }
 
 func finishCodedSession(session *models.ChatbotSession) {
@@ -263,28 +144,6 @@ func finishCodedSession(session *models.ChatbotSession) {
 	session.StepRetries = 0
 	session.CurrentFlowID = nil
 	session.Status = models.SessionStatusCompleted
-}
-
-func appendCodedPath(session *models.ChatbotSession, step string, jump codedJump) {
-	if session.SessionData == nil {
-		session.SessionData = models.JSONB{}
-	}
-	outcome := jump.outcome
-	switch {
-	case jump.yield:
-		outcome = "yield"
-	case jump.end:
-		outcome = "end"
-	case outcome == "" && jump.next != "":
-		outcome = jump.next
-	}
-	entry := map[string]any{
-		"node":    step,
-		"type":    "coded",
-		"outcome": outcome,
-	}
-	path, _ := session.SessionData["__path__"].([]any)
-	session.SessionData["__path__"] = append(path, entry)
 }
 
 // matchCodedFlowTrigger returns the enabled coded flow whose keyword is
