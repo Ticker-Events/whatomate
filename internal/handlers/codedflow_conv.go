@@ -153,6 +153,9 @@ func (c *Conv) AskNumber(name, body, pattern string) (string, bool) {
 			c.fail(err)
 			return "", false
 		}
+		if c.chat.capturing() {
+			c.chat.preview.expectText()
+		}
 		c.wait(name)
 		return "", false
 	}
@@ -220,6 +223,9 @@ func (c *Conv) Store(name, operation string, params map[string]string) (map[stri
 		return payload, true
 	}
 	ok, err := c.tiqr(name, operation, params)
+	if c.waitingForPreviewMock() {
+		return nil, false
+	}
 	if err != nil {
 		c.fail(err)
 		return nil, false
@@ -246,6 +252,9 @@ func (c *Conv) StoreList(name, operation string, params map[string]string) ([]an
 		return items, true
 	}
 	ok, err := c.tiqr(name, operation, params)
+	if c.waitingForPreviewMock() {
+		return nil, false
+	}
 	if err != nil {
 		c.fail(err)
 		return nil, false
@@ -274,6 +283,16 @@ func (c *Conv) LookupOrder(name string) (map[string]any, bool) {
 			return nil, false
 		}
 		order, _ := asStringMap(c.session().SessionData[name])
+		return order, true
+	}
+	if c.chat.capturing() && c.chat.preview.mock {
+		order, ok := c.chat.preview.mockFor("lookup_order_status")
+		if !ok {
+			c.stop = true
+			return nil, false
+		}
+		c.session().SessionData[name] = order
+		c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": order})
 		return order, true
 	}
 	order, err := lookupLatestOrder(c.app, c.chat.account, c.session())
@@ -317,6 +336,10 @@ func (c *Conv) End() error {
 	if c.ended {
 		return nil
 	}
+	if c.chat.capturing() && c.chat.preview.needsMock != "" {
+		c.stop = true
+		return nil
+	}
 	finishCodedSession(c.session())
 	c.stop = true
 	c.ended = true
@@ -341,8 +364,22 @@ func (c *Conv) askChoice(name string, cfg map[string]any, expected string) (Choi
 	if c.stop {
 		return Choice{}, false
 	}
-	if c.matchingButton(cfg) {
+	if id := c.offeredButtonID(cfg); id != "" {
+		c.chat.buttonID = id
 		return c.acceptButton(name, cfg)
+	}
+	// A button tap that is not one of this step's choices is not a request
+	// for an agent. Show the choices again.
+	if !c.noAnswerYet() && strings.TrimSpace(c.chat.buttonID) != "" {
+		c.app.Log.Warn("Coded flow button did not match this step",
+			"step", name,
+			"button_id", c.chat.buttonID,
+			"text", c.chat.userInput,
+		)
+		c.chat.buttonID = ""
+		c.chat.userInput = ""
+		c.chat.consumed = false
+		c.chat.flowResponseData = nil
 	}
 	if c.noAnswerYet() {
 		node := &ChatNode{ID: name, Type: ChatNodeButtons, Config: cfg}
@@ -363,10 +400,38 @@ func (c *Conv) askChoice(name string, cfg map[string]any, expected string) (Choi
 const codedAgentHandoff = "I'm connecting you with a team member who can help."
 
 func (c *Conv) matchingButton(cfg map[string]any) bool {
-	if c.chat.consumed || c.chat.buttonID == "" {
-		return false
+	return c.offeredButtonID(cfg) != ""
+}
+
+// offeredButtonID returns the primary id of a button offered by this step
+// when the inbound reply matches by id (exact after trim) or by title
+// (case-insensitive). Empty means no match.
+func (c *Conv) offeredButtonID(cfg map[string]any) string {
+	if c.chat.consumed {
+		return ""
 	}
-	return buttonOffered(cfg, c.session().SessionData, c.chat.buttonID)
+	buttons, err := buttonsForNode(cfg, c.session().SessionData)
+	if err != nil || len(buttons) == 0 {
+		return ""
+	}
+	buttonID := strings.TrimSpace(c.chat.buttonID)
+	userInput := strings.TrimSpace(c.chat.userInput)
+	titleMatch := ""
+	for _, button := range buttons {
+		id := fieldString(button, "id")
+		id2 := fieldString(button, "id_2")
+		primary := id
+		if primary == "" {
+			primary = id2
+		}
+		if buttonID != "" && (buttonID == id || buttonID == id2) {
+			return primary
+		}
+		if titleMatch == "" && userInput != "" && strings.EqualFold(userInput, fieldString(button, "title")) {
+			titleMatch = primary
+		}
+	}
+	return titleMatch
 }
 
 func (c *Conv) noAnswerYet() bool {
@@ -400,11 +465,10 @@ func (c *Conv) divert(name, expected string) {
 	}
 	if strings.TrimSpace(result.Reply) != "" {
 		text := c.text(result.Reply)
-		if err := c.app.sendAndSaveTextMessage(c.chat.account, c.chat.contact, text); err != nil {
+		if err := c.app.deliverCodedText(c.chat, name, text); err != nil {
 			c.fail(err)
 			return
 		}
-		c.app.logSessionMessage(c.session().ID, models.DirectionOutgoing, text, name)
 	}
 	c.stop = true
 }
@@ -412,6 +476,14 @@ func (c *Conv) divert(name, expected string) {
 func (c *Conv) wait(name string) {
 	c.session().CurrentStep = name
 	c.stop = true
+}
+
+func (c *Conv) waitingForPreviewMock() bool {
+	if !c.chat.capturing() || c.chat.preview.needsMock == "" {
+		return false
+	}
+	c.stop = true
+	return true
 }
 
 func (c *Conv) tiqr(name, operation string, params map[string]string) (bool, error) {
@@ -561,6 +633,10 @@ func snapshotFields(data models.JSONB, cfg map[string]any) map[string]any {
 }
 
 func buttonOffered(cfg map[string]any, data models.JSONB, buttonID string) bool {
+	buttonID = strings.TrimSpace(buttonID)
+	if buttonID == "" {
+		return false
+	}
 	buttons, err := buttonsForNode(cfg, data)
 	if err != nil {
 		return false

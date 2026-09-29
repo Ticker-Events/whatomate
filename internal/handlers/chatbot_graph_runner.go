@@ -37,6 +37,7 @@ type chatNodeCtx struct {
 	flowResponseData map[string]any // form fields from a WhatsApp Flow submission
 	consumed         bool
 	lastTiqr         map[string]any // payload from the latest tiqr_store_api call
+	preview          *codedPreviewSink
 }
 
 // nodeOutcome is the return value of a node executor.
@@ -241,10 +242,9 @@ func (a *App) execChatMessage(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		return nodeOutcome{outcome: "default"}, nil
 	}
 	text = processTemplate(text, ctx.session.SessionData)
-	if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, text); err != nil {
+	if err := a.deliverCodedText(ctx, node.ID, text); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send message: %w", err)
 	}
-	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, text, node.ID)
 	return nodeOutcome{outcome: "default"}, nil
 }
 
@@ -277,6 +277,10 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 				}
 			}
 		}
+		if ctx.capturing() {
+			ctx.preview.carousel(node.ID, body, cards)
+			return nodeOutcome{yield: true}, nil
+		}
 		if err := a.sendAndSaveInteractiveCarousel(ctx.account, ctx.contact, body, cards); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send carousel: %w", err)
 		}
@@ -304,13 +308,22 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		footer := processTemplate(stringFromConfig(node.Config, "footer"), ctx.session.SessionData)
 		listButton := processTemplate(stringFromConfig(node.Config, "list_button"), ctx.session.SessionData)
 		section := processTemplate(stringFromConfig(node.Config, "section_title"), ctx.session.SessionData)
+		if ctx.capturing() {
+			ctx.preview.buttons(node.ID, body, "list", buttons, header, footer, listButton, "")
+			return nodeOutcome{yield: true}, nil
+		}
 		if err := a.sendAndSaveInteractiveList(ctx.account, ctx.contact, body, header, footer, listButton, section, buttons); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send list: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
 		return nodeOutcome{yield: true}, nil
 	}
-	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons, replyHeaderImage(node.Config, ctx.session.SessionData)); err != nil {
+	headerImage := replyHeaderImage(node.Config, ctx.session.SessionData)
+	if ctx.capturing() {
+		ctx.preview.buttons(node.ID, body, "buttons", buttons, "", "", "", headerImage)
+		return nodeOutcome{yield: true}, nil
+	}
+	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons, headerImage); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
@@ -887,12 +900,14 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	if body := stringFromConfig(node.Config, "body", "message", "text"); body != "" {
 		message := processTemplate(body, ctx.session.SessionData)
-		if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, message); err != nil {
+		if err := a.deliverCodedText(ctx, node.ID, message); err != nil {
 			a.Log.Error("transfer node failed to send body",
 				"node", node.ID, "session", ctx.session.ID, "error", err)
-		} else {
-			a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, message, node.ID)
 		}
+	}
+	if ctx.capturing() {
+		ctx.session.Status = models.SessionStatusCompleted
+		return nodeOutcome{yield: true}, nil
 	}
 
 	notes := ""
@@ -1069,6 +1084,10 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	body := processTemplate(stringFromConfig(node.Config, "body", "message", "text"), ctx.session.SessionData)
 	header := processTemplate(stringFromConfig(node.Config, "header"), ctx.session.SessionData)
 	cta := processTemplate(stringFromConfig(node.Config, "cta"), ctx.session.SessionData)
+	if ctx.capturing() {
+		ctx.preview.flow(node.ID, header, body, cta)
+		return nodeOutcome{yield: true}, nil
+	}
 
 	// Look up the first screen — same pattern as the legacy executor so
 	// existing WhatsAppFlow rows continue to work.

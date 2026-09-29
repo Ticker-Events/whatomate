@@ -66,6 +66,24 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	sessionData := ctx.session.SessionData
 	sessionData["phone_number"] = ctx.session.PhoneNumber
 
+	operation := stringFromConfig(node.Config, "operation")
+	if ctx.capturing() && ctx.preview.mock {
+		payload, ok := ctx.preview.mockFor(operation)
+		if !ok {
+			return nodeOutcome{}, errCodedPreviewNeedsMock
+		}
+		aliasBuyerListResults(payload)
+		ctx.lastTiqr = payload
+		applyChatResponseMapping(node.Config, payload, sessionData)
+		if tmpl := stringFromConfig(node.Config, "message_template"); tmpl != "" {
+			rendered := processTemplate(tmpl, sessionData)
+			if rendered != "" {
+				_ = a.deliverCodedText(ctx, node.ID, rendered)
+			}
+		}
+		return nodeOutcome{outcome: "http:2xx"}, nil
+	}
+
 	settings, err := a.getChatbotSettingsCached(ctx.account.OrganizationID, ctx.account.Name)
 	apiType := tiqrStoreAPIType(node.Config)
 	if err != nil || settings == nil {
@@ -88,7 +106,6 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	storeID := strings.TrimSpace(settings.AI.CommerceStoreID)
 	sessionData["store_id"] = storeID
 
-	operation := stringFromConfig(node.Config, "operation")
 	replaceVar := func(s string) string { return processTiqrParamTemplate(s, sessionData) }
 	params := templateTiqrParams(node.Config["params"], replaceVar)
 
@@ -118,11 +135,9 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	if tmpl := stringFromConfig(node.Config, "message_template"); tmpl != "" {
 		rendered := processTemplate(tmpl, sessionData)
 		if rendered != "" {
-			if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, rendered); err != nil {
+			if err := a.deliverCodedText(ctx, node.ID, rendered); err != nil {
 				a.Log.Error("tiqr_store_api node failed to send message_template",
 					"node", node.ID, "session", ctx.session.ID, "error", err)
-			} else {
-				a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, rendered, node.ID)
 			}
 		}
 	}

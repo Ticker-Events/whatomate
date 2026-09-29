@@ -2058,7 +2058,22 @@
     "saved": "Keywords saved",
     "fetchError": "Failed to load coded flows. Please try again.",
     "saveError": "Failed to save keywords. Please try again.",
-    "accountRequired": "Select a WhatsApp account first."
+    "accountRequired": "Select a WhatsApp account first.",
+    "preview": "Preview",
+    "previewStart": "Start",
+    "previewReset": "Reset",
+    "previewPhone": "Customer phone",
+    "previewPhoneHint": "Used when the flow looks up an order. Nothing is sent on WhatsApp.",
+    "previewMock": "Mock TiQR responses",
+    "previewMockHint": "On by default. Each TiQR call asks for JSON instead of calling the store. Turn this off before starting to make real calls, including orders.",
+    "previewMockFor": "Response for {operation}",
+    "previewMockSubmit": "Use this response",
+    "previewMockInvalid": "Enter a JSON object for this TiQR call.",
+    "previewNote": "WhatsApp messages are not sent and chats are not transferred.",
+    "previewError": "Preview failed. Please try again.",
+    "previewFlow": "Customer details",
+    "previewFlowHint": "These stand in for the WhatsApp form.",
+    "previewFlowSubmit": "Submit details"
   },
   "chatbotFlows": {
     "title": "Conversation Flows",

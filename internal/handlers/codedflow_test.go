@@ -386,6 +386,56 @@ func TestTiqrEcommerce_TalkToAgentSkipsAI(t *testing.T) {
 	assert.Equal(t, int64(1), transfers)
 }
 
+func TestTiqrEcommerce_IntentTitleOnlySelectsBuy(t *testing.T) {
+	useCodedDiversion(t, nil)
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.NotContains(t, outgoingBlob(t, app, session), codedAgentHandoff)
+}
+
+func TestTiqrEcommerce_IntentPaddedButtonIDSelectsBuy(t *testing.T) {
+	useCodedDiversion(t, nil)
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", " buy_products ", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.NotContains(t, outgoingBlob(t, app, session), codedAgentHandoff)
+}
+
+func TestTiqrEcommerce_IntentTitleOnlyOrderStatus(t *testing.T) {
+	useCodedDiversion(t, nil)
+	prev := lookupLatestOrder
+	lookupLatestOrder = func(*App, *models.WhatsAppAccount, *models.ChatbotSession) (map[string]any, error) {
+		return map[string]any{"display_uid": "ST-1", "status": "CONFIRMED"}, nil
+	}
+	t.Cleanup(func() { lookupLatestOrder = prev })
+
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Order ST-1 is confirmed.")
+	assert.NotContains(t, blob, codedAgentHandoff)
+}
+
+func TestTiqrEcommerce_UnknownButtonRepromptsIntent(t *testing.T) {
+	useCodedDiversion(t, nil)
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Nope", "not_a_menu_button", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "intent", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "What would you like to do?")
+	assert.NotContains(t, blob, codedAgentHandoff)
+}
+
 func TestTiqrEcommerce_OrderStatus(t *testing.T) {
 	prev := lookupLatestOrder
 	lookupLatestOrder = func(*App, *models.WhatsAppAccount, *models.ChatbotSession) (map[string]any, error) {
