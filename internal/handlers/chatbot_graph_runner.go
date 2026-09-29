@@ -37,6 +37,8 @@ type chatNodeCtx struct {
 	flowResponseData map[string]any // form fields from a WhatsApp Flow submission
 	consumed         bool
 	lastTiqr         map[string]any // payload from the latest tiqr_store_api call
+	lastTiqrErr      string         // truncated error from the latest failed tiqr call
+	lastTiqrStatus   int            // HTTP status when known (0 otherwise)
 	preview          *codedPreviewSink
 }
 
@@ -1303,6 +1305,15 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 			if kind == "list" && descField != "" {
 				if desc := itemDisplayText(descField, obj, data); desc != "" {
 					btn["description"] = desc
+				}
+			}
+			// body_field is intent-only for reply buttons (not sent to WhatsApp).
+			// Same label shape as carousel cards: "{name} (₹{price}) — Add to cart".
+			if kind == "reply" {
+				if bodyField := stringFromConfig(cfg, "body_field"); bodyField != "" {
+					if label := itemDisplayText(bodyField, obj, data); label != "" {
+						btn["body"] = label
+					}
 				}
 			}
 		}

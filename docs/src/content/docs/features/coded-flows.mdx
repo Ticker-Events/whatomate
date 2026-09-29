@@ -59,7 +59,8 @@ The flow is a `func(*Conv) error`. These calls are the whole API.
 | `AskButtons` | Sends reply buttons and waits | Accepts a button from that prompt |
 | `AskList` | Sends a list built from items and waits | Accepts a row id from that list |
 | `AskCarousel` | Sends a product carousel and waits | Accepts a product id from those cards |
-| `AskNumber` | Sends the prompt and waits for text | Accepts text that matches the pattern |
+| `AskImageButtons` | Sends reply buttons with an image header | Accepts a button from that prompt |
+| `AskNumber` | Sends the prompt and waits for text | Accepts text that matches the pattern, or a confident AI-normalized value that matches |
 | `AskFlow` | Opens a WhatsApp Flow and waits | Accepts the form submission |
 | `Store` | Calls one TiQR REST operation and saves the object | Returns the saved object |
 | `StoreList` | Calls a list operation and saves `results` | Returns the saved list |
@@ -83,23 +84,31 @@ Reply buttons, list rows, and carousel cards accept an answer in two ways:
 
 Ids stay in English. Titles are what the customer sees. A button id that was not offered on this step is not a request for an agent. The same choices are shown again.
 
+Every customer question carries a short step note (`Doing` and `Expect`) so the intent role knows what the step is for. The intent prompt also includes the question that was just shown, the allowed choice ids with their labels (for carousels, the card body plus the button title), and, for number steps, the pattern a normalized answer must match.
+
 Free text that is not one of those titles leaves the script. So does a number that fails `AskNumber`, and so does text sent while a WhatsApp Flow is waiting. The flow asks the intent role (text-only AI, no catalog tools) to map the message onto one route:
 
 ```json
-{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","confidence":0}
+{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","confidence":0}
 ```
 
 | Route | Meaning |
 | --- | --- |
-| `choice` | `choice_id` must be one of the ids on this step |
+| `choice` | `choice_id` must be one of the ids on this step (including a typo of a title) |
 | `collection` | `collection_id` must already be in the loaded collections (menu and collection steps only) |
 | `product` | `product_query` is a short search string; no id is accepted |
+| `answer` | Normalized free-text value for this step (for example `"Two"` → `"2"`); must match the step pattern; no ids |
+| `checkout` | Customer wants to place the order with the current cart; no ids |
 | `handoff` | Transfer to an agent (human/staff request, confused customer, or inventing catalog data) |
 | `unclear` | Ask one clarifying question and stay on the step |
 
-Go checks every id against an allow-list. An invented id, a product route that also fills an id, or JSON that is not this contract transfers immediately. Confidence defaults to a threshold of `0.75`. A grounded `unclear` (or a route below the threshold) asks up to three guide questions, then transfers. A button the flow offered, including **Talk to staff**, does not go through this AI step.
+Go checks every id against an allow-list. An invented id, a product route that also fills an id, an answer that fails the pattern, or JSON that is not this contract transfers immediately. Confidence defaults to a threshold of `0.75`. A grounded `choice`, `collection`, `product`, `answer`, or `checkout` at or above the threshold is applied in the same turn. A grounded `unclear` (or a route below the threshold) asks up to three guide questions, then transfers. A button the flow offered, including **Talk to staff**, does not go through this AI step.
 
-Language, translation, and guide questions are separate roles so each can later use a different model. Provider `jev` is reserved for the intent role. Today all three use the chatbot AI already configured for the account. If AI is not configured, an off-script reply transfers.
+`checkout` from free text works on the menu and on any buy step. If `tiqr_cart` is empty, the customer is told the cart is empty and the collection list is shown again. If the cart has lines, the flow opens the checkout WhatsApp Flow and places the order the same way as the Checkout button.
+
+Language, translation, guide, and recover questions are separate roles so each can later use a different model. Provider `jev` is reserved for the intent role. Today they use the chatbot AI already configured for the account. If AI is not configured, an off-script reply transfers (recover falls back to a canned customer message).
+
+When a TiQR fetch fails (store, collections, products), the recover role writes a short customer message such as “try again later”. WhatsApp never sees URLs, HTTP status text, curl, tokens, or request payloads. When `create_order` fails, recover may ask for one missing customer field from an allow-list; the flow retries with the updated session values. Retries after the first attempt are controlled by `[codedflow] order_retries` (default `2`).
 
 ### Language
 
@@ -111,7 +120,7 @@ Catalog text is not translated. Collection names, product names, option names, a
 
 **Preview** on the coded-flow card runs the same function without sending WhatsApp messages and without creating an agent transfer. The preview session lives in memory for 30 minutes.
 
-Each outbound preview bubble includes a snapshot of session context variables at send time. Intent, guide, and translate calls for that turn are returned as `ai_calls` and attached to the related message (or shown as a debug bubble when no message followed). The sidebar shows the latest full context and the AI calls from the last turn.
+Each outbound preview bubble includes a snapshot of session context variables at send time. Intent, guide, and translate calls for that turn are returned as `ai_calls` and attached to the related message (or shown as a debug bubble when no message followed). The sidebar shows the latest full context as a collapsed JSON tree (expand nodes as needed) and the AI calls from the last turn, with copy buttons for both.
 
 ### Production tracing (SignOz)
 
@@ -197,7 +206,7 @@ Buying is a loop. The customer can add more than one item before checkout. Store
 <Steps>
 
 1. **Collection.** The customer gets a list titled "Our collections". The button is "Browse". Each row uses the collection `name` as the title and `description` as the description. The chosen row saves `collection_id` from `id` and `collection_name` from `title`. Free text on this step can also route to a loaded collection id, or to `search_products` with a product query. An empty search result tells the customer the item is not in the store and returns to the collection list. The model never invents product rows.
-2. **Products.** `list_products` is called with `category_id` set to that collection id, or `search_products` with the validated query. Two or more products are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". One product is a list instead, because a WhatsApp carousel needs at least two cards. The row title is the product name and the description is `₹{min_price}`. Either tap saves `product_id` and the product `options` array. A carousel tap also saves `product_selected`.
+2. **Products.** `list_products` is called with `category_id` set to that collection id, or `search_products` with the validated query. Two or more products are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". One product cannot use a carousel (WhatsApp needs at least two cards), so it is an image reply instead: the product image as the header, `*{name}* (₹{min_price})` plus the product description as the body, and an "Add to cart" button. Either tap saves `product_id` and the product `options` array, and also `product_selected`.
 3. **Option.** What happens next depends on how many options the product has.
 4. **Quantity.** The customer replies with a whole number. The pattern is `^[0-9]+$`.
 5. **Cart line.** The option and quantity are appended once. A replay does not add the line again.
@@ -213,7 +222,7 @@ Option handling:
 | One | That option is selected. No extra list. The flow asks for a quantity. `option_id` and `option_name` are set from that option. |
 | More than one | A list titled "Choose an option". Each row is `{name} (₹{price})`. The choice saves `option_id` and `option_name`. Then the flow asks for a quantity. |
 
-The quantity prompt is: "How many *{option name}* would you like?" A reply that is not a whole number stays on this step and is scored by the intent role. The cart is not changed.
+The quantity prompt is: "How many *{option name}* would you like?" A reply of digits that match `^[0-9]+$` is accepted immediately. A reply such as "Two" is scored by the intent role; when it returns `route: answer` with `answer: "2"` at or above the confidence threshold, the cart uses `2` in the same turn. A reply that stays unclear is guided on this step and the cart is not changed.
 
 A valid quantity appends one line:
 
@@ -223,9 +232,9 @@ A valid quantity appends one line:
 
 `tiqr_cart` is the list of those lines. `cart_count` is how many lines are in the cart, not the sum of quantities. The customer then sees: "*{option name}* has been added to your cart. You now have *{cart count}* in your cart."
 
-"Add more items" returns to the collection list. "Checkout" leaves the loop.
+"Add more items" returns to the collection list. "Checkout" leaves the loop. Free text such as “checkout” or “place my order” on any buy step also enters checkout when the cart has lines. An empty cart gets a short message and the collection list again.
 
-If `list_products` fails or returns no products, the customer gets the thank-you message and the flow ends.
+If `list_products` or `search_products` fails, the customer gets a safe “try later” message (never the raw API error) and returns to the collection list. An empty product list uses the “couldn’t find that” copy and also returns to collections.
 
 ### Checkout
 
@@ -261,7 +270,7 @@ The order is placed with `create_order` only after that form is submitted. Each 
 
 The WhatsApp Flow has to submit those field names. The Email input must be an email address. `email` is required to create the order. Guest checkout also needs `email` on the address. If the address omits it, the order email is copied onto the address.
 
-There is no second confirmation step. A successful create tells the customer the order is confirmed and set for store pickup. A failed create says the order could not be placed. The session does not stay open for another attempt. Either way, the thank-you message is sent and the flow ends:
+There is no second confirmation step. A successful create tells the customer the order is confirmed and set for store pickup. If create fails because a customer field is missing, the recover role may ask for that field (for example email) and retry `create_order` with the same cart and the updated session values. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details. The thank-you message is sent and the flow ends:
 
 ```text
 Thank you for shopping with us.

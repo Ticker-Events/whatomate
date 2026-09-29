@@ -1766,6 +1766,26 @@ func TestDynamicButtonsFromSession_ExtraCheckoutReply(t *testing.T) {
 	assert.Nil(t, buttons[1]["_item"])
 }
 
+func TestDynamicButtonsFromSession_ReplyBodyFieldForIntent(t *testing.T) {
+	buttons, err := dynamicButtonsFromSession(map[string]any{
+		"source":      "dynamic",
+		"items_var":   "products",
+		"id_field":    "id",
+		"title_field": "Add to cart",
+		"body_field":  "{{name}} (₹{{min_price}})",
+	}, models.JSONB{
+		"products": []any{
+			map[string]any{"id": "42", "name": "Mango Kunafa", "min_price": float64(250)},
+		},
+	}, "reply")
+	require.NoError(t, err)
+	require.Len(t, buttons, 1)
+	assert.Equal(t, "42", buttons[0]["id"])
+	assert.Equal(t, "Add to cart", buttons[0]["title"])
+	assert.Equal(t, "Mango Kunafa (₹250)", buttons[0]["body"])
+	assert.Equal(t, "Mango Kunafa (₹250) — Add to cart", choiceLabel(buttons[0]))
+}
+
 func TestDynamicButtonsFromSession_URLTemplate(t *testing.T) {
 	buttons, err := dynamicButtonsFromSession(map[string]any{
 		"source":       "dynamic",

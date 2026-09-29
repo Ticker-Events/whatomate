@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { Play, RotateCcw, Braces, ChevronDown, ChevronRight, Sparkles } from 'lucide-vue-next'
+import { Play, RotateCcw, Braces, ChevronDown, ChevronRight, Sparkles, Copy } from 'lucide-vue-next'
 import {
   chatbotService,
   type CodedFlowBinding,
@@ -25,6 +25,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import PreviewPhone from './PreviewPhone.vue'
+import JsonTree from './JsonTree.vue'
 
 const props = defineProps<{
   flow: CodedFlowBinding
@@ -64,7 +65,7 @@ const busy = ref(false)
 const messages = ref<SimulationMessage[]>([])
 const sessionContext = ref<Record<string, unknown>>({})
 const turnAICalls = ref<CodedPreviewAICall[]>([])
-const contextExpanded = ref(true)
+const contextExpanded = ref(false)
 const aiExpanded = ref(true)
 const details = reactive<Record<DetailKey, string>>({
   customer_name: 'Preview Customer',
@@ -80,12 +81,38 @@ const details = reactive<Record<DetailKey, string>>({
 })
 
 const waiting = computed(() => status.value === 'waiting_input')
-const contextEntries = computed(() => Object.entries(sessionContext.value || {}))
+const hasContext = computed(() => Object.keys(sessionContext.value || {}).length > 0)
 
 function formatDebugValue(value: unknown) {
   if (value === null || value === undefined) return String(value)
   if (typeof value === 'object') return JSON.stringify(value, null, 2)
   return String(value)
+}
+
+async function copyJSON(value: unknown, emptyMessage: string) {
+  if (value == null || (typeof value === 'object' && Object.keys(value as object).length === 0)
+    || (Array.isArray(value) && value.length === 0)) {
+    toast.error(emptyMessage)
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(value, null, 2))
+    toast.success(t('common.copiedToClipboard'))
+  } catch {
+    toast.error(t('common.clipboardFailed'))
+  }
+}
+
+function copyContext(event: Event) {
+  event.preventDefault()
+  event.stopPropagation()
+  copyJSON(sessionContext.value, t('codedFlows.previewContextEmpty'))
+}
+
+function copyAI(event: Event) {
+  event.preventDefault()
+  event.stopPropagation()
+  copyJSON(turnAICalls.value, t('codedFlows.previewAIEmpty'))
 }
 
 const statusLabel = computed(() => {
@@ -332,34 +359,57 @@ function submitFlow() {
           </div>
 
           <Collapsible v-model:open="contextExpanded">
-            <CollapsibleTrigger class="flex items-center gap-2 w-full text-xs font-medium text-muted-foreground hover:text-foreground">
-              <ChevronDown v-if="contextExpanded" class="h-3.5 w-3.5" />
-              <ChevronRight v-else class="h-3.5 w-3.5" />
-              <Braces class="h-3.5 w-3.5" />
-              {{ $t('codedFlows.previewContext') }}
-              <span class="ml-auto text-[10px]">{{ contextEntries.length }}</span>
-            </CollapsibleTrigger>
+            <div class="flex items-center gap-1">
+              <CollapsibleTrigger class="flex items-center gap-2 flex-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+                <ChevronDown v-if="contextExpanded" class="h-3.5 w-3.5" />
+                <ChevronRight v-else class="h-3.5 w-3.5" />
+                <Braces class="h-3.5 w-3.5" />
+                {{ $t('codedFlows.previewContext') }}
+                <span class="ml-auto text-[10px]">{{ Object.keys(sessionContext || {}).length }}</span>
+              </CollapsibleTrigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7 shrink-0"
+                :disabled="!hasContext"
+                :title="$t('codedFlows.previewContextCopy')"
+                @click="copyContext"
+              >
+                <Copy class="h-3.5 w-3.5" />
+              </Button>
+            </div>
             <CollapsibleContent class="mt-2">
-              <div v-if="contextEntries.length === 0" class="text-[11px] text-muted-foreground">
+              <div v-if="!hasContext" class="text-[11px] text-muted-foreground">
                 {{ $t('codedFlows.previewContextEmpty') }}
               </div>
-              <div v-else class="rounded-md border bg-muted/30 p-2 max-h-56 overflow-auto space-y-1.5">
-                <div v-for="[key, value] in contextEntries" :key="key" class="text-[11px]">
-                  <span class="font-mono text-purple-600 dark:text-purple-400">{{ key }}:</span>
-                  <pre class="mt-0.5 whitespace-pre-wrap break-all text-muted-foreground">{{ formatDebugValue(value) }}</pre>
-                </div>
+              <div v-else class="rounded-md border bg-muted/30 p-2 max-h-56 overflow-auto">
+                <JsonTree :value="sessionContext" />
               </div>
             </CollapsibleContent>
           </Collapsible>
 
           <Collapsible v-model:open="aiExpanded">
-            <CollapsibleTrigger class="flex items-center gap-2 w-full text-xs font-medium text-muted-foreground hover:text-foreground">
-              <ChevronDown v-if="aiExpanded" class="h-3.5 w-3.5" />
-              <ChevronRight v-else class="h-3.5 w-3.5" />
-              <Sparkles class="h-3.5 w-3.5" />
-              {{ $t('codedFlows.previewAI') }}
-              <span class="ml-auto text-[10px]">{{ turnAICalls.length }}</span>
-            </CollapsibleTrigger>
+            <div class="flex items-center gap-1">
+              <CollapsibleTrigger class="flex items-center gap-2 flex-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+                <ChevronDown v-if="aiExpanded" class="h-3.5 w-3.5" />
+                <ChevronRight v-else class="h-3.5 w-3.5" />
+                <Sparkles class="h-3.5 w-3.5" />
+                {{ $t('codedFlows.previewAI') }}
+                <span class="ml-auto text-[10px]">{{ turnAICalls.length }}</span>
+              </CollapsibleTrigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7 shrink-0"
+                :disabled="turnAICalls.length === 0"
+                :title="$t('codedFlows.previewAICopy')"
+                @click="copyAI"
+              >
+                <Copy class="h-3.5 w-3.5" />
+              </Button>
+            </div>
             <CollapsibleContent class="mt-2">
               <div v-if="turnAICalls.length === 0" class="text-[11px] text-muted-foreground">
                 {{ $t('codedFlows.previewAIEmpty') }}

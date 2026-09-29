@@ -61,6 +61,8 @@ func tiqrStoreAPIType(cfg map[string]any) string {
 //	}
 func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	ctx.lastTiqr = nil
+	ctx.lastTiqrErr = ""
+	ctx.lastTiqrStatus = 0
 	if ctx.session.SessionData == nil {
 		ctx.session.SessionData = models.JSONB{}
 	}
@@ -90,17 +92,20 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	if err != nil || settings == nil {
 		a.Log.Error("tiqr_store_api node missing commerce settings",
 			"node", node.ID, "session", ctx.session.ID, "api_type", apiType, "error", err)
+		noteTiqrFailure(ctx, 0, "commerce settings unavailable")
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 	if apiType == "rest" {
 		if !commerceRESTConfigured(settings.AI) {
 			a.Log.Error("tiqr_store_api node missing REST commerce settings",
 				"node", node.ID, "session", ctx.session.ID)
+			noteTiqrFailure(ctx, 0, "commerce settings unavailable")
 			return nodeOutcome{outcome: "http:non2xx"}, nil
 		}
 	} else if !commerceConfigured(settings.AI) {
 		a.Log.Error("tiqr_store_api node missing MCP commerce settings",
 			"node", node.ID, "session", ctx.session.ID)
+		noteTiqrFailure(ctx, 0, "commerce settings unavailable")
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 
@@ -153,6 +158,7 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	if err != nil {
 		a.Log.Error("tiqr_store_api node request failed",
 			"node", node.ID, "session", ctx.session.ID, "api_type", apiType, "operation", operation, "error", err)
+		noteTiqrFailure(ctx, 0, err.Error())
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 

@@ -2076,8 +2076,10 @@
     "previewFlowSubmit": "Submit details",
     "previewContext": "Context variables",
     "previewContextEmpty": "No session variables yet.",
+    "previewContextCopy": "Copy context",
     "previewAI": "AI this turn",
-    "previewAIEmpty": "No AI calls on the last turn."
+    "previewAIEmpty": "No AI calls on the last turn.",
+    "previewAICopy": "Copy AI context"
   },
   "chatbotFlows": {
     "title": "Conversation Flows",

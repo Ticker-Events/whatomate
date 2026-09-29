@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { SimulationMessage } from '@/types/flow-preview'
 import { Bug, Braces, ChevronDown, ChevronRight, Info, Sparkles } from 'lucide-vue-next'
+import JsonTree from './JsonTree.vue'
 
 const props = defineProps<{
   message: SimulationMessage
@@ -76,10 +77,12 @@ function formatValue(value: unknown) {
           <Braces class="h-3 w-3" />
           Context ({{ contextEntries.length }})
         </button>
-        <pre
+        <div
           v-if="showContext"
-          class="text-[10px] leading-snug bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 rounded p-2 overflow-x-auto max-h-40 whitespace-pre-wrap"
-        >{{ formatValue(message.context) }}</pre>
+          class="text-[10px] leading-snug bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 rounded p-2 overflow-x-auto max-h-40"
+        >
+          <JsonTree :value="message.context" />
+        </div>
 
         <button
           v-if="hasAI"
@@ -101,8 +104,8 @@ function formatValue(value: unknown) {
             <p class="font-medium">{{ call.role }}<span v-if="call.route"> → {{ call.route }}</span></p>
             <p v-if="call.language">language: {{ call.language }}</p>
             <p v-if="call.confidence != null">confidence: {{ call.confidence }}</p>
-            <p v-if="call.grounded != null">grounded: {{ call.grounded }}</p>
             <p v-if="call.error" class="text-red-600 dark:text-red-400">error: {{ call.error }}</p>
+            <p v-if="call.grounded != null">grounded: {{ call.grounded }}</p>
             <details v-if="call.prompt">
               <summary class="cursor-pointer">prompt</summary>
               <pre class="mt-1 whitespace-pre-wrap">{{ call.prompt }}</pre>
@@ -161,7 +164,9 @@ function formatValue(value: unknown) {
           <Braces class="h-3 w-3" />
           Context
         </button>
-        <pre v-if="showContext" class="text-[10px] whitespace-pre-wrap max-h-32 overflow-auto">{{ formatValue(message.context) }}</pre>
+        <div v-if="showContext" class="text-[10px] max-h-32 overflow-auto">
+          <JsonTree :value="message.context" />
+        </div>
         <button
           v-if="hasAI"
           type="button"

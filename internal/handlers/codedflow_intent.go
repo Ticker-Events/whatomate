@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -14,16 +15,19 @@ const (
 	codedRouteChoice     = "choice"
 	codedRouteCollection = "collection"
 	codedRouteProduct    = "product"
+	codedRouteAnswer     = "answer"
+	codedRouteCheckout   = "checkout"
 	codedRouteHandoff    = "handoff"
 	codedRouteUnclear    = "unclear"
 )
 
 // Route is one accepted free-text or exact answer from AskRoute.
 type Route struct {
-	Kind  string // choice, collection, product, handoff
-	ID    string // choice_id or collection_id
-	Query string // product_query
-	Title string
+	Kind   string // choice, collection, product, answer, checkout, handoff
+	ID     string // choice_id or collection_id
+	Query  string // product_query
+	Title  string
+	Answer string // normalized free-text answer for number steps
 }
 
 // RouteOptions controls which catalog routes the intent role may return.
@@ -43,14 +47,17 @@ type codedAIRoleConfig struct {
 type codedIntentConfig struct {
 	IntentThreshold float64
 	MaxGuideTurns   int
+	OrderRetries    int // retries after the first create_order attempt
 	Intent          codedAIRoleConfig
 	Translate       codedAIRoleConfig
 	Guide           codedAIRoleConfig
+	Recover         codedAIRoleConfig
 }
 
 var codedIntentSettings = codedIntentConfig{
 	IntentThreshold: 0.75,
 	MaxGuideTurns:   3,
+	OrderRetries:    2,
 }
 
 type codedIntentResult struct {
@@ -59,12 +66,17 @@ type codedIntentResult struct {
 	ChoiceID     string  `json:"choice_id"`
 	CollectionID string  `json:"collection_id"`
 	ProductQuery string  `json:"product_query"`
+	Answer       string  `json:"answer"`
 	Confidence   float64 `json:"confidence"`
 }
 
 type codedIntentContext struct {
 	AllowCatalog bool
-	ChoiceIDs    map[string]string // id -> title
+	Question     string
+	Doing        string
+	Expect       string
+	Pattern      string            // when set, answer route must match this pattern
+	ChoiceIDs    map[string]string // id -> title (or card body + title)
 	Collections  map[string]string // id -> name
 }
 
@@ -188,6 +200,7 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		"choice_id":     raw.ChoiceID,
 		"collection_id": raw.CollectionID,
 		"product_query": raw.ProductQuery,
+		"answer":        raw.Answer,
 		"confidence":    raw.Confidence,
 	}
 	call.Confidence = raw.Confidence
@@ -203,6 +216,7 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		"choice_id", result.ChoiceID,
 		"collection_id", result.CollectionID,
 		"product_query", result.ProductQuery,
+		"answer", result.Answer,
 		"language", result.Language,
 	)
 	c.rememberLanguage(result.Language)
@@ -234,6 +248,15 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 			route := Route{Kind: codedRouteProduct, Query: result.ProductQuery}
 			c.appendRouteCall(name, route, cfg)
 			return route, true
+		case codedRouteAnswer:
+			c.clearGuide()
+			// Caller (AskNumber) stores the value and appends its own call.
+			return Route{Kind: codedRouteAnswer, Answer: result.Answer}, true
+		case codedRouteCheckout:
+			c.clearGuide()
+			c.divert = codedRouteCheckout
+			// No shopping call — buy/menu checks divert and leaves the step.
+			return Route{Kind: codedRouteCheckout}, true
 		}
 	}
 	return c.askGuide(name, ctx)
@@ -301,6 +324,10 @@ func formatIntentResponse(raw codedIntentResult) string {
 func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) codedIntentContext {
 	ctx := codedIntentContext{
 		AllowCatalog: opts.AllowCatalog,
+		Question:     asString(cfg["body"]),
+		Doing:        asString(cfg["step_doing"]),
+		Expect:       asString(cfg["step_expect"]),
+		Pattern:      asString(cfg["pattern"]),
 		ChoiceIDs:    map[string]string{},
 		Collections:  map[string]string{},
 	}
@@ -314,7 +341,7 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) codedIntentC
 			if id == "" {
 				continue
 			}
-			ctx.ChoiceIDs[id] = fieldString(button, "title")
+			ctx.ChoiceIDs[id] = choiceLabel(button)
 		}
 	}
 	if opts.AllowCatalog {
@@ -336,6 +363,18 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) codedIntentC
 		}
 	}
 	return ctx
+}
+
+func choiceLabel(button map[string]any) string {
+	title := fieldString(button, "title")
+	body := fieldString(button, "body")
+	if body == "" {
+		return title
+	}
+	if title == "" {
+		return body
+	}
+	return body + " — " + title
 }
 
 func (c *Conv) appendRouteCall(name string, route Route, cfg map[string]any) {
@@ -417,13 +456,14 @@ func validateCodedIntent(raw codedIntentResult, ctx codedIntentContext) (codedIn
 	raw.ChoiceID = strings.TrimSpace(raw.ChoiceID)
 	raw.CollectionID = strings.TrimSpace(raw.CollectionID)
 	raw.ProductQuery = strings.TrimSpace(raw.ProductQuery)
+	raw.Answer = strings.TrimSpace(raw.Answer)
 	raw.Language = strings.TrimSpace(raw.Language)
 	if raw.Language == "" {
 		raw.Language = "en"
 	}
 	switch raw.Route {
 	case codedRouteChoice:
-		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" {
+		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
 			return raw, false
 		}
 		if _, ok := ctx.ChoiceIDs[raw.ChoiceID]; !ok {
@@ -434,7 +474,7 @@ func validateCodedIntent(raw codedIntentResult, ctx codedIntentContext) (codedIn
 		if !ctx.AllowCatalog {
 			return raw, false
 		}
-		if raw.CollectionID == "" || raw.ChoiceID != "" || raw.ProductQuery != "" {
+		if raw.CollectionID == "" || raw.ChoiceID != "" || raw.ProductQuery != "" || raw.Answer != "" {
 			return raw, false
 		}
 		if _, ok := ctx.Collections[raw.CollectionID]; !ok {
@@ -445,24 +485,51 @@ func validateCodedIntent(raw codedIntentResult, ctx codedIntentContext) (codedIn
 		if !ctx.AllowCatalog {
 			return raw, false
 		}
-		if raw.ProductQuery == "" || raw.ChoiceID != "" || raw.CollectionID != "" {
+		if raw.ProductQuery == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.Answer != "" {
+			return raw, false
+		}
+		return raw, true
+	case codedRouteAnswer:
+		if ctx.Pattern == "" {
+			return raw, false
+		}
+		if raw.Answer == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" {
+			return raw, false
+		}
+		if !matchCodedPattern(ctx.Pattern, raw.Answer) {
+			return raw, false
+		}
+		return raw, true
+	case codedRouteCheckout:
+		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
 			return raw, false
 		}
 		return raw, true
 	case codedRouteHandoff:
-		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" {
+		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
 			return raw, false
 		}
 		return raw, true
 	case codedRouteUnclear, "":
 		raw.Route = codedRouteUnclear
-		if raw.ChoiceID != "" || raw.CollectionID != "" {
+		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.Answer != "" {
 			return raw, false
 		}
 		return raw, true
 	default:
 		return raw, false
 	}
+}
+
+func matchCodedPattern(pattern, value string) bool {
+	if pattern == "" {
+		return false
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return false
+	}
+	return re.MatchString(value)
 }
 
 func defaultIdentifyCodedIntent(a *App, session *models.ChatbotSession, message string, ctx codedIntentContext) (codedIntentResult, error) {
@@ -525,28 +592,58 @@ func buildIntentPrompt(message string, ctx codedIntentContext) string {
 			fmt.Fprintf(&collections, "\n- %s (id %s)", name, id)
 		}
 	}
+	question := strings.TrimSpace(ctx.Question)
+	if question == "" {
+		question = "(not available)"
+	}
+	doing := strings.TrimSpace(ctx.Doing)
+	if doing == "" {
+		doing = "(not set)"
+	}
+	expect := strings.TrimSpace(ctx.Expect)
+	if expect == "" {
+		expect = "(not set)"
+	}
+	patternLine := "(none)"
+	if p := strings.TrimSpace(ctx.Pattern); p != "" {
+		patternLine = p
+	}
 	return fmt.Sprintf(`You map one customer message onto one route. You do not reply to the customer. You do not invent ids, products, collections, prices, or stock.
 
-Allowed choices, use only these ids:
+Current question shown to the customer:
+%s
+
+What this step is doing:
+%s
+
+What a valid reply looks like:
+%s
+
+If this step accepts a free-text value (not a button id), the value must match this pattern after you normalize it:
+%s
+
+Allowed choices, use only these ids. A typo or paraphrase of one of these titles is still route choice with that id:
 %s
 
 Collections already loaded, use only these ids. If this list is empty, do not use the collection route:
 %s
 
-route choice: they picked one of the choices above, or they want to buy or check an order. Set choice_id. Do not use this for a request to talk to a person unless talk_to_agent is in the allowed choices and that is what they picked.
+route choice: they picked one of the choices above (including a misspelled title), or they want to buy or check an order when those are choices. Set choice_id. Do not use this for a request to talk to a person unless talk_to_agent is in the allowed choices and that is what they picked.
 route collection: they want the items in one collection, or they ask what is available in that collection. Set collection_id from the list above. Do not use this for a single product name.
 route product: they name a product or ask to buy a specific item. Set product_query to a short search string taken from their words. Leave both ids empty.
+route answer: their reply is a valid answer to the current question but is not one of the choice ids. Set answer to the normalized value that satisfies the pattern and expected reply (for example "Two" becomes "2"). Leave both ids and product_query empty. Only use this when a pattern is listed above.
+route checkout: they want to check out, place the order, pay, or finish shopping with what is already in the cart. Leave both ids, product_query, and answer empty. Do not use this for checking an existing order status.
 route handoff: they ask for a human, agent, or staff, they seem confused or stuck, or you would have to invent a product, collection, price, or id to help them. Leave both ids empty.
 route unclear: more than one shopping route fits, or none of them fit, and they are not asking for a person and do not seem stuck.
 
-confidence is from 0 to 1. Use 0.9 or higher for an obvious route, including a clear request for a person and a clearly confused customer. Use a value below 0.75 when you are unsure. If you are unsure whether a catalog id exists, use handoff instead of guessing an id.
+confidence is from 0 to 1. Use 0.9 or higher for an obvious route, including a clear request for a person, a clearly confused customer, a clear typo of an allowed choice, a clear checkout request, and a clear normalized answer. Use a value below 0.75 when you are unsure. If you are unsure whether a catalog id exists, use handoff instead of guessing an id.
 language is a short label for the language the customer is writing in. English is en. Any other language, including mixed forms such as Manglish, gets its own label. Do not translate the message.
 
 Reply with JSON only:
-{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","confidence":0}
+{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","confidence":0}
 
 Customer message:
-%s`, choices.String(), collections.String(), message)
+%s`, question, doing, expect, patternLine, choices.String(), collections.String(), message)
 }
 
 func buildGuidePrompt(message, lang string, ctx codedIntentContext) string {
@@ -560,14 +657,36 @@ func buildGuidePrompt(message, lang string, ctx codedIntentContext) string {
 	if len(names) > 0 {
 		collectionNames = strings.Join(names, ", ")
 	}
+	question := strings.TrimSpace(ctx.Question)
+	if question == "" {
+		question = "(not available)"
+	}
+	doing := strings.TrimSpace(ctx.Doing)
+	if doing == "" {
+		doing = "(not set)"
+	}
+	expect := strings.TrimSpace(ctx.Expect)
+	if expect == "" {
+		expect = "(not set)"
+	}
 	return fmt.Sprintf(`The customer has not chosen a path yet. Ask one short question so their next reply can be matched to a path.
 You do not invent products, collections, prices, or ids. You may mention only these collection names: %s.
-Paths: Buy products, Check order status, Talk to staff.
-If they named an item, ask whether they want to buy that item, see a collection, check an order, or talk to staff. Do not say the item is available.
+
+Current question shown to the customer:
+%s
+
+What this step is doing:
+%s
+
+What a valid reply looks like:
+%s
+
+Paths: Buy products, Check order status, Checkout, Talk to staff.
+If they named an item, ask whether they want to buy that item, see a collection, check out, check an order, or talk to staff. Do not say the item is available.
 Write the question in %s, matching how the customer is writing. Return only the question.
 
 Customer message:
-%s`, collectionNames, lang, message)
+%s`, collectionNames, question, doing, expect, lang, message)
 }
 
 func parseCodedIntent(raw string) (codedIntentResult, error) {

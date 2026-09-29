@@ -122,6 +122,18 @@ func useCodedIntent(t *testing.T, intent func(string, codedIntentContext) (coded
 	})
 }
 
+func useCodedRecover(t *testing.T, recover func(codedRecoverContext) (codedRecoverResult, error)) {
+	t.Helper()
+	prev := recoverCodedFailure
+	recoverCodedFailure = func(_ *App, _ *models.ChatbotSession, ctx codedRecoverContext) (codedRecoverResult, error) {
+		if recover == nil {
+			t.Fatal("recover was called")
+		}
+		return recover(ctx)
+	}
+	t.Cleanup(func() { recoverCodedFailure = prev })
+}
+
 func outgoingBlob(t *testing.T, app *App, session *models.ChatbotSession) string {
 	t.Helper()
 	var b strings.Builder
@@ -226,6 +238,67 @@ func twoProducts(options []any) []any {
 	}
 }
 
+func TestSingleProductCTA_Config(t *testing.T) {
+	prompt := singleProductCTA()
+	assert.Contains(t, prompt.Body, "{{products[0].name}}")
+	assert.Contains(t, prompt.Body, "{{products[0].description}}")
+	assert.Equal(t, "{{products[0].images[0].original_url}}", prompt.HeaderImage)
+	assert.Equal(t, "Add to cart", prompt.Title)
+	assert.Equal(t, "product_selected", prompt.StoreAs)
+	assert.Equal(t, "{{name}} (₹{{min_price}})", prompt.BodyField)
+	assert.Equal(t, tiqrEcommerceFallbackMedia, prompt.FallbackMedia)
+
+	c := &Conv{chat: &chatNodeCtx{session: &models.ChatbotSession{
+		SessionData: models.JSONB{customerLanguageKey: "en"},
+	}}}
+	cfg := c.imageButtonConfig(prompt)
+	assert.Equal(t, "reply", cfg["mode"])
+	assert.Equal(t, "dynamic", cfg["source"])
+	assert.Equal(t, "products", cfg["items_var"])
+	assert.Equal(t, prompt.HeaderImage, cfg["header_image"])
+	assert.Equal(t, tiqrEcommerceFallbackMedia, cfg["fallback_media_url"])
+	assert.Equal(t, "Add to cart", cfg["title_field"])
+	assert.Equal(t, prompt.BodyField, cfg["body_field"])
+}
+
+func TestTiqrEcommerce_SingleProductImageCTA(t *testing.T) {
+	product := []any{
+		map[string]any{
+			"id":          "101",
+			"name":        "Kunafa",
+			"min_price":   "120",
+			"description": "Crispy shredded pastry",
+			"images": []any{
+				map[string]any{"original_url": "https://cdn.example.com/kunafa.jpg"},
+			},
+			"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "40"}},
+		},
+	}
+	app, account, contact, session := startEcommerce(t, product, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "product", session.CurrentStep)
+
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Kunafa")
+	assert.Contains(t, blob, "120")
+	assert.Contains(t, blob, "Crispy shredded pastry")
+	assert.Contains(t, blob, "Add to cart")
+	assert.Contains(t, blob, "https://cdn.example.com/kunafa.jpg")
+	assert.NotContains(t, blob, `"type":"carousel"`)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "101", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "quantity", session.CurrentStep)
+	assert.Equal(t, "101", session.SessionData["product_id"])
+	assert.Equal(t, "9", session.SessionData["option_id"])
+	_ = contact
+}
+
 func TestMatchCodedFlowTrigger_ContainsAndIgnoresEmpty(t *testing.T) {
 	app, org, account, _, _ := newGraphTestFixtures(t)
 	enableTiqrEcommerce(t, app, org.ID, account.Name, "shop", true)
@@ -284,7 +357,7 @@ func TestTiqrEcommerce_MissingCommerceEnds(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	assert.Empty(t, session.CurrentStep)
 	assert.Nil(t, session.SessionData[codedFlowDataKey])
-	assert.Contains(t, outgoingBlob(t, app, session), "Thank you for shopping with us.")
+	assert.Contains(t, outgoingBlob(t, app, session), "couldn't load the store")
 }
 
 func TestTiqrEcommerce_OptionBranches(t *testing.T) {
@@ -678,6 +751,89 @@ func TestValidateCodedIntent_RejectsInventedIDs(t *testing.T) {
 	assert.True(t, ok)
 }
 
+func TestValidateCodedIntent_AnswerRoute(t *testing.T) {
+	ctx := codedIntentContext{Pattern: `^[0-9]+$`}
+	got, ok := validateCodedIntent(codedIntentResult{Route: codedRouteAnswer, Answer: "2", Confidence: 0.9}, ctx)
+	assert.True(t, ok)
+	assert.Equal(t, "2", got.Answer)
+
+	_, ok = validateCodedIntent(codedIntentResult{Route: codedRouteAnswer, Answer: "2", ChoiceID: "x", Confidence: 0.9}, ctx)
+	assert.False(t, ok)
+	_, ok = validateCodedIntent(codedIntentResult{Route: codedRouteAnswer, Answer: "two", Confidence: 0.9}, ctx)
+	assert.False(t, ok)
+	_, ok = validateCodedIntent(codedIntentResult{Route: codedRouteAnswer, Answer: "2", Confidence: 0.9}, codedIntentContext{})
+	assert.False(t, ok)
+}
+
+func TestBuildIntentPrompt_IncludesStepContext(t *testing.T) {
+	prompt := buildIntentPrompt("Kunafaa", codedIntentContext{
+		Question:  "Here is what's available in *Sweets*.",
+		Doing:     "The customer is choosing one product from the carousel.",
+		Expect:    "A product from the cards.",
+		ChoiceIDs: map[string]string{"101": "Kunafa (₹40) — Add to cart"},
+	})
+	assert.Contains(t, prompt, "Here is what's available in *Sweets*.")
+	assert.Contains(t, prompt, "The customer is choosing one product from the carousel.")
+	assert.Contains(t, prompt, "A product from the cards.")
+	assert.Contains(t, prompt, "Kunafa (₹40) — Add to cart")
+	assert.Contains(t, prompt, "route answer:")
+}
+
+func TestTiqrEcommerce_QuantityWordAccepted(t *testing.T) {
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{
+			Language:   "en",
+			Route:      codedRouteAnswer,
+			Answer:     "2",
+			Confidence: 0.95,
+		}, nil
+	}, nil)
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "quantity", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Two", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "next", session.CurrentStep)
+	assert.Equal(t, "2", session.SessionData["quantity"])
+	assert.NotContains(t, outgoingBlob(t, app, session), "Send a whole number.")
+	cart, ok := session.SessionData["tiqr_cart"].([]any)
+	require.True(t, ok)
+	require.Len(t, cart, 1)
+	item, ok := cart[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "2", item["quantity"])
+}
+
+func TestTiqrEcommerce_CollectionTypoSelectsChoice(t *testing.T) {
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{
+			Language:   "en",
+			Route:      codedRouteChoice,
+			ChoiceID:   "57",
+			Confidence: 0.9,
+		}, nil
+	}, nil)
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "collection", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweetss", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "57", session.SessionData["collection_id"])
+	assert.Equal(t, "product", session.CurrentStep)
+}
+
 // A step that records a call must not hand that record to the next step in
 // the same turn. Otherwise the collections lookup is replayed as the menu
 // answer and an empty choice transfers the chat.
@@ -693,4 +849,280 @@ func TestCodedCallCursorSkipsCallsMadeThisRun(t *testing.T) {
 	rec, done := c.doneCall()
 	require.True(t, done)
 	assert.Equal(t, "store", rec["name"])
+}
+
+func TestValidateCodedIntent_CheckoutRoute(t *testing.T) {
+	got, ok := validateCodedIntent(codedIntentResult{Route: codedRouteCheckout, Confidence: 0.9}, codedIntentContext{})
+	assert.True(t, ok)
+	assert.Equal(t, codedRouteCheckout, got.Route)
+	_, ok = validateCodedIntent(codedIntentResult{Route: codedRouteCheckout, ChoiceID: "x", Confidence: 0.9}, codedIntentContext{})
+	assert.False(t, ok)
+}
+
+func TestSanitizeRecoverHint_DropsURLsAndKeepsFields(t *testing.T) {
+	hint := sanitizeRecoverHint(`{"email":["This field is required."],"detail":"see https://example.com/docs?token=abc"}`)
+	assert.Contains(t, hint, "email")
+	assert.NotContains(t, hint, "https://")
+	assert.NotContains(t, hint, "token=")
+}
+
+func TestValidateCodedRecover_MissingField(t *testing.T) {
+	ctx := codedRecoverContext{Kind: "create"}
+	got, ok := validateCodedRecover(codedRecoverResult{
+		Kind: codedRecoverMissingField, Field: "email", Message: "Please share your email.", Confidence: 0.9,
+	}, ctx)
+	assert.True(t, ok)
+	assert.Equal(t, "customer_email", got.Field)
+
+	_, ok = validateCodedRecover(codedRecoverResult{
+		Kind: codedRecoverMissingField, Field: "email", Message: "Call https://api.example/x", Confidence: 0.9,
+	}, ctx)
+	assert.False(t, ok)
+
+	_, ok = validateCodedRecover(codedRecoverResult{
+		Kind: codedRecoverMissingField, Field: "email", Message: "Please share your email.", Confidence: 0.9,
+	}, codedRecoverContext{Kind: "fetch"})
+	assert.False(t, ok)
+}
+
+func TestBuildRecoverPrompt_NoSecrets(t *testing.T) {
+	prompt := buildRecoverPrompt(codedRecoverContext{
+		Kind: "create", Operation: "create_order", Resource: "order", Status: 400,
+		Hint: sanitizeRecoverHint(`{"email":["required"]}`),
+	})
+	assert.Contains(t, prompt, "validation fields")
+	assert.NotContains(t, prompt, "https://")
+}
+
+func TestTiqrEcommerce_CheckoutEmptyCartReturnsToCollections(t *testing.T) {
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{Language: "en", Route: codedRouteCheckout, Confidence: 0.95}, nil
+	}, nil)
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "collection", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "checkout please", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "cart is empty")
+	assert.Equal(t, models.SessionStatusActive, session.Status)
+}
+
+func TestTiqrEcommerce_CheckoutWithCartOpensDetails(t *testing.T) {
+	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{Language: "en", Route: codedRouteCheckout, Confidence: 0.95}, nil
+	}, nil)
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+
+	session.SessionData["tiqr_cart"] = []any{map[string]any{"product_option": "9", "quantity": "1"}}
+	session.SessionData["cart_count"] = float64(1)
+	require.NoError(t, app.DB.Save(session).Error)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I want to checkout", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "details", session.CurrentStep)
+	assert.NotContains(t, outgoingBlob(t, app, session), "cart is empty")
+}
+
+func TestTiqrEcommerce_ListProductsFailureRecovers(t *testing.T) {
+	useCodedRecover(t, func(ctx codedRecoverContext) (codedRecoverResult, error) {
+		assert.Equal(t, "fetch", ctx.Kind)
+		assert.Equal(t, "products", ctx.Resource)
+		return codedRecoverResult{
+			Kind: codedRecoverTryLater, Message: "Products are unavailable right now. Please try later.", Confidence: 0.9,
+		}, nil
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/category/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{
+					map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"},
+				},
+			})
+		case strings.Contains(r.URL.Path, "/product/"):
+			http.Error(w, `{"detail":"boom https://internal/api"}`, http.StatusBadGateway)
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "Demo"})
+		}
+	}))
+	t.Cleanup(srv.Close)
+	useStoreREST(t, srv)
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Products are unavailable right now")
+	assert.NotContains(t, blob, "https://internal")
+	assert.NotContains(t, blob, "ticker api")
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Equal(t, models.SessionStatusActive, session.Status)
+}
+
+func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
+	orderCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/category/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{
+					map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"},
+				},
+			})
+		case strings.Contains(r.URL.Path, "/product/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{
+					map[string]any{
+						"id": "101", "name": "Kunafa", "min_price": "40",
+						"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "40"}},
+					},
+				},
+			})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
+			orderCalls++
+			if orderCalls == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"email":["This field is required."]}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ord-1", "display_uid": "TQ-1"})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "Demo"})
+		}
+	}))
+	t.Cleanup(srv.Close)
+	useStoreREST(t, srv)
+	useCodedRecover(t, func(ctx codedRecoverContext) (codedRecoverResult, error) {
+		assert.Equal(t, "create", ctx.Kind)
+		return codedRecoverResult{
+			Kind: codedRecoverMissingField, Field: "customer_email",
+			Message: "Could you reply with your email address?", Confidence: 0.95,
+		}, nil
+	})
+
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrCheckout, nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "details", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
+		"customer_name":    "Ada",
+		"customer_phone":   "910000000000",
+		"address_line_one": "1 Main",
+		"city":             "Kochi",
+		"state":            "KL",
+		"country":          "India",
+		"pincode":          "682001",
+	}))
+	reloadSession(t, app, session)
+	assert.Contains(t, outgoingBlob(t, app, session), "Could you reply with your email address?")
+	assert.Equal(t, 1, orderCalls)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "ada@example.com", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, 2, orderCalls)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "order is confirmed")
+	assert.NotContains(t, blob, "ticker api")
+	assert.NotContains(t, blob, "This field is required")
+}
+
+func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {
+	prev := codedIntentSettings.OrderRetries
+	codedIntentSettings.OrderRetries = 0
+	t.Cleanup(func() { codedIntentSettings.OrderRetries = prev })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/category/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"}},
+			})
+		case strings.Contains(r.URL.Path, "/product/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{map[string]any{
+					"id": "101", "name": "Kunafa", "min_price": "40",
+					"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "40"}},
+				}},
+			})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"email":["This field is required."]}`))
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "Demo"})
+		}
+	}))
+	t.Cleanup(srv.Close)
+	useStoreREST(t, srv)
+	useCodedRecover(t, func(codedRecoverContext) (codedRecoverResult, error) {
+		return codedRecoverResult{
+			Kind: codedRecoverGiveUp, Message: "We could not place your order just now.", Confidence: 0.9,
+		}, nil
+	})
+
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrCheckout, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
+		"customer_name": "Ada", "customer_phone": "910000000000",
+		"address_line_one": "1 Main", "city": "Kochi", "state": "KL", "country": "India", "pincode": "682001",
+	}))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "We could not place your order just now.")
+	assert.NotContains(t, blob, "ticker api")
+	assert.NotContains(t, blob, "https://")
 }
