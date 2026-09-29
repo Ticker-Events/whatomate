@@ -1,6 +1,8 @@
 package handlers
 
-import "strings"
+import (
+	"strings"
+)
 
 // TiQR Ecommerce loads the store and its collections, then lets the
 // customer buy, check an order, or talk to an agent.
@@ -131,7 +133,7 @@ func buyProducts(c *Conv, collections []any) error {
 			c.Say(tiqrEcommerceThanks)
 			return c.End()
 		}
-		_, ok = c.AskCarousel("product", products, productCards())
+		_, ok = askProducts(c, products)
 		if !ok {
 			return nil
 		}
@@ -153,6 +155,28 @@ func buyProducts(c *Conv, collections []any) error {
 		}
 	}
 	return checkout(c)
+}
+
+// askProducts shows one product as a list. WhatsApp carousels need at least
+// two cards, and several collections in a store have a single product.
+func askProducts(c *Conv, products []any) (Choice, bool) {
+	if len(products) < 2 {
+		return c.AskList("product", products, ListPrompt{
+			Body:        "Here is what's available in *{{collection_name}}*.\n\nTap the item you'd like.",
+			Header:      "Our products",
+			Button:      "View",
+			Section:     "Products",
+			ItemsKey:    "products",
+			IDField:     "id",
+			Title:       "{{name}}",
+			Description: "₹{{min_price}}",
+			Select: map[string]string{
+				"options":    "options",
+				"product_id": "id",
+			},
+		})
+	}
+	return c.AskCarousel("product", products, productCards())
 }
 
 func productCards() CarouselPrompt {

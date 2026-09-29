@@ -606,6 +606,9 @@ func (c *Conv) appendCall(rec map[string]any) {
 	next = append(next, items...)
 	next = append(next, rec)
 	c.session().SessionData[codedCallsKey] = next
+	// This call just ran. Move the cursor past it so the next step in this
+	// same turn does not replay it as its own saved result.
+	c.seq = len(c.callRecords())
 }
 
 func callOK(rec map[string]any) bool {

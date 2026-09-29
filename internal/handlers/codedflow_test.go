@@ -511,3 +511,20 @@ func TestTiqrEcommerce_EnglishSkipsTranslation(t *testing.T) {
 	assert.Contains(t, blob, "Welcome to Demo")
 	assert.NotContains(t, blob, "ES:")
 }
+
+// A step that records a call must not hand that record to the next step in
+// the same turn. Otherwise the collections lookup is replayed as the menu
+// answer and an empty choice transfers the chat.
+func TestCodedCallCursorSkipsCallsMadeThisRun(t *testing.T) {
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	c := &Conv{chat: &chatNodeCtx{session: session}}
+
+	c.appendCall(map[string]any{"name": "store", "ok": true, "var": "store", "value": map[string]any{"name": "Demo"}})
+	_, done := c.doneCall()
+	assert.False(t, done)
+
+	c.seq = 0
+	rec, done := c.doneCall()
+	require.True(t, done)
+	assert.Equal(t, "store", rec["name"])
+}

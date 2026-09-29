@@ -160,7 +160,7 @@ Buying is a loop. The customer can add more than one item before checkout. Store
 <Steps>
 
 1. **Collection.** The customer gets a list titled "Our collections". The button is "Browse". Each row uses the collection `name` as the title and `description` as the description. The chosen row saves `collection_id` from `id` and `collection_name` from `title`.
-2. **Products.** `list_products` is called with `category_id` set to that collection id. The cards are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". The tap saves `product_id`, the product `options` array, and `product_selected`.
+2. **Products.** `list_products` is called with `category_id` set to that collection id. Two or more products are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". One product is a list instead, because a WhatsApp carousel needs at least two cards. The row title is the product name and the description is `₹{min_price}`. Either tap saves `product_id` and the product `options` array. A carousel tap also saves `product_selected`.
 3. **Option.** What happens next depends on how many options the product has.
 4. **Quantity.** The customer replies with a whole number. The pattern is `^[0-9]+$`.
 5. **Cart line.** The option and quantity are appended once. A replay does not add the line again.
