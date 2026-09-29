@@ -253,6 +253,7 @@
     "overview": "Overview",
     "keywords": "Keywords",
     "flows": "Flows",
+    "codedFlows": "Coded flows",
     "aiContexts": "AI Contexts",
     "transfers": "Transfers",
     "agentAnalytics": "Agent Analytics",
@@ -2040,6 +2041,24 @@
     "keywordsHint": "Keywords that trigger automated responses",
     "newKeyword": "New Keyword",
     "notFound": "Keyword rule not found"
+  },
+  "codedFlows": {
+    "title": "Coded flows",
+    "backToChatbot": "Chatbot",
+    "description": "These conversations ship with the app. Assign keywords to start one. The steps cannot be edited here.",
+    "account": "WhatsApp account",
+    "selectAccount": "Select an account",
+    "noAccounts": "Add a WhatsApp account before assigning keywords.",
+    "noFlows": "No coded flows are available in this build.",
+    "keywords": "Keywords",
+    "keywordsHint": "A message that contains one of these words starts the flow. Separate keywords with commas.",
+    "steps": "Steps",
+    "enabled": "Enabled",
+    "save": "Save keywords",
+    "saved": "Keywords saved",
+    "fetchError": "Failed to load coded flows. Please try again.",
+    "saveError": "Failed to save keywords. Please try again.",
+    "accountRequired": "Select a WhatsApp account first."
   },
   "chatbotFlows": {
     "title": "Conversation Flows",

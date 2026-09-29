@@ -123,6 +123,12 @@ const router = createRouter({
           meta: { permission: 'flows.chatbot' }
         },
         {
+          path: 'chatbot/coded-flows',
+          name: 'chatbot-coded-flows',
+          component: () => import('@/views/chatbot/CodedFlowsView.vue'),
+          meta: { permission: 'flows.chatbot' }
+        },
+        {
           path: 'chatbot/flows/new',
           name: 'chatbot-flow-new',
           component: () => import('@/views/chatbot/ChatbotFlowBuilderView.vue'),
@@ -352,6 +358,7 @@ const navigationOrder = [
     { path: '/chatbot', permission: 'settings.chatbot' },
     { path: '/chatbot/keywords', permission: 'chatbot.keywords' },
     { path: '/chatbot/flows', permission: 'flows.chatbot' },
+    { path: '/chatbot/coded-flows', permission: 'flows.chatbot' },
     { path: '/chatbot/ai', permission: 'chatbot.ai' }
   ]},
   { path: '/chatbot/transfers', permission: 'transfers' },

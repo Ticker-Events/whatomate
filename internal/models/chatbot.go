@@ -64,8 +64,8 @@ type AIConfig struct {
 
 	// Commerce tools (ticker-events buyer MCP via LLM tool calling)
 	CommerceEnabled   bool   `gorm:"column:ai_commerce_enabled;default:false" json:"ai_commerce_enabled"`
-	CommerceMCPURL    string `gorm:"column:ai_commerce_base_url;size:500" json:"ai_commerce_mcp_url"` // streamable-http endpoint, e.g. http://127.0.0.1:8100/mcp
-	CommerceMCPAPIKey string `gorm:"column:ai_commerce_mcp_api_key;type:text" json:"-"`               // optional X-MCP-API-Key
+	CommerceMCPURL    string `gorm:"column:ai_commerce_base_url;size:500" json:"ai_commerce_mcp_url"`  // streamable-http endpoint, e.g. http://127.0.0.1:8100/mcp
+	CommerceMCPAPIKey string `gorm:"column:ai_commerce_mcp_api_key;type:text" json:"-"`                // optional X-MCP-API-Key
 	CommerceRESTURL   string `gorm:"column:ai_commerce_rest_url;size:500" json:"ai_commerce_rest_url"` // ticker-events origin for buyer REST, e.g. https://api.example.com
 	CommerceStoreID   string `gorm:"column:ai_commerce_store_id;size:50" json:"ai_commerce_store_id"`
 
@@ -203,6 +203,23 @@ type ChatbotFlow struct {
 
 func (ChatbotFlow) TableName() string {
 	return "chatbot_flows"
+}
+
+// CodedFlowBinding stores the keywords an admin assigned to a flow that
+// ships in the binary. The flow definition itself is not editable here.
+type CodedFlowBinding struct {
+	BaseModel
+	OrganizationID  uuid.UUID   `gorm:"type:uuid;not null;uniqueIndex:idx_coded_flow_binding,priority:1" json:"organization_id"`
+	WhatsAppAccount string      `gorm:"size:100;not null;uniqueIndex:idx_coded_flow_binding,priority:2" json:"whatsapp_account"`
+	FlowKey         string      `gorm:"size:100;not null;uniqueIndex:idx_coded_flow_binding,priority:3" json:"flow_key"`
+	Keywords        StringArray `gorm:"type:jsonb;default:'[]'" json:"keywords"`
+	IsEnabled       bool        `gorm:"default:false" json:"is_enabled"`
+
+	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
+}
+
+func (CodedFlowBinding) TableName() string {
+	return "coded_flow_bindings"
 }
 
 // ChatbotFlowStep defines individual steps in a conversation flow

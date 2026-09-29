@@ -84,6 +84,7 @@ func GetMigrationModels() []MigrationModel {
 		{"ChatbotSettings", &models.ChatbotSettings{}},
 		{"KeywordRule", &models.KeywordRule{}},
 		{"ChatbotFlow", &models.ChatbotFlow{}},
+		{"CodedFlowBinding", &models.CodedFlowBinding{}},
 		// ChatbotFlowStep table is no longer managed by AutoMigrate — the
 		// v2 graph runner uses ChatbotFlow.Graph exclusively. The model
 		// type is retained only so BackfillChatbotFlowGraph can read
