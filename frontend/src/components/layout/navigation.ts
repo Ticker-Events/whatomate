@@ -8,6 +8,7 @@ import {
   Users,
   Contact,
   Workflow,
+  Code2,
   Sparkles,
   Key,
   UserX,
@@ -88,6 +89,7 @@ export const navigationSections: NavSection[] = [
           { name: 'nav.overview', path: '/chatbot', icon: Bot, permission: 'settings.chatbot' },
           { name: 'nav.keywords', path: '/chatbot/keywords', icon: Key, permission: 'chatbot.keywords' },
           { name: 'nav.flows', path: '/chatbot/flows', icon: Workflow, permission: 'flows.chatbot' },
+          { name: 'nav.codedFlows', path: '/chatbot/coded-flows', icon: Code2, permission: 'flows.chatbot' },
           { name: 'nav.aiContexts', path: '/chatbot/ai', icon: Sparkles, permission: 'chatbot.ai' },
           { name: 'nav.transfers', path: '/chatbot/transfers', icon: UserX, permission: 'transfers' }
         ]

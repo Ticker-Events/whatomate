@@ -814,6 +814,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/chatbot/keywords/{id}", app.UpdateKeywordRule)
 	g.DELETE("/api/chatbot/keywords/{id}", app.DeleteKeywordRule)
 
+	// Coded flows (definitions ship in the binary; admins assign keywords)
+	g.GET("/api/chatbot/coded-flows", app.ListCodedFlows)
+	g.PUT("/api/chatbot/coded-flows/{key}", app.UpdateCodedFlowBinding)
+
 	// Chatbot Flows
 	g.GET("/api/chatbot/flows", app.ListChatbotFlows)
 	g.POST("/api/chatbot/flows", app.CreateChatbotFlow)

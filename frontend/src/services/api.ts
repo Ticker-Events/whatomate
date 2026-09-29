@@ -344,6 +344,21 @@ export const campaignsService = {
     api.get(`/campaigns/${campaignId}/media`, { responseType: 'arraybuffer' })
 }
 
+export type CodedFlowStep = {
+  name: string
+  label: string
+}
+
+export type CodedFlowBinding = {
+  key: string
+  name: string
+  description: string
+  steps: CodedFlowStep[]
+  keywords: string[]
+  is_enabled: boolean
+  whatsapp_account: string
+}
+
 export const chatbotService = {
   // Settings
   getSettings: () => api.get('/chatbot/settings'),
@@ -369,6 +384,11 @@ export const chatbotService = {
     api.get(`/chatbot/flows/${id}/export`, { responseType: 'blob' }),
   importFlow: (data: unknown) => api.post('/chatbot/flows/import', data),
   duplicateFlow: (id: string) => api.post(`/chatbot/flows/${id}/duplicate`),
+
+  listCodedFlows: (account: string) =>
+    api.get<{ flows: CodedFlowBinding[] }>('/chatbot/coded-flows', { params: { account } }),
+  updateCodedFlow: (key: string, account: string, data: { keywords: string[]; is_enabled: boolean }) =>
+    api.put<CodedFlowBinding>(`/chatbot/coded-flows/${encodeURIComponent(key)}`, data, { params: { account } }),
 
   // AI Contexts
   listAIContexts: (params?: { search?: string; page?: number; limit?: number }) =>

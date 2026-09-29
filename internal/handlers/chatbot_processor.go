@@ -421,6 +421,12 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// Log incoming message to session
 	a.logSessionMessageWithMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check", persistedMessage, "")
 
+	// An in-progress coded flow owns the conversation, including WhatsApp
+	// Flow submissions that commerce checkout would otherwise capture.
+	if a.resumeCodedFlow(account, contact, session, messageText, buttonID, flowResponseData) {
+		return
+	}
+
 	// Commerce button taps (cart, checkout) stop further routing.
 	if a.handleCommerceButtonTap(account, contact, session, settings, buttonID) {
 		return
@@ -491,6 +497,21 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		}
 		if err := a.runChatGraph(account, contact, session, flow, messageText, buttonID, flowResponseData); err != nil {
 			a.Log.Error("Chat graph runner failed", "error", err, "session", session.ID, "flow", flow.ID)
+		}
+		return
+	}
+
+	// Coded flows are checked before visual graphs so a shared keyword
+	// starts the compiled flow. The trigger text is not an answer.
+	if flow := a.matchCodedFlowTrigger(account.OrganizationID, account.Name, messageText); flow != nil {
+		session.CurrentFlowID = nil
+		session.CurrentStep = ""
+		session.StepRetries = 0
+		session.SessionData = models.JSONB{
+			codedFlowDataKey: flow.Key,
+		}
+		if err := a.runCodedFlow(account, contact, session, flow, messageText, buttonID, flowResponseData); err != nil {
+			a.Log.Error("Coded flow failed at start", "error", err, "session", session.ID, "flow", flow.Key)
 		}
 		return
 	}
