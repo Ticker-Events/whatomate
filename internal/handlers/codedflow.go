@@ -97,6 +97,20 @@ func (a *App) runCodedFlow(
 	userInput, buttonID string,
 	flowResponseData map[string]any,
 ) error {
+	return a.runCodedFlowPreview(account, contact, session, flow, userInput, buttonID, flowResponseData, nil)
+}
+
+// runCodedFlowPreview is runCodedFlow with outbound messages captured
+// instead of sent. A nil sink is a normal live run.
+func (a *App) runCodedFlowPreview(
+	account *models.WhatsAppAccount,
+	contact *models.Contact,
+	session *models.ChatbotSession,
+	flow *CodedFlow,
+	userInput, buttonID string,
+	flowResponseData map[string]any,
+	preview *codedPreviewSink,
+) error {
 	if flow == nil || flow.run == nil {
 		return fmt.Errorf("coded flow is nil")
 	}
@@ -117,21 +131,32 @@ func (a *App) runCodedFlow(
 		userInput:        userInput,
 		buttonID:         buttonID,
 		flowResponseData: flowResponseData,
+		preview:          preview,
 	}
 	conv := &Conv{app: a, chat: chat}
-	conv.ensureLanguage(userInput)
 	if session.CurrentStep == "" {
 		chat.userInput = ""
 		chat.buttonID = ""
 		chat.flowResponseData = nil
+	} else if preview == nil {
+		a.logCodedFlowInbound(chat)
+	}
+
+	if preview == nil {
+		a.logCodedFlowContext(session, "turn_start")
 	}
 
 	err := flow.run(conv)
 	if err == nil {
 		err = conv.err
 	}
-	if perr := a.persistChatSession(session); perr != nil && err == nil {
-		err = perr
+	if preview == nil {
+		a.logCodedFlowContext(session, "turn_end")
+	}
+	if chat.preview == nil {
+		if perr := a.persistChatSession(session); perr != nil && err == nil {
+			err = perr
+		}
 	}
 	return err
 }

@@ -37,6 +37,9 @@ type chatNodeCtx struct {
 	flowResponseData map[string]any // form fields from a WhatsApp Flow submission
 	consumed         bool
 	lastTiqr         map[string]any // payload from the latest tiqr_store_api call
+	lastTiqrErr      string         // truncated error from the latest failed tiqr call
+	lastTiqrStatus   int            // HTTP status when known (0 otherwise)
+	preview          *codedPreviewSink
 }
 
 // nodeOutcome is the return value of a node executor.
@@ -241,10 +244,9 @@ func (a *App) execChatMessage(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		return nodeOutcome{outcome: "default"}, nil
 	}
 	text = processTemplate(text, ctx.session.SessionData)
-	if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, text); err != nil {
+	if err := a.deliverCodedText(ctx, node.ID, text); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send message: %w", err)
 	}
-	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, text, node.ID)
 	return nodeOutcome{outcome: "default"}, nil
 }
 
@@ -277,10 +279,15 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 				}
 			}
 		}
+		if ctx.capturing() {
+			ctx.preview.carousel(node.ID, body, cards)
+			return nodeOutcome{yield: true}, nil
+		}
 		if err := a.sendAndSaveInteractiveCarousel(ctx.account, ctx.contact, body, cards); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send carousel: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
+		a.logCodedFlowWhatsApp(ctx, node.ID, "carousel", body, "card_count", len(cards))
 		return nodeOutcome{yield: true}, nil
 	}
 	buttons, err := buttonsForNode(node.Config, ctx.session.SessionData)
@@ -304,16 +311,27 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		footer := processTemplate(stringFromConfig(node.Config, "footer"), ctx.session.SessionData)
 		listButton := processTemplate(stringFromConfig(node.Config, "list_button"), ctx.session.SessionData)
 		section := processTemplate(stringFromConfig(node.Config, "section_title"), ctx.session.SessionData)
+		if ctx.capturing() {
+			ctx.preview.buttons(node.ID, body, "list", buttons, header, footer, listButton, "")
+			return nodeOutcome{yield: true}, nil
+		}
 		if err := a.sendAndSaveInteractiveList(ctx.account, ctx.contact, body, header, footer, listButton, section, buttons); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send list: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
+		a.logCodedFlowWhatsApp(ctx, node.ID, "list", body, "button_count", len(buttons))
 		return nodeOutcome{yield: true}, nil
 	}
-	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons, replyHeaderImage(node.Config, ctx.session.SessionData)); err != nil {
+	headerImage := replyHeaderImage(node.Config, ctx.session.SessionData)
+	if ctx.capturing() {
+		ctx.preview.buttons(node.ID, body, "buttons", buttons, "", "", "", headerImage)
+		return nodeOutcome{yield: true}, nil
+	}
+	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons, headerImage); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
+	a.logCodedFlowWhatsApp(ctx, node.ID, "buttons", body, "button_count", len(buttons))
 	return nodeOutcome{yield: true}, nil
 }
 
@@ -887,12 +905,14 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	if body := stringFromConfig(node.Config, "body", "message", "text"); body != "" {
 		message := processTemplate(body, ctx.session.SessionData)
-		if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, message); err != nil {
+		if err := a.deliverCodedText(ctx, node.ID, message); err != nil {
 			a.Log.Error("transfer node failed to send body",
 				"node", node.ID, "session", ctx.session.ID, "error", err)
-		} else {
-			a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, message, node.ID)
 		}
+	}
+	if ctx.capturing() {
+		ctx.session.Status = models.SessionStatusCompleted
+		return nodeOutcome{yield: true}, nil
 	}
 
 	notes := ""
@@ -1069,6 +1089,10 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	body := processTemplate(stringFromConfig(node.Config, "body", "message", "text"), ctx.session.SessionData)
 	header := processTemplate(stringFromConfig(node.Config, "header"), ctx.session.SessionData)
 	cta := processTemplate(stringFromConfig(node.Config, "cta"), ctx.session.SessionData)
+	if ctx.capturing() {
+		ctx.preview.flow(node.ID, header, body, cta)
+		return nodeOutcome{yield: true}, nil
+	}
 
 	// Look up the first screen — same pattern as the legacy executor so
 	// existing WhatsAppFlow rows continue to work.
@@ -1281,6 +1305,15 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 			if kind == "list" && descField != "" {
 				if desc := itemDisplayText(descField, obj, data); desc != "" {
 					btn["description"] = desc
+				}
+			}
+			// body_field is intent-only for reply buttons (not sent to WhatsApp).
+			// Same label shape as carousel cards: "{name} (₹{price}) — Add to cart".
+			if kind == "reply" {
+				if bodyField := stringFromConfig(cfg, "body_field"); bodyField != "" {
+					if label := itemDisplayText(bodyField, obj, data); label != "" {
+						btn["body"] = label
+					}
 				}
 			}
 		}

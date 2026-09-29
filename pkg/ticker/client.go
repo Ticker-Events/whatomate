@@ -23,6 +23,9 @@ const (
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
+	// OnHTTP is called after each request with the raw exchange (for tracing).
+	// status is 0 when the transport failed before a response.
+	OnHTTP func(method, url string, reqBody []byte, status int, respBody []byte, err error)
 }
 
 // NewClient returns a client for the given origin (no trailing slash).
@@ -333,7 +336,7 @@ func (c *Client) getJSON(ctx context.Context, path string, dest any) error {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
-	return c.doJSON(req, dest)
+	return c.doJSON(req, nil, dest)
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, body any, dest any) error {
@@ -347,12 +350,13 @@ func (c *Client) postJSON(ctx context.Context, path string, body any, dest any) 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	return c.doJSON(req, dest)
+	return c.doJSON(req, payload, dest)
 }
 
-func (c *Client) doJSON(req *http.Request, dest any) error {
+func (c *Client) doJSON(req *http.Request, reqBody []byte, dest any) error {
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		c.observeHTTP(req, reqBody, 0, nil, err)
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -360,18 +364,24 @@ func (c *Client) doJSON(req *http.Request, dest any) error {
 	limited := io.LimitReader(resp.Body, maxResponseBytes+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
+		c.observeHTTP(req, reqBody, resp.StatusCode, body, err)
 		return err
 	}
 	if len(body) > maxResponseBytes {
-		return fmt.Errorf("response too large")
+		err = fmt.Errorf("response too large")
+		c.observeHTTP(req, reqBody, resp.StatusCode, body[:maxResponseBytes], err)
+		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg := strings.TrimSpace(string(body))
 		if len(msg) > 500 {
 			msg = msg[:500] + "…"
 		}
-		return fmt.Errorf("ticker api error %d: %s", resp.StatusCode, msg)
+		err = fmt.Errorf("ticker api error %d: %s", resp.StatusCode, msg)
+		c.observeHTTP(req, reqBody, resp.StatusCode, body, err)
+		return err
 	}
+	c.observeHTTP(req, reqBody, resp.StatusCode, body, nil)
 	if dest == nil {
 		return nil
 	}
@@ -379,6 +389,17 @@ func (c *Client) doJSON(req *http.Request, dest any) error {
 		return fmt.Errorf("failed to parse ticker response: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) observeHTTP(req *http.Request, reqBody []byte, status int, respBody []byte, err error) {
+	if c == nil || c.OnHTTP == nil || req == nil {
+		return
+	}
+	url := ""
+	if req.URL != nil {
+		url = req.URL.String()
+	}
+	c.OnHTTP(req.Method, url, reqBody, status, respBody, err)
 }
 
 // PaiseToRupees converts ticker API money (integer paise) to rupees.

@@ -138,3 +138,11 @@ full_name = "Admin"
 # Contact docs include isClosed and awaitingReplySince for the tiqr.store inbox.
 [firebase]
 credentials = ""  # Service account JSON string, or set WHATOMATE_FIREBASE_CREDENTIALS env var
+
+# Coded-flow tracing for SignOz (WhatsApp, AI prompts/responses, TiQR curl + body).
+# Default is on. Disable with WHATOMATE_CODEDFLOW_TRACE=false (or 0/off/no).
+# order_retries: create_order attempts after the first failure when a missing
+# customer field can be collected (default 2).
+[codedflow]
+trace = true
+order_retries = 2

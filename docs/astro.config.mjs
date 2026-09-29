@@ -34,6 +34,7 @@ export default defineConfig({
             { label: 'SSO (Single Sign-On)', slug: 'features/sso' },
             { label: 'Audit Logs', slug: 'features/audit-logs' },
             { label: 'Chatbot Automation', slug: 'features/chatbot' },
+            { label: 'Coded flows', slug: 'features/coded-flows' },
             { label: 'Canned Responses', slug: 'features/canned-responses' },
             { label: 'Custom Actions', slug: 'features/custom-actions' },
             { label: 'Templates', slug: 'features/templates' },

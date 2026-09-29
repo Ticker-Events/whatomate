@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -60,35 +61,57 @@ func tiqrStoreAPIType(cfg map[string]any) string {
 //	}
 func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	ctx.lastTiqr = nil
+	ctx.lastTiqrErr = ""
+	ctx.lastTiqrStatus = 0
 	if ctx.session.SessionData == nil {
 		ctx.session.SessionData = models.JSONB{}
 	}
 	sessionData := ctx.session.SessionData
 	sessionData["phone_number"] = ctx.session.PhoneNumber
 
+	operation := stringFromConfig(node.Config, "operation")
+	if ctx.capturing() && ctx.preview.mock {
+		payload, ok := ctx.preview.mockFor(operation)
+		if !ok {
+			return nodeOutcome{}, errCodedPreviewNeedsMock
+		}
+		aliasBuyerListResults(payload)
+		ctx.lastTiqr = payload
+		applyChatResponseMapping(node.Config, payload, sessionData)
+		if tmpl := stringFromConfig(node.Config, "message_template"); tmpl != "" {
+			rendered := processTemplate(tmpl, sessionData)
+			if rendered != "" {
+				_ = a.deliverCodedText(ctx, node.ID, rendered)
+			}
+		}
+		return nodeOutcome{outcome: "http:2xx"}, nil
+	}
+
 	settings, err := a.getChatbotSettingsCached(ctx.account.OrganizationID, ctx.account.Name)
 	apiType := tiqrStoreAPIType(node.Config)
 	if err != nil || settings == nil {
 		a.Log.Error("tiqr_store_api node missing commerce settings",
 			"node", node.ID, "session", ctx.session.ID, "api_type", apiType, "error", err)
+		noteTiqrFailure(ctx, 0, "commerce settings unavailable")
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 	if apiType == "rest" {
 		if !commerceRESTConfigured(settings.AI) {
 			a.Log.Error("tiqr_store_api node missing REST commerce settings",
 				"node", node.ID, "session", ctx.session.ID)
+			noteTiqrFailure(ctx, 0, "commerce settings unavailable")
 			return nodeOutcome{outcome: "http:non2xx"}, nil
 		}
 	} else if !commerceConfigured(settings.AI) {
 		a.Log.Error("tiqr_store_api node missing MCP commerce settings",
 			"node", node.ID, "session", ctx.session.ID)
+		noteTiqrFailure(ctx, 0, "commerce settings unavailable")
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 
 	storeID := strings.TrimSpace(settings.AI.CommerceStoreID)
 	sessionData["store_id"] = storeID
 
-	operation := stringFromConfig(node.Config, "operation")
 	replaceVar := func(s string) string { return processTiqrParamTemplate(s, sessionData) }
 	params := templateTiqrParams(node.Config["params"], replaceVar)
 
@@ -98,15 +121,44 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	var raw any
 	if apiType == "rest" {
 		client := newTiqrStoreRESTClient(settings.AI.CommerceRESTURL)
+		if a.shouldTraceCodedFlow(ctx.session) && !ctx.capturing() {
+			client.OnHTTP = func(method, rawURL string, reqBody []byte, status int, respBody []byte, callErr error) {
+				headers := map[string]string{"Accept": "application/json"}
+				if strings.EqualFold(method, http.MethodPost) {
+					headers["Content-Type"] = "application/json"
+				}
+				curl := formatHTTPCurl(method, rawURL, headers, string(reqBody))
+				a.logCodedFlowTiqrRequest(ctx.session, apiType, operation, curl, params)
+				errMsg := ""
+				if callErr != nil {
+					errMsg = callErr.Error()
+				}
+				var parsed any
+				if len(respBody) > 0 {
+					_ = json.Unmarshal(respBody, &parsed)
+					if parsed == nil {
+						parsed = string(respBody)
+					}
+				}
+				a.logCodedFlowTiqrResponse(ctx.session, apiType, operation, status, parsed, errMsg)
+			}
+		}
 		raw, err = invokeTiqrStoreRESTOperation(callCtx, client, operation, storeID, ctx.session.PhoneNumber, params)
 	} else {
+		a.logCodedFlowTiqrRequest(ctx.session, apiType, operation, "", params)
 		invoker := newTiqrStoreInvoker(settings.AI.CommerceMCPURL, settings.AI.CommerceMCPAPIKey)
 		defer func() { _ = invoker.Close() }()
 		raw, err = invokeTiqrStoreOperation(callCtx, invoker, operation, storeID, ctx.session.PhoneNumber, params)
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		a.logCodedFlowTiqrResponse(ctx.session, apiType, operation, 0, raw, errMsg)
 	}
 	if err != nil {
 		a.Log.Error("tiqr_store_api node request failed",
 			"node", node.ID, "session", ctx.session.ID, "api_type", apiType, "operation", operation, "error", err)
+		noteTiqrFailure(ctx, 0, err.Error())
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 
@@ -118,11 +170,9 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	if tmpl := stringFromConfig(node.Config, "message_template"); tmpl != "" {
 		rendered := processTemplate(tmpl, sessionData)
 		if rendered != "" {
-			if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, rendered); err != nil {
+			if err := a.deliverCodedText(ctx, node.ID, rendered); err != nil {
 				a.Log.Error("tiqr_store_api node failed to send message_template",
 					"node", node.ID, "session", ctx.session.ID, "error", err)
-			} else {
-				a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, rendered, node.ID)
 			}
 		}
 	}

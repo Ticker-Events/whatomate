@@ -359,6 +359,73 @@ export type CodedFlowBinding = {
   whatsapp_account: string
 }
 
+export type CodedPreviewButton = {
+  id: string
+  title: string
+  description?: string
+  type?: string
+  url?: string
+  phone_number?: string
+}
+
+export type CodedPreviewCard = {
+  media_type: string
+  media_url: string
+  body?: string
+  buttons?: CodedPreviewButton[]
+}
+
+export type CodedPreviewAICall = {
+  role: string
+  prompt?: string
+  response?: string
+  parsed?: Record<string, unknown>
+  error?: string
+  language?: string
+  route?: string
+  confidence?: number
+  grounded?: boolean
+  reasoning?: string
+}
+
+export type CodedPreviewMessage = {
+  type: string
+  content: string
+  step?: string
+  interactive?: 'buttons' | 'list' | 'carousel'
+  buttons?: CodedPreviewButton[]
+  cards?: CodedPreviewCard[]
+  header?: string
+  header_image?: string
+  footer?: string
+  list_button?: string
+  context?: Record<string, unknown>
+  ai?: CodedPreviewAICall[]
+}
+
+export type CodedPreviewResponse = {
+  session_id: string
+  status: 'waiting_input' | 'completed' | 'error' | 'needs_mock'
+  step: string
+  input: '' | 'button' | 'text' | 'whatsapp_flow'
+  flow_cta?: string
+  mock_operation?: string
+  messages: CodedPreviewMessage[]
+  context?: Record<string, unknown>
+  ai_calls?: CodedPreviewAICall[]
+}
+
+export type CodedPreviewRequest = {
+  account: string
+  session_id?: string
+  phone?: string
+  text?: string
+  button_id?: string
+  flow_response?: Record<string, string>
+  mock?: boolean
+  mocks?: Record<string, Record<string, unknown>>
+}
+
 export const chatbotService = {
   // Settings
   getSettings: () => api.get('/chatbot/settings'),
@@ -389,6 +456,8 @@ export const chatbotService = {
     api.get<{ flows: CodedFlowBinding[] }>('/chatbot/coded-flows', { params: { account } }),
   updateCodedFlow: (key: string, account: string, data: { keywords: string[]; is_enabled: boolean }) =>
     api.put<CodedFlowBinding>(`/chatbot/coded-flows/${encodeURIComponent(key)}`, data, { params: { account } }),
+  previewCodedFlow: (key: string, data: CodedPreviewRequest) =>
+    api.post<CodedPreviewResponse>(`/chatbot/coded-flows/${encodeURIComponent(key)}/preview`, data),
 
   // AI Contexts
   listAIContexts: (params?: { search?: string; page?: number; limit?: number }) =>

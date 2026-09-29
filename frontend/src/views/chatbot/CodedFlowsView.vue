@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Code2, Loader2 } from 'lucide-vue-next'
+import { Code2, Loader2, Play } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { accountsService, chatbotService, type CodedFlowBinding } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
@@ -16,6 +16,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import CodedFlowPreview from '@/components/chatbot/flow-preview/CodedFlowPreview.vue'
 
 type AccountOption = {
   name: string
@@ -36,6 +38,8 @@ const flows = ref<CodedFlowBinding[]>([])
 const drafts = ref<Record<string, KeywordDraft>>({})
 const isLoading = ref(true)
 const error = ref<string | null>(null)
+const showPreview = ref(false)
+const previewFlow = ref<CodedFlowBinding | null>(null)
 
 const canWrite = computed(() => authStore.hasPermission('flows.chatbot', 'write'))
 
@@ -89,6 +93,11 @@ async function loadFlows() {
   }
 }
 
+function openPreview(flow: CodedFlowBinding) {
+  previewFlow.value = flow
+  showPreview.value = true
+}
+
 async function save(flow: CodedFlowBinding) {
   const draft = drafts.value[flow.key]
   if (!draft || !account.value) return
@@ -123,9 +132,14 @@ onMounted(async () => {
 })
 
 watch(account, (name) => {
+  showPreview.value = false
   if (name) {
     loadFlows()
   }
+})
+
+watch(showPreview, (open) => {
+  if (!open) previewFlow.value = null
 })
 </script>
 
@@ -216,7 +230,11 @@ watch(account, (name) => {
               />
               <p class="text-xs text-muted-foreground">{{ $t('codedFlows.keywordsHint') }}</p>
             </div>
-            <div class="flex justify-end">
+            <div class="flex justify-end gap-2">
+              <Button size="sm" variant="outline" @click="openPreview(flow)">
+                <Play class="h-4 w-4 mr-1" />
+                {{ $t('codedFlows.preview') }}
+              </Button>
               <Button size="sm" :disabled="!canWrite || drafts[flow.key]?.saving" @click="save(flow)">
                 <Loader2 v-if="drafts[flow.key]?.saving" class="h-4 w-4 mr-2 animate-spin" />
                 {{ $t('codedFlows.save') }}
@@ -227,5 +245,17 @@ watch(account, (name) => {
         </template>
       </div>
     </ScrollArea>
+
+    <Dialog v-model:open="showPreview">
+      <DialogContent class="max-w-[1100px] w-[95vw] h-[92vh] p-0 flex flex-col">
+        <DialogTitle class="sr-only">{{ previewFlow?.name || $t('codedFlows.preview') }}</DialogTitle>
+        <CodedFlowPreview
+          v-if="previewFlow && account"
+          :key="`${account}:${previewFlow.key}`"
+          :flow="previewFlow"
+          :account="account"
+        />
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

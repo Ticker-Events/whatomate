@@ -622,3 +622,103 @@ GET /api/chatbot/sessions/{id}
 <Aside type="tip">
   Use the Sessions API to debug chatbot interactions and understand the conversation state.
 </Aside>
+
+## Coded flows
+
+Coded flows are compiled into the binary. These endpoints assign keywords for one WhatsApp account and run a preview. They do not create or edit the conversation. See [Coded flows](/whatomate/features/coded-flows/) for how a session replays and for the TiQR Ecommerce path.
+
+Listing and preview need `flows.chatbot` read. Updating a binding needs write.
+
+### List coded flows
+
+```bash
+GET /api/chatbot/coded-flows?account={whatsapp_account_name}
+```
+
+`account` is the WhatsApp account name. The response is every flow in this build, merged with that account's keywords. A flow with no binding yet has `keywords: []` and `is_enabled: false`. `steps` is the read-only outline.
+
+```json
+{
+  "status": "success",
+  "data": {
+    "flows": [
+      {
+        "key": "tiqr_ecommerce",
+        "name": "TiQR Ecommerce",
+        "description": "Buy products for store pickup, check an order, or talk to an agent.",
+        "steps": [
+          {"name": "load_store", "label": "Load store and collections"}
+        ],
+        "keywords": ["shop"],
+        "is_enabled": true,
+        "whatsapp_account": "main"
+      }
+    ]
+  }
+}
+```
+
+### Update keywords
+
+```bash
+PUT /api/chatbot/coded-flows/{key}?account={whatsapp_account_name}
+```
+
+```json
+{
+  "keywords": ["shop", "order"],
+  "is_enabled": true
+}
+```
+
+Unknown keys return 404. Keywords are trimmed. Empty entries are dropped. Entries longer than 200 characters are rejected. Duplicates that differ only by case are stored once. The response is the same object as one item in the list.
+
+### Preview one turn
+
+```bash
+POST /api/chatbot/coded-flows/{key}/preview
+```
+
+Runs one turn without sending a WhatsApp message and without creating an agent transfer. Omit `session_id` to start. Send it back on the next turn. A preview session is kept in memory for 30 minutes.
+
+`mock` defaults to on when it is omitted. Each TiQR call then returns `status: "needs_mock"` and `mock_operation` until `mocks` contains a JSON object for that operation. Set `"mock": false` before the first turn to call the real store. In that mode a checkout preview can place a real order.
+
+```json
+{
+  "account": "main",
+  "session_id": "",
+  "phone": "910000000000",
+  "text": "shop",
+  "button_id": "",
+  "flow_response": {},
+  "mock": true,
+  "mocks": {
+    "get_store": {"id": 42, "name": "Demo"}
+  }
+}
+```
+
+`phone` is the number used for order lookup. `button_id` is a reply, list, or carousel id. `flow_response` is the WhatsApp Flow field map, used at checkout in place of the form.
+
+```json
+{
+  "status": "success",
+  "data": {
+    "session_id": "uuid",
+    "status": "waiting_input",
+    "step": "intent",
+    "input": "button",
+    "messages": [
+      {
+        "type": "bot",
+        "content": "Welcome to Demo.\n\nWhat would you like to do?",
+        "buttons": [
+          {"id": "buy_products", "title": "Buy products"}
+        ]
+      }
+    ]
+  }
+}
+```
+
+`status` is `waiting_input` while the flow is waiting for a reply, `needs_mock` while a TiQR response is missing, `completed` when the flow has ended, and `error` when the turn failed. `input` is `button`, `text`, or `whatsapp_flow`. `flow_cta` is set when the turn is waiting on the customer-details form.
