@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// poolMaxIdle remembers the idle limit configured in NewPostgres so schema
+// migrations can close pooled sessions and then restore the same limit.
+var poolMaxIdle sync.Map // *sql.DB -> int
 
 // NewPostgres creates a new PostgreSQL connection
 func NewPostgres(cfg *config.DatabaseConfig, debug bool) (*gorm.DB, error) {
@@ -43,6 +48,7 @@ func NewPostgres(cfg *config.DatabaseConfig, debug bool) (*gorm.DB, error) {
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifetime) * time.Second)
+	poolMaxIdle.Store(sqlDB, cfg.MaxIdleConns)
 
 	return db, nil
 }
@@ -132,7 +138,10 @@ func AutoMigrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	return EnforceCommerceDraftOwnership(db)
+	if err := EnforceCommerceDraftOwnership(db); err != nil {
+		return err
+	}
+	return discardSchemaCachedPlans(db)
 }
 
 // EncryptLegacyChatbotSecrets migrates plaintext AI credentials in place.
@@ -141,6 +150,12 @@ func AutoMigrate(db *gorm.DB) error {
 func EncryptLegacyChatbotSecrets(db *gorm.DB, encryptionKey string) error {
 	if encryptionKey == "" {
 		return fmt.Errorf("app.encryption_key is required to encrypt chatbot secrets")
+	}
+	// AutoMigrate may have added or retyped chatbot_settings columns on a
+	// pooled session that already prepared SELECT *. PostgreSQL then rejects
+	// the next read with SQLSTATE 0A000. Drop those sessions first.
+	if err := discardSchemaCachedPlans(db); err != nil {
+		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -154,6 +169,8 @@ func EncryptLegacyChatbotSecrets(db *gorm.DB, encryptionKey string) error {
 			for column, value := range map[string]string{
 				"ai_api_key":              settings[i].AI.APIKey,
 				"ai_commerce_mcp_api_key": settings[i].AI.CommerceMCPAPIKey,
+				"ai_typesafe_api_key":     settings[i].AI.TypeSafeAPIKey,
+				"ai_gateway_api_key":      settings[i].AI.GatewayAPIKey,
 			} {
 				if value == "" || appcrypto.IsEncrypted(value) {
 					continue
@@ -263,8 +280,34 @@ func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) 
 	}
 
 	printProgress(currentStep, totalSteps)
+	if err := discardSchemaCachedPlans(db); err != nil {
+		fmt.Printf("\n  \033[31m✗ Failed to reset database sessions after schema changes\033[0m\n\n")
+		return err
+	}
 	fmt.Printf("\n  \033[32m✓ Migration completed\033[0m\n\n")
 
+	return nil
+}
+
+// discardSchemaCachedPlans closes idle pooled connections after DDL.
+// pgx keeps a prepared statement per session. If AutoMigrate changes a
+// table's result type (for example by adding a column to chatbot_settings),
+// the next query on that session fails with
+// "cached plan must not change result type" (SQLSTATE 0A000).
+func discardSchemaCachedPlans(db *gorm.DB) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("database handle: %w", err)
+	}
+	maxIdle := 2
+	if v, ok := poolMaxIdle.Load(sqlDB); ok {
+		maxIdle = v.(int)
+	}
+	// n <= 0 closes every idle connection immediately.
+	sqlDB.SetMaxIdleConns(0)
+	if maxIdle > 0 {
+		sqlDB.SetMaxIdleConns(maxIdle)
+	}
 	return nil
 }
 

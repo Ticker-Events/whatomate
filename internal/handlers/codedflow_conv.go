@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 
@@ -99,6 +100,20 @@ type FlowPrompt struct {
 	Body   string
 	CTA    string
 	Step   StepNote
+}
+
+// LocationPrompt asks the customer to share a WhatsApp location pin.
+type LocationPrompt struct {
+	Body string
+	Step StepNote
+}
+
+// LocationPin is a shared WhatsApp location.
+type LocationPin struct {
+	Latitude  float64
+	Longitude float64
+	Name      string
+	Address   string
 }
 
 // Conv is one replay of a coded flow. Finished calls return their saved
@@ -273,6 +288,59 @@ func (c *Conv) AskText(name, body string, step StepNote) (string, bool) {
 	return input, true
 }
 
+// AskLocation sends a WhatsApp location request and accepts a pin reply.
+func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, bool) {
+	if c.stop {
+		return LocationPin{}, false
+	}
+	if rec, done := c.doneCall(); done {
+		if !callOK(rec) {
+			return LocationPin{}, false
+		}
+		return locationPinFromSession(c.session().SessionData, name), true
+	}
+	body := c.text(prompt.Body)
+	if c.chat.consumed || strings.TrimSpace(c.chat.userInput) == "" {
+		if err := c.app.deliverCodedLocationRequest(c.chat, name, body); err != nil {
+			c.fail(err)
+			return LocationPin{}, false
+		}
+		c.wait(name)
+		return LocationPin{}, false
+	}
+	pin, ok := parseLocationInput(c.chat.userInput)
+	if !ok {
+		if c.skipIntent {
+			c.skipIntent = false
+			return LocationPin{}, false
+		}
+		cfg := map[string]any{"body": body, "mode": "location"}
+		putStepNote(cfg, prompt.Step)
+		_, _ = c.resolveFreeText(name, cfg, RouteOptions{})
+		return LocationPin{}, false
+	}
+	c.chat.consumed = true
+	c.session().SessionData[name] = map[string]any{
+		"latitude":  pin.Latitude,
+		"longitude": pin.Longitude,
+		"name":      pin.Name,
+		"address":   pin.Address,
+	}
+	c.session().SessionData["delivery_latitude"] = pin.Latitude
+	c.session().SessionData["delivery_longitude"] = pin.Longitude
+	c.appendCall(map[string]any{
+		"name": name,
+		"ok":   true,
+		"var":  name,
+		"value": map[string]any{
+			"latitude":  pin.Latitude,
+			"longitude": pin.Longitude,
+		},
+	})
+	_ = prompt.Step
+	return pin, true
+}
+
 // AskFlow accepts a WhatsApp Flow submission. Free text is a diversion.
 func (c *Conv) AskFlow(name string, prompt FlowPrompt) bool {
 	if c.stop {
@@ -311,6 +379,15 @@ func (c *Conv) AskFlow(name string, prompt FlowPrompt) bool {
 
 // Store calls a TiQR REST operation once and returns the payload.
 func (c *Conv) Store(name, operation string, params map[string]string) (map[string]any, bool) {
+	return c.storeAPI(name, operation, "rest", params)
+}
+
+// StoreMCP calls a TiQR MCP operation once and returns the payload.
+func (c *Conv) StoreMCP(name, operation string, params map[string]string) (map[string]any, bool) {
+	return c.storeAPI(name, operation, "mcp", params)
+}
+
+func (c *Conv) storeAPI(name, operation, apiType string, params map[string]string) (map[string]any, bool) {
 	if c.stop {
 		return nil, false
 	}
@@ -321,7 +398,7 @@ func (c *Conv) Store(name, operation string, params map[string]string) (map[stri
 		payload, _ := asStringMap(c.session().SessionData[name])
 		return payload, true
 	}
-	ok, err := c.tiqr(name, operation, params)
+	ok, err := c.tiqr(name, operation, apiType, params)
 	if c.waitingForPreviewMock() {
 		return nil, false
 	}
@@ -350,7 +427,7 @@ func (c *Conv) StoreList(name, operation string, params map[string]string) ([]an
 		items, _ := anySlice(c.session().SessionData[name])
 		return items, true
 	}
-	ok, err := c.tiqr(name, operation, params)
+	ok, err := c.tiqr(name, operation, "rest", params)
 	if c.waitingForPreviewMock() {
 		return nil, false
 	}
@@ -570,7 +647,10 @@ func (c *Conv) waitingForPreviewMock() bool {
 	return true
 }
 
-func (c *Conv) tiqr(name, operation string, params map[string]string) (bool, error) {
+func (c *Conv) tiqr(name, operation, apiType string, params map[string]string) (bool, error) {
+	if apiType == "" {
+		apiType = "rest"
+	}
 	raw := make(map[string]any, len(params))
 	for key, value := range params {
 		raw[key] = value
@@ -579,7 +659,7 @@ func (c *Conv) tiqr(name, operation string, params map[string]string) (bool, err
 		ID:   name,
 		Type: ChatNodeTiqrStoreAPI,
 		Config: map[string]any{
-			"api_type":  "rest",
+			"api_type":  apiType,
 			"operation": operation,
 			"params":    raw,
 		},
@@ -589,6 +669,49 @@ func (c *Conv) tiqr(name, operation string, params map[string]string) (bool, err
 		return false, err
 	}
 	return out.outcome == "http:2xx", nil
+}
+
+func parseLocationInput(raw string) (LocationPin, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw[0] != '{' {
+		return LocationPin{}, false
+	}
+	var payload struct {
+		Latitude  float64 `json:"latitude"`
+		Longitude float64 `json:"longitude"`
+		Name      string  `json:"name"`
+		Address   string  `json:"address"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return LocationPin{}, false
+	}
+	if payload.Latitude == 0 && payload.Longitude == 0 {
+		return LocationPin{}, false
+	}
+	return LocationPin{
+		Latitude:  payload.Latitude,
+		Longitude: payload.Longitude,
+		Name:      payload.Name,
+		Address:   payload.Address,
+	}, true
+}
+
+func locationPinFromSession(data models.JSONB, name string) LocationPin {
+	if data == nil {
+		return LocationPin{}
+	}
+	raw, ok := asStringMap(data[name])
+	if !ok {
+		return LocationPin{}
+	}
+	lat, _ := anyToFloat64(raw["latitude"])
+	lng, _ := anyToFloat64(raw["longitude"])
+	return LocationPin{
+		Latitude:  lat,
+		Longitude: lng,
+		Name:      asString(raw["name"]),
+		Address:   asString(raw["address"]),
+	}
 }
 
 func (c *Conv) buttonConfig(prompt ButtonPrompt) map[string]any {

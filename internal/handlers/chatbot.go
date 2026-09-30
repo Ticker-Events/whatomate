@@ -15,32 +15,39 @@ import (
 
 // ChatbotSettingsResponse represents the response for chatbot settings
 type ChatbotSettingsResponse struct {
-	Enabled                      bool              `json:"enabled"`
-	GreetingMessage              string            `json:"greeting_message"`
-	GreetingButtons              []map[string]any  `json:"greeting_buttons"`
-	FallbackMessage              string            `json:"fallback_message"`
-	FallbackButtons              []map[string]any  `json:"fallback_buttons"`
-	SessionTimeoutMinutes        int               `json:"session_timeout_minutes"`
-	BusinessHoursEnabled         bool              `json:"business_hours_enabled"`
-	BusinessHours                []map[string]any  `json:"business_hours"`
-	OutOfHoursMessage            string            `json:"out_of_hours_message"`
-	AllowAutomatedOutsideHours   bool              `json:"allow_automated_outside_hours"`
-	AllowAgentQueuePickup        bool              `json:"allow_agent_queue_pickup"`
-	AssignToSameAgent            bool              `json:"assign_to_same_agent"`
-	AgentCurrentConversationOnly bool              `json:"agent_current_conversation_only"`
-	AIEnabled                    bool              `json:"ai_enabled"`
-	AIProvider                   models.AIProvider `json:"ai_provider"`
-	AIModel                      string            `json:"ai_model"`
-	AIMaxTokens                  int               `json:"ai_max_tokens"`
-	AISystemPrompt               string            `json:"ai_system_prompt"`
-	AICommerceEnabled            bool              `json:"ai_commerce_enabled"`
-	AICommerceMCPURL             string            `json:"ai_commerce_mcp_url"`
-	AICommerceRESTURL            string            `json:"ai_commerce_rest_url"`
-	AICommerceStoreID            string            `json:"ai_commerce_store_id"`
-	AICommerceMCPAPIKeySet       bool              `json:"ai_commerce_mcp_api_key_set"`
-	AICommerceWelcomeMessage     string            `json:"ai_commerce_welcome_message"`
-	AICommerceWelcomeGeneratedAt *time.Time        `json:"ai_commerce_welcome_generated_at"`
-	AICommerceWelcomeStale       bool              `json:"ai_commerce_welcome_stale"`
+	Enabled                      bool                  `json:"enabled"`
+	GreetingMessage              string                `json:"greeting_message"`
+	GreetingButtons              []map[string]any      `json:"greeting_buttons"`
+	FallbackMessage              string                `json:"fallback_message"`
+	FallbackButtons              []map[string]any      `json:"fallback_buttons"`
+	SessionTimeoutMinutes        int                   `json:"session_timeout_minutes"`
+	BusinessHoursEnabled         bool                  `json:"business_hours_enabled"`
+	BusinessHours                []map[string]any      `json:"business_hours"`
+	OutOfHoursMessage            string                `json:"out_of_hours_message"`
+	AllowAutomatedOutsideHours   bool                  `json:"allow_automated_outside_hours"`
+	AllowAgentQueuePickup        bool                  `json:"allow_agent_queue_pickup"`
+	AssignToSameAgent            bool                  `json:"assign_to_same_agent"`
+	AgentCurrentConversationOnly bool                  `json:"agent_current_conversation_only"`
+	AIEnabled                    bool                  `json:"ai_enabled"`
+	AIProvider                   models.AIProvider     `json:"ai_provider"`
+	AIModel                      string                `json:"ai_model"`
+	AIMaxTokens                  int                   `json:"ai_max_tokens"`
+	AISystemPrompt               string                `json:"ai_system_prompt"`
+	AICommerceEnabled            bool                  `json:"ai_commerce_enabled"`
+	AICommerceMCPURL             string                `json:"ai_commerce_mcp_url"`
+	AICommerceRESTURL            string                `json:"ai_commerce_rest_url"`
+	AICommerceStoreID            string                `json:"ai_commerce_store_id"`
+	AICommerceMCPAPIKeySet       bool                  `json:"ai_commerce_mcp_api_key_set"`
+	AICommerceWelcomeMessage     string                `json:"ai_commerce_welcome_message"`
+	AICommerceWelcomeGeneratedAt *time.Time            `json:"ai_commerce_welcome_generated_at"`
+	AICommerceWelcomeStale       bool                  `json:"ai_commerce_welcome_stale"`
+	AIIntentProvider             models.IntentProvider `json:"ai_intent_provider"`
+	AITranslateProvider          models.IntentProvider `json:"ai_translate_provider"`
+	AIGuideProvider              models.IntentProvider `json:"ai_guide_provider"`
+	AIRecoverProvider            models.IntentProvider `json:"ai_recover_provider"`
+	AITypeSafeAPIKeySet          bool                  `json:"ai_typesafe_api_key_set"`
+	AIGatewayAPIKeySet           bool                  `json:"ai_gateway_api_key_set"`
+	AIGatewayModel               string                `json:"ai_gateway_model"`
 	// SLA Settings
 	SLAEnabled             bool     `json:"sla_enabled"`
 	SLAResponseMinutes     int      `json:"sla_response_minutes"`
@@ -200,6 +207,13 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AICommerceWelcomeMessage:     settings.AI.CommerceWelcomeMessage,
 		AICommerceWelcomeGeneratedAt: settings.AI.CommerceWelcomeGeneratedAt,
 		AICommerceWelcomeStale:       commerceWelcomeStale(settings.AI),
+		AIIntentProvider:             settings.AI.IntentProvider,
+		AITranslateProvider:          settings.AI.TranslateProvider,
+		AIGuideProvider:              settings.AI.GuideProvider,
+		AIRecoverProvider:            settings.AI.RecoverProvider,
+		AITypeSafeAPIKeySet:          strings.TrimSpace(settings.AI.TypeSafeAPIKey) != "",
+		AIGatewayAPIKeySet:           strings.TrimSpace(settings.AI.GatewayAPIKey) != "",
+		AIGatewayModel:               settings.AI.GatewayModel,
 		// SLA Settings
 		SLAEnabled:             settings.SLA.Enabled,
 		SLAResponseMinutes:     settings.SLA.ResponseMinutes,
@@ -287,9 +301,17 @@ func chatbotSLASnapshot(s *models.ChatbotSettings) map[string]any {
 	}
 }
 
+// maskedSecretChange records that a secret was set or rotated without
+// storing the plaintext or ciphertext in the activity log.
+func maskedSecretChange(field string) map[string]any {
+	return map[string]any{
+		"field": field, "old_value": "********", "new_value": "********",
+	}
+}
+
 // chatbotAISnapshot captures the fields shown on the Chatbot "AI" tab.
-// The API key is intentionally excluded — it's a secret, not a user-facing
-// change the activity log should surface.
+// Secret keys are omitted here and recorded separately as masked changes so
+// the activity log shows that they were updated without exposing the value.
 func chatbotAISnapshot(s *models.ChatbotSettings) map[string]any {
 	return map[string]any{
 		"ai_enabled":                       s.AI.Enabled,
@@ -303,7 +325,42 @@ func chatbotAISnapshot(s *models.ChatbotSettings) map[string]any {
 		"ai_commerce_store_id":             s.AI.CommerceStoreID,
 		"ai_commerce_welcome_message":      s.AI.CommerceWelcomeMessage,
 		"ai_commerce_welcome_generated_at": s.AI.CommerceWelcomeGeneratedAt,
+		"ai_intent_provider":               s.AI.IntentProvider,
+		"ai_translate_provider":            s.AI.TranslateProvider,
+		"ai_guide_provider":                s.AI.GuideProvider,
+		"ai_recover_provider":              s.AI.RecoverProvider,
+		"ai_gateway_model":                 s.AI.GatewayModel,
 	}
+}
+
+// applyCodedFlowProvider validates and stores one coded-flow role engine.
+// Returns an error message for the client, or empty on success / no-op.
+func applyCodedFlowProvider(dst *models.IntentProvider, req *models.IntentProvider, settings *models.ChatbotSettings, roleLabel string) string {
+	if req == nil {
+		return ""
+	}
+	provider, ok := models.NormalizeIntentProvider(*req)
+	if !ok {
+		return "Invalid " + roleLabel + " provider"
+	}
+	switch provider {
+	case models.IntentProviderGeneric:
+		*dst = models.IntentProviderGeneric
+	case models.IntentProviderJev:
+		if strings.TrimSpace(settings.AI.TypeSafeAPIKey) == "" {
+			return "TypeSafe API key is required for Jev " + roleLabel
+		}
+		*dst = models.IntentProviderJev
+	case models.IntentProviderGateway:
+		if strings.TrimSpace(settings.AI.GatewayAPIKey) == "" {
+			return "AI Gateway API key is required for gateway " + roleLabel
+		}
+		if settings.AI.GatewayModel == "" {
+			settings.AI.GatewayModel = models.IntentGatewayModelJev
+		}
+		*dst = models.IntentProviderGateway
+	}
+	return ""
 }
 
 func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
@@ -313,30 +370,37 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 
 	var req struct {
-		Enabled                      *bool              `json:"enabled"`
-		GreetingMessage              *string            `json:"greeting_message"`
-		GreetingButtons              *[]map[string]any  `json:"greeting_buttons"`
-		FallbackMessage              *string            `json:"fallback_message"`
-		FallbackButtons              *[]map[string]any  `json:"fallback_buttons"`
-		SessionTimeoutMinutes        *int               `json:"session_timeout_minutes"`
-		BusinessHoursEnabled         *bool              `json:"business_hours_enabled"`
-		BusinessHours                *[]map[string]any  `json:"business_hours"`
-		OutOfHoursMessage            *string            `json:"out_of_hours_message"`
-		AllowAutomatedOutsideHours   *bool              `json:"allow_automated_outside_hours"`
-		AllowAgentQueuePickup        *bool              `json:"allow_agent_queue_pickup"`
-		AssignToSameAgent            *bool              `json:"assign_to_same_agent"`
-		AgentCurrentConversationOnly *bool              `json:"agent_current_conversation_only"`
-		AIEnabled                    *bool              `json:"ai_enabled"`
-		AIProvider                   *models.AIProvider `json:"ai_provider"`
-		AIAPIKey                     *string            `json:"ai_api_key"`
-		AIModel                      *string            `json:"ai_model"`
-		AIMaxTokens                  *int               `json:"ai_max_tokens"`
-		AISystemPrompt               *string            `json:"ai_system_prompt"`
-		AICommerceEnabled            *bool              `json:"ai_commerce_enabled"`
-		AICommerceMCPURL             *string            `json:"ai_commerce_mcp_url"`
-		AICommerceMCPAPIKey          *string            `json:"ai_commerce_mcp_api_key"`
-		AICommerceRESTURL            *string            `json:"ai_commerce_rest_url"`
-		AICommerceStoreID            *string            `json:"ai_commerce_store_id"`
+		Enabled                      *bool                  `json:"enabled"`
+		GreetingMessage              *string                `json:"greeting_message"`
+		GreetingButtons              *[]map[string]any      `json:"greeting_buttons"`
+		FallbackMessage              *string                `json:"fallback_message"`
+		FallbackButtons              *[]map[string]any      `json:"fallback_buttons"`
+		SessionTimeoutMinutes        *int                   `json:"session_timeout_minutes"`
+		BusinessHoursEnabled         *bool                  `json:"business_hours_enabled"`
+		BusinessHours                *[]map[string]any      `json:"business_hours"`
+		OutOfHoursMessage            *string                `json:"out_of_hours_message"`
+		AllowAutomatedOutsideHours   *bool                  `json:"allow_automated_outside_hours"`
+		AllowAgentQueuePickup        *bool                  `json:"allow_agent_queue_pickup"`
+		AssignToSameAgent            *bool                  `json:"assign_to_same_agent"`
+		AgentCurrentConversationOnly *bool                  `json:"agent_current_conversation_only"`
+		AIEnabled                    *bool                  `json:"ai_enabled"`
+		AIProvider                   *models.AIProvider     `json:"ai_provider"`
+		AIAPIKey                     *string                `json:"ai_api_key"`
+		AIModel                      *string                `json:"ai_model"`
+		AIMaxTokens                  *int                   `json:"ai_max_tokens"`
+		AISystemPrompt               *string                `json:"ai_system_prompt"`
+		AICommerceEnabled            *bool                  `json:"ai_commerce_enabled"`
+		AICommerceMCPURL             *string                `json:"ai_commerce_mcp_url"`
+		AICommerceMCPAPIKey          *string                `json:"ai_commerce_mcp_api_key"`
+		AICommerceRESTURL            *string                `json:"ai_commerce_rest_url"`
+		AICommerceStoreID            *string                `json:"ai_commerce_store_id"`
+		AIIntentProvider             *models.IntentProvider `json:"ai_intent_provider"`
+		AITranslateProvider          *models.IntentProvider `json:"ai_translate_provider"`
+		AIGuideProvider              *models.IntentProvider `json:"ai_guide_provider"`
+		AIRecoverProvider            *models.IntentProvider `json:"ai_recover_provider"`
+		AITypeSafeAPIKey             *string                `json:"ai_typesafe_api_key"`
+		AIGatewayAPIKey              *string                `json:"ai_gateway_api_key"`
+		AIGatewayModel               *string                `json:"ai_gateway_model"`
 		// SLA Settings
 		SLAEnabled             *bool     `json:"sla_enabled"`
 		SLAResponseMinutes     *int      `json:"sla_response_minutes"`
@@ -408,7 +472,11 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil ||
 		req.AICommerceEnabled != nil || req.AICommerceMCPURL != nil ||
 		req.AICommerceMCPAPIKey != nil || req.AICommerceRESTURL != nil ||
-		req.AICommerceStoreID != nil
+		req.AICommerceStoreID != nil || req.AIIntentProvider != nil ||
+		req.AITranslateProvider != nil || req.AIGuideProvider != nil ||
+		req.AIRecoverProvider != nil ||
+		req.AITypeSafeAPIKey != nil || req.AIGatewayAPIKey != nil ||
+		req.AIGatewayModel != nil
 
 	// Update fields if provided
 	if req.Enabled != nil {
@@ -470,6 +538,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	prevCommerceEnabled := settings.AI.CommerceEnabled
 	prevCommerceMCPURL := settings.AI.CommerceMCPURL
 	prevCommerceStoreID := settings.AI.CommerceStoreID
+	var aiSecretChanges []map[string]any
 
 	if req.AIEnabled != nil {
 		settings.AI.Enabled = *req.AIEnabled
@@ -484,6 +553,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
 		}
 		settings.AI.APIKey = encrypted
+		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_api_key"))
 	}
 	if req.AIModel != nil {
 		settings.AI.Model = *req.AIModel
@@ -507,12 +577,50 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
 		}
 		settings.AI.CommerceMCPAPIKey = encrypted
+		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_commerce_mcp_api_key"))
 	}
 	if req.AICommerceRESTURL != nil {
 		settings.AI.CommerceRESTURL = strings.TrimRight(strings.TrimSpace(*req.AICommerceRESTURL), "/")
 	}
 	if req.AICommerceStoreID != nil {
 		settings.AI.CommerceStoreID = strings.TrimSpace(*req.AICommerceStoreID)
+	}
+	if req.AITypeSafeAPIKey != nil && *req.AITypeSafeAPIKey != "" {
+		encrypted, err := crypto.Encrypt(*req.AITypeSafeAPIKey, a.Config.App.EncryptionKey)
+		if err != nil {
+			a.Log.Error("Failed to encrypt TypeSafe API key", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
+		}
+		settings.AI.TypeSafeAPIKey = encrypted
+		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_typesafe_api_key"))
+	}
+	if req.AIGatewayAPIKey != nil && *req.AIGatewayAPIKey != "" {
+		encrypted, err := crypto.Encrypt(*req.AIGatewayAPIKey, a.Config.App.EncryptionKey)
+		if err != nil {
+			a.Log.Error("Failed to encrypt AI Gateway API key", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
+		}
+		settings.AI.GatewayAPIKey = encrypted
+		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_gateway_api_key"))
+	}
+	if req.AIGatewayModel != nil {
+		model := strings.TrimSpace(*req.AIGatewayModel)
+		if model != "" && !models.ValidIntentGatewayModel(model) {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid AI Gateway model", nil, "")
+		}
+		settings.AI.GatewayModel = model
+	}
+	if errMsg := applyCodedFlowProvider(&settings.AI.IntentProvider, req.AIIntentProvider, &settings, "intent"); errMsg != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errMsg, nil, "")
+	}
+	if errMsg := applyCodedFlowProvider(&settings.AI.TranslateProvider, req.AITranslateProvider, &settings, "translation"); errMsg != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errMsg, nil, "")
+	}
+	if errMsg := applyCodedFlowProvider(&settings.AI.GuideProvider, req.AIGuideProvider, &settings, "guide"); errMsg != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errMsg, nil, "")
+	}
+	if errMsg := applyCodedFlowProvider(&settings.AI.RecoverProvider, req.AIRecoverProvider, &settings, "order recovery"); errMsg != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, errMsg, nil, "")
 	}
 	if settings.AI.CommerceEnabled != prevCommerceEnabled ||
 		settings.AI.CommerceMCPURL != prevCommerceMCPURL ||
@@ -638,7 +746,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	if aiTouched {
 		audit.LogAudit(a.DB, orgID, userID, userName,
 			models.ResourceSettingsChatbotAI, orgID, models.AuditActionUpdated,
-			oldAI, chatbotAISnapshot(&settings))
+			oldAI, chatbotAISnapshot(&settings), aiSecretChanges...)
 	}
 
 	return r.SendEnvelope(map[string]any{

@@ -48,6 +48,36 @@ func TestPickupOrderParams_MapsFlowContext(t *testing.T) {
 	}`, params["new_address"])
 }
 
+func TestPickupOrderParams_UsesStoredDeliveryModeAndBuyerMeta(t *testing.T) {
+	params := pickupOrderParams(map[string]any{
+		"customer_email":      "buyer@example.com",
+		"customer_phone":      "9846435358",
+		"delivery_mode":       "DELIVERY_TO_LOCATION",
+		"delivery_latitude":   12.97,
+		"delivery_longitude":  77.59,
+		"tiqr_cart":           []any{map[string]any{"product_option": "1", "quantity": "1"}},
+	})
+	assert.Equal(t, "DELIVERY_TO_LOCATION", params["delivery_mode"])
+	assert.JSONEq(t, `{"latitude":12.97,"longitude":77.59}`, params["buyer_meta_data"])
+
+	var address map[string]string
+	require.NoError(t, json.Unmarshal([]byte(params["new_address"]), &address))
+	assert.Equal(t, "12.970000", address["latitude"])
+	assert.Equal(t, "77.590000", address["longitude"])
+}
+
+func TestPickupOrderParams_RoundsDeliveryPinOntoAddress(t *testing.T) {
+	params := pickupOrderParams(map[string]any{
+		"delivery_mode":      "DELIVERY_TO_LOCATION",
+		"delivery_latitude":  11.5545985,
+		"delivery_longitude": 75.6326679,
+	})
+	var address map[string]string
+	require.NoError(t, json.Unmarshal([]byte(params["new_address"]), &address))
+	assert.Equal(t, "11.554599", address["latitude"])
+	assert.Equal(t, "75.632668", address["longitude"])
+}
+
 func TestPickupOrderParams_DoesNotUsePhoneAsEmail(t *testing.T) {
 	params := pickupOrderParams(map[string]any{
 		"customer_email": "9846435358",
@@ -173,6 +203,14 @@ type storeCounts struct {
 
 func newStoreServer(t *testing.T, products []any, counts *storeCounts) *httptest.Server {
 	t.Helper()
+	return newStoreServerWith(t, products, counts, map[string]any{"id": 42, "name": "Demo"})
+}
+
+func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store map[string]any) *httptest.Server {
+	t.Helper()
+	if store == nil {
+		store = map[string]any{"id": 42, "name": "Demo"}
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/category/"):
@@ -202,7 +240,7 @@ func newStoreServer(t *testing.T, products []any, counts *storeCounts) *httptest
 			if counts != nil {
 				counts.store++
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "Demo"})
+			_ = json.NewEncoder(w).Encode(store)
 		}
 	}))
 	t.Cleanup(srv.Close)
@@ -211,13 +249,36 @@ func newStoreServer(t *testing.T, products []any, counts *storeCounts) *httptest
 
 func startEcommerce(t *testing.T, products []any, counts *storeCounts) (*App, *models.WhatsAppAccount, *models.Contact, *models.ChatbotSession) {
 	t.Helper()
-	srv := newStoreServer(t, products, counts)
+	return startEcommerceWithStore(t, products, counts, map[string]any{"id": 42, "name": "Demo"}, nil)
+}
+
+func startEcommerceWithStore(
+	t *testing.T,
+	products []any,
+	counts *storeCounts,
+	store map[string]any,
+	extraAI *models.AIConfig,
+) (*App, *models.WhatsAppAccount, *models.Contact, *models.ChatbotSession) {
+	t.Helper()
+	srv := newStoreServerWith(t, products, counts, store)
 	useStoreREST(t, srv)
 	app, org, account, contact, session := newGraphTestFixtures(t)
-	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+	ai := models.AIConfig{
 		CommerceRESTURL: srv.URL,
 		CommerceStoreID: "42",
-	})
+	}
+	if extraAI != nil {
+		if extraAI.CommerceEnabled {
+			ai.CommerceEnabled = true
+		}
+		if extraAI.CommerceMCPURL != "" {
+			ai.CommerceMCPURL = extraAI.CommerceMCPURL
+		}
+		if extraAI.CommerceMCPAPIKey != "" {
+			ai.CommerceMCPAPIKey = extraAI.CommerceMCPAPIKey
+		}
+	}
+	createChatbotSettings(t, app, org.ID, account.Name, ai)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 	require.NotNil(t, flow)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
@@ -1290,4 +1351,143 @@ func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {
 	assert.Contains(t, blob, "We could not place your order just now.")
 	assert.NotContains(t, blob, "ticker api")
 	assert.NotContains(t, blob, "https://")
+}
+
+func TestTiqrEcommerce_PickupOnlyProceedsToCollections(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
+		"id":             42,
+		"name":           "Demo",
+		"delivery_modes": []any{"PICKUP_FROM_STORE"},
+	}, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "fulfillment_pickup_only", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "store pickup only")
+	assert.Contains(t, blob, "Proceed")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Proceed", tiqrProceed, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
+}
+
+func TestTiqrEcommerce_BothModesPickupSkipsLocation(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"delivery_modes": []any{
+			"PICKUP_FROM_STORE",
+			"DELIVERY_TO_LOCATION",
+		},
+	}, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "fulfillment_mode", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Store pickup", tiqrPickupMode, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
+}
+
+func TestTiqrEcommerce_DeliveryInRangeContinuesToCollections(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
+		"id":                       42,
+		"name":                     "Demo",
+		"address":                  "Vadakara",
+		"latitude":                 "11.2",
+		"longitude":                "75.8",
+		"location_based_delivery":  true,
+		"free_delivery_radius":     8,
+		"delivery_radius":          16,
+		"delivery_modes":           []any{"DELIVERY_TO_LOCATION"},
+	}, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+
+	pin := `{"latitude":11.2,"longitude":75.8}`
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, pin, "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Equal(t, "DELIVERY_TO_LOCATION", session.SessionData["delivery_mode"])
+	assert.Equal(t, 11.2, session.SessionData["delivery_latitude"])
+	assert.Equal(t, 75.8, session.SessionData["delivery_longitude"])
+	assert.Equal(t, "free", session.SessionData["delivery_zone"])
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "delivery is free")
+	assert.Contains(t, blob, "8 km")
+	assert.Contains(t, blob, "16 km")
+}
+
+func TestTiqrEcommerce_DeliveryOutOfRangeOffersPickup(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
+		"id":                      42,
+		"name":                    "Demo",
+		"address":                 "Vadakara, Kozhikode",
+		"latitude":                "11.55",
+		"longitude":               "75.63",
+		"location_based_delivery": true,
+		"free_delivery_radius":    8,
+		"delivery_radius":         16,
+		"delivery_modes": []any{
+			"PICKUP_FROM_STORE",
+			"DELIVERY_TO_LOCATION",
+		},
+	}, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Delivery", tiqrDeliveryMode, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+
+	pin := `{"latitude":1.0,"longitude":1.0}`
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, pin, "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_fallback_1", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "unable to deliver")
+	assert.Contains(t, blob, "Vadakara")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Store pickup", tiqrPickupMode, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
+}
+
+func TestTiqrEcommerce_DeliveryOnlyOutOfRangeAsksAgain(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
+		"id":                      42,
+		"name":                    "Demo",
+		"latitude":                "11.55",
+		"longitude":               "75.63",
+		"location_based_delivery": true,
+		"delivery_modes":          []any{"DELIVERY_TO_LOCATION"},
+		"delivery_radius":         10,
+	}, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, `{"latitude":1,"longitude":2}`, "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_2", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "within our delivery radius")
+	assert.NotContains(t, blob, "Store Pickup as your preferred option")
+	assert.NotContains(t, blob, `"id":"pickup"`)
 }

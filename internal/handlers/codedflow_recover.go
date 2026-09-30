@@ -568,12 +568,8 @@ func recoverAskFields(asks []codedRecoverAsk) []string {
 }
 
 func defaultRecoverCodedFailure(a *App, session *models.ChatbotSession, ctx codedRecoverContext) (codedRecoverResult, error) {
-	settings, ok := codedRoleSettings(a, session, codedIntentSettings.Recover)
-	if !ok {
-		return codedRecoverResult{}, fmt.Errorf("ai is not configured")
-	}
 	prompt := buildRecoverPrompt(ctx)
-	answer, err := a.completeCodedText(settings, session, prompt, "")
+	answer, err := a.completeCodedRoleText(session, codedFlowRoleRecover, prompt)
 	if err != nil {
 		return codedRecoverResult{}, err
 	}

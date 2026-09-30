@@ -539,12 +539,21 @@ func matchCodedPattern(pattern, value string) bool {
 }
 
 func defaultIdentifyCodedIntent(a *App, session *models.ChatbotSession, message string, ctx codedIntentContext) (codedIntentResult, error) {
-	settings, ok := codedRoleSettings(a, session, codedIntentSettings.Intent)
+	if a != nil && session != nil {
+		settings, err := a.getChatbotSettingsCached(session.OrganizationID, session.WhatsAppAccount)
+		if err == nil && settings != nil {
+			switch codedIntentProvider(settings) {
+			case models.IntentProviderJev, models.IntentProviderGateway:
+				return identifyCodedIntentJev(a, settings, message, ctx)
+			}
+		}
+	}
+	roleSettings, ok := codedRoleSettings(a, session, codedIntentSettings.Intent)
 	if !ok {
 		return codedIntentResult{}, fmt.Errorf("ai is not configured")
 	}
 	prompt := buildIntentPrompt(message, ctx)
-	answer, err := a.completeCodedText(settings, session, prompt, "")
+	answer, err := a.completeCodedText(roleSettings, session, prompt, "")
 	if err != nil {
 		return codedIntentResult{}, err
 	}
@@ -552,12 +561,8 @@ func defaultIdentifyCodedIntent(a *App, session *models.ChatbotSession, message 
 }
 
 func defaultGuideCodedIntent(a *App, session *models.ChatbotSession, message, lang string, ctx codedIntentContext) (string, error) {
-	settings, ok := codedRoleSettings(a, session, codedIntentSettings.Guide)
-	if !ok {
-		return "", fmt.Errorf("ai is not configured")
-	}
 	prompt := buildGuidePrompt(message, lang, ctx)
-	return a.completeCodedText(settings, session, prompt, "")
+	return a.completeCodedRoleText(session, codedFlowRoleGuide, prompt)
 }
 
 func codedRoleSettings(a *App, session *models.ChatbotSession, role codedAIRoleConfig) (*models.ChatbotSettings, bool) {

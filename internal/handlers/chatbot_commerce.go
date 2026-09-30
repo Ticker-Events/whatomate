@@ -699,6 +699,10 @@ func radiusKmLabel(v any) string {
 // is outside delivery_radius. It uses store.address, free_delivery_radius,
 // and delivery_radius from get_store — never invents those values.
 func formatOutOfRangeDeliveryMessage(store map[string]any) string {
+	return formatOutOfRangeDeliveryMessageWithPickup(store, true)
+}
+
+func formatOutOfRangeDeliveryMessageWithPickup(store map[string]any, offerPickup bool) string {
 	var b strings.Builder
 	b.WriteString("Sorry, we're currently unable to deliver to this location.")
 
@@ -736,7 +740,11 @@ func formatOutOfRangeDeliveryMessage(store map[string]any) string {
 		}
 	}
 
-	b.WriteString("\n\nPlease provide a location within our delivery radius, or choose Store Pickup as your preferred option.\n\nThank you for your understanding.")
+	if offerPickup {
+		b.WriteString("\n\nPlease provide a location within our delivery radius, or choose Store Pickup as your preferred option.\n\nThank you for your understanding.")
+	} else {
+		b.WriteString("\n\nPlease provide a location within our delivery radius.\n\nThank you for your understanding.")
+	}
 	return b.String()
 }
 
