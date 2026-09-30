@@ -76,7 +76,7 @@ func BackfillChatbotFlowGraph(db *gorm.DB, lo logf.Logger) error {
 type legacyFlowMeta struct {
 	ID           uuid.UUID
 	Name         string
-	CanvasLayout models.JSONB `gorm:"column:canvas_layout"`
+	CanvasLayout models.JSONB `gorm:"column:canvas_layout;type:jsonb"`
 }
 
 // stepsToGraph converts a legacy slice of ChatbotFlowStep rows plus an

@@ -15,6 +15,13 @@ import (
 // JSONB is a custom type for PostgreSQL JSONB columns
 type JSONB map[string]any
 
+// GormDataType marks JSONB as a column. A nil map's Value() returns nil, so
+// GORM cannot infer a type and otherwise tries to parse the map as a model
+// ("unsupported data type: ...JSONB").
+func (JSONB) GormDataType() string {
+	return "jsonb"
+}
+
 func (j JSONB) Value() (driver.Value, error) {
 	if j == nil {
 		return nil, nil
@@ -36,6 +43,11 @@ func (j *JSONB) Scan(value any) error {
 
 // JSONBArray is a custom type for JSONB arrays
 type JSONBArray []any
+
+// GormDataType marks JSONBArray as a column. See JSONB.GormDataType.
+func (JSONBArray) GormDataType() string {
+	return "jsonb"
+}
 
 func (j JSONBArray) Value() (driver.Value, error) {
 	if j == nil {

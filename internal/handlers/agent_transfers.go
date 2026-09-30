@@ -30,7 +30,7 @@ type agentTransferRow struct {
 	TeamID                *uuid.UUID            `gorm:"column:team_id"`
 	TransferredByUserID   *uuid.UUID            `gorm:"column:transferred_by_user_id"`
 	Notes                 string                `gorm:"column:notes"`
-	Metadata              models.JSONB          `gorm:"column:metadata"`
+	Metadata              models.JSONB          `gorm:"column:metadata;type:jsonb"`
 	CommerceDraftID       *uuid.UUID            `gorm:"column:commerce_draft_id"`
 	TransferredAt         time.Time             `gorm:"column:transferred_at"`
 	ResumedAt             *time.Time            `gorm:"column:resumed_at"`

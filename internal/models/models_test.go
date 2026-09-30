@@ -1,11 +1,13 @@
 package models_test
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/schema"
 )
 
 func TestJSONB_Value(t *testing.T) {
@@ -317,4 +319,24 @@ func TestJSONBArray_Scan(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestJSONB_GormParsesAsColumn(t *testing.T) {
+	t.Parallel()
+
+	type row struct {
+		Metadata models.JSONB      `gorm:"column:metadata"`
+		Items    models.JSONBArray `gorm:"column:items"`
+	}
+
+	parsed, err := schema.Parse(&row{}, &sync.Map{}, schema.NamingStrategy{})
+	require.NoError(t, err)
+
+	metadata := parsed.LookUpField("Metadata")
+	require.NotNil(t, metadata)
+	assert.Equal(t, schema.DataType("jsonb"), metadata.DataType)
+
+	items := parsed.LookUpField("Items")
+	require.NotNil(t, items)
+	assert.Equal(t, schema.DataType("jsonb"), items.DataType)
 }
