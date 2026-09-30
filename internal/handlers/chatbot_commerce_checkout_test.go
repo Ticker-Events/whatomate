@@ -92,11 +92,31 @@ func TestFormatCheckoutCartSummary(t *testing.T) {
 	}}
 	summary := formatCheckoutCartSummary(session)
 	assert.Contains(t, summary, "*Your cart:*")
-	assert.Contains(t, summary, "*Large* x2 — ₹100.00 each (₹200.00)")
-	assert.Contains(t, summary, "*Small* x1 — ₹50.00 each")
+	assert.Contains(t, summary, "1. *Large* x2 — ₹200.00")
+	assert.Contains(t, summary, "2. *Small* x1 — ₹50.00")
 	assert.Contains(t, summary, "*Subtotal:* ₹250.00")
 	// Stable ordering by option id.
 	assert.Less(t, strings.Index(summary, "Large"), strings.Index(summary, "Small"))
+}
+
+func TestFormatCheckoutCartSummaryUsesStoreCurrency(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		"currency": "USD",
+		cartKey: map[string]any{
+			"1": map[string]any{
+				"qty": 2,
+				"product": map[string]any{
+					"option_name": "Cookie",
+					"price":       3.5,
+				},
+			},
+		},
+	}}
+	summary := formatCheckoutCartSummary(session)
+	assert.Contains(t, summary, "1. *Cookie* x2 — $7.00")
+	assert.Contains(t, summary, "*Subtotal:* $7.00")
+	assert.NotContains(t, summary, "each")
 }
 
 func TestCartIsEmpty(t *testing.T) {
@@ -244,6 +264,15 @@ func TestFormatOrderSuccessMessage_IncludesDeliveryFee(t *testing.T) {
 	})
 	assert.Contains(t, msg, "Delivery fee: ₹50.00")
 	assert.Contains(t, msg, "Total: ₹150.00")
+
+	usd := formatOrderSuccessMessage(map[string]any{
+		"display_uid":  "ORD-2",
+		"amount":       12.5,
+		"shipping_fee": 2.0,
+		"currency":     "USD",
+	})
+	assert.Contains(t, usd, "Delivery fee: $2.00")
+	assert.Contains(t, usd, "Total: $12.50")
 }
 
 func TestCheckoutStateRoundTrip_LocationFields(t *testing.T) {
@@ -767,7 +796,7 @@ func TestCheckoutReviewStateRoundTrip(t *testing.T) {
 	require.NotNil(t, st)
 	assert.Equal(t, "review", st.Step)
 	assert.Equal(t, checkoutFlowCheckout, st.Flow)
-	assert.Contains(t, formatCheckoutCartSummary(session), "*Chocolate* x2 — ₹50.00 each (₹100.00)")
+	assert.Contains(t, formatCheckoutCartSummary(session), "1. *Chocolate* x2 — ₹100.00")
 }
 
 func TestBrowsingCartEditRemovesAndUpdatesQty(t *testing.T) {

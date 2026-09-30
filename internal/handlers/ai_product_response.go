@@ -38,7 +38,7 @@ Whenever you need to display a specific product to the user, you MUST NOT output
 CRITICAL RULES FOR THE JSON OBJECT:
 1. "image_url": MUST be the exact HTTPS image_url from search_products / get_product tool results (prefer image_url / images[].original_url over images[].image). NEVER invent, guess, slugify, or placeholder a URL. If the tool result has no image, omit image_url or use "".
 2. "product_title": Keep it short (under 20 characters). Use the real product name from tools.
-3. "product_description": MUST include "Starts at ₹X.XX" using min_price from tool results, plus a brief detail. Do not list individual option prices on the product card.
+3. "product_description": MUST include "Starts at {currency_symbol}X.XX" using min_price and the store currency from get_store.currency / tool results (₹ for INR, $ for USD, etc.), plus a brief detail. Do not list individual option prices on the product card. Never show raw minor units (paise/cents).
 4. "button_id": This must follow the strict format: "add_to_cart_[PRODUCT_ID]" using the numeric product id from tools.
 5. Only emit cards for products that have at least one option in tool results.
 
@@ -47,7 +47,7 @@ JSON STRUCTURE TO OUTPUT:
 {
   "image_url": "https://...",
   "product_title": "PRODUCT_NAME",
-  "product_description": "Starts at ₹X.XX — DETAILS",
+  "product_description": "Starts at {currency_symbol}X.XX — DETAILS",
   "button_id": "add_to_cart_ID"
 }
 ` + "```" + `
@@ -167,7 +167,73 @@ func truncateRunes(s string, max int) string {
 }
 
 func formatPriceINR(price float64) string {
-	return fmt.Sprintf("₹%.2f", price)
+	return formatMoney(price, "INR")
+}
+
+// formatMoney formats a major-unit amount using the store currency code.
+func formatMoney(amount float64, currency string) string {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" {
+		currency = "INR"
+	}
+	switch currency {
+	case "INR":
+		return fmt.Sprintf("₹%.2f", amount)
+	case "USD":
+		return fmt.Sprintf("$%.2f", amount)
+	case "EUR":
+		return fmt.Sprintf("€%.2f", amount)
+	case "GBP":
+		return fmt.Sprintf("£%.2f", amount)
+	default:
+		return fmt.Sprintf("%s %.2f", currency, amount)
+	}
+}
+
+func currencySymbol(currency string) string {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	switch currency {
+	case "INR", "":
+		return "₹"
+	case "USD":
+		return "$"
+	case "EUR":
+		return "€"
+	case "GBP":
+		return "£"
+	default:
+		return currency + " "
+	}
+}
+
+func sessionCurrencyCode(session *models.ChatbotSession) string {
+	if session == nil || session.SessionData == nil {
+		return "INR"
+	}
+	if code := strings.TrimSpace(asString(session.SessionData["currency"])); code != "" {
+		return strings.ToUpper(code)
+	}
+	if store, ok := asStringMap(session.SessionData["store"]); ok {
+		if code := strings.TrimSpace(asString(store["currency"])); code != "" {
+			return strings.ToUpper(code)
+		}
+	}
+	return "INR"
+}
+
+func stashSessionCurrency(session *models.ChatbotSession, currency string) {
+	if session == nil {
+		return
+	}
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
+	code := strings.ToUpper(strings.TrimSpace(currency))
+	if code == "" {
+		code = "INR"
+	}
+	session.SessionData["currency"] = code
+	session.SessionData["currency_symbol"] = currencySymbol(code)
 }
 
 // IsAddToCartButton reports whether a WhatsApp interactive button id is an add-to-cart action.
@@ -389,7 +455,7 @@ func formatCartSummary(session *models.ChatbotSession) string {
 			qty = 1
 		}
 		price := cartLinePrice(meta)
-		fmt.Fprintf(&b, "- %s (product_option id: %d) x%d — %s each\n", name, optID, qty, formatPriceINR(price))
+		fmt.Fprintf(&b, "- %s (product_option id: %d) x%d — %s\n", name, optID, qty, formatMoney(price*float64(qty), sessionCurrencyCode(session)))
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -427,10 +493,14 @@ func stashProductOffer(session *models.ChatbotSession, product *WhatsAppProduct,
 }
 
 func enrichProductDescription(product *WhatsAppProduct, summary ticker.ProductSummary) {
+	enrichProductDescriptionWithCurrency(product, summary, "INR")
+}
+
+func enrichProductDescriptionWithCurrency(product *WhatsAppProduct, summary ticker.ProductSummary, currency string) {
 	if product == nil || summary.MinPrice <= 0 {
 		return
 	}
-	startsAt := "Starts at " + formatPriceINR(summary.MinPrice)
+	startsAt := "Starts at " + formatMoney(summary.MinPrice, currency)
 	if strings.Contains(strings.ToLower(product.ProductDescription), "starts at") {
 		return
 	}
@@ -513,7 +583,7 @@ func (a *App) sendAIResponse(account *models.WhatsAppAccount, contact *models.Co
 				a.Log.Warn("Skipping product card with zero options", "product_id", seg.Product.ProductID())
 				continue
 			}
-			enrichProductDescription(seg.Product, summary)
+			enrichProductDescriptionWithCurrency(seg.Product, summary, sessionCurrencyCode(session))
 			seg.Product.ImageURL = a.resolveProductCardImage(ctx, account, session, seg.Product, summary.ImageURL)
 			stashProductOffer(session, seg.Product, &summary)
 			sessionDirty = true
@@ -870,8 +940,9 @@ func (a *App) sendOptionPicker(account *models.WhatsAppAccount, contact *models.
 	var b strings.Builder
 	fmt.Fprintf(&b, "Choose an option for %s:\n", product.Name)
 	buttons := make([]map[string]any, 0, len(product.Options))
+	currency := sessionCurrencyCode(session)
 	for _, opt := range product.Options {
-		fmt.Fprintf(&b, "%s — %s\n", opt.Name, formatPriceINR(opt.Price))
+		fmt.Fprintf(&b, "%s — %s\n", opt.Name, formatMoney(opt.Price, currency))
 		buttons = append(buttons, map[string]any{
 			"id":    fmt.Sprintf("%s%d", addOptionPrefix, opt.ID),
 			"title": truncateRunes(opt.Name, 20),

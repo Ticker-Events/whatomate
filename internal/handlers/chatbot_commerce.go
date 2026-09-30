@@ -33,7 +33,8 @@ CRITICAL — live catalog/orders:
 - Static FAQ/context is secondary; tool results are the source of truth for products and orders.
 
 Prices:
-- Tool results already convert MCP amounts from paise to rupees. Quote every price/amount as ₹X.XX (Indian Rupees). Never show raw paise or divide again.
+- All catalog/order money fields from the store API are in minor units (paise for INR, cents for USD, etc.). Tools convert them to major units by dividing by 100 before you see them.
+- Quote every price using the store currency from get_store.currency (for example ₹ for INR, $ for USD). Never invent a currency, never show raw minor units, and never divide again.
 
 Memory — use the conversation history:
 - Remember product_option id, quantity, email, phone, and delivery mode already provided. Do NOT re-ask for details the user already gave.
@@ -45,7 +46,7 @@ Memory — use the conversation history:
 - Only ask for the next missing field needed to place the order.
 
 Tools:
-- get_store: fetch the store name, description, address, free_delivery_radius, and delivery_radius (use for welcome / about-the-store / out-of-range delivery replies).
+- get_store: fetch the store name, description, address, currency, free_delivery_radius, and delivery_radius (use for welcome / about-the-store / out-of-range delivery replies).
 - list_categories: list product collections/categories for the store.
 - search_products: find products by query (or list items with an empty/broad query). Results include image_url when available — use that exact URL in whatsapp_product cards. When recommending products to the user, show at most 5 (top matches only).
 - get_product: fetch full details for a product id (includes image_url / images).
@@ -117,6 +118,8 @@ type commerceRuntime struct {
 	Client      commerceBackend
 	StoreID     string
 	PhoneNumber string
+	Currency    string
+	Session     *models.ChatbotSession
 }
 
 func (rt *commerceRuntime) Close() {
@@ -125,6 +128,33 @@ func (rt *commerceRuntime) Close() {
 	}
 	if closer, ok := rt.Client.(interface{ Close() error }); ok {
 		_ = closer.Close()
+	}
+}
+
+func (rt *commerceRuntime) currencyCode() string {
+	if rt == nil {
+		return "INR"
+	}
+	if code := strings.ToUpper(strings.TrimSpace(rt.Currency)); code != "" {
+		return code
+	}
+	if rt.Session != nil {
+		return sessionCurrencyCode(rt.Session)
+	}
+	return "INR"
+}
+
+func (rt *commerceRuntime) setCurrency(code string) {
+	if rt == nil {
+		return
+	}
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if code == "" {
+		code = "INR"
+	}
+	rt.Currency = code
+	if rt.Session != nil {
+		stashSessionCurrency(rt.Session, code)
 	}
 }
 
@@ -144,11 +174,18 @@ func (a *App) newCommerceRuntime(settings *models.ChatbotSettings, session *mode
 	}
 	// Dedicated MCP HTTP client: admin-configured first-party endpoint.
 	// App.HTTPClient uses SSRFSafeDialer which blocks loopback/private IPs.
-	return &commerceRuntime{
+	rt := &commerceRuntime{
 		Client:      tickermcp.NewClient(settings.AI.CommerceMCPURL, settings.AI.CommerceMCPAPIKey, nil),
 		StoreID:     strings.TrimSpace(settings.AI.CommerceStoreID),
 		PhoneNumber: phone,
+		Session:     session,
 	}
+	if session != nil && session.SessionData != nil {
+		if code := strings.TrimSpace(asString(session.SessionData["currency"])); code != "" {
+			rt.Currency = strings.ToUpper(code)
+		}
+	}
+	return rt
 }
 
 func buildCommerceSystemPrompt(base, contextData string) string {
@@ -170,7 +207,7 @@ func commerceToolDefs() []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        "get_store",
-				"description": "Get the configured store's name, description, address, free_delivery_radius (km), and delivery_radius (km). Call before writing a welcome, about-the-store, or out-of-range delivery reply.",
+				"description": "Get the configured store's name, description, address, currency (ISO code, e.g. INR/USD), free_delivery_radius (km), and delivery_radius (km). Call before writing a welcome, about-the-store, or out-of-range delivery reply.",
 				"parameters": map[string]any{
 					"type":       "object",
 					"properties": map[string]any{},
@@ -192,7 +229,7 @@ func commerceToolDefs() []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        "search_products",
-				"description": "Search or list products for the configured store. Prices in the result are in INR (rupees), already converted from paise.",
+				"description": "Search or list products for the configured store. Prices in the result are in major currency units (already converted from paise/cents by dividing by 100). currency is the store ISO code.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -212,7 +249,7 @@ func commerceToolDefs() []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        "get_product",
-				"description": "Get full details for a product by numeric id. Prices in the result are in INR (rupees).",
+				"description": "Get full details for a product by numeric id. Prices in the result are in major currency units (already converted from paise/cents). currency is the store ISO code.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -411,6 +448,9 @@ func (a *App) toolGetStore(ctx context.Context, rt *commerceRuntime) (any, error
 	if err != nil {
 		return nil, err
 	}
+	if store != nil {
+		rt.setCurrency(asString(store["currency"]))
+	}
 	return store, nil
 }
 
@@ -443,10 +483,10 @@ func (a *App) toolSearchProducts(ctx context.Context, rt *commerceRuntime, argsJ
 	}
 
 	// Object wrapper: Gemini functionResponse.response must be a JSON object, not an array.
-	// Prices are already converted from paise to rupees by the ticker client.
+	// Prices are already converted from minor units (paise/cents) to major units.
 	return map[string]any{
 		"count":    len(products),
-		"currency": "INR",
+		"currency": ensureCommerceCurrency(ctx, rt),
 		"products": products,
 	}, nil
 }
@@ -616,7 +656,22 @@ func (a *App) toolGetProduct(ctx context.Context, rt *commerceRuntime, argsJSON 
 	if err != nil {
 		return nil, err
 	}
-	return convertProductMoneyToRupees(raw), nil
+	return convertProductMoneyFromMinor(raw, ensureCommerceCurrency(ctx, rt)), nil
+}
+
+func ensureCommerceCurrency(ctx context.Context, rt *commerceRuntime) string {
+	if rt == nil {
+		return "INR"
+	}
+	if code := strings.ToUpper(strings.TrimSpace(rt.Currency)); code != "" {
+		return code
+	}
+	if rt.Client != nil && strings.TrimSpace(rt.StoreID) != "" {
+		if store, err := rt.Client.GetStore(ctx, rt.StoreID); err == nil && store != nil {
+			rt.setCurrency(asString(store["currency"]))
+		}
+	}
+	return rt.currencyCode()
 }
 
 func (a *App) toolGetOrderStatus(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
@@ -636,7 +691,7 @@ func (a *App) toolGetOrderStatus(ctx context.Context, rt *commerceRuntime, argsJ
 	if err != nil {
 		return nil, err
 	}
-	return compactOrderStatus(raw), nil
+	return compactOrderStatus(raw, ensureCommerceCurrency(ctx, rt)), nil
 }
 
 func (a *App) toolCheckDeliveryEligibility(ctx context.Context, rt *commerceRuntime, argsJSON string) (any, error) {
@@ -661,6 +716,8 @@ func (a *App) toolCheckDeliveryEligibility(ctx context.Context, rt *commerceRunt
 	if fee, ok := result["shipping_fee_paise"]; ok {
 		out["shipping_fee"] = ticker.PaiseToRupees(asToolFloat(fee))
 	}
+	// Prefer already-known store currency; do not fetch get_store here.
+	out["currency"] = rt.currencyCode()
 	if deliveryEligibilityNeedsOutOfRangeCopy(out) {
 		store, storeErr := rt.Client.GetStore(ctx, rt.StoreID)
 		if storeErr != nil {
@@ -874,15 +931,22 @@ func placeCommerceOrder(ctx context.Context, rt *commerceRuntime, args createOrd
 	if err != nil {
 		return nil, err
 	}
-	return compactOrderCreateResult(raw), nil
+	return compactOrderCreateResult(raw, ensureCommerceCurrency(ctx, rt)), nil
 }
 
-func compactOrderStatus(raw map[string]any) map[string]any {
+func compactOrderStatus(raw map[string]any, currency string) map[string]any {
+	code := strings.ToUpper(strings.TrimSpace(currency))
+	if code == "" {
+		code = strings.ToUpper(strings.TrimSpace(asString(raw["currency"])))
+	}
+	if code == "" {
+		code = "INR"
+	}
 	out := map[string]any{
 		"display_uid": raw["display_uid"],
 		"status":      raw["status"],
 		"amount":      ticker.PaiseToRupees(asToolFloat(raw["amount"])),
-		"currency":    "INR",
+		"currency":    code,
 	}
 	if payment, ok := raw["payment"].(map[string]any); ok {
 		out["payment_status"] = payment["status"]
@@ -896,8 +960,8 @@ func compactOrderStatus(raw map[string]any) map[string]any {
 	return out
 }
 
-func compactOrderCreateResult(raw map[string]any) map[string]any {
-	out := compactOrderStatus(raw)
+func compactOrderCreateResult(raw map[string]any, currency string) map[string]any {
+	out := compactOrderStatus(raw, currency)
 	// Keep uuid for durable draft completion / payment retry. System prompt
 	// already forbids sharing uuid with the customer.
 	if u := strings.TrimSpace(asString(raw["uuid"])); u != "" {
@@ -938,8 +1002,9 @@ func anyIDString(v any) string {
 	}
 }
 
-// convertProductMoneyToRupees copies a product payload and converts paise money fields to rupees.
-func convertProductMoneyToRupees(raw map[string]any) map[string]any {
+// convertProductMoneyFromMinor copies a product payload and converts minor-unit
+// money fields (paise/cents) to major units. currency is the ISO store code.
+func convertProductMoneyFromMinor(raw map[string]any, currency string) map[string]any {
 	if raw == nil {
 		return nil
 	}
@@ -973,11 +1038,20 @@ func convertProductMoneyToRupees(raw map[string]any) map[string]any {
 		}
 		out["options"] = converted
 	}
-	out["currency"] = "INR"
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" {
+		currency = "INR"
+	}
+	out["currency"] = currency
 	if img := ticker.ExtractProductImageURL(out); img != "" {
 		out["image_url"] = img
 	}
 	return out
+}
+
+// convertProductMoneyToRupees is kept for older call sites; prefer convertProductMoneyFromMinor.
+func convertProductMoneyToRupees(raw map[string]any) map[string]any {
+	return convertProductMoneyFromMinor(raw, "INR")
 }
 
 func asToolFloat(v any) float64 {

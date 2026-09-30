@@ -16,6 +16,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestFormatMoney(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "₹10.50", formatMoney(10.5, "INR"))
+	assert.Equal(t, "$10.50", formatMoney(10.5, "USD"))
+	assert.Equal(t, "€10.50", formatMoney(10.5, "EUR"))
+	assert.Equal(t, "AED 10.50", formatMoney(10.5, "AED"))
+	assert.Equal(t, "₹", currencySymbol("INR"))
+	assert.Equal(t, "$", currencySymbol("USD"))
+}
+
 func TestIsWhatsAppHeaderImageURL(t *testing.T) {
 	assert.True(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.jpg"))
 	assert.True(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.PNG?x=1"))
@@ -441,8 +451,8 @@ func TestFormatAddToCartAck(t *testing.T) {
 	msg := formatAddToCartAck(session, "Varalakshmi Jhumka", 1)
 	assert.Contains(t, msg, "Added 1 × Varalakshmi Jhumka to your cart.")
 	assert.Contains(t, msg, "*Your cart:*")
-	assert.Contains(t, msg, "*Varalakshmi Jhumka* x1 — ₹250.00 each")
-	assert.Contains(t, msg, "*Large* x2 — ₹100.00 each (₹200.00)")
+	assert.Contains(t, msg, "1. *Varalakshmi Jhumka* x1 — ₹250.00")
+	assert.Contains(t, msg, "2. *Large* x2 — ₹200.00")
 	assert.Contains(t, msg, "*Subtotal:*")
 	assert.Contains(t, msg, "remove <name>")
 	assert.Contains(t, msg, "Checkout")

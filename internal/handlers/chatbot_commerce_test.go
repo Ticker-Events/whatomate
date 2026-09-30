@@ -328,8 +328,9 @@ func TestBuildCommerceSystemPrompt(t *testing.T) {
 	assert.Contains(t, p, "confirmed=true")
 	assert.Contains(t, p, "display_uid")
 	assert.Contains(t, p, "get_order_status")
-	assert.Contains(t, p, "Never ask for or mention internal uuid")
-	assert.Contains(t, p, "₹")
+	assert.Contains(t, p, "get_store.currency")
+	assert.Contains(t, p, "minor units")
+	assert.Contains(t, p, "dividing by 100")
 	assert.Contains(t, p, "get_store.address")
 	assert.Contains(t, p, "out_of_range")
 	assert.Contains(t, p, "confirmed the full cart")
@@ -350,7 +351,7 @@ func TestCompactOrderCreateResultUsesDisplayUIDAndPaymentURL(t *testing.T) {
 				"url_to_redirect": "https://pay.example/go",
 			},
 		},
-	})
+	}, "INR")
 	assert.Equal(t, "AB-260710-000042", out["display_uid"])
 	assert.Equal(t, 250.5, out["amount"])
 	assert.Equal(t, "https://pay.example/go", out["payment_url"])

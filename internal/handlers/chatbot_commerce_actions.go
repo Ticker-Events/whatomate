@@ -263,7 +263,7 @@ func (a *App) browseCommerceCategory(account *models.WhatsAppAccount, contact *m
 		card := &WhatsAppProduct{
 			ImageURL:           product.ImageURL,
 			ProductTitle:       truncateRunes(product.Name, 20),
-			ProductDescription: "Starts at " + formatPriceINR(product.MinPrice),
+			ProductDescription: "Starts at " + formatMoney(product.MinPrice, sessionCurrencyCode(session)),
 			ButtonID:           addToCartPrefix + strconv.Itoa(product.ID),
 		}
 		stashProductOffer(session, card, &product)
@@ -321,7 +321,7 @@ func (a *App) sendLatestCommerceOrderStatus(account *models.WhatsAppAccount, con
 		_ = a.sendAndSaveTextMessage(account, contact, "I couldn’t find a recent order for this phone number.")
 		return
 	}
-	order := compactOrderStatus(raw)
+	order := compactOrderStatus(raw, ensureCommerceCurrency(ctx, rt))
 	body := formatDirectOrderStatus(order)
 	paymentURL := asString(order["payment_url"])
 	status := strings.ToUpper(asString(raw["status"]))

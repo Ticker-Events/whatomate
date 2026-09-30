@@ -160,9 +160,10 @@ func TestTiqrCartUpsertAndUnitCount(t *testing.T) {
 	assert.Equal(t, 1, cartLen(c))
 
 	summary := formatTiqrCartSummary(c)
-	assert.Contains(t, summary, "*Kunafa* x5")
-	assert.Contains(t, summary, "₹40.00 each")
-	assert.Contains(t, summary, "*Subtotal:*")
+	assert.Contains(t, summary, "1. *Kunafa* x5")
+	assert.Contains(t, summary, "₹200.00")
+	assert.NotContains(t, summary, "each")
+	assert.Contains(t, summary, "*Subtotal:* ₹200.00")
 
 	ok, name := removeTiqrCartLine(c, "9")
 	require.True(t, ok)
@@ -183,6 +184,76 @@ func TestTiqrCartSetQty(t *testing.T) {
 	assert.Equal(t, 4, cartUnitCount(c))
 	assert.False(t, setTiqrCartLineQty(c, "9", 0))
 	assert.Equal(t, 4, cartUnitCount(c))
+}
+
+func TestParseTiqrCartEdit(t *testing.T) {
+	t.Parallel()
+	lines := []tiqrCartLine{
+		{OptionID: "9", Name: "Kunafa", Qty: 2},
+		{OptionID: "8", Name: "Chocolate Large", Qty: 1},
+	}
+
+	got := parseTiqrCartEdit("remove item 1", lines)
+	assert.Equal(t, "remove", got.Action)
+	assert.Equal(t, 1, got.Index)
+	assert.False(t, got.Incomplete)
+
+	got = parseTiqrCartEdit("remove Kunafa", lines)
+	assert.Equal(t, "remove", got.Action)
+	assert.Equal(t, 1, got.Index)
+
+	got = parseTiqrCartEdit("change item 2 to 1", lines)
+	assert.Equal(t, "set_qty", got.Action)
+	assert.Equal(t, 2, got.Index)
+	assert.Equal(t, 1, got.Qty)
+
+	got = parseTiqrCartEdit("reduce Chocolate to 1", lines)
+	assert.Equal(t, "set_qty", got.Action)
+	assert.Equal(t, 2, got.Index)
+	assert.Equal(t, 1, got.Qty)
+
+	got = parseTiqrCartEdit("Chocolate Large to 3", lines)
+	assert.Equal(t, "set_qty", got.Action)
+	assert.Equal(t, 2, got.Index)
+	assert.Equal(t, 3, got.Qty)
+
+	got = parseTiqrCartEdit("remove", lines)
+	assert.Equal(t, "remove", got.Action)
+	assert.True(t, got.Incomplete)
+
+	got = parseTiqrCartEdit("Kunafa", lines)
+	assert.Equal(t, 1, got.Index)
+	assert.True(t, got.Incomplete)
+	assert.Empty(t, got.Action)
+}
+
+func TestParseTiqrCartEdit_AmbiguousName(t *testing.T) {
+	t.Parallel()
+	lines := []tiqrCartLine{
+		{OptionID: "1", Name: "Chocolate Small", Qty: 1},
+		{OptionID: "2", Name: "Chocolate Large", Qty: 1},
+	}
+	got := parseTiqrCartEdit("remove Chocolate", lines)
+	assert.Equal(t, "remove", got.Action)
+	assert.True(t, got.Ambiguous)
+	assert.True(t, got.Incomplete)
+}
+
+func TestFormatTiqrCartSummaryNumbered(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		"tiqr_cart": []any{
+			map[string]any{"product_option": "9", "quantity": "2", "option_name": "Kunafa", "price": 40.0},
+			map[string]any{"product_option": "8", "quantity": "1", "option_name": "Chocolate", "price": 50.0},
+		},
+	}}
+	c := &Conv{chat: &chatNodeCtx{session: session}}
+	summary := formatTiqrCartSummary(c)
+	assert.Contains(t, summary, "1. *Kunafa* x2 — ₹80.00")
+	assert.Contains(t, summary, "2. *Chocolate* x1 — ₹50.00")
+	assert.Contains(t, summary, "*Subtotal:* ₹130.00")
+	assert.NotContains(t, summary, "each")
+	assert.Less(t, strings.Index(summary, "1. *Kunafa*"), strings.Index(summary, "2. *Chocolate*"))
 }
 
 func useStoreREST(t *testing.T, srv *httptest.Server) {
@@ -398,7 +469,7 @@ func TestSingleProductCTA_Config(t *testing.T) {
 	assert.Equal(t, "{{products[0].images[0].original_url}}", prompt.HeaderImage)
 	assert.Equal(t, "Add to cart", prompt.Title)
 	assert.Equal(t, "product_selected", prompt.StoreAs)
-	assert.Equal(t, "{{name}} (₹{{min_price}})", prompt.BodyField)
+	assert.Equal(t, "{{name}} ({{currency_symbol}}{{min_price}})", prompt.BodyField)
 	assert.Equal(t, tiqrEcommerceFallbackMedia, prompt.FallbackMedia)
 
 	c := &Conv{chat: &chatNodeCtx{session: &models.ChatbotSession{
@@ -943,13 +1014,13 @@ func TestBuildIntentPrompt_IncludesStepContext(t *testing.T) {
 	assert.Contains(t, prompt, `"reasoning":""`)
 }
 
-func TestLimitWords_CapsAtOneHundred(t *testing.T) {
-	words := make([]string, 120)
+func TestLimitWords_CapsAtLimit(t *testing.T) {
+	words := make([]string, 220)
 	for i := range words {
 		words[i] = "word"
 	}
 	got := limitWords(strings.Join(words, " "), 200)
-	assert.Equal(t, 100, len(strings.Fields(got)))
+	assert.Equal(t, 200, len(strings.Fields(got)))
 	assert.Equal(t, "keep this", limitWords("  keep   this  ", 100))
 }
 

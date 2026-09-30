@@ -102,7 +102,7 @@ func defaultLookupLatestOrder(a *App, account *models.WhatsAppAccount, session *
 	if err != nil {
 		return nil, err
 	}
-	return compactOrderStatus(raw), nil
+	return compactOrderStatus(raw, ensureCommerceCurrency(ctx, rt)), nil
 }
 
 func codedAISettings(a *App, session *models.ChatbotSession) (*models.ChatbotSettings, bool) {

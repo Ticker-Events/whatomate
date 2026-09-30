@@ -510,7 +510,7 @@ func (a *App) beginAddonStep(account *models.WhatsAppAccount, contact *models.Co
 		a.promptFreeTextAddonsOrContinue(account, contact, session, settings, st)
 		return
 	}
-	a.promptStructuredAddons(account, contact, st)
+	a.promptStructuredAddons(account, contact, session, st)
 }
 
 func (a *App) loadProductAddonChoices(session *models.ChatbotSession, settings *models.ChatbotSettings, productID string) []map[string]any {
@@ -578,14 +578,15 @@ func normalizeAddonChoice(item map[string]any) map[string]any {
 	}
 }
 
-func (a *App) promptStructuredAddons(account *models.WhatsAppAccount, contact *models.Contact, st *checkoutState) {
+func (a *App) promptStructuredAddons(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, st *checkoutState) {
 	var b strings.Builder
 	b.WriteString("Would you like any add-ons?\n")
+	currency := sessionCurrencyCode(session)
 	for i, choice := range st.AddonChoices {
 		fmt.Fprintf(&b, "%d. %s", i+1, asString(choice["name"]))
 		if paise := anyToInt(choice["price"]); paise > 0 {
 			b.WriteString(" — ")
-			b.WriteString(formatPriceINR(ticker.PaiseToRupees(float64(paise))))
+			b.WriteString(formatMoney(ticker.PaiseToRupees(float64(paise)), currency))
 		}
 		b.WriteByte('\n')
 	}
@@ -667,7 +668,7 @@ func (a *App) handleCheckoutAddonText(account *models.WhatsAppAccount, contact *
 			}
 		}
 		_ = a.sendAndSaveTextMessage(account, contact, "Please reply with a listed number, or tap Skip.")
-		a.promptStructuredAddons(account, contact, st)
+		a.promptStructuredAddons(account, contact, session, st)
 		return true
 	}
 	// Free-text themed extras → notes.
@@ -1493,7 +1494,7 @@ func (a *App) handleCheckoutLocationPin(account *models.WhatsAppAccount, contact
 	if zone == "free" || feePaise == 0 {
 		ack = "Great news — delivery is free to that location."
 	} else if feePaise > 0 {
-		ack = fmt.Sprintf("We can deliver there. Delivery fee: %s.", formatPriceINR(ticker.PaiseToRupees(float64(feePaise))))
+		ack = fmt.Sprintf("We can deliver there. Delivery fee: %s.", formatMoney(ticker.PaiseToRupees(float64(feePaise)), sessionCurrencyCode(session)))
 	}
 	_ = a.sendAndSaveTextMessage(account, contact, ack)
 	a.promptCheckoutAddress(account, contact, session, settings, st)
@@ -1702,7 +1703,7 @@ func (a *App) repromptCheckoutStep(account *models.WhatsAppAccount, contact *mod
 		}
 	case "addons":
 		if len(st.AddonChoices) > 0 {
-			a.promptStructuredAddons(account, contact, st)
+			a.promptStructuredAddons(account, contact, session, st)
 		} else {
 			_ = a.sendAndSaveInteractiveButtons(account, contact,
 				"Any add-ons? Reply with details, or tap Skip.",
@@ -2383,6 +2384,12 @@ func paymentCTAContent(result map[string]any) (string, string) {
 
 func formatOrderSuccessMessage(result map[string]any) string {
 	var b strings.Builder
+	currency := "INR"
+	if result != nil {
+		if code := strings.ToUpper(strings.TrimSpace(asString(result["currency"]))); code != "" {
+			currency = code
+		}
+	}
 	displayUID, _ := result["display_uid"].(string)
 	if displayUID != "" {
 		fmt.Fprintf(&b, "Order placed! Your order number is %s.", displayUID)
@@ -2391,13 +2398,13 @@ func formatOrderSuccessMessage(result map[string]any) string {
 	}
 	if fee, ok := anyToFloat64(result["shipping_fee"]); ok {
 		if fee > 0 {
-			fmt.Fprintf(&b, "\nDelivery fee: %s", formatPriceINR(fee))
+			fmt.Fprintf(&b, "\nDelivery fee: %s", formatMoney(fee, currency))
 		} else {
 			b.WriteString("\nDelivery fee: Free")
 		}
 	}
 	if amount, ok := result["amount"].(float64); ok && amount > 0 {
-		fmt.Fprintf(&b, "\nTotal: %s", formatPriceINR(amount))
+		fmt.Fprintf(&b, "\nTotal: %s", formatMoney(amount, currency))
 	}
 	if url, _ := result["payment_url"].(string); url != "" {
 		fmt.Fprintf(&b, "\nPay here: %s", url)
@@ -2425,7 +2432,8 @@ func formatCheckoutCartSummary(session *models.ChatbotSession) string {
 	var b strings.Builder
 	b.WriteString("*Your cart:*\n")
 	var total float64
-	for _, key := range keys {
+	currency := sessionCurrencyCode(session)
+	for i, key := range keys {
 		line := cart[key]
 		meta, _ := line["product"].(map[string]any)
 		name := cartLineOptionName(meta)
@@ -2436,15 +2444,9 @@ func formatCheckoutCartSummary(session *models.ChatbotSession) string {
 		price := cartLinePrice(meta)
 		lineTotal := price * float64(qty)
 		total += lineTotal
-		// Match the commerce Current Cart style (name xqty — unit price each),
-		// then show the line total so multi-qty rows stay clear.
-		fmt.Fprintf(&b, "- *%s* x%d — %s each", name, qty, formatPriceINR(price))
-		if qty > 1 {
-			fmt.Fprintf(&b, " (%s)", formatPriceINR(lineTotal))
-		}
-		b.WriteByte('\n')
+		fmt.Fprintf(&b, "%d. *%s* x%d — %s\n", i+1, name, qty, formatMoney(lineTotal, currency))
 	}
-	fmt.Fprintf(&b, "\n*Subtotal:* %s", formatPriceINR(total))
+	fmt.Fprintf(&b, "\n*Subtotal:* %s", formatMoney(total, currency))
 	return strings.TrimSpace(b.String())
 }
 
@@ -2481,10 +2483,10 @@ func formatOrderConfirmSummary(session *models.ChatbotSession, st *checkoutState
 		if st.DeliveryZone == "free" || st.ShippingFeePaise == 0 {
 			b.WriteString("Delivery fee: Free\n")
 		} else {
-			fmt.Fprintf(&b, "Delivery fee: %s\n", formatPriceINR(ticker.PaiseToRupees(float64(st.ShippingFeePaise))))
+			fmt.Fprintf(&b, "Delivery fee: %s\n", formatMoney(ticker.PaiseToRupees(float64(st.ShippingFeePaise)), sessionCurrencyCode(session)))
 		}
 		grand := cartSubtotal + ticker.PaiseToRupees(float64(st.ShippingFeePaise))
-		fmt.Fprintf(&b, "Estimated total: %s\n", formatPriceINR(grand))
+		fmt.Fprintf(&b, "Estimated total: %s\n", formatMoney(grand, sessionCurrencyCode(session)))
 	}
 	if st.RequestedAt != "" {
 		fmt.Fprintf(&b, "Requested time: %s\n", checkoutSlotLabel(st.RequestedAt))
