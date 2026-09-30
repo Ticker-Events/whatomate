@@ -186,7 +186,7 @@ func TestCreateOrderInjectsStoreID(t *testing.T) {
 				"uuid":        "ord-uuid-1",
 				"display_uid": "ST-260710-000001",
 				"status":      "PENDING_PAYMENT",
-				"amount":      10000, // paise → ₹100.00
+				"amount":      100.0, // major units (API client converts from paise)
 				"payment": map[string]any{
 					"status": "initiated",
 					"meta_data": map[string]any{
@@ -344,7 +344,7 @@ func TestCompactOrderCreateResultUsesDisplayUIDAndPaymentURL(t *testing.T) {
 		"uuid":        "secret-uuid",
 		"display_uid": "AB-260710-000042",
 		"status":      "PENDING_PAYMENT",
-		"amount":      25050, // paise
+		"amount":      250.5, // major units (already converted at API client)
 		"payment": map[string]any{
 			"status": "initiated",
 			"meta_data": map[string]any{
@@ -379,7 +379,7 @@ func TestGetOrderStatusLatestWithoutOrderID(t *testing.T) {
 			return map[string]any{
 				"display_uid": "ST-260710-000001",
 				"status":      "CONFIRMED",
-				"amount":      10000,
+				"amount":      100.0,
 			}, nil
 		},
 	}
@@ -388,6 +388,7 @@ func TestGetOrderStatusLatestWithoutOrderID(t *testing.T) {
 	out := app.executeCommerceTool(rt, "get_order_status", `{}`)
 	assert.Contains(t, out, `"display_uid":"ST-260710-000001"`)
 	assert.Contains(t, out, `"status":"CONFIRMED"`)
+	assert.Contains(t, out, `"amount":100`)
 }
 
 func TestGetOrderStatusWithOrderID(t *testing.T) {
@@ -397,7 +398,7 @@ func TestGetOrderStatusWithOrderID(t *testing.T) {
 			return map[string]any{
 				"display_uid": "ST-260710-000099",
 				"status":      "IN_TRANSIT",
-				"amount":      5000,
+				"amount":      50.0,
 			}, nil
 		},
 	}

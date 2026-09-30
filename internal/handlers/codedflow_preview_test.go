@@ -251,6 +251,7 @@ func TestPreviewCodedFlow_MockCreateOrderIsNotSent(t *testing.T) {
 	turn(codedPreviewInput{Text: "Kunafa", ButtonID: "101"})
 	turn(codedPreviewInput{Text: "1"})
 	turn(codedPreviewInput{Text: "Checkout", ButtonID: tiqrCheckout})
+	turn(codedPreviewInput{Text: "Confirm items", ButtonID: tiqrConfirmItems})
 	asked = turn(codedPreviewInput{FlowResponse: map[string]any{"customer_name": "Preview Customer"}})
 	require.Equal(t, "create_order", asked.MockOperation)
 	done := turn(codedPreviewInput{Mocks: map[string]any{
@@ -319,17 +320,14 @@ func TestPreviewCodedFlow_LiveCreateOrderIsSent(t *testing.T) {
 	turn(codedPreviewInput{SessionID: sessionID, Text: "Kunafa", ButtonID: "101"})
 	turn(codedPreviewInput{SessionID: sessionID, Text: "1"})
 	turn(codedPreviewInput{SessionID: sessionID, Text: "Checkout", ButtonID: tiqrCheckout})
+	turn(codedPreviewInput{SessionID: sessionID, Text: "Confirm items", ButtonID: tiqrConfirmItems})
 	done := turn(codedPreviewInput{
 		SessionID: sessionID,
 		FlowResponse: map[string]any{
-			"customer_name":    "Preview Customer",
-			"customer_phone":   "910000000000",
-			"customer_email":   "preview@example.com",
-			"address_line_one": "1 Preview Street",
-			"city":             "Bengaluru",
-			"state":            "KA",
-			"country":          "India",
-			"pincode":          "560001",
+			"customer_name":  "Preview Customer",
+			"customer_phone": "910000000000",
+			"customer_email": "preview@example.com",
+			"customer_notes": "Pickup note",
 		},
 	})
 
@@ -337,12 +335,14 @@ func TestPreviewCodedFlow_LiveCreateOrderIsSent(t *testing.T) {
 	assert.Contains(t, previewMessageText(done.Messages), "Your order is confirmed.")
 	assert.Equal(t, 1, orders)
 	assert.Equal(t, "preview@example.com", orderBody["email"])
-	address, ok := orderBody["new_address"].(map[string]any)
+	assert.Equal(t, "910000000000", orderBody["phone_number"])
+	assert.Equal(t, "Pickup note", orderBody["notes"])
+	assert.Equal(t, "PICKUP_FROM_STORE", orderBody["delivery_mode"])
+	_, hasAddress := orderBody["new_address"]
+	assert.False(t, hasAddress)
+	meta, ok := orderBody["buyer_meta_data"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "preview@example.com", address["email"])
-	assert.Equal(t, "910000000000", address["phone"])
-	assert.Equal(t, "Preview Customer", address["name"])
-	assert.Equal(t, "1 Preview Street", address["address_line_1"])
+	assert.Equal(t, "Preview Customer", meta["name"])
 
 	_, _, transfers := countRows(t, app, org.ID, account.Name)
 	assert.Zero(t, transfers)

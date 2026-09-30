@@ -42,8 +42,9 @@ flowchart TD
   skip --> next[Add more or Checkout]
   cart --> next
   next -->|Add more| list
-  next -->|Checkout and cart has lines| flow[WhatsApp Flow 1557965846018132]
-  flow --> create[create_order]
+  next -->|Checkout and cart has lines| flow[WhatsApp Flow by delivery mode]
+  flow -->|pickup 1484028330223507| create[create_order]
+  flow -->|delivery 1557965846018132| create
   create -->|success| done[Confirm, thanks, end]
   create -->|missing fields and retries left| fix[Ask each missing field]
   fix --> create
@@ -141,18 +142,24 @@ Then buttons `add_more` and `checkout`. Add more returns to the collection list.
 
 ### 6. Checkout
 
-`AskFlow` opens WhatsApp Flow id `1557965846018132`, button Enter details. The body says pickup or delivery based on `delivery_mode`. The flow id is a constant. It has to exist on the WhatsApp account under that Meta id.
+`AskFlow` opens a WhatsApp Flow by delivery mode, button Enter details. Both flow ids are constants and must exist on the WhatsApp account under those Meta ids.
+
+| `delivery_mode` | Meta flow id | Form fields | Body |
+| --- | --- | --- | --- |
+| `PICKUP_FROM_STORE` (or empty) | `1484028330223507` | `customer_name`, `customer_email`, `customer_phone`, `customer_notes` | Name, email, and phone. No address |
+| `DELIVERY_TO_LOCATION` | `1557965846018132` | Same contact fields plus address lines | Name, phone, and address |
 
 `pickupOrderParams` builds `create_order`:
 
 | Param | Source |
 | --- | --- |
 | `email` | `customer_email` or `email` if it matches a simple email. Phone fields are skipped. Other session values are scanned for an email |
+| `phone_number` | `customer_phone`, `phone`, or `phone_number` when present |
 | `items` | `tiqr_cart` lines reduced to `product_option` and `quantity`. The TiQR client turns those strings into integers |
 | `notes` | `customer_notes` or `notes` |
-| `new_address` | name, address lines, city, state, country, pincode, email, phone. Delivery also adds latitude and longitude to 6 decimal places |
+| `new_address` | Delivery only: name, address lines, city, state, country, pincode, email, phone, plus latitude and longitude to 6 decimal places. Omitted for pickup |
 | `delivery_mode` | session value, or `PICKUP_FROM_STORE` if empty |
-| `buyer_meta_data` | delivery only: latitude and longitude |
+| `buyer_meta_data` | Pickup: `{name}` when a customer name exists. Delivery: latitude and longitude |
 
 `shipping_fee_paise` is not sent.
 
@@ -284,7 +291,7 @@ Collection `AIInstructions` and required capture fields used by the commerce cha
 
 10. **Empty store data is a transfer, not a retry inside the session.** `get_store` or `list_collections` failure completes the session. A later keyword can start a new session and call TiQR again. Within one session those calls are not retried, because the flow has already ended.
 
-11. **Hardcoded Meta flow id and fallback image.** `tiqrEcommerceFlowID` is `1557965846018132`. The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
+11. **Hardcoded Meta flow ids and fallback image.** Pickup uses `tiqrEcommercePickupFlowID` (`1484028330223507`). Delivery uses `tiqrEcommerceFlowID` (`1557965846018132`). The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
 
 12. **Language is sticky.** The first non-empty intent language wins for the session. A later message in another language does not replace it, so translation keeps using the first label.
 

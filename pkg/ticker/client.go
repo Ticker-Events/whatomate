@@ -85,6 +85,7 @@ func (c *Client) SearchProducts(ctx context.Context, storeID, search string, lim
 
 	out := make([]ProductSummary, 0, len(page.Results))
 	for _, raw := range page.Results {
+		NormalizeProductMoney(raw)
 		out = append(out, CompactProduct(raw))
 	}
 	return out, nil
@@ -99,6 +100,7 @@ func (c *Client) GetProduct(ctx context.Context, productID string) (map[string]a
 	if err := c.getJSON(ctx, "/service/buyer/product/"+url.PathEscape(productID)+"/", &raw); err != nil {
 		return nil, err
 	}
+	NormalizeProductMoney(raw)
 	return raw, nil
 }
 
@@ -130,6 +132,7 @@ func (c *Client) CreateOrder(ctx context.Context, body CreateOrderRequest) (map[
 	if err := c.postJSON(ctx, "/service/buyer/order/", body, &raw); err != nil {
 		return nil, err
 	}
+	NormalizeOrderMoney(raw)
 	return raw, nil
 }
 
@@ -142,6 +145,7 @@ func (c *Client) GetOrder(ctx context.Context, orderUUID string) (map[string]any
 	if err := c.getJSON(ctx, "/service/buyer/order/"+url.PathEscape(orderUUID)+"/", &raw); err != nil {
 		return nil, err
 	}
+	NormalizeOrderMoney(raw)
 	return raw, nil
 }
 
@@ -209,7 +213,12 @@ func (c *Client) ListProductsPage(ctx context.Context, storeID string, params Li
 	if id := strings.TrimSpace(params.CategoryID); id != "" {
 		q.Set("category_id", id)
 	}
-	return c.getPageAs(ctx, "/service/buyer/product/?"+q.Encode(), "products", params.Limit, params.Offset)
+	page, err := c.getPageAs(ctx, "/service/buyer/product/?"+q.Encode(), "products", params.Limit, params.Offset)
+	if err != nil {
+		return nil, err
+	}
+	normalizePageProducts(page)
+	return page, nil
 }
 
 // ListProductOptions lists options optionally filtered by store and ids.
@@ -235,11 +244,16 @@ func (c *Client) ListProductOptions(ctx context.Context, storeID string, ids []i
 	}
 	switch t := raw.(type) {
 	case []any:
+		NormalizeProductListMoney(t)
 		return t, nil
 	case map[string]any:
 		if results, ok := t["results"]; ok {
+			if list, ok := results.([]any); ok {
+				NormalizeProductListMoney(list)
+			}
 			return results, nil
 		}
+		NormalizeProductMoney(t)
 		return t, nil
 	default:
 		return raw, nil
@@ -330,6 +344,22 @@ func (c *Client) getPageAs(ctx context.Context, path, listKey string, limit, off
 	return out, nil
 }
 
+func normalizePageProducts(page map[string]any) {
+	if page == nil {
+		return
+	}
+	for _, key := range []string{"products", "results"} {
+		switch list := page[key].(type) {
+		case []any:
+			NormalizeProductListMoney(list)
+		case []map[string]any:
+			for _, item := range list {
+				NormalizeProductMoney(item)
+			}
+		}
+	}
+}
+
 func (c *Client) getJSON(ctx context.Context, path string, dest any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
 	if err != nil {
@@ -402,11 +432,6 @@ func (c *Client) observeHTTP(req *http.Request, reqBody []byte, status int, resp
 	c.OnHTTP(req.Method, url, reqBody, status, respBody, err)
 }
 
-// PaiseToRupees converts ticker API money (integer paise) to rupees.
-func PaiseToRupees(paise float64) float64 {
-	return paise / 100
-}
-
 // ExtractProductImageURL returns the first HTTPS product image from a ticker
 // product payload. Prefers images[].original_url (JPEG/PNG source) over the
 // optimized display fields (images[].url / images[].image), which are often WebP.
@@ -440,15 +465,16 @@ func firstHTTPURL(m map[string]any, keys ...string) string {
 	return ""
 }
 
-// CompactProduct builds a tool-friendly product summary with prices in rupees.
+// CompactProduct builds a tool-friendly product summary.
+// Money fields on raw must already be in major units (NormalizeProductMoney).
 func CompactProduct(raw map[string]any) ProductSummary {
 	p := ProductSummary{
 		ID:                     asInt(raw["id"]),
 		Name:                   asString(raw["name"]),
 		Description:            asString(raw["description"]),
 		ImageURL:               ExtractProductImageURL(raw),
-		MinPrice:               PaiseToRupees(asFloat(raw["min_price"])),
-		MRP:                    PaiseToRupees(asFloat(raw["mrp"])),
+		MinPrice:               asFloat(raw["min_price"]),
+		MRP:                    asFloat(raw["mrp"]),
 		Type:                   asString(raw["type"]),
 		PreparationTimeMinutes: asInt(raw["preparation_time_minutes"]),
 	}
@@ -462,8 +488,8 @@ func CompactProduct(raw map[string]any) ProductSummary {
 			opt := ProductOption{
 				ID:          asInt(om["id"]),
 				Name:        asString(om["name"]),
-				Price:       PaiseToRupees(asFloat(om["price"])),
-				MRP:         PaiseToRupees(asFloat(om["mrp"])),
+				Price:       asFloat(om["price"]),
+				MRP:         asFloat(om["mrp"]),
 				StockStatus: asString(om["stock_status"]),
 			}
 			if aq, ok := om["available_quantity"]; ok && aq != nil {

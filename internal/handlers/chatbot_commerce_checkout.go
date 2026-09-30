@@ -584,9 +584,9 @@ func (a *App) promptStructuredAddons(account *models.WhatsAppAccount, contact *m
 	currency := sessionCurrencyCode(session)
 	for i, choice := range st.AddonChoices {
 		fmt.Fprintf(&b, "%d. %s", i+1, asString(choice["name"]))
-		if paise := anyToInt(choice["price"]); paise > 0 {
+		if price := asToolFloat(choice["price"]); price > 0 {
 			b.WriteString(" — ")
-			b.WriteString(formatMoney(ticker.PaiseToRupees(float64(paise)), currency))
+			b.WriteString(formatMoney(price, currency))
 		}
 		b.WriteByte('\n')
 	}

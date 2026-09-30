@@ -206,6 +206,7 @@ func (c *Client) ListProducts(ctx context.Context, storeID, search, categoryID s
 	}
 	out := make([]ticker.ProductSummary, 0, len(items))
 	for _, item := range items {
+		ticker.NormalizeProductMoney(item)
 		out = append(out, ticker.CompactProduct(item))
 	}
 	meta.Limit = defaultInt(meta.Limit, limit)
@@ -227,6 +228,7 @@ func (c *Client) GetProduct(ctx context.Context, productID string) (map[string]a
 	if !ok {
 		return nil, fmt.Errorf("unexpected get_product result type %T", raw)
 	}
+	ticker.NormalizeProductMoney(m)
 	return m, nil
 }
 
@@ -351,7 +353,26 @@ func (c *Client) ListProductOptions(ctx context.Context, storeID string, ids []i
 	if len(ids) > 0 {
 		args["ids"] = ids
 	}
-	return c.callTool(ctx, "list_product_options", args)
+	raw, err := c.callTool(ctx, "list_product_options", args)
+	if err != nil {
+		return nil, err
+	}
+	switch t := raw.(type) {
+	case []any:
+		ticker.NormalizeProductListMoney(t)
+		return t, nil
+	case map[string]any:
+		if list, ok := t["options"].([]any); ok {
+			ticker.NormalizeProductListMoney(list)
+		} else if list, ok := t["results"].([]any); ok {
+			ticker.NormalizeProductListMoney(list)
+		} else {
+			ticker.NormalizeProductMoney(t)
+		}
+		return t, nil
+	default:
+		return raw, nil
+	}
 }
 
 // CheckDeliveryEligibility maps to MCP check_delivery_eligibility.
@@ -372,6 +393,7 @@ func (c *Client) CheckDeliveryEligibility(ctx context.Context, storeID string, l
 	if !ok {
 		return nil, fmt.Errorf("unexpected check_delivery_eligibility result type %T", raw)
 	}
+	ticker.NormalizeDeliveryMoney(m)
 	return m, nil
 }
 
@@ -553,6 +575,7 @@ func (c *Client) LookupOrderStatus(ctx context.Context, storeID, phoneNumber, or
 	if !ok {
 		return nil, fmt.Errorf("unexpected lookup_order_status result type %T", raw)
 	}
+	ticker.NormalizeOrderMoney(m)
 	return m, nil
 }
 
@@ -570,6 +593,7 @@ func (c *Client) GetOrder(ctx context.Context, orderUUID string) (map[string]any
 	if !ok {
 		return nil, fmt.Errorf("unexpected get_order result type %T", raw)
 	}
+	ticker.NormalizeOrderMoney(m)
 	return m, nil
 }
 
@@ -611,6 +635,7 @@ func (c *Client) CreateOrder(ctx context.Context, body ticker.CreateOrderRequest
 	if !ok {
 		return nil, fmt.Errorf("unexpected create_order result type %T", raw)
 	}
+	ticker.NormalizeOrderMoney(m)
 	return m, nil
 }
 

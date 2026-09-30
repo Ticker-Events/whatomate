@@ -52,7 +52,7 @@ func TestPlaceCommerceOrder(t *testing.T) {
 		createFn: func(ctx context.Context, body ticker.CreateOrderRequest) (map[string]any, error) {
 			return map[string]any{
 				"display_uid": "ORD-1",
-				"amount":      5000,
+				"amount":      50.0,
 			}, nil
 		},
 	}
@@ -65,6 +65,7 @@ func TestPlaceCommerceOrder(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "ORD-1", result["display_uid"])
+	assert.Equal(t, 50.0, result["amount"])
 	assert.Equal(t, 10, stub.lastCreate.Items[0].ProductOption)
 	assert.Equal(t, 2, stub.lastCreate.Items[0].Quantity)
 }
@@ -639,7 +640,7 @@ func TestCheckoutStateRoundTripIncludesFlowAndAddons(t *testing.T) {
 		Step:             "addons",
 		Flow:             checkoutFlowPostCart,
 		PendingProductID: "99",
-		AddonChoices:     []map[string]any{{"id": 5, "name": "Candle", "price": 5000}},
+		AddonChoices:     []map[string]any{{"id": 5, "name": "Candle", "price": 50.0}},
 		CaptureFields:    []map[string]any{{"key": "writing_on_cake", "label": "Writing"}},
 		CaptureIndex:     0,
 	})
@@ -686,7 +687,7 @@ func TestApplyCheckoutSlotPersistsTokenBeforeAddress(t *testing.T) {
 func TestParseProductAddonChoices(t *testing.T) {
 	t.Parallel()
 	choices := parseProductAddonChoices([]any{
-		map[string]any{"id": 1, "name": "Candle", "price": 5000, "is_active": true},
+		map[string]any{"id": 1, "name": "Candle", "price": 50.0, "is_active": true},
 		map[string]any{"id": 2, "name": "Hidden", "is_active": false},
 		map[string]any{"name": "No ID"},
 	})

@@ -33,7 +33,7 @@ CRITICAL — live catalog/orders:
 - Static FAQ/context is secondary; tool results are the source of truth for products and orders.
 
 Prices:
-- All catalog/order money fields from the store API are in minor units (paise for INR, cents for USD, etc.). Tools convert them to major units by dividing by 100 before you see them.
+- All catalog/order money fields from the store API are in minor units (paise for INR, cents for USD, etc.). The store client converts them to major units exactly once when the API responds (dividing by 100). Tool results you see are already in major units.
 - Quote every price using the store currency from get_store.currency (for example ₹ for INR, $ for USD). Never invent a currency, never show raw minor units, and never divide again.
 
 Memory — use the conversation history:
@@ -229,7 +229,7 @@ func commerceToolDefs() []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        "search_products",
-				"description": "Search or list products for the configured store. Prices in the result are in major currency units (already converted from paise/cents by dividing by 100). currency is the store ISO code.",
+				"description": "Search or list products for the configured store. Prices in the result are in major currency units (converted once from paise/cents by the store client). currency is the store ISO code.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -249,7 +249,7 @@ func commerceToolDefs() []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        "get_product",
-				"description": "Get full details for a product by numeric id. Prices in the result are in major currency units (already converted from paise/cents). currency is the store ISO code.",
+				"description": "Get full details for a product by numeric id. Prices in the result are in major currency units (converted once from paise/cents by the store client). currency is the store ISO code.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -656,7 +656,7 @@ func (a *App) toolGetProduct(ctx context.Context, rt *commerceRuntime, argsJSON 
 	if err != nil {
 		return nil, err
 	}
-	return convertProductMoneyFromMinor(raw, ensureCommerceCurrency(ctx, rt)), nil
+	return attachProductCurrency(raw, ensureCommerceCurrency(ctx, rt)), nil
 }
 
 func ensureCommerceCurrency(ctx context.Context, rt *commerceRuntime) string {
@@ -713,10 +713,7 @@ func (a *App) toolCheckDeliveryEligibility(ctx context.Context, rt *commerceRunt
 	for k, v := range result {
 		out[k] = v
 	}
-	if fee, ok := result["shipping_fee_paise"]; ok {
-		out["shipping_fee"] = ticker.PaiseToRupees(asToolFloat(fee))
-	}
-	// Prefer already-known store currency; do not fetch get_store here.
+	// shipping_fee is already major units from the commerce client.
 	out["currency"] = rt.currencyCode()
 	if deliveryEligibilityNeedsOutOfRangeCopy(out) {
 		store, storeErr := rt.Client.GetStore(ctx, rt.StoreID)
@@ -945,7 +942,7 @@ func compactOrderStatus(raw map[string]any, currency string) map[string]any {
 	out := map[string]any{
 		"display_uid": raw["display_uid"],
 		"status":      raw["status"],
-		"amount":      ticker.PaiseToRupees(asToolFloat(raw["amount"])),
+		"amount":      asToolFloat(raw["amount"]), // already major units from client
 		"currency":    code,
 	}
 	if payment, ok := raw["payment"].(map[string]any); ok {
@@ -973,7 +970,7 @@ func compactOrderCreateResult(raw map[string]any, currency string) map[string]an
 		out["id"] = raw["id"]
 	}
 	if _, ok := raw["shipping_fee"]; ok {
-		out["shipping_fee"] = ticker.PaiseToRupees(asToolFloat(raw["shipping_fee"]))
+		out["shipping_fee"] = asToolFloat(raw["shipping_fee"]) // already major units from client
 	}
 	return out
 }
@@ -1002,41 +999,15 @@ func anyIDString(v any) string {
 	}
 }
 
-// convertProductMoneyFromMinor copies a product payload and converts minor-unit
-// money fields (paise/cents) to major units. currency is the ISO store code.
-func convertProductMoneyFromMinor(raw map[string]any, currency string) map[string]any {
+// attachProductCurrency adds store currency and image_url for tool results.
+// Money fields are already major units from the commerce client.
+func attachProductCurrency(raw map[string]any, currency string) map[string]any {
 	if raw == nil {
 		return nil
 	}
-	out := make(map[string]any, len(raw))
+	out := make(map[string]any, len(raw)+2)
 	for k, v := range raw {
 		out[k] = v
-	}
-	for _, key := range []string{"min_price", "mrp", "price", "amount"} {
-		if _, ok := out[key]; ok {
-			out[key] = ticker.PaiseToRupees(asToolFloat(out[key]))
-		}
-	}
-	if opts, ok := out["options"].([]any); ok {
-		converted := make([]any, 0, len(opts))
-		for _, o := range opts {
-			om, ok := o.(map[string]any)
-			if !ok {
-				converted = append(converted, o)
-				continue
-			}
-			opt := make(map[string]any, len(om))
-			for k, v := range om {
-				opt[k] = v
-			}
-			for _, key := range []string{"price", "mrp", "amount"} {
-				if _, ok := opt[key]; ok {
-					opt[key] = ticker.PaiseToRupees(asToolFloat(opt[key]))
-				}
-			}
-			converted = append(converted, opt)
-		}
-		out["options"] = converted
 	}
 	currency = strings.ToUpper(strings.TrimSpace(currency))
 	if currency == "" {
@@ -1047,11 +1018,6 @@ func convertProductMoneyFromMinor(raw map[string]any, currency string) map[strin
 		out["image_url"] = img
 	}
 	return out
-}
-
-// convertProductMoneyToRupees is kept for older call sites; prefer convertProductMoneyFromMinor.
-func convertProductMoneyToRupees(raw map[string]any) map[string]any {
-	return convertProductMoneyFromMinor(raw, "INR")
 }
 
 func asToolFloat(v any) float64 {

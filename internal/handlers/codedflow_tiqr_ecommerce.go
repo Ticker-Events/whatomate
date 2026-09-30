@@ -16,7 +16,8 @@ import (
 const (
 	tiqrEcommerceKey = "tiqr_ecommerce"
 
-	tiqrEcommerceFlowID = "1557965846018132"
+	tiqrEcommerceFlowID       = "1557965846018132"
+	tiqrEcommercePickupFlowID = "1484028330223507"
 
 	tiqrEcommerceFallbackMedia = "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/d592fabca6314ee5a749da835b40cf5a-589041f37b35417d8122b31a1b645eee-p.jpg"
 
@@ -693,7 +694,6 @@ func productsForRoute(c *Conv, route Route) ([]any, bool) {
 			return nil, false
 		}
 		c.session().SessionData["products"] = items
-		convertProductListMoneyFromPaise(items)
 		return items, true
 	case codedRouteChoice, codedRouteCollection:
 		id := strings.TrimSpace(route.ID)
@@ -713,40 +713,10 @@ func productsForRoute(c *Conv, route Route) ([]any, bool) {
 			}
 			return nil, false
 		}
-		convertProductListMoneyFromPaise(products)
 		return products, true
 	default:
 		_ = c.Transfer(codedAgentHandoff)
 		return nil, false
-	}
-}
-
-// convertProductListMoneyFromPaise converts catalog money fields from minor
-// units (paise/cents) to major units for WhatsApp display templates.
-func convertProductListMoneyFromPaise(products []any) {
-	for _, entry := range products {
-		item, ok := asStringMap(entry)
-		if !ok {
-			continue
-		}
-		for _, key := range []string{"min_price", "mrp", "price", "amount"} {
-			if _, exists := item[key]; exists {
-				item[key] = ticker.PaiseToRupees(asToolFloat(item[key]))
-			}
-		}
-		if opts, ok := anySlice(item["options"]); ok {
-			for _, optEntry := range opts {
-				opt, ok := asStringMap(optEntry)
-				if !ok {
-					continue
-				}
-				for _, key := range []string{"price", "mrp", "amount"} {
-					if _, exists := opt[key]; exists {
-						opt[key] = ticker.PaiseToRupees(asToolFloat(opt[key]))
-					}
-				}
-			}
-		}
 	}
 }
 
@@ -1338,38 +1308,14 @@ func listLen(c *Conv, key string) int {
 
 // pickupOrderParams maps the WhatsApp Flow session values onto create_order.
 // The email is the form's email field. Phone numbers are never used as the email.
+// Pickup omits new_address; delivery keeps address lines and the delivery pin.
 func pickupOrderParams(data map[string]any) map[string]string {
 	email := contextEmail(data)
 	phone := contextValue(data, "customer_phone", "phone", "phone_number")
+	name := contextValue(data, "customer_name", "name")
 	deliveryMode := strings.TrimSpace(asString(data["delivery_mode"]))
 	if deliveryMode == "" {
 		deliveryMode = tiqrModePickup
-	}
-	addressFields := map[string]string{
-		"name":           contextValue(data, "customer_name", "name"),
-		"address_line_1": contextValue(data, "address_line_one", "address_line_1"),
-		"address_line_2": contextValue(data, "address_line_two", "address_line_2"),
-		"city":           contextValue(data, "city"),
-		"state":          contextValue(data, "state"),
-		"country":        contextValue(data, "country"),
-		"pincode":        contextValue(data, "pincode"),
-		"email":          email,
-		"phone_number":   phone,
-		"phone":          phone,
-	}
-	// Location-based stores read the pin from new_address, not buyer_meta_data,
-	// whenever an address object is present.
-	if deliveryMode == tiqrModeDelivery {
-		if lat, ok := anyToFloat64(data["delivery_latitude"]); ok {
-			addressFields["latitude"] = formatOrderCoordinate(lat)
-		}
-		if lng, ok := anyToFloat64(data["delivery_longitude"]); ok {
-			addressFields["longitude"] = formatOrderCoordinate(lng)
-		}
-	}
-	address, err := json.Marshal(addressFields)
-	if err != nil {
-		address = []byte("{}")
 	}
 	items := "[]"
 	if cartItems := orderItemsForAPI(data["tiqr_cart"]); len(cartItems) > 0 {
@@ -1381,13 +1327,44 @@ func pickupOrderParams(data map[string]any) map[string]string {
 		"email":         email,
 		"items":         items,
 		"notes":         contextValue(data, "customer_notes", "notes"),
-		"new_address":   string(address),
 		"delivery_mode": deliveryMode,
 	}
+	if phone != "" {
+		params["phone_number"] = phone
+	}
 	if deliveryMode == tiqrModeDelivery {
+		addressFields := map[string]string{
+			"name":           name,
+			"address_line_1": contextValue(data, "address_line_one", "address_line_1"),
+			"address_line_2": contextValue(data, "address_line_two", "address_line_2"),
+			"city":           contextValue(data, "city"),
+			"state":          contextValue(data, "state"),
+			"country":        contextValue(data, "country"),
+			"pincode":        contextValue(data, "pincode"),
+			"email":          email,
+			"phone_number":   phone,
+			"phone":          phone,
+		}
+		// Location-based stores read the pin from new_address, not buyer_meta_data,
+		// whenever an address object is present.
+		if lat, ok := anyToFloat64(data["delivery_latitude"]); ok {
+			addressFields["latitude"] = formatOrderCoordinate(lat)
+		}
+		if lng, ok := anyToFloat64(data["delivery_longitude"]); ok {
+			addressFields["longitude"] = formatOrderCoordinate(lng)
+		}
+		address, err := json.Marshal(addressFields)
+		if err != nil {
+			address = []byte("{}")
+		}
+		params["new_address"] = string(address)
 		if meta, ok := codedBuyerMetaJSON(data); ok {
 			params["buyer_meta_data"] = meta
 		}
+		return params
+	}
+	if meta, ok := codedPickupBuyerMetaJSON(name); ok {
+		params["buyer_meta_data"] = meta
 	}
 	return params
 }
@@ -1409,6 +1386,18 @@ func codedBuyerMetaJSON(data map[string]any) (string, bool) {
 		return "", false
 	}
 	raw, err := json.Marshal(meta)
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
+}
+
+func codedPickupBuyerMetaJSON(name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", false
+	}
+	raw, err := json.Marshal(map[string]any{"name": name})
 	if err != nil {
 		return "", false
 	}
@@ -1452,14 +1441,16 @@ func contextValue(data map[string]any, keys ...string) string {
 }
 
 func checkout(c *Conv) error {
-	detailsBody := "Please share your name, phone number, and address so we can place your pickup order."
+	detailsBody := "Please share your name, email, and phone number so we can place your pickup order."
 	confirmMsg := tiqrEcommerceConfirmed
+	flowID := tiqrEcommercePickupFlowID
 	if asString(c.session().SessionData["delivery_mode"]) == tiqrModeDelivery {
 		detailsBody = "Please share your name, phone number, and address so we can place your delivery order."
 		confirmMsg = tiqrEcommerceConfirmedDelivery
+		flowID = tiqrEcommerceFlowID
 	}
 	ok := c.AskFlow("details", FlowPrompt{
-		FlowID: tiqrEcommerceFlowID,
+		FlowID: flowID,
 		CTA:    "Enter details",
 		Header: "Your details",
 		Body:   detailsBody,

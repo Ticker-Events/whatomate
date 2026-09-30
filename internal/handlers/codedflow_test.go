@@ -37,9 +37,35 @@ func TestPickupOrderParams_MapsFlowContext(t *testing.T) {
 	assert.Equal(t, "buyer@example.com", params["email"])
 	assert.Equal(t, "Note", params["notes"])
 	assert.Equal(t, "PICKUP_FROM_STORE", params["delivery_mode"])
+	assert.Equal(t, "9846435358", params["phone_number"])
 	assert.JSONEq(t, `[{"product_option":"1312","quantity":"2"}]`, params["items"])
 	assert.NotContains(t, params["items"], "option_name")
 	assert.NotContains(t, params["items"], "Kunafa")
+	assert.NotContains(t, params, "new_address")
+	assert.JSONEq(t, `{"name":"Aswin Divakar"}`, params["buyer_meta_data"])
+}
+
+func TestPickupOrderParams_DeliveryIncludesAddress(t *testing.T) {
+	params := pickupOrderParams(map[string]any{
+		"customer_name":    "Aswin Divakar",
+		"customer_email":   "buyer@example.com",
+		"customer_phone":   "9846435358",
+		"delivery_mode":    "DELIVERY_TO_LOCATION",
+		"address_line_one": "Infopark Rd",
+		"address_line_two": "TCS",
+		"city":             "Kakkanad",
+		"state":            "Keralam",
+		"country":          "India",
+		"pincode":          "682042",
+		"customer_notes":   "Note",
+		"tiqr_cart": []any{map[string]any{
+			"product_option": "1312",
+			"quantity":       "2",
+		}},
+	})
+
+	assert.Equal(t, "DELIVERY_TO_LOCATION", params["delivery_mode"])
+	assert.Equal(t, "9846435358", params["phone_number"])
 	assert.JSONEq(t, `{
 		"name": "Aswin Divakar",
 		"address_line_1": "Infopark Rd",
@@ -113,11 +139,8 @@ func TestPickupOrderParams_DoesNotUsePhoneAsEmail(t *testing.T) {
 		"email":          "buyer@example.com",
 	})
 	assert.Equal(t, "buyer@example.com", params["email"])
-
-	var address map[string]string
-	require.NoError(t, json.Unmarshal([]byte(params["new_address"]), &address))
-	assert.Equal(t, "buyer@example.com", address["email"])
-	assert.Equal(t, "9846435358", address["phone"])
+	assert.Equal(t, "9846435358", params["phone_number"])
+	assert.NotContains(t, params, "new_address")
 }
 
 func TestOrderItemsForAPI_MergesAndSkipsInvalidQty(t *testing.T) {
@@ -1225,6 +1248,10 @@ func TestTiqrEcommerce_CheckoutWithCartOpensDetails(t *testing.T) {
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrConfirmItems, nil))
 	reloadSession(t, app, session)
 	assert.Equal(t, "details", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, tiqrEcommercePickupFlowID)
+	assert.Contains(t, blob, "name, email, and phone number")
+	assert.NotContains(t, blob, "and address")
 }
 
 func TestTiqrEcommerce_ListProductsFailureRecovers(t *testing.T) {
@@ -1271,6 +1298,7 @@ func TestTiqrEcommerce_ListProductsFailureRecovers(t *testing.T) {
 
 func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
 	orderCalls := 0
+	var placed map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/category/"):
@@ -1297,6 +1325,7 @@ func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
 				_, _ = w.Write([]byte(`{"email":["This field is required."]}`))
 				return
 			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&placed))
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "ord-1", "display_uid": "TQ-1"})
 		default:
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "Demo"})
@@ -1330,16 +1359,16 @@ func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
 	reloadSession(t, app, session)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrCheckout, nil))
 	reloadSession(t, app, session)
+	require.Equal(t, "cart_review_1", session.CurrentStep)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrConfirmItems, nil))
+	reloadSession(t, app, session)
 	require.Equal(t, "details", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), tiqrEcommercePickupFlowID)
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
-		"customer_name":    "Ada",
-		"customer_phone":   "910000000000",
-		"address_line_one": "1 Main",
-		"city":             "Kochi",
-		"state":            "KL",
-		"country":          "India",
-		"pincode":          "682001",
+		"customer_name":  "Ada",
+		"customer_phone": "910000000000",
+		"customer_notes": "Leave at counter",
 	}))
 	reloadSession(t, app, session)
 	assert.Contains(t, outgoingBlob(t, app, session), "Could you reply with your email address?")
@@ -1349,6 +1378,15 @@ func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
 	reloadSession(t, app, session)
 	assert.Equal(t, 2, orderCalls)
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Equal(t, "ada@example.com", placed["email"])
+	assert.Equal(t, "910000000000", placed["phone_number"])
+	assert.Equal(t, "Leave at counter", placed["notes"])
+	assert.Equal(t, "PICKUP_FROM_STORE", placed["delivery_mode"])
+	_, hasAddress := placed["new_address"]
+	assert.False(t, hasAddress)
+	meta, ok := placed["buyer_meta_data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Ada", meta["name"])
 	blob := outgoingBlob(t, app, session)
 	assert.Contains(t, blob, "order is confirmed")
 	assert.NotContains(t, blob, "ticker api")
@@ -1422,6 +1460,15 @@ func TestTiqrEcommerce_CreateOrderAsksEveryMissingFieldBeforeRetry(t *testing.T)
 	reloadSession(t, app, session)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrCheckout, nil))
 	reloadSession(t, app, session)
+	require.Equal(t, "cart_review_1", session.CurrentStep)
+
+	session.SessionData["delivery_mode"] = tiqrModeDelivery
+	require.NoError(t, app.DB.Save(session).Error)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrConfirmItems, nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "details", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), tiqrEcommerceFlowID)
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
 		"customer_name":    "Ada",
@@ -1514,6 +1561,8 @@ func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
 	reloadSession(t, app, session)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrCheckout, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrConfirmItems, nil))
 	reloadSession(t, app, session)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
 		"customer_name": "Ada", "customer_phone": "910000000000",

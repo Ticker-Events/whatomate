@@ -164,6 +164,11 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 
 	payload := tiqrStoreResultMap(operation, raw)
 	aliasBuyerListResults(payload)
+	// REST client methods already normalize money once. MCP CallTool returns raw
+	// minor units, so convert here exactly once before session/templates see it.
+	if apiType != "rest" {
+		normalizeTiqrStoreMoney(operation, payload)
+	}
 	ctx.lastTiqr = payload
 	applyChatResponseMapping(node.Config, payload, sessionData)
 
@@ -576,6 +581,48 @@ func aliasBuyerListResults(payload map[string]any) {
 			payload["results"] = list
 			return
 		}
+	}
+}
+
+// normalizeTiqrStoreMoney converts API minor units → major units once for MCP
+// payloads. REST paths normalize inside pkg/ticker client methods instead.
+func normalizeTiqrStoreMoney(operation string, payload map[string]any) {
+	if payload == nil {
+		return
+	}
+	switch strings.TrimSpace(operation) {
+	case "list_products", "search_products":
+		for _, key := range []string{"results", "products"} {
+			switch list := payload[key].(type) {
+			case []any:
+				ticker.NormalizeProductListMoney(list)
+			case []map[string]any:
+				for _, item := range list {
+					ticker.NormalizeProductMoney(item)
+				}
+			}
+		}
+	case "get_product":
+		ticker.NormalizeProductMoney(payload)
+	case "list_product_options":
+		switch list := payload["options"].(type) {
+		case []any:
+			ticker.NormalizeProductListMoney(list)
+		case []map[string]any:
+			for _, item := range list {
+				ticker.NormalizeProductMoney(item)
+			}
+		}
+		if data, ok := payload["data"].([]any); ok {
+			ticker.NormalizeProductListMoney(data)
+		}
+	case "create_order", "get_order", "lookup_order_status":
+		ticker.NormalizeOrderMoney(payload)
+		if data, ok := payload["data"].(map[string]any); ok {
+			ticker.NormalizeOrderMoney(data)
+		}
+	case "check_delivery":
+		ticker.NormalizeDeliveryMoney(payload)
 	}
 }
 
