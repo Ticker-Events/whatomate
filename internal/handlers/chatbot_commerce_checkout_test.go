@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -80,11 +81,22 @@ func TestFormatCheckoutCartSummary(t *testing.T) {
 					"price":       100.0,
 				},
 			},
+			"2": map[string]any{
+				"qty": 1,
+				"product": map[string]any{
+					"option_name": "Small",
+					"price":       50.0,
+				},
+			},
 		},
 	}}
 	summary := formatCheckoutCartSummary(session)
-	assert.Contains(t, summary, "Large x2")
-	assert.Contains(t, summary, "₹200.00")
+	assert.Contains(t, summary, "*Your cart:*")
+	assert.Contains(t, summary, "*Large* x2 — ₹100.00 each (₹200.00)")
+	assert.Contains(t, summary, "*Small* x1 — ₹50.00 each")
+	assert.Contains(t, summary, "*Subtotal:* ₹250.00")
+	// Stable ordering by option id.
+	assert.Less(t, strings.Index(summary, "Large"), strings.Index(summary, "Small"))
 }
 
 func TestCartIsEmpty(t *testing.T) {
@@ -714,4 +726,74 @@ func TestAdvanceToConfirmOrHandoffThemedUsesConfirmStep(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, "confirm", got.Step)
 	assert.Equal(t, checkoutFlowThemed, got.Flow)
+}
+
+func TestIsCheckoutButtonIncludesItemsConfirm(t *testing.T) {
+	t.Parallel()
+	assert.True(t, IsCheckoutButton(checkoutItemsConfirmButtonID))
+	assert.Equal(t, "checkout_items_confirm", checkoutItemsConfirmButtonID)
+}
+
+func TestIsCheckoutStartIntent(t *testing.T) {
+	t.Parallel()
+	assert.True(t, isCheckoutStartIntent("checkout"))
+	assert.True(t, isCheckoutStartIntent("Check Out"))
+	assert.True(t, isCheckoutStartIntent("place order"))
+	assert.True(t, isCheckoutStartIntent("ready to checkout"))
+	assert.False(t, isCheckoutStartIntent("remove chocolate"))
+	assert.False(t, isCheckoutStartIntent("hello"))
+}
+
+func TestIsCheckoutConfirmYesIncludesConfirmItems(t *testing.T) {
+	t.Parallel()
+	assert.True(t, isCheckoutConfirmYes("confirm items"))
+	assert.True(t, isCheckoutConfirmYes("yes"))
+	assert.False(t, isCheckoutConfirmYes("remove chocolate"))
+}
+
+func TestCheckoutReviewStateRoundTrip(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"7": map[string]any{"qty": 2, "product": map[string]any{"option_name": "Chocolate", "price": 50.0}},
+		},
+	}}
+	setCheckoutState(session, &checkoutState{
+		Flow:       checkoutFlowCheckout,
+		Step:       "review",
+		NewAddress: map[string]any{},
+	})
+	st := getCheckoutState(session)
+	require.NotNil(t, st)
+	assert.Equal(t, "review", st.Step)
+	assert.Equal(t, checkoutFlowCheckout, st.Flow)
+	assert.Contains(t, formatCheckoutCartSummary(session), "*Chocolate* x2 — ₹50.00 each (₹100.00)")
+}
+
+func TestBrowsingCartEditRemovesAndUpdatesQty(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"7": map[string]any{"qty": 1, "product": map[string]any{"option_name": "Chocolate Large"}},
+			"8": map[string]any{"qty": 2, "product": map[string]any{"option_name": "Vanilla Small"}},
+		},
+	}}
+	// No checkout in progress — browsing edit path relies on applyTargetedCartEdit.
+	assert.Nil(t, getCheckoutState(session))
+
+	changed, message := applyTargetedCartEdit(session, "vanilla small to 5")
+	require.True(t, changed)
+	assert.Contains(t, message, "Vanilla Small")
+	assert.Equal(t, 5, anyToInt(normalizeCartMap(session.SessionData[cartKey])["8"]["qty"]))
+
+	changed, message = applyTargetedCartEdit(session, "remove chocolate")
+	require.True(t, changed)
+	assert.Contains(t, message, "Removed")
+	assert.NotContains(t, normalizeCartMap(session.SessionData[cartKey]), "7")
+	assert.False(t, cartIsEmpty(session))
+
+	changed, message = applyTargetedCartEdit(session, "remove vanilla")
+	require.True(t, changed)
+	assert.True(t, cartIsEmpty(session))
+	_ = message
 }

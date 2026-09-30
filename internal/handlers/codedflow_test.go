@@ -27,13 +27,19 @@ func TestPickupOrderParams_MapsFlowContext(t *testing.T) {
 		"country":          "India",
 		"pincode":          "682042",
 		"customer_notes":   "Note",
-		"tiqr_cart":        []any{map[string]any{"product_option": "1312", "quantity": "2"}},
+		"tiqr_cart": []any{map[string]any{
+			"product_option": "1312",
+			"quantity":       "2",
+			"option_name":    "Kunafa",
+		}},
 	})
 
 	assert.Equal(t, "buyer@example.com", params["email"])
 	assert.Equal(t, "Note", params["notes"])
 	assert.Equal(t, "PICKUP_FROM_STORE", params["delivery_mode"])
 	assert.JSONEq(t, `[{"product_option":"1312","quantity":"2"}]`, params["items"])
+	assert.NotContains(t, params["items"], "option_name")
+	assert.NotContains(t, params["items"], "Kunafa")
 	assert.JSONEq(t, `{
 		"name": "Aswin Divakar",
 		"address_line_1": "Infopark Rd",
@@ -46,6 +52,27 @@ func TestPickupOrderParams_MapsFlowContext(t *testing.T) {
 		"phone_number": "9846435358",
 		"phone": "9846435358"
 	}`, params["new_address"])
+}
+
+func TestFormatFailedOrderHandoff(t *testing.T) {
+	msg := formatFailedOrderHandoff(map[string]any{
+		"customer_name":    "Aswin Divakar",
+		"address_line_one": "Infopark Rd",
+		"address_line_two": "TCS",
+		"city":             "Kakkanad",
+		"state":            "Keralam",
+		"country":          "India",
+		"pincode":          "682042",
+		"tiqr_cart": []any{
+			map[string]any{"option_name": "Kunafa", "product_option": "9", "quantity": "2"},
+			map[string]any{"product_option": "10", "quantity": "1"},
+		},
+	})
+	assert.Contains(t, msg, "Placing order for the following items failed.")
+	assert.Contains(t, msg, "Kunafa x 2")
+	assert.Contains(t, msg, "Option 10 x 1")
+	assert.Contains(t, msg, "Address\nAswin Divakar\nInfopark Rd, TCS\nKakkanad, Keralam\nIndia 682042")
+	assert.Contains(t, msg, tiqrEcommerceHandoffConnect)
 }
 
 func TestPickupOrderParams_UsesStoredDeliveryModeAndBuyerMeta(t *testing.T) {
@@ -91,6 +118,71 @@ func TestPickupOrderParams_DoesNotUsePhoneAsEmail(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(params["new_address"]), &address))
 	assert.Equal(t, "buyer@example.com", address["email"])
 	assert.Equal(t, "9846435358", address["phone"])
+}
+
+func TestOrderItemsForAPI_MergesAndSkipsInvalidQty(t *testing.T) {
+	t.Parallel()
+	items := orderItemsForAPI([]any{
+		map[string]any{"product_option": "9", "quantity": "2"},
+		map[string]any{"product_option": "9", "quantity": "3"},
+		map[string]any{"product_option": "8", "quantity": "0"},
+		map[string]any{"product_option": "7", "quantity": "1"},
+	})
+	require.Len(t, items, 2)
+	assert.Equal(t, "9", items[0]["product_option"])
+	assert.Equal(t, "5", items[0]["quantity"])
+	assert.Equal(t, "7", items[1]["product_option"])
+	assert.Equal(t, "1", items[1]["quantity"])
+}
+
+func TestTiqrCartUpsertAndUnitCount(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		"option_name": "Kunafa",
+		"options": []any{
+			map[string]any{"id": "9", "name": "Kunafa", "price": 40.0},
+		},
+	}}
+	c := &Conv{chat: &chatNodeCtx{session: session}}
+
+	upsertCartItem(c, "9", "2")
+	assert.Equal(t, 1, cartLen(c))
+	assert.Equal(t, 2, cartUnitCount(c))
+	assert.Equal(t, float64(2), session.SessionData["cart_count"])
+
+	upsertCartItem(c, "9", "3")
+	assert.Equal(t, 1, cartLen(c))
+	assert.Equal(t, 5, cartUnitCount(c))
+
+	upsertCartItem(c, "", "1") // empty option ignored
+	assert.Equal(t, 1, cartLen(c))
+	upsertCartItem(c, "8", "0") // qty 0 ignored
+	assert.Equal(t, 1, cartLen(c))
+
+	summary := formatTiqrCartSummary(c)
+	assert.Contains(t, summary, "*Kunafa* x5")
+	assert.Contains(t, summary, "₹40.00 each")
+	assert.Contains(t, summary, "*Subtotal:*")
+
+	ok, name := removeTiqrCartLine(c, "9")
+	require.True(t, ok)
+	assert.Equal(t, "Kunafa", name)
+	assert.Equal(t, 0, cartLen(c))
+	assert.Equal(t, 0, cartUnitCount(c))
+}
+
+func TestTiqrCartSetQty(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		"tiqr_cart": []any{
+			map[string]any{"product_option": "9", "quantity": "2", "option_name": "Kunafa", "price": 40.0},
+		},
+	}}
+	c := &Conv{chat: &chatNodeCtx{session: session}}
+	require.True(t, setTiqrCartLineQty(c, "9", 4))
+	assert.Equal(t, 4, cartUnitCount(c))
+	assert.False(t, setTiqrCartLineQty(c, "9", 0))
+	assert.Equal(t, 4, cartUnitCount(c))
 }
 
 func useStoreREST(t *testing.T, srv *httptest.Server) {
@@ -418,7 +510,13 @@ func TestTiqrEcommerce_MissingCommerceEnds(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	assert.Empty(t, session.CurrentStep)
 	assert.Nil(t, session.SessionData[codedFlowDataKey])
-	assert.Contains(t, outgoingBlob(t, app, session), "couldn't load the store")
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "business information")
+	assert.Contains(t, blob, "connecting you with a team member")
+	assert.NotContains(t, strings.ToLower(blob), "fetch the store")
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(1), transfers)
 }
 
 func TestTiqrEcommerce_OptionBranches(t *testing.T) {
@@ -496,7 +594,7 @@ func TestTiqrEcommerce_AppendsCartAndAddMoreSkipsCollections(t *testing.T) {
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "2", "", nil))
 	reloadSession(t, app, session)
 	assert.Equal(t, "next", session.CurrentStep)
-	assert.Equal(t, float64(1), session.SessionData["cart_count"])
+	assert.Equal(t, float64(2), session.SessionData["cart_count"])
 
 	cart, ok := session.SessionData["tiqr_cart"].([]any)
 	require.True(t, ok)
@@ -505,6 +603,9 @@ func TestTiqrEcommerce_AppendsCartAndAddMoreSkipsCollections(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "9", item["product_option"])
 	assert.Equal(t, "2", item["quantity"])
+	assert.Contains(t, asString(session.SessionData["cart_summary"]), "Your cart")
+	assert.Contains(t, outgoingBlob(t, app, session), "Edit cart")
+	assert.Contains(t, outgoingBlob(t, app, session), "Checkout")
 
 	before := counts.collections
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add more items", tiqrAddMore, nil))
@@ -1045,18 +1146,17 @@ func TestTiqrEcommerce_CheckoutWithCartOpensDetails(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I want to checkout", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "details", session.CurrentStep)
+	assert.Equal(t, "cart_review_1", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "Confirm items")
+	assert.Contains(t, outgoingBlob(t, app, session), "Edit cart")
 	assert.NotContains(t, outgoingBlob(t, app, session), "cart is empty")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrConfirmItems, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "details", session.CurrentStep)
 }
 
 func TestTiqrEcommerce_ListProductsFailureRecovers(t *testing.T) {
-	useCodedRecover(t, func(ctx codedRecoverContext) (codedRecoverResult, error) {
-		assert.Equal(t, "fetch", ctx.Kind)
-		assert.Equal(t, "products", ctx.Resource)
-		return codedRecoverResult{
-			Kind: codedRecoverTryLater, Message: "Products are unavailable right now. Please try later.", Confidence: 0.9,
-		}, nil
-	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/category/"):
@@ -1088,11 +1188,14 @@ func TestTiqrEcommerce_ListProductsFailureRecovers(t *testing.T) {
 	reloadSession(t, app, session)
 
 	blob := outgoingBlob(t, app, session)
-	assert.Contains(t, blob, "Products are unavailable right now")
+	assert.Contains(t, blob, "unable to fetch those products")
+	assert.Contains(t, blob, "connecting you with a team member")
 	assert.NotContains(t, blob, "https://internal")
 	assert.NotContains(t, blob, "ticker api")
-	assert.Equal(t, "collection", session.CurrentStep)
-	assert.Equal(t, models.SessionStatusActive, session.Status)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(1), transfers)
 }
 
 func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
@@ -1348,9 +1451,19 @@ func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {
 	reloadSession(t, app, session)
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	blob := outgoingBlob(t, app, session)
-	assert.Contains(t, blob, "We could not place your order just now.")
+	assert.Contains(t, blob, "Placing order for the following items failed.")
+	assert.Contains(t, blob, "Regular x 1")
+	assert.Contains(t, blob, "Address")
+	assert.Contains(t, blob, "Ada")
+	assert.Contains(t, blob, "1 Main")
+	assert.Contains(t, blob, "Kochi")
+	assert.Contains(t, blob, "connecting you with a team member")
+	assert.NotContains(t, blob, "Thank you for shopping")
 	assert.NotContains(t, blob, "ticker api")
 	assert.NotContains(t, blob, "https://")
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(1), transfers)
 }
 
 func TestTiqrEcommerce_PickupOnlyProceedsToCollections(t *testing.T) {

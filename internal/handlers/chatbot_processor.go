@@ -453,6 +453,13 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if a.handleCartQuantityReply(account, contact, session, messageText) {
 		return
 	}
+	if a.handleBrowsingCartEdit(account, contact, session, messageText) {
+		return
+	}
+	if commerceConfigured(settings.AI) && isCheckoutStartIntent(messageText) && !cartIsEmpty(session) && getCheckoutState(session) == nil {
+		a.startCheckout(account, contact, session, settings)
+		return
+	}
 
 	// Check for transfer keyword BEFORE sending greeting (transfer takes priority)
 	keywordResponse, keywordMatched := a.matchKeywordRules(account.OrganizationID, account.Name, messageText)

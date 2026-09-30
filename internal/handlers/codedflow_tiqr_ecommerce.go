@@ -23,7 +23,7 @@ const (
 
 	tiqrEcommerceUnavailable = "Sorry, this item isn't available right now.\n\nPlease choose another item from our collections."
 
-	tiqrEcommerceAdded = "*{{option_name}}* has been added to your cart.\n\nYou now have *{{cart_count}}* in your cart. Add something else, or check out when you're ready."
+	tiqrEcommerceAdded = "*{{option_name}}* has been added to your cart.\n\n{{cart_summary}}\n\nYou now have *{{cart_count}}* items in your cart. Add something else, edit your cart, or check out when you're ready."
 
 	tiqrEcommerceConfirmed = "Your order is confirmed.\n\nIt's set for store pickup, and we'll have it ready for you.\n\nThank you for shopping with us."
 
@@ -37,17 +37,24 @@ const (
 
 	tiqrEcommerceCartEmpty = "Your cart is empty.\n\nPlease choose a collection below to add items, then you can check out."
 
-	tiqrEcommerceFetchStore = "I couldn't load the store right now.\n\nPlease try again in a bit."
+	tiqrEcommerceHandoffConnect = "So, I'm connecting you with a team member who can help."
 
-	tiqrEcommerceFetchCatalog = "I couldn't load our collections right now.\n\nPlease try again in a bit."
+	tiqrEcommerceFailBusiness = "I was unable to fetch the business information.\n\n" + tiqrEcommerceHandoffConnect
 
-	tiqrEcommerceFetchProducts = "I couldn't load those products right now.\n\nPlease try again in a bit, or choose another collection."
+	tiqrEcommerceFailCollections = "I was unable to fetch our collections.\n\n" + tiqrEcommerceHandoffConnect
+
+	tiqrEcommerceFailProducts = "I was unable to fetch those products.\n\n" + tiqrEcommerceHandoffConnect
 
 	tiqrBuyProducts      = "buy_products"
 	tiqrCheckOrderStatus = "check_order_status"
 	tiqrTalkToAgent      = "talk_to_agent"
 	tiqrAddMore          = "add_more"
 	tiqrCheckout         = "checkout"
+	tiqrEditCart         = "edit_cart"
+	tiqrConfirmItems     = "confirm_items"
+	tiqrChangeQty        = "change_qty"
+	tiqrRemoveItem       = "remove_item"
+	tiqrDoneEdit         = "done_edit"
 
 	tiqrModePickup   = "PICKUP_FROM_STORE"
 	tiqrModeDelivery = "DELIVERY_TO_LOCATION"
@@ -87,13 +94,11 @@ func newTiqrEcommerceFlow() CodedFlow {
 func tiqrEcommerce(c *Conv) error {
 	store, ok := c.Store("store", "get_store", nil)
 	if !ok {
-		c.Say(c.recoverFetchMessage("get_store", "store", tiqrEcommerceFetchStore))
-		return c.End()
+		return c.Transfer(tiqrEcommerceFailBusiness)
 	}
 	collections, ok := c.StoreList("collections", "list_collections", map[string]string{"limit": "20"})
 	if !ok {
-		c.Say(c.recoverFetchMessage("list_collections", "collections", tiqrEcommerceFetchCatalog))
-		return c.End()
+		return c.Transfer(tiqrEcommerceFailCollections)
 	}
 	route, ok := c.askRouteButtons("intent", menuButtons(store), RouteOptions{AllowCatalog: true})
 	if !ok {
@@ -244,17 +249,7 @@ func buyProducts(c *Conv, collections []any, first Route) error {
 			}
 			return nil
 		}
-		next, ok := c.AskButtons("next", ButtonPrompt{
-			Body: "Would you like to add anything else, or are you ready to place your order?",
-			Buttons: []Button{
-				{ID: tiqrAddMore, Title: "Add more items"},
-				{ID: tiqrCheckout, Title: "Checkout"},
-			},
-			Step: StepNote{
-				Doing:  "The customer just added an item.",
-				Expect: "They may add more or check out.",
-			},
-		})
+		action, ok := askAfterCartAdd(c)
 		if !ok {
 			res, err := c.applyCheckoutDivert()
 			if err != nil || c.ended || c.stop {
@@ -265,11 +260,74 @@ func buyProducts(c *Conv, collections []any, first Route) error {
 			}
 			return nil
 		}
-		if next.ID == tiqrCheckout {
-			break
+		if action == tiqrCheckout {
+			ready, ok := reviewCartBeforeOrder(c)
+			if !ok {
+				res, err := c.applyCheckoutDivert()
+				if err != nil || c.ended || c.stop {
+					return err
+				}
+				if res == divertEmptyCart {
+					continue
+				}
+				return nil
+			}
+			if !ready {
+				continue
+			}
+			return checkout(c)
+		}
+		// tiqrAddMore — keep browsing
+	}
+	return nil
+}
+
+// askAfterCartAdd offers Add more / Edit cart / Checkout until the shopper
+// either continues browsing or starts checkout.
+func askAfterCartAdd(c *Conv) (string, bool) {
+	for attempt := 1; ; attempt++ {
+		if cartLen(c) == 0 {
+			c.Say(tiqrEcommerceCartEmpty)
+			return tiqrAddMore, true
+		}
+		name := "next"
+		if attempt > 1 {
+			name = fmt.Sprintf("next_%d", attempt)
+		}
+		next, ok := c.AskButtons(name, ButtonPrompt{
+			Body: "Would you like to add anything else, edit your cart, or place your order?",
+			Buttons: []Button{
+				{ID: tiqrAddMore, Title: "Add more items"},
+				{ID: tiqrEditCart, Title: "Edit cart"},
+				{ID: tiqrCheckout, Title: "Checkout"},
+			},
+			Step: StepNote{
+				Doing:  "The customer just added an item and can edit the cart or check out.",
+				Expect: "They may add more, edit the cart, or check out.",
+			},
+		})
+		if !ok {
+			return "", false
+		}
+		switch next.ID {
+		case tiqrAddMore:
+			return tiqrAddMore, true
+		case tiqrCheckout:
+			return tiqrCheckout, true
+		case tiqrEditCart:
+			if !editCartMenu(c, attempt) {
+				return "", false
+			}
+			if cartLen(c) == 0 {
+				c.Say(tiqrEcommerceCartEmpty)
+				return tiqrAddMore, true
+			}
+			c.Say(formatTiqrCartSummary(c))
+			continue
+		default:
+			return tiqrAddMore, true
 		}
 	}
-	return checkout(c)
 }
 
 // resolveFulfillment asks for delivery mode based on store.delivery_modes
@@ -470,7 +528,7 @@ const (
 )
 
 // applyCheckoutDivert clears divert. Empty cart: message and continue shopping.
-// Non-empty cart: run checkout.
+// Non-empty cart: review items, then run checkout.
 func (c *Conv) applyCheckoutDivert() (divertResult, error) {
 	if c.divert != codedRouteCheckout {
 		return divertNone, nil
@@ -478,6 +536,13 @@ func (c *Conv) applyCheckoutDivert() (divertResult, error) {
 	c.divert = ""
 	if cartLen(c) == 0 {
 		c.Say(tiqrEcommerceCartEmpty)
+		return divertEmptyCart, nil
+	}
+	ready, ok := reviewCartBeforeOrder(c)
+	if !ok {
+		return divertCheckoutDone, nil
+	}
+	if !ready {
 		return divertEmptyCart, nil
 	}
 	return divertCheckoutDone, checkout(c)
@@ -488,7 +553,92 @@ func cartLen(c *Conv) int {
 	if !ok {
 		return 0
 	}
-	return len(items)
+	n := 0
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(asString(item["product_option"])) == "" {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+func cartUnitCount(c *Conv) int {
+	items, ok := anySlice(c.session().SessionData["tiqr_cart"])
+	if !ok {
+		return 0
+	}
+	total := 0
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(asString(item["product_option"])) == "" {
+			continue
+		}
+		qty := parsePositiveInt(asString(item["quantity"]))
+		if qty < 1 {
+			continue
+		}
+		total += qty
+	}
+	return total
+}
+
+func refreshCartSessionFields(c *Conv) {
+	c.session().SessionData["cart_count"] = float64(cartUnitCount(c))
+	c.session().SessionData["cart_summary"] = formatTiqrCartSummary(c)
+}
+
+func formatTiqrCartSummary(c *Conv) string {
+	cart, ok := anySlice(c.session().SessionData["tiqr_cart"])
+	if !ok || len(cart) == 0 {
+		return "Your cart is empty."
+	}
+	var b strings.Builder
+	b.WriteString("*Your cart:*\n")
+	var total float64
+	hasPrice := false
+	for _, entry := range cart {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		optionID := strings.TrimSpace(asString(item["product_option"]))
+		if optionID == "" {
+			continue
+		}
+		name := strings.TrimSpace(asString(item["option_name"]))
+		if name == "" {
+			name = "Option " + optionID
+		}
+		qty := parsePositiveInt(asString(item["quantity"]))
+		if qty < 1 {
+			qty = 1
+		}
+		price, priceOK := anyToFloat64(item["price"])
+		if priceOK && price > 0 {
+			hasPrice = true
+			lineTotal := price * float64(qty)
+			total += lineTotal
+			fmt.Fprintf(&b, "- *%s* x%d — %s each", name, qty, formatPriceINR(price))
+			if qty > 1 {
+				fmt.Fprintf(&b, " (%s)", formatPriceINR(lineTotal))
+			}
+			b.WriteByte('\n')
+			continue
+		}
+		fmt.Fprintf(&b, "- *%s* x%d\n", name, qty)
+	}
+	if hasPrice {
+		fmt.Fprintf(&b, "\n*Subtotal:* %s", formatPriceINR(total))
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func productsForRoute(c *Conv, route Route) ([]any, bool) {
@@ -506,7 +656,7 @@ func productsForRoute(c *Conv, route Route) ([]any, bool) {
 		})
 		if !ok {
 			if c.chat != nil && strings.TrimSpace(c.chat.lastTiqrErr) != "" {
-				c.Say(c.recoverFetchMessage("search_products", "products", tiqrEcommerceFetchProducts))
+				_ = c.Transfer(tiqrEcommerceFailProducts)
 			} else {
 				c.Say(tiqrEcommerceSearchEmpty)
 			}
@@ -531,7 +681,7 @@ func productsForRoute(c *Conv, route Route) ([]any, bool) {
 		products, ok := c.StoreList("products", "list_products", map[string]string{"category_id": id})
 		if !ok {
 			if c.chat != nil && strings.TrimSpace(c.chat.lastTiqrErr) != "" {
-				c.Say(c.recoverFetchMessage("list_products", "products", tiqrEcommerceFetchProducts))
+				_ = c.Transfer(tiqrEcommerceFailProducts)
 			} else {
 				c.Say(tiqrEcommerceSearchEmpty)
 			}
@@ -641,11 +791,11 @@ func addPickedProduct(c *Conv) bool {
 
 func askQuantityAndAdd(c *Conv) bool {
 	quantity, ok := c.AskNumber("quantity", NumberPrompt{
-		Body:    "How many *{{option_name}}* would you like?\n\nReply with a whole number, for example 1.",
-		Pattern: `^[0-9]+$`,
+		Body:    "How many *{{option_name}}* would you like?\n\nReply with a whole number of 1 or more, for example 1.",
+		Pattern: `^[1-9][0-9]*$`,
 		Step: StepNote{
 			Doing:  "The customer is saying how many units to add.",
-			Expect: "A whole number, as digits or as a number word such as two.",
+			Expect: "A whole number of 1 or more, as digits or as a number word such as two.",
 		},
 	})
 	if !ok {
@@ -653,20 +803,341 @@ func askQuantityAndAdd(c *Conv) bool {
 	}
 	optionID := asString(c.session().SessionData["option_id"])
 	c.Once("cart", func() {
-		appendCartItem(c, optionID, quantity)
+		upsertCartItem(c, optionID, quantity)
 	})
+	refreshCartSessionFields(c)
 	c.Say(tiqrEcommerceAdded)
 	return true
 }
 
-func appendCartItem(c *Conv, optionID, quantity string) {
+func upsertCartItem(c *Conv, optionID, quantity string) {
+	optionID = strings.TrimSpace(optionID)
+	qty := parsePositiveInt(quantity)
+	if optionID == "" || qty < 1 {
+		return
+	}
 	cart, _ := anySlice(c.session().SessionData["tiqr_cart"])
-	cart = append(cart, map[string]any{
+	name := strings.TrimSpace(asString(c.session().SessionData["option_name"]))
+	price := optionPriceFromSession(c, optionID)
+	for i, entry := range cart {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(asString(item["product_option"])) != optionID {
+			continue
+		}
+		existing := parsePositiveInt(asString(item["quantity"]))
+		if existing < 0 {
+			existing = 0
+		}
+		item["quantity"] = strconv.Itoa(existing + qty)
+		if name != "" {
+			item["option_name"] = name
+		}
+		if price > 0 {
+			item["price"] = price
+		}
+		cart[i] = item
+		c.session().SessionData["tiqr_cart"] = cart
+		refreshCartSessionFields(c)
+		return
+	}
+	item := map[string]any{
 		"product_option": optionID,
-		"quantity":       quantity,
-	})
+		"quantity":       strconv.Itoa(qty),
+	}
+	if name != "" {
+		item["option_name"] = name
+	}
+	if price > 0 {
+		item["price"] = price
+	}
+	cart = append(cart, item)
 	c.session().SessionData["tiqr_cart"] = cart
-	c.session().SessionData["cart_count"] = float64(len(cart))
+	refreshCartSessionFields(c)
+}
+
+func optionPriceFromSession(c *Conv, optionID string) float64 {
+	items, ok := anySlice(c.session().SessionData["options"])
+	if !ok {
+		return 0
+	}
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if fieldString(item, "id") != optionID {
+			continue
+		}
+		if p, ok := anyToFloat64(item["price"]); ok {
+			return p
+		}
+	}
+	return 0
+}
+
+func setTiqrCartLineQty(c *Conv, optionID string, qty int) bool {
+	optionID = strings.TrimSpace(optionID)
+	if optionID == "" || qty < 1 {
+		return false
+	}
+	cart, ok := anySlice(c.session().SessionData["tiqr_cart"])
+	if !ok {
+		return false
+	}
+	for i, entry := range cart {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(asString(item["product_option"])) != optionID {
+			continue
+		}
+		item["quantity"] = strconv.Itoa(qty)
+		cart[i] = item
+		c.session().SessionData["tiqr_cart"] = cart
+		refreshCartSessionFields(c)
+		return true
+	}
+	return false
+}
+
+func removeTiqrCartLine(c *Conv, optionID string) (bool, string) {
+	optionID = strings.TrimSpace(optionID)
+	if optionID == "" {
+		return false, ""
+	}
+	cart, ok := anySlice(c.session().SessionData["tiqr_cart"])
+	if !ok {
+		return false, ""
+	}
+	next := make([]any, 0, len(cart))
+	removedName := ""
+	for _, entry := range cart {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(asString(item["product_option"])) == optionID {
+			removedName = strings.TrimSpace(asString(item["option_name"]))
+			if removedName == "" {
+				removedName = "Option " + optionID
+			}
+			continue
+		}
+		next = append(next, item)
+	}
+	if removedName == "" {
+		return false, ""
+	}
+	c.session().SessionData["tiqr_cart"] = next
+	refreshCartSessionFields(c)
+	return true, removedName
+}
+
+func cartListItems(c *Conv) []any {
+	cart, _ := anySlice(c.session().SessionData["tiqr_cart"])
+	out := make([]any, 0, len(cart))
+	for _, entry := range cart {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		optionID := strings.TrimSpace(asString(item["product_option"]))
+		if optionID == "" {
+			continue
+		}
+		name := strings.TrimSpace(asString(item["option_name"]))
+		if name == "" {
+			name = "Option " + optionID
+		}
+		qty := strings.TrimSpace(asString(item["quantity"]))
+		if qty == "" {
+			qty = "1"
+		}
+		out = append(out, map[string]any{
+			"id":       optionID,
+			"name":     name,
+			"quantity": qty,
+		})
+	}
+	return out
+}
+
+// reviewCartBeforeOrder shows the full cart and waits for confirm, edit, or add more.
+// ready=true means proceed to order details; ready=false means keep shopping.
+func reviewCartBeforeOrder(c *Conv) (ready bool, ok bool) {
+	for attempt := 1; ; attempt++ {
+		if cartLen(c) == 0 {
+			c.Say(tiqrEcommerceCartEmpty)
+			return false, true
+		}
+		refreshCartSessionFields(c)
+		choice, got := c.AskButtons(fmt.Sprintf("cart_review_%d", attempt), ButtonPrompt{
+			Body: formatTiqrCartSummary(c) + "\n\nPlease confirm these items before we continue checkout.\n\nYou can edit quantities or remove items first.",
+			Buttons: []Button{
+				{ID: tiqrConfirmItems, Title: "Confirm items"},
+				{ID: tiqrEditCart, Title: "Edit cart"},
+				{ID: tiqrAddMore, Title: "Add more"},
+			},
+			Step: StepNote{
+				Doing:  "The customer is reviewing the full cart before checkout.",
+				Expect: "They confirm items, edit the cart, or add more products.",
+			},
+		})
+		if !got {
+			return false, false
+		}
+		switch choice.ID {
+		case tiqrConfirmItems:
+			return true, true
+		case tiqrAddMore:
+			return false, true
+		case tiqrEditCart:
+			if !editCartMenu(c, attempt) {
+				return false, false
+			}
+		}
+	}
+}
+
+func editCartMenu(c *Conv, reviewAttempt int) bool {
+	for attempt := 1; ; attempt++ {
+		if cartLen(c) == 0 {
+			return true
+		}
+		refreshCartSessionFields(c)
+		action, ok := c.AskButtons(fmt.Sprintf("cart_edit_%d_%d", reviewAttempt, attempt), ButtonPrompt{
+			Body: formatTiqrCartSummary(c) + "\n\nWhat would you like to change?",
+			Buttons: []Button{
+				{ID: tiqrChangeQty, Title: "Change quantity"},
+				{ID: tiqrRemoveItem, Title: "Remove item"},
+				{ID: tiqrDoneEdit, Title: "Done"},
+			},
+			Step: StepNote{
+				Doing:  "The customer is editing the cart.",
+				Expect: "They change a quantity, remove an item, or finish editing.",
+			},
+		})
+		if !ok {
+			return false
+		}
+		switch action.ID {
+		case tiqrDoneEdit:
+			return true
+		case tiqrChangeQty:
+			if !changeCartLineQty(c, reviewAttempt, attempt) {
+				return false
+			}
+		case tiqrRemoveItem:
+			if !removeCartLineAsk(c, reviewAttempt, attempt) {
+				return false
+			}
+			if cartLen(c) == 0 {
+				return true
+			}
+		}
+	}
+}
+
+func changeCartLineQty(c *Conv, reviewAttempt, editAttempt int) bool {
+	items := cartListItems(c)
+	if len(items) == 0 {
+		return true
+	}
+	picked, ok := c.AskList(fmt.Sprintf("cart_qty_item_%d_%d", reviewAttempt, editAttempt), items, ListPrompt{
+		Body:        "Which item should we change the quantity for?",
+		Header:      "Change quantity",
+		Button:      "Choose",
+		Section:     "Cart",
+		ItemsKey:    "cart_edit_items",
+		IDField:     "id",
+		Title:       "{{name}} × {{quantity}}",
+		Description: "Tap to update quantity",
+		Step: StepNote{
+			Doing:  "The customer is picking a cart line to update.",
+			Expect: "They pick one of the cart items.",
+		},
+	})
+	if !ok {
+		return false
+	}
+	qty, ok := c.AskNumber(fmt.Sprintf("cart_qty_value_%d_%d", reviewAttempt, editAttempt), NumberPrompt{
+		Body:    "What quantity would you like for that item?\n\nReply with a whole number of 1 or more.",
+		Pattern: `^[1-9][0-9]*$`,
+		Step: StepNote{
+			Doing:  "The customer is setting a new quantity for a cart line.",
+			Expect: "A whole number of 1 or more.",
+		},
+	})
+	if !ok {
+		return false
+	}
+	c.Once(fmt.Sprintf("cart_qty_apply_%d_%d", reviewAttempt, editAttempt), func() {
+		setTiqrCartLineQty(c, picked.ID, parsePositiveInt(qty))
+	})
+	c.Say("Updated quantity for *" + cartLineName(c, picked.ID) + "* to " + qty + ".\n\n" + formatTiqrCartSummary(c))
+	return true
+}
+
+func removeCartLineAsk(c *Conv, reviewAttempt, editAttempt int) bool {
+	items := cartListItems(c)
+	if len(items) == 0 {
+		return true
+	}
+	picked, ok := c.AskList(fmt.Sprintf("cart_remove_item_%d_%d", reviewAttempt, editAttempt), items, ListPrompt{
+		Body:        "Which item should we remove from your cart?",
+		Header:      "Remove item",
+		Button:      "Choose",
+		Section:     "Cart",
+		ItemsKey:    "cart_edit_items",
+		IDField:     "id",
+		Title:       "{{name}} × {{quantity}}",
+		Description: "Tap to remove",
+		Step: StepNote{
+			Doing:  "The customer is picking a cart line to remove.",
+			Expect: "They pick one of the cart items.",
+		},
+	})
+	if !ok {
+		return false
+	}
+	var removedName string
+	c.Once(fmt.Sprintf("cart_remove_apply_%d_%d", reviewAttempt, editAttempt), func() {
+		_, removedName = removeTiqrCartLine(c, picked.ID)
+	})
+	if removedName == "" {
+		removedName = strings.TrimSpace(picked.Title)
+	}
+	if removedName == "" {
+		removedName = "that item"
+	}
+	if cartLen(c) == 0 {
+		c.Say("Removed *" + removedName + "* from your cart.\n\nYour cart is empty.")
+		return true
+	}
+	c.Say("Removed *" + removedName + "* from your cart.\n\n" + formatTiqrCartSummary(c))
+	return true
+}
+
+func cartLineName(c *Conv, optionID string) string {
+	cart, _ := anySlice(c.session().SessionData["tiqr_cart"])
+	for _, entry := range cart {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(asString(item["product_option"])) != strings.TrimSpace(optionID) {
+			continue
+		}
+		if name := strings.TrimSpace(asString(item["option_name"])); name != "" {
+			return name
+		}
+		return "Option " + optionID
+	}
+	return "Option " + optionID
 }
 
 func optionAt(c *Conv, index int) (string, string, bool) {
@@ -727,8 +1198,10 @@ func pickupOrderParams(data map[string]any) map[string]string {
 		address = []byte("{}")
 	}
 	items := "[]"
-	if raw, err := json.Marshal(data["tiqr_cart"]); err == nil && string(raw) != "null" {
-		items = string(raw)
+	if cartItems := orderItemsForAPI(data["tiqr_cart"]); len(cartItems) > 0 {
+		if raw, err := json.Marshal(cartItems); err == nil {
+			items = string(raw)
+		}
 	}
 	params := map[string]string{
 		"email":         email,
@@ -856,17 +1329,120 @@ func checkout(c *Conv) error {
 			}
 			continue
 		}
-		msg := result.Message
-		if msg == "" {
-			msg = tiqrEcommerceFailed
-		}
-		c.Say(msg)
-		c.Say(tiqrEcommerceThanks)
-		return c.End()
+		return c.Transfer(formatFailedOrderHandoff(c.session().SessionData))
 	}
-	c.Say(tiqrEcommerceFailed)
-	c.Say(tiqrEcommerceThanks)
-	return c.End()
+	return c.Transfer(formatFailedOrderHandoff(c.session().SessionData))
+}
+
+// orderItemsForAPI returns cart lines with only product_option and quantity for create_order.
+// Duplicate options are merged; quantities below 1 are skipped.
+func orderItemsForAPI(raw any) []map[string]any {
+	cart, ok := anySlice(raw)
+	if !ok || len(cart) == 0 {
+		return nil
+	}
+	merged := map[string]int{}
+	order := make([]string, 0, len(cart))
+	for _, entry := range cart {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		optionID := strings.TrimSpace(asString(item["product_option"]))
+		qty := parsePositiveInt(asString(item["quantity"]))
+		if optionID == "" || qty < 1 {
+			continue
+		}
+		if _, seen := merged[optionID]; !seen {
+			order = append(order, optionID)
+		}
+		merged[optionID] += qty
+	}
+	out := make([]map[string]any, 0, len(order))
+	for _, optionID := range order {
+		out = append(out, map[string]any{
+			"product_option": optionID,
+			"quantity":       strconv.Itoa(merged[optionID]),
+		})
+	}
+	return out
+}
+
+// formatFailedOrderHandoff builds the agent handoff text when create_order fails.
+func formatFailedOrderHandoff(data map[string]any) string {
+	var b strings.Builder
+	b.WriteString("Placing order for the following items failed.\n")
+	cart, _ := anySlice(data["tiqr_cart"])
+	for _, entry := range cart {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		name := strings.TrimSpace(asString(item["option_name"]))
+		optionID := strings.TrimSpace(asString(item["product_option"]))
+		qty := strings.TrimSpace(asString(item["quantity"]))
+		if qty == "" {
+			qty = "1"
+		}
+		if name == "" {
+			if optionID == "" {
+				continue
+			}
+			name = "Option " + optionID
+		}
+		b.WriteString("\n")
+		b.WriteString(name)
+		b.WriteString(" x ")
+		b.WriteString(qty)
+	}
+	if addr := formatCheckoutAddress(data); addr != "" {
+		b.WriteString("\n\nAddress\n")
+		b.WriteString(addr)
+	}
+	b.WriteString("\n\n")
+	b.WriteString(tiqrEcommerceHandoffConnect)
+	return b.String()
+}
+
+// formatCheckoutAddress formats name and shipping lines from the checkout session.
+func formatCheckoutAddress(data map[string]any) string {
+	name := contextValue(data, "customer_name", "name")
+	line1 := contextValue(data, "address_line_one", "address_line_1")
+	line2 := contextValue(data, "address_line_two", "address_line_2")
+	city := contextValue(data, "city")
+	state := contextValue(data, "state")
+	country := contextValue(data, "country")
+	pincode := contextValue(data, "pincode")
+	if name == "" && line1 == "" && line2 == "" && city == "" && state == "" && country == "" && pincode == "" {
+		return ""
+	}
+	var lines []string
+	if name != "" {
+		lines = append(lines, name)
+	}
+	street := strings.TrimSpace(strings.Join(nonEmpty(line1, line2), ", "))
+	if street != "" {
+		lines = append(lines, street)
+	}
+	cityState := strings.TrimSpace(strings.Join(nonEmpty(city, state), ", "))
+	if cityState != "" {
+		lines = append(lines, cityState)
+	}
+	countryPin := strings.TrimSpace(strings.Join(nonEmpty(country, pincode), " "))
+	if countryPin != "" {
+		lines = append(lines, countryPin)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func nonEmpty(parts ...string) []string {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 // collectRecoverFields asks for every missing checkout field, one reply at a

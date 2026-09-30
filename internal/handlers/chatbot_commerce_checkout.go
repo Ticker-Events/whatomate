@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ const (
 	checkoutButtonID             = "checkout"
 	checkoutExploreButtonID      = "checkout_explore"
 	checkoutConfirmButtonID      = "checkout_confirm"
+	checkoutItemsConfirmButtonID = "checkout_items_confirm"
 	checkoutCancelButtonID       = "checkout_cancel"
 	checkoutPickupButtonID       = "checkout_delivery_pickup"
 	checkoutDeliveryButtonID     = "checkout_delivery_ship"
@@ -239,8 +241,8 @@ func anyToFloat64(v any) (float64, bool) {
 // IsCheckoutButton reports commerce checkout interactive button ids.
 func IsCheckoutButton(buttonID string) bool {
 	switch buttonID {
-	case checkoutButtonID, checkoutExploreButtonID, checkoutConfirmButtonID, checkoutCancelButtonID,
-		checkoutPickupButtonID, checkoutDeliveryButtonID, checkoutNewAddressButtonID,
+	case checkoutButtonID, checkoutExploreButtonID, checkoutConfirmButtonID, checkoutItemsConfirmButtonID,
+		checkoutCancelButtonID, checkoutPickupButtonID, checkoutDeliveryButtonID, checkoutNewAddressButtonID,
 		checkoutAddonSkipButtonID, checkoutAddonDoneButtonID:
 		return true
 	default:
@@ -296,6 +298,8 @@ func (a *App) handleCheckoutButtonTap(account *models.WhatsAppAccount, contact *
 		a.handleCheckoutDeliveryChoice(account, contact, session, settings, "DELIVERY_TO_LOCATION")
 	case checkoutNewAddressButtonID:
 		a.beginNewCheckoutAddress(account, contact, session, settings)
+	case checkoutItemsConfirmButtonID:
+		a.continueCheckoutAfterCartReview(account, contact, session, settings)
 	case checkoutConfirmButtonID:
 		a.placeCheckoutOrderOrHandoff(account, contact, session, settings)
 	case checkoutCancelButtonID:
@@ -309,18 +313,12 @@ func (a *App) startCheckout(account *models.WhatsAppAccount, contact *models.Con
 		return
 	}
 	clearCartPendingOption(session)
-	summary := formatCheckoutCartSummary(session)
-	_ = a.sendAndSaveTextMessage(account, contact, summary)
 
 	st := &checkoutState{
 		Flow:          checkoutFlowCheckout,
+		Step:          "review",
 		NewAddress:    map[string]any{},
 		CaptureFields: a.checkoutCaptureFields(session, settings),
-	}
-	if len(st.CaptureFields) > 0 {
-		st.Step = "capture"
-	} else {
-		st.Step = "email"
 	}
 	setCheckoutState(session, st)
 	if _, err := a.ensureCommerceDraft(contact, session, settings); err != nil {
@@ -328,6 +326,44 @@ func (a *App) startCheckout(account *models.WhatsAppAccount, contact *models.Con
 		_ = a.sendAndSaveTextMessage(account, contact, "Checkout is temporarily unavailable. Please try again.")
 		return
 	}
+	_ = a.persistSessionData(session)
+	a.sendCartReviewPrompt(account, contact, session)
+}
+
+func (a *App) sendCartReviewPrompt(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession) {
+	msg := formatCheckoutCartSummary(session) + "\n\nPlease confirm these items before we continue checkout.\n\nYou can say remove <name> or <name> to <qty> to edit the cart."
+	_ = a.sendAndSaveInteractiveButtons(account, contact, msg, []map[string]any{
+		{"id": checkoutItemsConfirmButtonID, "title": "Confirm items"},
+		{"id": checkoutExploreButtonID, "title": "Keep browsing"},
+	})
+}
+
+func (a *App) continueCheckoutAfterCartReview(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
+	st := getCheckoutState(session)
+	if st == nil || st.Step != "review" {
+		if cartIsEmpty(session) {
+			_ = a.sendAndSaveTextMessage(account, contact, "Your cart is empty. Add items before checking out.")
+			return
+		}
+		a.startCheckout(account, contact, session, settings)
+		return
+	}
+	if cartIsEmpty(session) {
+		clearCheckoutState(session)
+		_ = a.persistSessionData(session)
+		_ = a.sendAndSaveTextMessage(account, contact, "Your cart is empty. Add items before checking out.")
+		return
+	}
+	if len(st.CaptureFields) == 0 {
+		st.CaptureFields = a.checkoutCaptureFields(session, settings)
+	}
+	if len(st.CaptureFields) > 0 {
+		st.Step = "capture"
+		st.CaptureIndex = 0
+	} else {
+		st.Step = "email"
+	}
+	setCheckoutState(session, st)
 	_ = a.persistSessionData(session)
 	a.repromptCheckoutStep(account, contact, session, settings, st)
 }
@@ -1183,6 +1219,18 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 	}
 
 	switch st.Step {
+	case "review":
+		if isCheckoutConfirmYes(text) {
+			a.continueCheckoutAfterCartReview(account, contact, session, settings)
+			return true
+		}
+		if isCheckoutCancelText(text) || isCheckoutEditExitIntent(text) {
+			a.exitCheckoutToBrowse(account, contact, session, checkoutExploreAck, true)
+			return true
+		}
+		_ = a.sendAndSaveTextMessage(account, contact, "Please confirm these items, or edit the cart (remove <name> / <name> to <qty>).")
+		a.sendCartReviewPrompt(account, contact, session)
+		return true
 	case "capture":
 		if st.CaptureIndex < 0 || st.CaptureIndex >= len(st.CaptureFields) {
 			a.continueAfterCaptureComplete(account, contact, session, settings, st)
@@ -1463,31 +1511,47 @@ func (a *App) handleCheckoutCartEditIntent(account *models.WhatsAppAccount, cont
 	}
 	if changed, message := applyTargetedCartEdit(session, text); changed {
 		_ = a.persistSessionData(session)
-		_ = a.sendAndSaveTextMessage(account, contact, message+"\n\n"+formatCheckoutCartSummary(session))
 		if cartIsEmpty(session) {
 			clearCheckoutState(session)
+			_ = a.persistSessionData(session)
+			_ = a.sendAndSaveTextMessage(account, contact, message+"\n\nYour cart is empty. Add items when you're ready.")
 			return true
 		}
+		if st.Step == "review" {
+			_ = a.sendAndSaveTextMessage(account, contact, message)
+			a.sendCartReviewPrompt(account, contact, session)
+			return true
+		}
+		_ = a.sendAndSaveTextMessage(account, contact, message+"\n\n"+formatCheckoutCartSummary(session))
 		a.repromptCheckoutStep(account, contact, session, settings, st)
 		return true
 	}
 	if isCheckoutEditExitIntent(text) {
 		qty := extractQtyFromText(text)
 		if qty > 0 {
+			if st.Step == "review" {
+				return a.applyReviewQtyUpdate(account, contact, session, settings, st, qty)
+			}
 			return a.applyCheckoutQtyOrPause(account, contact, session, settings, st, qty)
 		}
 		a.exitCheckoutToBrowse(account, contact, session, "Checkout paused. Your cart is still saved — update it or keep browsing, then tap Checkout when you're ready.", true)
 		return true
 	}
 
-	// Bare positive integer → qty for sole cart line.
+	// Bare positive integer → qty for sole cart line (or pending line on review).
 	if qty := parsePositiveInt(text); qty > 0 {
+		if st.Step == "review" {
+			return a.applyReviewQtyUpdate(account, contact, session, settings, st, qty)
+		}
 		return a.applyCheckoutQtyOrPause(account, contact, session, settings, st, qty)
 	}
 
 	// Phrases that include a quantity (e.g. "i want 2", "change to 2").
 	if isCheckoutQtyPhrase(text) {
 		if qty := extractQtyFromText(text); qty > 0 {
+			if st.Step == "review" {
+				return a.applyReviewQtyUpdate(account, contact, session, settings, st, qty)
+			}
 			return a.applyCheckoutQtyOrPause(account, contact, session, settings, st, qty)
 		}
 	}
@@ -1497,6 +1561,28 @@ func (a *App) handleCheckoutCartEditIntent(account *models.WhatsAppAccount, cont
 		return true
 	}
 	return false
+}
+
+func (a *App) applyReviewQtyUpdate(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, qty int) bool {
+	_ = settings
+	_ = st
+	optID, ok := soleCartOptionID(session)
+	if !ok {
+		_ = a.sendAndSaveTextMessage(account, contact, "Your cart has multiple items. Tell me which to change (e.g. remove Chocolate or Chocolate to 2).")
+		a.sendCartReviewPrompt(account, contact, session)
+		return true
+	}
+	optKey := fmt.Sprintf("%d", optID)
+	if !setCartLineQty(session, optKey, qty) {
+		_ = a.sendAndSaveTextMessage(account, contact, "Couldn't update that quantity. Please try again.")
+		a.sendCartReviewPrompt(account, contact, session)
+		return true
+	}
+	_ = a.persistSessionData(session)
+	name := cartOptionName(session, optKey)
+	_ = a.sendAndSaveTextMessage(account, contact, fmt.Sprintf("Updated quantity to %d for %s.", qty, name))
+	a.sendCartReviewPrompt(account, contact, session)
+	return true
 }
 
 func applyTargetedCartEdit(session *models.ChatbotSession, text string) (bool, string) {
@@ -1608,6 +1694,8 @@ func (a *App) repromptCheckoutStep(account *models.WhatsAppAccount, contact *mod
 		return
 	}
 	switch st.Step {
+	case "review":
+		a.sendCartReviewPrompt(account, contact, session)
 	case "capture":
 		if st.CaptureIndex >= 0 && st.CaptureIndex < len(st.CaptureFields) {
 			_ = a.sendAndSaveTextMessage(account, contact, promptCaptureField(st.CaptureFields[st.CaptureIndex]))
@@ -1717,11 +1805,46 @@ func isCheckoutQtyPhrase(text string) bool {
 
 func isCheckoutConfirmYes(text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
-	case "yes", "y", "confirm", "ok", "okay", "place order", "confirm order":
+	case "yes", "y", "confirm", "ok", "okay", "place order", "confirm order", "confirm items":
 		return true
 	default:
 		return false
 	}
+}
+
+func isCheckoutStartIntent(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	switch lower {
+	case "checkout", "check out", "check-out", "place order", "place my order", "ready to checkout", "ready to check out":
+		return true
+	default:
+		return false
+	}
+}
+
+// handleBrowsingCartEdit applies remove/qty edits while the shopper is browsing (no checkout in progress).
+func (a *App) handleBrowsingCartEdit(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, messageText string) bool {
+	if getCheckoutState(session) != nil {
+		return false
+	}
+	text := strings.TrimSpace(messageText)
+	if text == "" || cartIsEmpty(session) {
+		return false
+	}
+	changed, message := applyTargetedCartEdit(session, text)
+	if !changed {
+		return false
+	}
+	_ = a.persistSessionData(session)
+	if cartIsEmpty(session) {
+		clearCartPendingOption(session)
+		_ = a.persistSessionData(session)
+		_ = a.sendAndSaveTextMessage(account, contact, message+"\n\nYour cart is empty. Add items when you're ready.")
+		return true
+	}
+	_ = a.sendAndSaveTextMessage(account, contact, message+"\n\n"+formatCheckoutCartSummary(session))
+	a.sendCheckoutButtonPrompt(account, contact)
+	return true
 }
 
 func isCheckoutCancelText(text string) bool {
@@ -2287,10 +2410,23 @@ func formatCheckoutCartSummary(session *models.ChatbotSession) string {
 	if len(cart) == 0 {
 		return "Your cart is empty."
 	}
+	keys := make([]string, 0, len(cart))
+	for key := range cart {
+		keys = append(keys, key)
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		ni, nj := anyToInt(keys[i]), anyToInt(keys[j])
+		if ni > 0 && nj > 0 && ni != nj {
+			return ni < nj
+		}
+		return keys[i] < keys[j]
+	})
+
 	var b strings.Builder
-	b.WriteString("Your cart:\n")
+	b.WriteString("*Your cart:*\n")
 	var total float64
-	for _, line := range cart {
+	for _, key := range keys {
+		line := cart[key]
 		meta, _ := line["product"].(map[string]any)
 		name := cartLineOptionName(meta)
 		qty := anyToInt(line["qty"])
@@ -2300,10 +2436,16 @@ func formatCheckoutCartSummary(session *models.ChatbotSession) string {
 		price := cartLinePrice(meta)
 		lineTotal := price * float64(qty)
 		total += lineTotal
-		fmt.Fprintf(&b, "- %s x%d — %s\n", name, qty, formatPriceINR(lineTotal))
+		// Match the commerce Current Cart style (name xqty — unit price each),
+		// then show the line total so multi-qty rows stay clear.
+		fmt.Fprintf(&b, "- *%s* x%d — %s each", name, qty, formatPriceINR(price))
+		if qty > 1 {
+			fmt.Fprintf(&b, " (%s)", formatPriceINR(lineTotal))
+		}
+		b.WriteByte('\n')
 	}
-	fmt.Fprintf(&b, "\nSubtotal: %s", formatPriceINR(total))
-	return b.String()
+	fmt.Fprintf(&b, "\n*Subtotal:* %s", formatPriceINR(total))
+	return strings.TrimSpace(b.String())
 }
 
 func formatOrderConfirmSummary(session *models.ChatbotSession, st *checkoutState) string {
@@ -2397,7 +2539,7 @@ func (a *App) handleCartQuantityReply(account *models.WhatsAppAccount, contact *
 	clearCartPendingOption(session)
 	_ = a.persistSessionData(session)
 	name := cartOptionName(session, pendingID)
-	msg := fmt.Sprintf("Updated quantity to %d for %s.", qty, name)
+	msg := fmt.Sprintf("Updated quantity to %d for %s.\n\n%s", qty, name, formatCheckoutCartSummary(session))
 	_ = a.sendAndSaveTextMessage(account, contact, msg)
 	a.sendCheckoutButtonPrompt(account, contact)
 	return true

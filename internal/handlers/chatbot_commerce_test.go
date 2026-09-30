@@ -332,6 +332,9 @@ func TestBuildCommerceSystemPrompt(t *testing.T) {
 	assert.Contains(t, p, "₹")
 	assert.Contains(t, p, "get_store.address")
 	assert.Contains(t, p, "out_of_range")
+	assert.Contains(t, p, "confirmed the full cart")
+	assert.Contains(t, p, "tap Checkout")
+	assert.Contains(t, p, "Cart edits")
 }
 
 func TestCompactOrderCreateResultUsesDisplayUIDAndPaymentURL(t *testing.T) {

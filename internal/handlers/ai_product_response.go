@@ -917,7 +917,7 @@ func (a *App) completeAddToCart(account *models.WhatsAppAccount, contact *models
 	setCartPendingOption(session, optionID)
 	_ = a.persistSessionData(session)
 
-	ack := formatAddToCartAck(name, qty)
+	ack := formatAddToCartAck(session, name, qty)
 	if err := a.sendAndSaveTextMessage(account, contact, ack); err != nil {
 		a.Log.Error("Failed to send add-to-cart ack", "error", err, "contact", contact.PhoneNumber)
 	}
@@ -929,17 +929,18 @@ func (a *App) completeAddToCart(account *models.WhatsAppAccount, contact *models
 	a.beginPostCartLineFlow(account, contact, session, settings, productIDFromCartMeta(meta))
 }
 
-func formatAddToCartAck(optionName string, qty int) string {
+func formatAddToCartAck(session *models.ChatbotSession, optionName string, qty int) string {
 	if qty < 1 {
 		qty = 1
 	}
 	if optionName == "" {
 		optionName = "item"
 	}
-	return fmt.Sprintf(
-		"Added %d × %s to your cart.\n\nReply with a number to change the quantity, or keep browsing — tap Checkout when you're ready.",
-		qty, optionName,
-	)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Added %d × %s to your cart.\n\n", qty, optionName)
+	b.WriteString(formatCheckoutCartSummary(session))
+	b.WriteString("\n\nReply with a number to change this item's quantity, say remove <name> or <name> to <qty> to edit another line, or tap Checkout when you're ready.")
+	return b.String()
 }
 
 func (a *App) sendCheckoutButtonPrompt(account *models.WhatsAppAccount, contact *models.Contact) {

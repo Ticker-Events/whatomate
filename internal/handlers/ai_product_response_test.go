@@ -419,11 +419,35 @@ func TestParsePositiveInt(t *testing.T) {
 func TestFormatAddToCartAck(t *testing.T) {
 	t.Parallel()
 
-	msg := formatAddToCartAck("Varalakshmi Jhumka", 1)
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		cartKey: map[string]any{
+			"1": map[string]any{
+				"qty": 1,
+				"product": map[string]any{
+					"option_name": "Varalakshmi Jhumka",
+					"price":       250.0,
+				},
+			},
+			"2": map[string]any{
+				"qty": 2,
+				"product": map[string]any{
+					"option_name": "Large",
+					"price":       100.0,
+				},
+			},
+		},
+	}}
+
+	msg := formatAddToCartAck(session, "Varalakshmi Jhumka", 1)
 	assert.Contains(t, msg, "Added 1 × Varalakshmi Jhumka to your cart.")
-	assert.Contains(t, msg, "Reply with a number to change the quantity")
+	assert.Contains(t, msg, "*Your cart:*")
+	assert.Contains(t, msg, "*Varalakshmi Jhumka* x1 — ₹250.00 each")
+	assert.Contains(t, msg, "*Large* x2 — ₹100.00 each (₹200.00)")
+	assert.Contains(t, msg, "*Subtotal:*")
+	assert.Contains(t, msg, "remove <name>")
 	assert.Contains(t, msg, "Checkout")
 
-	msg2 := formatAddToCartAck("Large", 3)
+	msg2 := formatAddToCartAck(session, "Large", 3)
 	assert.Contains(t, msg2, "Added 3 × Large to your cart.")
+	assert.Contains(t, msg2, "*Your cart:*")
 }
