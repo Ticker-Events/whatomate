@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -1315,6 +1316,52 @@ func TestApp_UpdateChatbotSettings_PartialUpdate(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
 	})
+}
+
+func TestApp_UpdateChatbotSettings_MCPKeyActivityLog(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	app.Config.App.EncryptionKey = "this-is-a-32-character-test-key-XX"
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID)
+
+	const secret = "mcp-key-must-not-leak"
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"ai_commerce_mcp_api_key": secret,
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	require.NoError(t, app.UpdateChatbotSettings(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var logs []models.AuditLog
+	require.Eventually(t, func() bool {
+		logs = nil
+		err := app.DB.Where("organization_id = ? AND resource_type = ?", org.ID, models.ResourceSettingsChatbotAI).
+			Find(&logs).Error
+		return err == nil && len(logs) == 1
+	}, 2*time.Second, 20*time.Millisecond)
+
+	raw, err := json.Marshal(logs[0].Changes)
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), secret)
+
+	found := false
+	for _, change := range logs[0].Changes {
+		entry, ok := change.(map[string]any)
+		if !ok || entry["field"] != "ai_commerce_mcp_api_key" {
+			continue
+		}
+		found = true
+		assert.Equal(t, "********", entry["old_value"])
+		assert.Equal(t, "********", entry["new_value"])
+	}
+	assert.True(t, found, "MCP API key update must appear in the activity log")
+
+	var stored models.ChatbotSettings
+	require.NoError(t, app.DB.Where("organization_id = ?", org.ID).First(&stored).Error)
+	assert.NotEqual(t, secret, stored.AI.CommerceMCPAPIKey)
+	assert.True(t, strings.HasPrefix(stored.AI.CommerceMCPAPIKey, "enc:"))
 }
 
 // =============================================================================

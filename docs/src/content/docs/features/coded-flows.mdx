@@ -215,12 +215,12 @@ Before the collection list, Buy products reads `delivery_modes` from the store a
 When delivery is selected (or is the only mode):
 
 1. The flow sends a WhatsApp location request.
-2. It calls TiQR MCP `check_delivery` (`check_delivery_eligibility`) with the pin.
-3. For `free` or `paid`, it tells the customer the result and shows the store’s free and paid radii from `get_store`, then continues to collections.
+2. It calculates distance locally from the store’s `latitude` / `longitude` and compares against `free_delivery_radius` and `delivery_radius` (same rules as TiQR `evaluate_delivery`). No MCP call.
+3. For `free` or `paid`, it tells the customer the result and shows the store’s free and paid radii, then continues to collections.
 4. For out of range when pickup is also supported, it shows the out-of-range copy and buttons to switch to **Store pickup** or **Share again**.
 5. For out of range when delivery is the only mode, it shows the same radii without offering pickup, then asks for another pin.
 
-Each pin attempt uses its own call names (`delivery_location_1`, `delivery_check_1`, …) so a later check does not overwrite an earlier one. Latitude and longitude are stored as `delivery_latitude` / `delivery_longitude` for the order.
+Each pin attempt uses its own call names (`delivery_location_1`, `delivery_check_1`, …). Latitude and longitude are stored as `delivery_latitude` / `delivery_longitude` for the order.
 
 ### Buying
 
@@ -272,7 +272,7 @@ The order is placed with `create_order` only after that form is submitted. Each 
 | `items` | `tiqr_cart` |
 | `notes` | `customer_notes` |
 | `delivery_mode` | Session `delivery_mode` from fulfillment (`PICKUP_FROM_STORE` or `DELIVERY_TO_LOCATION`). Empty defaults to pickup. |
-| `new_address` | The address object below |
+| `new_address` | The address object below. Delivery also includes `latitude` and `longitude` from the pin, rounded to 6 decimal places |
 | `buyer_meta_data` | For delivery: `latitude` / `longitude` from the pin (`delivery_latitude` / `delivery_longitude`) |
 | `phone_number` | The WhatsApp number on the session. The form's phone is stored on the address, not copied into `email`. |
 
@@ -289,11 +289,13 @@ The order is placed with `create_order` only after that form is submitted. Each 
   "pincode": "{{pincode}}",
   "email": "{{customer_email}}",
   "phone_number": "{{customer_phone}}",
-  "phone": "{{customer_phone}}"
+  "phone": "{{customer_phone}}",
+  "latitude": "{{delivery_latitude}}",
+  "longitude": "{{delivery_longitude}}"
 }
 ```
 
-The WhatsApp Flow has to submit those field names. The Email input must be an email address. `email` is required to create the order. Guest checkout also needs `email` on the address. If the address omits it, the order email is copied onto the address.
+The WhatsApp Flow has to submit those field names. The Email input must be an email address. `email` is required to create the order. Guest checkout also needs `email` on the address. If the address omits it, the order email is copied onto the address. For delivery, `latitude` and `longitude` on the address are the stored pin, rounded to 6 decimal places. Location-based stores require that pin on the address to confirm the order.
 
 There is no second confirmation step. A successful create tells the customer the order is confirmed for pickup or delivery, matching the stored mode. If create fails because customer details are missing, the recover role asks for every missing field from the error, one reply at a time, in this order: name, phone, email, address line 1, address line 2, city, state, country, pincode, notes. `create_order` is retried only after all of those replies are saved on the session, with the same cart. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details. The thank-you message is sent and the flow ends:
 

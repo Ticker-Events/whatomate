@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/shridarpatil/whatomate/pkg/ticker"
@@ -60,8 +61,6 @@ const (
 	tiqrEcommerceChooseMode = "How would you like to receive your order?"
 
 	tiqrEcommerceLocationPrompt = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
-
-	tiqrEcommerceDeliveryCheckFailed = "We couldn’t verify delivery for that location right now.\n\nPlease share your location again."
 )
 
 func init() {
@@ -336,7 +335,6 @@ func resolveDeliveryLocation(c *Conv, pickupAllowed bool) bool {
 	store, _ := asStringMap(c.session().SessionData["store"])
 	for attempt := 1; ; attempt++ {
 		locName := fmt.Sprintf("delivery_location_%d", attempt)
-		checkName := fmt.Sprintf("delivery_check_%d", attempt)
 		pin, ok := c.AskLocation(locName, LocationPrompt{
 			Body: tiqrEcommerceLocationPrompt,
 			Step: StepNote{
@@ -347,28 +345,23 @@ func resolveDeliveryLocation(c *Conv, pickupAllowed bool) bool {
 		if !ok {
 			return false
 		}
-		result, ok := c.StoreMCP(checkName, "check_delivery", map[string]string{
-			"latitude":  fmt.Sprintf("%v", pin.Latitude),
-			"longitude": fmt.Sprintf("%v", pin.Longitude),
-		})
-		if !ok {
-			if c.stop || c.ended {
-				return false
+		result := evaluateStoreDelivery(store, pin.Latitude, pin.Longitude)
+		c.Once(fmt.Sprintf("delivery_check_%d", attempt), func() {
+			c.session().SessionData[fmt.Sprintf("delivery_check_%d", attempt)] = map[string]any{
+				"deliverable": result.Deliverable,
+				"zone":        result.Zone,
+				"distance_km": result.DistanceKm,
 			}
-			c.Say(tiqrEcommerceDeliveryCheckFailed)
-			continue
-		}
-		zone := asString(result["zone"])
-		deliverable := false
-		if v, isBool := result["deliverable"].(bool); isBool {
-			deliverable = v
-		}
-		if deliverable && zone != "out_of_range" {
+		})
+		if result.Deliverable && result.Zone != deliveryZoneOutOfRange {
 			c.Say(formatDeliveryEligibilityMessage(store, result))
 			c.session().SessionData["delivery_mode"] = tiqrModeDelivery
-			c.session().SessionData["delivery_zone"] = zone
-			if fee, ok := anyToFloat64(result["shipping_fee_paise"]); ok {
-				c.session().SessionData["shipping_fee_paise"] = fee
+			c.session().SessionData["delivery_zone"] = result.Zone
+			if result.HasDistance {
+				c.session().SessionData["delivery_distance_km"] = result.DistanceKm
+			}
+			if result.ShippingFeePaise > 0 {
+				c.session().SessionData["shipping_fee_paise"] = float64(result.ShippingFeePaise)
 			}
 			return true
 		}
@@ -436,18 +429,15 @@ func deliveryModesContain(modes []string, want string) bool {
 	return false
 }
 
-func formatDeliveryEligibilityMessage(store map[string]any, result map[string]any) string {
+func formatDeliveryEligibilityMessage(store map[string]any, result storeDeliveryEligibility) string {
 	var b strings.Builder
-	zone := asString(result["zone"])
-	feePaise := 0.0
-	if fee, ok := anyToFloat64(result["shipping_fee_paise"]); ok {
-		feePaise = fee
-	}
 	switch {
-	case zone == "free" || feePaise == 0:
+	case result.Zone == deliveryZoneFree:
 		b.WriteString("Great news — delivery is free to that location.")
-	case feePaise > 0:
-		b.WriteString(fmt.Sprintf("We can deliver there. Delivery fee: %s.", formatPriceINR(ticker.PaiseToRupees(feePaise))))
+	case result.Zone == deliveryZonePaid && result.ShippingFeePaise > 0:
+		b.WriteString(fmt.Sprintf("We can deliver there. Delivery fee: %s.", formatPriceINR(ticker.PaiseToRupees(float64(result.ShippingFeePaise)))))
+	case result.Zone == deliveryZonePaid:
+		b.WriteString("We can deliver there. An additional delivery fee may apply.")
 	default:
 		b.WriteString("Thanks — we can deliver to that location.")
 	}
@@ -706,7 +696,11 @@ func listLen(c *Conv, key string) int {
 func pickupOrderParams(data map[string]any) map[string]string {
 	email := contextEmail(data)
 	phone := contextValue(data, "customer_phone", "phone", "phone_number")
-	address, err := json.Marshal(map[string]string{
+	deliveryMode := strings.TrimSpace(asString(data["delivery_mode"]))
+	if deliveryMode == "" {
+		deliveryMode = tiqrModePickup
+	}
+	addressFields := map[string]string{
 		"name":           contextValue(data, "customer_name", "name"),
 		"address_line_1": contextValue(data, "address_line_one", "address_line_1"),
 		"address_line_2": contextValue(data, "address_line_two", "address_line_2"),
@@ -717,17 +711,24 @@ func pickupOrderParams(data map[string]any) map[string]string {
 		"email":          email,
 		"phone_number":   phone,
 		"phone":          phone,
-	})
+	}
+	// Location-based stores read the pin from new_address, not buyer_meta_data,
+	// whenever an address object is present.
+	if deliveryMode == tiqrModeDelivery {
+		if lat, ok := anyToFloat64(data["delivery_latitude"]); ok {
+			addressFields["latitude"] = formatOrderCoordinate(lat)
+		}
+		if lng, ok := anyToFloat64(data["delivery_longitude"]); ok {
+			addressFields["longitude"] = formatOrderCoordinate(lng)
+		}
+	}
+	address, err := json.Marshal(addressFields)
 	if err != nil {
 		address = []byte("{}")
 	}
 	items := "[]"
 	if raw, err := json.Marshal(data["tiqr_cart"]); err == nil && string(raw) != "null" {
 		items = string(raw)
-	}
-	deliveryMode := strings.TrimSpace(asString(data["delivery_mode"]))
-	if deliveryMode == "" {
-		deliveryMode = tiqrModePickup
 	}
 	params := map[string]string{
 		"email":         email,
@@ -742,6 +743,11 @@ func pickupOrderParams(data map[string]any) map[string]string {
 		}
 	}
 	return params
+}
+
+// formatOrderCoordinate keeps six decimal places, the address field limit.
+func formatOrderCoordinate(v float64) string {
+	return strconv.FormatFloat(v, 'f', 6, 64)
 }
 
 func codedBuyerMetaJSON(data map[string]any) (string, bool) {

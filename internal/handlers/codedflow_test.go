@@ -59,6 +59,23 @@ func TestPickupOrderParams_UsesStoredDeliveryModeAndBuyerMeta(t *testing.T) {
 	})
 	assert.Equal(t, "DELIVERY_TO_LOCATION", params["delivery_mode"])
 	assert.JSONEq(t, `{"latitude":12.97,"longitude":77.59}`, params["buyer_meta_data"])
+
+	var address map[string]string
+	require.NoError(t, json.Unmarshal([]byte(params["new_address"]), &address))
+	assert.Equal(t, "12.970000", address["latitude"])
+	assert.Equal(t, "77.590000", address["longitude"])
+}
+
+func TestPickupOrderParams_RoundsDeliveryPinOntoAddress(t *testing.T) {
+	params := pickupOrderParams(map[string]any{
+		"delivery_mode":      "DELIVERY_TO_LOCATION",
+		"delivery_latitude":  11.5545985,
+		"delivery_longitude": 75.6326679,
+	})
+	var address map[string]string
+	require.NoError(t, json.Unmarshal([]byte(params["new_address"]), &address))
+	assert.Equal(t, "11.554599", address["latitude"])
+	assert.Equal(t, "75.632668", address["longitude"])
 }
 
 func TestPickupOrderParams_DoesNotUsePhoneAsEmail(t *testing.T) {
@@ -1382,26 +1399,17 @@ func TestTiqrEcommerce_BothModesPickupSkipsLocation(t *testing.T) {
 
 func TestTiqrEcommerce_DeliveryInRangeContinuesToCollections(t *testing.T) {
 	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
-	stub := &stubTiqrInvoker{
-		result: map[string]any{
-			"deliverable":        true,
-			"zone":               "free",
-			"shipping_fee_paise": 0,
-			"message":            "Free delivery",
-		},
-	}
-	withTiqrInvoker(t, stub)
 	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
-		"id":                   42,
-		"name":                 "Demo",
-		"address":              "Vadakara",
-		"free_delivery_radius": 8,
-		"delivery_radius":      16,
-		"delivery_modes":       []any{"DELIVERY_TO_LOCATION"},
-	}, &models.AIConfig{
-		CommerceEnabled: true,
-		CommerceMCPURL:  "http://mcp.test/mcp",
-	})
+		"id":                       42,
+		"name":                     "Demo",
+		"address":                  "Vadakara",
+		"latitude":                 "11.2",
+		"longitude":                "75.8",
+		"location_based_delivery":  true,
+		"free_delivery_radius":     8,
+		"delivery_radius":          16,
+		"delivery_modes":           []any{"DELIVERY_TO_LOCATION"},
+	}, nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
@@ -1415,37 +1423,29 @@ func TestTiqrEcommerce_DeliveryInRangeContinuesToCollections(t *testing.T) {
 	assert.Equal(t, "DELIVERY_TO_LOCATION", session.SessionData["delivery_mode"])
 	assert.Equal(t, 11.2, session.SessionData["delivery_latitude"])
 	assert.Equal(t, 75.8, session.SessionData["delivery_longitude"])
+	assert.Equal(t, "free", session.SessionData["delivery_zone"])
 	blob := outgoingBlob(t, app, session)
 	assert.Contains(t, blob, "delivery is free")
 	assert.Contains(t, blob, "8 km")
 	assert.Contains(t, blob, "16 km")
-	assert.Equal(t, "check_delivery_eligibility", stub.lastName)
 }
 
 func TestTiqrEcommerce_DeliveryOutOfRangeOffersPickup(t *testing.T) {
 	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
-	stub := &stubTiqrInvoker{
-		result: map[string]any{
-			"deliverable":        false,
-			"zone":               "out_of_range",
-			"shipping_fee_paise": 0,
-		},
-	}
-	withTiqrInvoker(t, stub)
 	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
-		"id":                   42,
-		"name":                 "Demo",
-		"address":              "Vadakara, Kozhikode",
-		"free_delivery_radius": 8,
-		"delivery_radius":      16,
+		"id":                      42,
+		"name":                    "Demo",
+		"address":                 "Vadakara, Kozhikode",
+		"latitude":                "11.55",
+		"longitude":               "75.63",
+		"location_based_delivery": true,
+		"free_delivery_radius":    8,
+		"delivery_radius":         16,
 		"delivery_modes": []any{
 			"PICKUP_FROM_STORE",
 			"DELIVERY_TO_LOCATION",
 		},
-	}, &models.AIConfig{
-		CommerceEnabled: true,
-		CommerceMCPURL:  "http://mcp.test/mcp",
-	})
+	}, nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
@@ -1470,22 +1470,15 @@ func TestTiqrEcommerce_DeliveryOutOfRangeOffersPickup(t *testing.T) {
 
 func TestTiqrEcommerce_DeliveryOnlyOutOfRangeAsksAgain(t *testing.T) {
 	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
-	stub := &stubTiqrInvoker{
-		result: map[string]any{
-			"deliverable": false,
-			"zone":        "out_of_range",
-		},
-	}
-	withTiqrInvoker(t, stub)
 	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
-		"id":              42,
-		"name":            "Demo",
-		"delivery_modes":  []any{"DELIVERY_TO_LOCATION"},
-		"delivery_radius": 10,
-	}, &models.AIConfig{
-		CommerceEnabled: true,
-		CommerceMCPURL:  "http://mcp.test/mcp",
-	})
+		"id":                      42,
+		"name":                    "Demo",
+		"latitude":                "11.55",
+		"longitude":               "75.63",
+		"location_based_delivery": true,
+		"delivery_modes":          []any{"DELIVERY_TO_LOCATION"},
+		"delivery_radius":         10,
+	}, nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))

@@ -301,9 +301,17 @@ func chatbotSLASnapshot(s *models.ChatbotSettings) map[string]any {
 	}
 }
 
+// maskedSecretChange records that a secret was set or rotated without
+// storing the plaintext or ciphertext in the activity log.
+func maskedSecretChange(field string) map[string]any {
+	return map[string]any{
+		"field": field, "old_value": "********", "new_value": "********",
+	}
+}
+
 // chatbotAISnapshot captures the fields shown on the Chatbot "AI" tab.
-// The API key is intentionally excluded — it's a secret, not a user-facing
-// change the activity log should surface.
+// Secret keys are omitted here and recorded separately as masked changes so
+// the activity log shows that they were updated without exposing the value.
 func chatbotAISnapshot(s *models.ChatbotSettings) map[string]any {
 	return map[string]any{
 		"ai_enabled":                       s.AI.Enabled,
@@ -530,6 +538,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	prevCommerceEnabled := settings.AI.CommerceEnabled
 	prevCommerceMCPURL := settings.AI.CommerceMCPURL
 	prevCommerceStoreID := settings.AI.CommerceStoreID
+	var aiSecretChanges []map[string]any
 
 	if req.AIEnabled != nil {
 		settings.AI.Enabled = *req.AIEnabled
@@ -544,6 +553,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
 		}
 		settings.AI.APIKey = encrypted
+		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_api_key"))
 	}
 	if req.AIModel != nil {
 		settings.AI.Model = *req.AIModel
@@ -567,6 +577,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
 		}
 		settings.AI.CommerceMCPAPIKey = encrypted
+		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_commerce_mcp_api_key"))
 	}
 	if req.AICommerceRESTURL != nil {
 		settings.AI.CommerceRESTURL = strings.TrimRight(strings.TrimSpace(*req.AICommerceRESTURL), "/")
@@ -581,6 +592,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
 		}
 		settings.AI.TypeSafeAPIKey = encrypted
+		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_typesafe_api_key"))
 	}
 	if req.AIGatewayAPIKey != nil && *req.AIGatewayAPIKey != "" {
 		encrypted, err := crypto.Encrypt(*req.AIGatewayAPIKey, a.Config.App.EncryptionKey)
@@ -589,6 +601,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
 		}
 		settings.AI.GatewayAPIKey = encrypted
+		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_gateway_api_key"))
 	}
 	if req.AIGatewayModel != nil {
 		model := strings.TrimSpace(*req.AIGatewayModel)
@@ -733,7 +746,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	if aiTouched {
 		audit.LogAudit(a.DB, orgID, userID, userName,
 			models.ResourceSettingsChatbotAI, orgID, models.AuditActionUpdated,
-			oldAI, chatbotAISnapshot(&settings))
+			oldAI, chatbotAISnapshot(&settings), aiSecretChanges...)
 	}
 
 	return r.SendEnvelope(map[string]any{
