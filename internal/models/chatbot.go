@@ -72,6 +72,15 @@ type AIConfig struct {
 	// Cached AI welcome for commerce new-session greetings (TTL enforced in handlers)
 	CommerceWelcomeMessage     string     `gorm:"column:ai_commerce_welcome_message;type:text" json:"ai_commerce_welcome_message"`
 	CommerceWelcomeGeneratedAt *time.Time `gorm:"column:ai_commerce_welcome_generated_at" json:"ai_commerce_welcome_generated_at"`
+
+	// Coded-flow AI engines (generic account AI, TypeSafe Jev, or Vercel AI Gateway)
+	IntentProvider    IntentProvider `gorm:"column:ai_intent_provider;size:20" json:"ai_intent_provider"`
+	TranslateProvider IntentProvider `gorm:"column:ai_translate_provider;size:20" json:"ai_translate_provider"`
+	GuideProvider     IntentProvider `gorm:"column:ai_guide_provider;size:20" json:"ai_guide_provider"`
+	RecoverProvider   IntentProvider `gorm:"column:ai_recover_provider;size:20" json:"ai_recover_provider"`
+	TypeSafeAPIKey    string         `gorm:"column:ai_typesafe_api_key;type:text" json:"-"`
+	GatewayAPIKey     string         `gorm:"column:ai_gateway_api_key;type:text" json:"-"`
+	GatewayModel      string         `gorm:"column:ai_gateway_model;size:100" json:"ai_gateway_model"`
 }
 
 // PanelFieldConfig defines a field to display in the contact info panel
@@ -139,6 +148,8 @@ func (s *ChatbotSettings) DecryptSecrets(encryptionKey string) {
 		encryptionKey,
 		&s.AI.APIKey,
 		&s.AI.CommerceMCPAPIKey,
+		&s.AI.TypeSafeAPIKey,
+		&s.AI.GatewayAPIKey,
 	)
 }
 

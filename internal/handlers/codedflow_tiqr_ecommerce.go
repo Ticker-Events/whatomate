@@ -131,8 +131,8 @@ func menuButtons(store map[string]any) ButtonPrompt {
 			{ID: tiqrTalkToAgent, Title: "Talk to staff"},
 		},
 		Step: StepNote{
-			Doing:  "Opening menu: the customer chooses buy products, check order status, talk to staff, or check out with items already in the cart.",
-			Expect: "One of the three button titles, free text that matches them, a loaded collection or product, or a request to check out.",
+			Doing:  "The customer is at the welcome menu.",
+			Expect: "They may pick Buy products, Check order status, or Talk to staff, name a collection or a product, or ask to check out.",
 		},
 	}
 }
@@ -169,8 +169,8 @@ func buyProducts(c *Conv, collections []any, first Route) error {
 					"collection_name": "title",
 				},
 				Step: StepNote{
-					Doing:  "The customer is picking a store collection to browse, naming a product to search, or asking to check out.",
-					Expect: "A collection row from the list (including a close typo of its name), a product name to search, or a checkout request.",
+					Doing:  "The customer is looking at the collection list.",
+					Expect: "They may pick a collection, name a product, or ask to check out.",
 				},
 			}, RouteOptions{AllowCatalog: true})
 			if !ok {
@@ -230,8 +230,8 @@ func buyProducts(c *Conv, collections []any, first Route) error {
 				{ID: tiqrCheckout, Title: "Checkout"},
 			},
 			Step: StepNote{
-				Doing:  "The customer just added an item and chooses whether to keep shopping or check out.",
-				Expect: "Add more items or Checkout, including a close paraphrase of either, or a free-text checkout request.",
+				Doing:  "The customer just added an item.",
+				Expect: "They may add more or check out.",
 			},
 		})
 		if !ok {
@@ -358,8 +358,8 @@ func singleProductCTA() ImageButtonPrompt {
 			"product_id": "id",
 		},
 		Step: StepNote{
-			Doing:  "The customer is adding the only product shown for this collection or search.",
-			Expect: "Add to cart, or the product name (including a close typo).",
+			Doing:  "One product is on screen.",
+			Expect: "They may accept it or name it.",
 		},
 	}
 }
@@ -379,8 +379,8 @@ func productCards() CarouselPrompt {
 			"product_id": "id",
 		},
 		Step: StepNote{
-			Doing:  "The customer is choosing one product from the carousel for this collection or search.",
-			Expect: "A product from the cards (match by product name even if they do not say Add to cart).",
+			Doing:  "Several products are on screen.",
+			Expect: "They name one of those products.",
 		},
 	}
 }
@@ -415,8 +415,8 @@ func addPickedProduct(c *Conv) bool {
 				"option_name": "name",
 			},
 			Step: StepNote{
-				Doing:  "The selected product has more than one option; the customer must pick one.",
-				Expect: "An option row from the list, including a close typo of the option name.",
+				Doing:  "The product has more than one option on screen.",
+				Expect: "They pick one of those options.",
 			},
 		})
 		if !ok {
@@ -434,8 +434,8 @@ func askQuantityAndAdd(c *Conv) bool {
 		Body:    "How many *{{option_name}}* would you like?\n\nReply with a whole number, for example 1.",
 		Pattern: `^[0-9]+$`,
 		Step: StepNote{
-			Doing:  "The customer is saying how many units of the chosen option to add to the cart.",
-			Expect: "A whole number of 0 or more. Words such as two must be normalized to digits such as 2.",
+			Doing:  "The customer is saying how many units to add.",
+			Expect: "A whole number, as digits or as a number word such as two.",
 		},
 	})
 	if !ok {
@@ -557,8 +557,8 @@ func checkout(c *Conv) error {
 		Header: "Your details",
 		Body:   "Please share your name, phone number, and address so we can place your pickup order.",
 		Step: StepNote{
-			Doing:  "Checkout: the customer must submit the WhatsApp Flow with pickup details.",
-			Expect: "A completed WhatsApp Flow submission. Free text is not a valid answer here.",
+			Doing:  "The customer is asked to submit the details form.",
+			Expect: "A typed message is not the form.",
 		},
 	})
 	if !ok {

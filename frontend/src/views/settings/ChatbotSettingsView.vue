@@ -15,7 +15,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { PageHeader, AuditLogPanel } from '@/components/shared'
 import { toast } from 'vue-sonner'
-import { Bot, Loader2, Brain, Plus, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users, RefreshCw } from 'lucide-vue-next'
+import { Bot, Loader2, Brain, Plus, X, Clock, AlertTriangle, UserPlus, MessageSquare, Users, RefreshCw, ChevronDown } from 'lucide-vue-next'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { chatbotService } from '@/services/api'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
@@ -138,12 +139,22 @@ const aiSettings = ref({
   ai_commerce_store_id: '',
   ai_commerce_welcome_message: '',
   ai_commerce_welcome_generated_at: '' as string | null,
-  ai_commerce_welcome_stale: true
+  ai_commerce_welcome_stale: true,
+  ai_intent_provider: 'generic',
+  ai_translate_provider: 'generic',
+  ai_guide_provider: 'generic',
+  ai_recover_provider: 'generic',
+  ai_typesafe_api_key: '',
+  ai_typesafe_api_key_set: false,
+  ai_gateway_api_key: '',
+  ai_gateway_api_key_set: false,
+  ai_gateway_model: 'typesafe-ai/jev'
 })
 
 const isAIEnabled = ref(false)
 const isAICommerceEnabled = ref(false)
 const isRefreshingWelcome = ref(false)
+const codedFlowAIOpen = ref(true)
 
 const aiProviders = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
@@ -151,10 +162,53 @@ const aiProviders = [
   { value: 'google', label: 'Google AI', models: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'] }
 ]
 
+const codedFlowEngines = [
+  { value: 'generic', labelKey: 'chatbotSettings.intentProviderGeneric' },
+  { value: 'jev', labelKey: 'chatbotSettings.intentProviderJev' },
+  { value: 'gateway', labelKey: 'chatbotSettings.intentProviderGateway' }
+]
+
+const gatewayModels = [
+  { value: 'typesafe-ai/jev', label: 'typesafe-ai/jev' },
+  { value: 'google/gemini-2.5-flash', label: 'google/gemini-2.5-flash' }
+]
+
 const availableModels = computed(() => {
   const provider = aiProviders.find(p => p.value === aiSettings.value.ai_provider)
   return provider?.models || []
 })
+
+const accountAILabel = computed(() => {
+  if (!aiSettings.value.ai_enabled || !aiSettings.value.ai_provider) {
+    return t('chatbotSettings.accountAINotConfigured')
+  }
+  const provider = aiProviders.find(p => p.value === aiSettings.value.ai_provider)
+  const name = provider?.label || aiSettings.value.ai_provider
+  const model = aiSettings.value.ai_model || t('chatbotSettings.modelNotSet')
+  return `${name} · ${model}`
+})
+
+const codedFlowRoles = [
+  { key: 'ai_intent_provider' as const, labelKey: 'chatbotSettings.intentEngine' },
+  { key: 'ai_translate_provider' as const, labelKey: 'chatbotSettings.roleTranslation' },
+  { key: 'ai_guide_provider' as const, labelKey: 'chatbotSettings.roleGuide' },
+  { key: 'ai_recover_provider' as const, labelKey: 'chatbotSettings.roleRecover' }
+]
+
+const needsTypeSafeKey = computed(() =>
+  codedFlowRoles.some(role => aiSettings.value[role.key] === 'jev')
+)
+
+const needsGatewayKey = computed(() =>
+  codedFlowRoles.some(role => aiSettings.value[role.key] === 'gateway')
+)
+
+function roleEngineHint(provider: string) {
+  if (provider === 'generic') return accountAILabel.value
+  if (provider === 'jev') return t('chatbotSettings.roleEngineJevHint')
+  if (provider === 'gateway') return t('chatbotSettings.roleEngineGatewayHint')
+  return ''
+}
 
 watch(isAIEnabled, (newValue) => {
   aiSettings.value.ai_enabled = newValue
@@ -262,7 +316,16 @@ onMounted(async () => {
         ai_commerce_store_id: chatbotData.settings.ai_commerce_store_id || '',
         ai_commerce_welcome_message: chatbotData.settings.ai_commerce_welcome_message || '',
         ai_commerce_welcome_generated_at: chatbotData.settings.ai_commerce_welcome_generated_at || null,
-        ai_commerce_welcome_stale: chatbotData.settings.ai_commerce_welcome_stale !== false
+        ai_commerce_welcome_stale: chatbotData.settings.ai_commerce_welcome_stale !== false,
+        ai_intent_provider: chatbotData.settings.ai_intent_provider || 'generic',
+        ai_translate_provider: chatbotData.settings.ai_translate_provider || 'generic',
+        ai_guide_provider: chatbotData.settings.ai_guide_provider || 'generic',
+        ai_recover_provider: chatbotData.settings.ai_recover_provider || 'generic',
+        ai_typesafe_api_key: '',
+        ai_typesafe_api_key_set: chatbotData.settings.ai_typesafe_api_key_set === true,
+        ai_gateway_api_key: '',
+        ai_gateway_api_key_set: chatbotData.settings.ai_gateway_api_key_set === true,
+        ai_gateway_model: chatbotData.settings.ai_gateway_model || 'typesafe-ai/jev'
       }
 
       const slaEnabledValue = chatbotData.settings.sla_enabled === true
@@ -369,7 +432,12 @@ async function saveAISettings() {
       ai_commerce_enabled: aiSettings.value.ai_commerce_enabled,
       ai_commerce_mcp_url: aiSettings.value.ai_commerce_mcp_url,
       ai_commerce_rest_url: aiSettings.value.ai_commerce_rest_url,
-      ai_commerce_store_id: aiSettings.value.ai_commerce_store_id
+      ai_commerce_store_id: aiSettings.value.ai_commerce_store_id,
+      ai_intent_provider: aiSettings.value.ai_intent_provider || 'generic',
+      ai_translate_provider: aiSettings.value.ai_translate_provider || 'generic',
+      ai_guide_provider: aiSettings.value.ai_guide_provider || 'generic',
+      ai_recover_provider: aiSettings.value.ai_recover_provider || 'generic',
+      ai_gateway_model: aiSettings.value.ai_gateway_model || 'typesafe-ai/jev'
     }
     if (aiSettings.value.ai_api_key) {
       payload.ai_api_key = aiSettings.value.ai_api_key
@@ -377,10 +445,18 @@ async function saveAISettings() {
     if (aiSettings.value.ai_commerce_mcp_api_key) {
       payload.ai_commerce_mcp_api_key = aiSettings.value.ai_commerce_mcp_api_key
     }
+    if (aiSettings.value.ai_typesafe_api_key) {
+      payload.ai_typesafe_api_key = aiSettings.value.ai_typesafe_api_key
+    }
+    if (aiSettings.value.ai_gateway_api_key) {
+      payload.ai_gateway_api_key = aiSettings.value.ai_gateway_api_key
+    }
     await chatbotService.updateSettings(payload)
     toast.success(t('chatbotSettings.aiSettingsSaved'))
     aiSettings.value.ai_api_key = ''
     aiSettings.value.ai_commerce_mcp_api_key = ''
+    aiSettings.value.ai_typesafe_api_key = ''
+    aiSettings.value.ai_gateway_api_key = ''
     // Commerce URL/store changes clear the cached welcome — reload those fields.
     try {
       const { data } = await chatbotService.getSettings()
@@ -389,6 +465,13 @@ async function saveAISettings() {
         aiSettings.value.ai_commerce_welcome_message = chatbotData.settings.ai_commerce_welcome_message || ''
         aiSettings.value.ai_commerce_welcome_generated_at = chatbotData.settings.ai_commerce_welcome_generated_at || null
         aiSettings.value.ai_commerce_welcome_stale = chatbotData.settings.ai_commerce_welcome_stale !== false
+        aiSettings.value.ai_intent_provider = chatbotData.settings.ai_intent_provider || 'generic'
+        aiSettings.value.ai_translate_provider = chatbotData.settings.ai_translate_provider || 'generic'
+        aiSettings.value.ai_guide_provider = chatbotData.settings.ai_guide_provider || 'generic'
+        aiSettings.value.ai_recover_provider = chatbotData.settings.ai_recover_provider || 'generic'
+        aiSettings.value.ai_typesafe_api_key_set = chatbotData.settings.ai_typesafe_api_key_set === true
+        aiSettings.value.ai_gateway_api_key_set = chatbotData.settings.ai_gateway_api_key_set === true
+        aiSettings.value.ai_gateway_model = chatbotData.settings.ai_gateway_model || 'typesafe-ai/jev'
       }
     } catch {
       // non-fatal
@@ -1108,6 +1191,90 @@ function removeEscalationUser(userId: string) {
                     <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMaxTokensHint') }}</p>
                   </div>
                 </div>
+
+                <Separator />
+
+                <Collapsible v-model:open="codedFlowAIOpen" class="space-y-4">
+                  <CollapsibleTrigger class="flex w-full items-center justify-between gap-3 text-left hover:opacity-80">
+                    <div>
+                      <p class="font-medium">{{ $t('chatbotSettings.codedFlowAI') }}</p>
+                      <p class="text-sm text-muted-foreground">{{ $t('chatbotSettings.codedFlowAIDesc') }}</p>
+                    </div>
+                    <ChevronDown
+                      class="h-4 w-4 shrink-0 text-muted-foreground transition-transform"
+                      :class="{ 'rotate-180': codedFlowAIOpen }"
+                    />
+                  </CollapsibleTrigger>
+
+                  <CollapsibleContent class="space-y-4">
+                    <div
+                      v-for="role in codedFlowRoles"
+                      :key="role.key"
+                      class="space-y-2"
+                    >
+                      <Label>{{ $t(role.labelKey) }}</Label>
+                      <Select v-model="aiSettings[role.key]">
+                        <SelectTrigger>
+                          <SelectValue :placeholder="$t('chatbotSettings.selectEngine') + '...'" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem v-for="item in codedFlowEngines" :key="item.value" :value="item.value">
+                            {{ $t(item.labelKey) }}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p class="text-xs text-muted-foreground">
+                        {{ roleEngineHint(aiSettings[role.key]) }}
+                      </p>
+                    </div>
+
+                    <div v-if="needsTypeSafeKey" class="space-y-4 rounded-md border p-3">
+                      <div class="space-y-2">
+                        <Label>{{ $t('chatbotSettings.typesafeApiKey') }}</Label>
+                        <Input
+                          v-model="aiSettings.ai_typesafe_api_key"
+                          type="password"
+                          :placeholder="$t('chatbotSettings.apiKeyPlaceholder') + '...'"
+                        />
+                        <p class="text-xs text-muted-foreground">
+                          {{ aiSettings.ai_typesafe_api_key_set ? $t('chatbotSettings.keyAlreadySaved') : $t('chatbotSettings.apiKeyHint') }}
+                        </p>
+                      </div>
+                      <div class="space-y-1">
+                        <Label>{{ $t('chatbotSettings.model') }}</Label>
+                        <p class="text-sm text-muted-foreground">jev-latest</p>
+                      </div>
+                    </div>
+
+                    <div v-if="needsGatewayKey" class="space-y-4 rounded-md border p-3">
+                      <div class="space-y-2">
+                        <Label>{{ $t('chatbotSettings.gatewayApiKey') }}</Label>
+                        <Input
+                          v-model="aiSettings.ai_gateway_api_key"
+                          type="password"
+                          :placeholder="$t('chatbotSettings.apiKeyPlaceholder') + '...'"
+                        />
+                        <p class="text-xs text-muted-foreground">
+                          {{ aiSettings.ai_gateway_api_key_set ? $t('chatbotSettings.keyAlreadySaved') : $t('chatbotSettings.apiKeyHint') }}
+                        </p>
+                      </div>
+                      <div class="space-y-2">
+                        <Label>{{ $t('chatbotSettings.gatewayModel') }}</Label>
+                        <Select v-model="aiSettings.ai_gateway_model">
+                          <SelectTrigger>
+                            <SelectValue :placeholder="$t('chatbotSettings.selectModel') + '...'" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem v-for="model in gatewayModels" :key="model.value" :value="model.value">
+                              {{ model.label }}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.gatewayModelHint') }}</p>
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
 
                 <div class="flex justify-end pt-2">
                   <Button @click="saveAISettings" :disabled="isSubmitting">

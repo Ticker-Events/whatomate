@@ -1,5 +1,7 @@
 package models
 
+import "strings"
+
 // AuditAction represents the type of audit action
 type AuditAction string
 
@@ -62,6 +64,69 @@ const (
 	AIProviderAnthropic AIProvider = "anthropic"
 	AIProviderGoogle    AIProvider = "google"
 )
+
+// IntentProvider selects the engine used for coded-flow intent identification.
+type IntentProvider string
+
+const (
+	IntentProviderGeneric IntentProvider = "generic"
+	IntentProviderJev     IntentProvider = "jev"
+	IntentProviderGateway IntentProvider = "gateway"
+)
+
+const (
+	// IntentGatewayModelJev is the documented AI Gateway evaluation model.
+	IntentGatewayModelJev = "typesafe-ai/jev"
+	// IntentGatewayModelGemini25Flash is Gemini 2.5 Flash via AI Gateway.
+	IntentGatewayModelGemini25Flash = "google/gemini-2.5-flash"
+	// IntentTypeSafeModel is the TypeSafe System One model for direct Jev calls.
+	IntentTypeSafeModel = "jev-latest"
+)
+
+// IntentGatewayModels is the fixed picklist of AI Gateway models for coded-flow AI.
+var IntentGatewayModels = []string{
+	IntentGatewayModelJev,
+	IntentGatewayModelGemini25Flash,
+}
+
+// IntentGatewayChatModels are AI Gateway models that can generate free text.
+var IntentGatewayChatModels = []string{
+	IntentGatewayModelGemini25Flash,
+}
+
+// ValidIntentGatewayModel reports whether model is an allowed AI Gateway id.
+func ValidIntentGatewayModel(model string) bool {
+	for _, allowed := range IntentGatewayModels {
+		if model == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidIntentGatewayChatModel reports whether model can be used for chat completions.
+func ValidIntentGatewayChatModel(model string) bool {
+	for _, allowed := range IntentGatewayChatModels {
+		if model == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeIntentProvider maps empty to generic and rejects unknown values.
+func NormalizeIntentProvider(p IntentProvider) (IntentProvider, bool) {
+	switch IntentProvider(strings.TrimSpace(string(p))) {
+	case "", IntentProviderGeneric:
+		return IntentProviderGeneric, true
+	case IntentProviderJev:
+		return IntentProviderJev, true
+	case IntentProviderGateway:
+		return IntentProviderGateway, true
+	default:
+		return "", false
+	}
+}
 
 // MatchType represents keyword matching strategies
 type MatchType string
