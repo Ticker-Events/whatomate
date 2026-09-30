@@ -495,6 +495,13 @@ func buildGuestOrderPayload(storeID int, phone string, params map[string]string)
 	if token := strings.TrimSpace(params["slot_token"]); token != "" {
 		order["slot_token"] = token
 	}
+	if meta := strings.TrimSpace(params["buyer_meta_data"]); meta != "" {
+		parsed, err := parseJSONParam(meta)
+		if err != nil {
+			return nil, fmt.Errorf("buyer_meta_data must be JSON: %w", err)
+		}
+		order["buyer_meta_data"] = parsed
+	}
 	return order, nil
 }
 

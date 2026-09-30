@@ -246,6 +246,20 @@ func TestBuildGuestOrderPayload_CopiesEmailOntoNewAddress(t *testing.T) {
 	}, order["new_address"])
 }
 
+func TestBuildGuestOrderPayload_ForwardsBuyerMetaData(t *testing.T) {
+	order, err := buildGuestOrderPayload(21, "919800000000", map[string]string{
+		"items":           `[{"product_option":11,"quantity":1}]`,
+		"email":           "buyer@example.com",
+		"delivery_mode":   "DELIVERY_TO_LOCATION",
+		"buyer_meta_data": `{"latitude":12.97,"longitude":77.59}`,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{
+		"latitude":  12.97,
+		"longitude": 77.59,
+	}, order["buyer_meta_data"])
+}
+
 func TestBuildTiqrStoreToolArgs_SearchCollectionsRequiresQuery(t *testing.T) {
 	_, _, err := buildTiqrStoreToolArgs("search_collections", 1, "", map[string]string{})
 	require.Error(t, err)

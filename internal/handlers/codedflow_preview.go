@@ -217,6 +217,20 @@ func (s *codedPreviewSink) expectText() {
 	s.flowCTA = ""
 }
 
+func (s *codedPreviewSink) expectLocation(step, body string) {
+	if s == nil {
+		return
+	}
+	s.appendMessage(CodedPreviewMessage{
+		Type:        "bot",
+		Content:     body,
+		Step:        step,
+		Interactive: "location_request",
+	})
+	s.input = "location"
+	s.flowCTA = ""
+}
+
 func (s *codedPreviewSink) buttons(step, body, mode string, buttons []map[string]any, header, footer, listButton, headerImage string) {
 	if s == nil {
 		return
@@ -303,6 +317,20 @@ func (a *App) deliverCodedText(ctx *chatNodeCtx, step, text string) error {
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, text, step)
 	a.logCodedFlowWhatsApp(ctx, step, "text", text)
+	return nil
+}
+
+// deliverCodedLocationRequest asks for a WhatsApp location pin, or records it in preview.
+func (a *App) deliverCodedLocationRequest(ctx *chatNodeCtx, step, body string) error {
+	if ctx.capturing() {
+		ctx.preview.expectLocation(step, body)
+		return nil
+	}
+	if err := a.sendAndSaveLocationRequest(ctx.account, ctx.contact, body); err != nil {
+		return err
+	}
+	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, step)
+	a.logCodedFlowWhatsApp(ctx, step, "location_request", body)
 	return nil
 }
 

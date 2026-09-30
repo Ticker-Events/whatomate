@@ -67,6 +67,8 @@ const sessionContext = ref<Record<string, unknown>>({})
 const turnAICalls = ref<CodedPreviewAICall[]>([])
 const contextExpanded = ref(false)
 const aiExpanded = ref(true)
+const locationLat = ref('12.9716')
+const locationLng = ref('77.5946')
 const details = reactive<Record<DetailKey, string>>({
   customer_name: 'Preview Customer',
   customer_phone: '',
@@ -287,6 +289,18 @@ function submitFlow() {
   }
   turn({ flow_response: flowResponse }, flowCta.value || t('codedFlows.previewFlowSubmit'))
 }
+
+function submitLocation() {
+  if (!waiting.value || input.value !== 'location') return
+  const lat = Number(locationLat.value)
+  const lng = Number(locationLng.value)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+    toast.error(t('codedFlows.previewLocationInvalid'))
+    return
+  }
+  const payload = JSON.stringify({ latitude: lat, longitude: lng })
+  turn({ text: payload }, t('codedFlows.previewLocationSubmit'))
+}
 </script>
 
 <template>
@@ -458,6 +472,24 @@ function submitFlow() {
             </div>
             <Button size="sm" class="w-full" :disabled="busy" @click="submitFlow">
               {{ flowCta || $t('codedFlows.previewFlowSubmit') }}
+            </Button>
+          </div>
+
+          <div v-if="waiting && input === 'location'" class="space-y-2">
+            <div>
+              <p class="text-xs font-medium">{{ $t('codedFlows.previewLocation') }}</p>
+              <p class="text-[11px] text-muted-foreground">{{ $t('codedFlows.previewLocationHint') }}</p>
+            </div>
+            <div class="space-y-1">
+              <Label class="text-[11px]">{{ $t('codedFlows.previewLatitude') }}</Label>
+              <Input v-model="locationLat" class="h-8 text-xs" :disabled="busy" />
+            </div>
+            <div class="space-y-1">
+              <Label class="text-[11px]">{{ $t('codedFlows.previewLongitude') }}</Label>
+              <Input v-model="locationLng" class="h-8 text-xs" :disabled="busy" />
+            </div>
+            <Button size="sm" class="w-full" :disabled="busy" @click="submitLocation">
+              {{ $t('codedFlows.previewLocationSubmit') }}
             </Button>
           </div>
 

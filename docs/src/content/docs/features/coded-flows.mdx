@@ -61,8 +61,10 @@ The flow is a `func(*Conv) error`. These calls are the whole API.
 | `AskCarousel` | Sends a product carousel and waits | Accepts a product id from those cards |
 | `AskImageButtons` | Sends reply buttons with an image header | Accepts a button from that prompt |
 | `AskNumber` | Sends the prompt and waits for text | Accepts text that matches the pattern, or a confident AI-normalized value that matches |
+| `AskLocation` | Sends a WhatsApp location request and waits | Accepts a location pin (latitude / longitude JSON) |
 | `AskFlow` | Opens a WhatsApp Flow and waits | Accepts the form submission |
 | `Store` | Calls one TiQR REST operation and saves the object | Returns the saved object |
+| `StoreMCP` | Calls one TiQR MCP operation and saves the object | Returns the saved object |
 | `StoreList` | Calls a list operation and saves `results` | Returns the saved list |
 | `LookupOrder` | Loads the latest order for this phone through TiQR MCP | Returns the saved order |
 | `Once` | Runs a function one time, such as appending the cart | Skips it |
@@ -155,7 +157,7 @@ The customer phone in the preview is used when the flow looks up an order. The d
 
 Key: `tiqr_ecommerce`.
 
-The customer can buy products for pickup, check the latest order on their phone number, or talk to an agent. Customer details at checkout are collected with WhatsApp Flow `1557965846018132`. That flow has to exist in Whatomate under the same Meta flow id, so the form can open on its first screen.
+The customer can buy products for pickup or delivery (when the store supports it), check the latest order on their phone number, or talk to an agent. Customer details at checkout are collected with WhatsApp Flow `1557965846018132`. That flow has to exist in Whatomate under the same Meta flow id, so the form can open on its first screen.
 
 The outline in the admin UI is:
 
@@ -170,7 +172,7 @@ keyword
   → get_store
   → list_collections (limit 20)
   → menu
-       ├─ Buy products → collection → products → cart → checkout → end
+       ├─ Buy products → fulfillment → collection → products → cart → checkout → end
        ├─ Check order status → latest order for this phone → end
        ├─ Talk to staff → transfer
        ├─ free text → collection id → products → …
@@ -199,18 +201,40 @@ Without a name, the first line is omitted. The buttons are:
 
 `talk_to_agent` transfers immediately. It does not ask the AI. Free text that asks for a human, agent, or staff, or a confused customer, transfers from whatever step they are on.
 
+### Fulfillment
+
+Before the collection list, Buy products reads `delivery_modes` from the store already loaded by `get_store`.
+
+| `delivery_modes` | What the customer sees |
+| --- | --- |
+| Missing or empty | No extra prompt. `delivery_mode` is stored as `PICKUP_FROM_STORE` and browsing continues (same as before). |
+| Only `PICKUP_FROM_STORE` | Explains that the store is pickup only, with a **Proceed** button. |
+| Both pickup and delivery | Reply buttons **Store pickup** and **Delivery**. The choice is stored as `delivery_mode`. |
+| Only `DELIVERY_TO_LOCATION` | Asks for a WhatsApp location pin immediately. |
+
+When delivery is selected (or is the only mode):
+
+1. The flow sends a WhatsApp location request.
+2. It calls TiQR MCP `check_delivery` (`check_delivery_eligibility`) with the pin.
+3. For `free` or `paid`, it tells the customer the result and shows the store’s free and paid radii from `get_store`, then continues to collections.
+4. For out of range when pickup is also supported, it shows the out-of-range copy and buttons to switch to **Store pickup** or **Share again**.
+5. For out of range when delivery is the only mode, it shows the same radii without offering pickup, then asks for another pin.
+
+Each pin attempt uses its own call names (`delivery_location_1`, `delivery_check_1`, …) so a later check does not overwrite an earlier one. Latitude and longitude are stored as `delivery_latitude` / `delivery_longitude` for the order.
+
 ### Buying
 
 Buying is a loop. The customer can add more than one item before checkout. Store and collection data from the opening calls are reused. They are not fetched again when the customer adds another item.
 
 <Steps>
 
-1. **Collection.** The customer gets a list titled "Our collections". The button is "Browse". Each row uses the collection `name` as the title and `description` as the description. The chosen row saves `collection_id` from `id` and `collection_name` from `title`. Free text on this step can also route to a loaded collection id, or to `search_products` with a product query. An empty search result tells the customer the item is not in the store and returns to the collection list. The model never invents product rows.
-2. **Products.** `list_products` is called with `category_id` set to that collection id, or `search_products` with the validated query. Two or more products are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". One product cannot use a carousel (WhatsApp needs at least two cards), so it is an image reply instead: the product image as the header, `*{name}* (₹{min_price})` plus the product description as the body, and an "Add to cart" button. Either tap saves `product_id` and the product `options` array, and also `product_selected`.
-3. **Option.** What happens next depends on how many options the product has.
-4. **Quantity.** The customer replies with a whole number. The pattern is `^[0-9]+$`.
-5. **Cart line.** The option and quantity are appended once. A replay does not add the line again.
-6. **Next.** The customer chooses "Add more items" or "Checkout".
+1. **Fulfillment.** Delivery mode and, when needed, a location pin (see above).
+2. **Collection.** The customer gets a list titled "Our collections". The button is "Browse". Each row uses the collection `name` as the title and `description` as the description. The chosen row saves `collection_id` from `id` and `collection_name` from `title`. Free text on this step can also route to a loaded collection id, or to `search_products` with a product query. An empty search result tells the customer the item is not in the store and returns to the collection list. The model never invents product rows.
+3. **Products.** `list_products` is called with `category_id` set to that collection id, or `search_products` with the validated query. Two or more products are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". One product cannot use a carousel (WhatsApp needs at least two cards), so it is an image reply instead: the product image as the header, `*{name}* (₹{min_price})` plus the product description as the body, and an "Add to cart" button. Either tap saves `product_id` and the product `options` array, and also `product_selected`.
+4. **Option.** What happens next depends on how many options the product has.
+5. **Quantity.** The customer replies with a whole number. The pattern is `^[0-9]+$`.
+6. **Cart line.** The option and quantity are appended once. A replay does not add the line again.
+7. **Next.** The customer chooses "Add more items" or "Checkout".
 
 </Steps>
 
@@ -238,7 +262,7 @@ If `list_products` or `search_products` fails, the customer gets a safe “try l
 
 ### Checkout
 
-Checkout opens WhatsApp Flow `1557965846018132` with the button "Enter details". The form asks for the name, phone number, and address used to place the pickup order. Text sent instead of the form is an off-script reply. The form's fields are copied onto the session under the field names the flow submits.
+Checkout opens WhatsApp Flow `1557965846018132` with the button "Enter details". The form asks for the name, phone number, and address used to place the order. The body mentions pickup or delivery based on the stored `delivery_mode`. Text sent instead of the form is an off-script reply. The form's fields are copied onto the session under the field names the flow submits.
 
 The order is placed with `create_order` only after that form is submitted. Each order field is read from the session value the form stored:
 
@@ -247,8 +271,9 @@ The order is placed with `create_order` only after that form is submitted. Each 
 | `email` | `customer_email`, or `email` when that value contains an `@`. A phone number in either field is not sent as the email. |
 | `items` | `tiqr_cart` |
 | `notes` | `customer_notes` |
-| `delivery_mode` | `PICKUP_FROM_STORE` |
+| `delivery_mode` | Session `delivery_mode` from fulfillment (`PICKUP_FROM_STORE` or `DELIVERY_TO_LOCATION`). Empty defaults to pickup. |
 | `new_address` | The address object below |
+| `buyer_meta_data` | For delivery: `latitude` / `longitude` from the pin (`delivery_latitude` / `delivery_longitude`) |
 | `phone_number` | The WhatsApp number on the session. The form's phone is stored on the address, not copied into `email`. |
 
 `product_option` and `quantity` are stored as text and sent to TiQR as integers.
@@ -270,7 +295,7 @@ The order is placed with `create_order` only after that form is submitted. Each 
 
 The WhatsApp Flow has to submit those field names. The Email input must be an email address. `email` is required to create the order. Guest checkout also needs `email` on the address. If the address omits it, the order email is copied onto the address.
 
-There is no second confirmation step. A successful create tells the customer the order is confirmed and set for store pickup. If create fails because customer details are missing, the recover role asks for every missing field from the error, one reply at a time, in this order: name, phone, email, address line 1, address line 2, city, state, country, pincode, notes. `create_order` is retried only after all of those replies are saved on the session, with the same cart. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details. The thank-you message is sent and the flow ends:
+There is no second confirmation step. A successful create tells the customer the order is confirmed for pickup or delivery, matching the stored mode. If create fails because customer details are missing, the recover role asks for every missing field from the error, one reply at a time, in this order: name, phone, email, address line 1, address line 2, city, state, country, pincode, notes. `create_order` is retried only after all of those replies are saved on the session, with the same cart. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details. The thank-you message is sent and the flow ends:
 
 ```text
 Thank you for shopping with us.
@@ -305,6 +330,9 @@ These are the values later messages and the order payload read back.
 | `customer_language` | Once, from the trigger message |
 | `store` | `get_store` succeeds |
 | `collections` | `list_collections` returns rows |
+| `delivery_mode` | Fulfillment resolves pickup or delivery |
+| `delivery_latitude`, `delivery_longitude` | A delivery pin is accepted |
+| `delivery_zone`, `shipping_fee_paise` | Delivery eligibility succeeds |
 | `collection_id`, `collection_name` | A collection row is chosen |
 | `products` | `list_products` returns rows |
 | `product_id`, `options`, `product_selected` | A product card is chosen |

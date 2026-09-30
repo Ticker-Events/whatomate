@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/shridarpatil/whatomate/pkg/ticker"
 )
 
 // TiQR Ecommerce loads the store and its collections, then lets the
@@ -24,6 +26,8 @@ const (
 
 	tiqrEcommerceConfirmed = "Your order is confirmed.\n\nIt's set for store pickup, and we'll have it ready for you.\n\nThank you for shopping with us."
 
+	tiqrEcommerceConfirmedDelivery = "Your order is confirmed.\n\nWe'll deliver it to the address you shared.\n\nThank you for shopping with us."
+
 	tiqrEcommerceFailed = "We couldn't place your order just now.\n\nPlease try again in a moment. If it still doesn't go through, message us and we'll help you complete it."
 
 	tiqrEcommerceOrderMissing = "I couldn't find a recent order for this phone number."
@@ -43,6 +47,21 @@ const (
 	tiqrTalkToAgent      = "talk_to_agent"
 	tiqrAddMore          = "add_more"
 	tiqrCheckout         = "checkout"
+
+	tiqrModePickup   = "PICKUP_FROM_STORE"
+	tiqrModeDelivery = "DELIVERY_TO_LOCATION"
+	tiqrProceed      = "proceed"
+	tiqrPickupMode   = "pickup"
+	tiqrDeliveryMode = "delivery"
+	tiqrShareAgain   = "share_again"
+
+	tiqrEcommercePickupOnly = "This store offers store pickup only.\n\nYou can browse products and place an order for pickup when you're ready."
+
+	tiqrEcommerceChooseMode = "How would you like to receive your order?"
+
+	tiqrEcommerceLocationPrompt = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
+
+	tiqrEcommerceDeliveryCheckFailed = "We couldn’t verify delivery for that location right now.\n\nPlease share your location again."
 )
 
 func init() {
@@ -53,7 +72,7 @@ func newTiqrEcommerceFlow() CodedFlow {
 	return CodedFlow{
 		Key:  tiqrEcommerceKey,
 		Name: "TiQR Ecommerce",
-		Description: "Buy products for store pickup, check an order, or talk to an agent. " +
+		Description: "Buy products for store pickup or delivery, check an order, or talk to an agent. " +
 			"Customer details are collected with a WhatsApp Flow.",
 		Steps: []CodedStep{
 			{Name: "load_store", Label: "Load store and collections"},
@@ -138,6 +157,9 @@ func menuButtons(store map[string]any) ButtonPrompt {
 }
 
 func buyProducts(c *Conv, collections []any, first Route) error {
+	if !resolveFulfillment(c) {
+		return nil
+	}
 	for {
 		route := first
 		first = Route{}
@@ -249,6 +271,204 @@ func buyProducts(c *Conv, collections []any, first Route) error {
 		}
 	}
 	return checkout(c)
+}
+
+// resolveFulfillment asks for delivery mode based on store.delivery_modes
+// before browsing. Missing modes keep the previous pickup-only behaviour.
+func resolveFulfillment(c *Conv) bool {
+	store, _ := asStringMap(c.session().SessionData["store"])
+	modes := storeDeliveryModes(store)
+	hasPickup := deliveryModesContain(modes, tiqrModePickup)
+	hasDelivery := deliveryModesContain(modes, tiqrModeDelivery)
+
+	switch {
+	case !hasPickup && !hasDelivery:
+		c.Once("fulfillment_default", func() {
+			c.session().SessionData["delivery_mode"] = tiqrModePickup
+		})
+		return !c.stop
+	case hasPickup && !hasDelivery:
+		_, ok := c.AskButtons("fulfillment_pickup_only", ButtonPrompt{
+			Body: tiqrEcommercePickupOnly,
+			Buttons: []Button{
+				{ID: tiqrProceed, Title: "Proceed"},
+			},
+			Step: StepNote{
+				Doing:  "The store only supports pickup. The customer is confirming before browsing.",
+				Expect: "They tap Proceed, or ask to check out if they already have a cart.",
+			},
+		})
+		if !ok {
+			return false
+		}
+		c.session().SessionData["delivery_mode"] = tiqrModePickup
+		return true
+	case hasPickup && hasDelivery:
+		choice, ok := c.AskButtons("fulfillment_mode", ButtonPrompt{
+			Body: tiqrEcommerceChooseMode,
+			Buttons: []Button{
+				{ID: tiqrPickupMode, Title: "Store pickup"},
+				{ID: tiqrDeliveryMode, Title: "Delivery"},
+			},
+			Step: StepNote{
+				Doing:  "The customer is choosing pickup or delivery before browsing.",
+				Expect: "They pick Store pickup or Delivery.",
+			},
+		})
+		if !ok {
+			return false
+		}
+		if choice.ID == tiqrPickupMode {
+			c.session().SessionData["delivery_mode"] = tiqrModePickup
+			return true
+		}
+		c.session().SessionData["delivery_mode"] = tiqrModeDelivery
+		return resolveDeliveryLocation(c, true)
+	default:
+		c.Once("fulfillment_delivery_only", func() {
+			c.session().SessionData["delivery_mode"] = tiqrModeDelivery
+		})
+		return resolveDeliveryLocation(c, false)
+	}
+}
+
+func resolveDeliveryLocation(c *Conv, pickupAllowed bool) bool {
+	store, _ := asStringMap(c.session().SessionData["store"])
+	for attempt := 1; ; attempt++ {
+		locName := fmt.Sprintf("delivery_location_%d", attempt)
+		checkName := fmt.Sprintf("delivery_check_%d", attempt)
+		pin, ok := c.AskLocation(locName, LocationPrompt{
+			Body: tiqrEcommerceLocationPrompt,
+			Step: StepNote{
+				Doing:  "The customer is sharing a delivery location pin.",
+				Expect: "A WhatsApp location pin with latitude and longitude.",
+			},
+		})
+		if !ok {
+			return false
+		}
+		result, ok := c.StoreMCP(checkName, "check_delivery", map[string]string{
+			"latitude":  fmt.Sprintf("%v", pin.Latitude),
+			"longitude": fmt.Sprintf("%v", pin.Longitude),
+		})
+		if !ok {
+			if c.stop || c.ended {
+				return false
+			}
+			c.Say(tiqrEcommerceDeliveryCheckFailed)
+			continue
+		}
+		zone := asString(result["zone"])
+		deliverable := false
+		if v, isBool := result["deliverable"].(bool); isBool {
+			deliverable = v
+		}
+		if deliverable && zone != "out_of_range" {
+			c.Say(formatDeliveryEligibilityMessage(store, result))
+			c.session().SessionData["delivery_mode"] = tiqrModeDelivery
+			c.session().SessionData["delivery_zone"] = zone
+			if fee, ok := anyToFloat64(result["shipping_fee_paise"]); ok {
+				c.session().SessionData["shipping_fee_paise"] = fee
+			}
+			return true
+		}
+		c.Say(formatOutOfRangeDeliveryMessageWithPickup(store, pickupAllowed))
+		if !pickupAllowed {
+			continue
+		}
+		choice, ok := c.AskButtons(fmt.Sprintf("delivery_fallback_%d", attempt), ButtonPrompt{
+			Body: "Would you like to pick up from the store instead, or share another location?",
+			Buttons: []Button{
+				{ID: tiqrPickupMode, Title: "Store pickup"},
+				{ID: tiqrShareAgain, Title: "Share again"},
+			},
+			Step: StepNote{
+				Doing:  "Delivery is out of range. The customer can switch to pickup or try another pin.",
+				Expect: "They pick Store pickup or Share again.",
+			},
+		})
+		if !ok {
+			return false
+		}
+		if choice.ID == tiqrPickupMode {
+			c.session().SessionData["delivery_mode"] = tiqrModePickup
+			return true
+		}
+	}
+}
+
+func storeDeliveryModes(store map[string]any) []string {
+	if store == nil {
+		return nil
+	}
+	raw, ok := store["delivery_modes"]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, mode := range v {
+			if mode = strings.TrimSpace(mode); mode != "" {
+				out = append(out, mode)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if mode := strings.TrimSpace(asString(item)); mode != "" {
+				out = append(out, mode)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func deliveryModesContain(modes []string, want string) bool {
+	for _, mode := range modes {
+		if strings.EqualFold(strings.TrimSpace(mode), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func formatDeliveryEligibilityMessage(store map[string]any, result map[string]any) string {
+	var b strings.Builder
+	zone := asString(result["zone"])
+	feePaise := 0.0
+	if fee, ok := anyToFloat64(result["shipping_fee_paise"]); ok {
+		feePaise = fee
+	}
+	switch {
+	case zone == "free" || feePaise == 0:
+		b.WriteString("Great news — delivery is free to that location.")
+	case feePaise > 0:
+		b.WriteString(fmt.Sprintf("We can deliver there. Delivery fee: %s.", formatPriceINR(ticker.PaiseToRupees(feePaise))))
+	default:
+		b.WriteString("Thanks — we can deliver to that location.")
+	}
+
+	var freeLabel, maxLabel string
+	if store != nil {
+		freeLabel = radiusKmLabel(store["free_delivery_radius"])
+		maxLabel = radiusKmLabel(store["delivery_radius"])
+	}
+	offers := make([]string, 0, 2)
+	if freeLabel != "" {
+		offers = append(offers, "- Free delivery within "+freeLabel+" km of our store")
+	}
+	if maxLabel != "" {
+		offers = append(offers, "- Delivery up to "+maxLabel+" km for an additional delivery fee")
+	}
+	if len(offers) > 0 {
+		b.WriteString("\n\nFor reference, we offer:\n\n")
+		b.WriteString(strings.Join(offers, "\n"))
+	}
+	return b.String()
 }
 
 type divertResult int
@@ -505,13 +725,41 @@ func pickupOrderParams(data map[string]any) map[string]string {
 	if raw, err := json.Marshal(data["tiqr_cart"]); err == nil && string(raw) != "null" {
 		items = string(raw)
 	}
-	return map[string]string{
+	deliveryMode := strings.TrimSpace(asString(data["delivery_mode"]))
+	if deliveryMode == "" {
+		deliveryMode = tiqrModePickup
+	}
+	params := map[string]string{
 		"email":         email,
 		"items":         items,
 		"notes":         contextValue(data, "customer_notes", "notes"),
 		"new_address":   string(address),
-		"delivery_mode": "PICKUP_FROM_STORE",
+		"delivery_mode": deliveryMode,
 	}
+	if deliveryMode == tiqrModeDelivery {
+		if meta, ok := codedBuyerMetaJSON(data); ok {
+			params["buyer_meta_data"] = meta
+		}
+	}
+	return params
+}
+
+func codedBuyerMetaJSON(data map[string]any) (string, bool) {
+	meta := map[string]any{}
+	if lat, ok := anyToFloat64(data["delivery_latitude"]); ok {
+		meta["latitude"] = lat
+	}
+	if lng, ok := anyToFloat64(data["delivery_longitude"]); ok {
+		meta["longitude"] = lng
+	}
+	if len(meta) == 0 {
+		return "", false
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
 }
 
 func contextEmail(data map[string]any) string {
@@ -551,11 +799,17 @@ func contextValue(data map[string]any, keys ...string) string {
 }
 
 func checkout(c *Conv) error {
+	detailsBody := "Please share your name, phone number, and address so we can place your pickup order."
+	confirmMsg := tiqrEcommerceConfirmed
+	if asString(c.session().SessionData["delivery_mode"]) == tiqrModeDelivery {
+		detailsBody = "Please share your name, phone number, and address so we can place your delivery order."
+		confirmMsg = tiqrEcommerceConfirmedDelivery
+	}
 	ok := c.AskFlow("details", FlowPrompt{
 		FlowID: tiqrEcommerceFlowID,
 		CTA:    "Enter details",
 		Header: "Your details",
-		Body:   "Please share your name, phone number, and address so we can place your pickup order.",
+		Body:   detailsBody,
 		Step: StepNote{
 			Doing:  "The customer is asked to submit the details form.",
 			Expect: "A typed message is not the form.",
@@ -582,7 +836,7 @@ func checkout(c *Conv) error {
 		}
 		_, ok = c.Store(name, "create_order", params)
 		if ok {
-			c.Say(tiqrEcommerceConfirmed)
+			c.Say(confirmMsg)
 			c.Say(tiqrEcommerceThanks)
 			return c.End()
 		}
