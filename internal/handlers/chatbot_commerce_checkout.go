@@ -37,7 +37,7 @@ const (
 	cartPendingOptionKey         = "cart_pending_option_id"
 	checkoutFlowCheckout         = "checkout"
 	checkoutFlowPostCart         = "post_cart"
-	checkoutFlowThemed           = "themed"
+	checkoutFlowAfterCapture     = "after_capture"
 	checkoutLocationPrompt       = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
 	checkoutAddressPrompt        = "Please provide your full delivery address, including your name, phone number, street address, city, state, country, and pincode."
 	checkoutAddressMessageBody   = "Thanks for your order! Tell us what address you'd like this order delivered to."
@@ -97,6 +97,11 @@ func getCheckoutState(session *models.ChatbotSession) *checkoutState {
 		Email:            asString(raw["email"]),
 		DeliveryMode:     asString(raw["delivery_mode"]),
 		PendingProductID: asString(raw["pending_product_id"]),
+	}
+	if st.Flow == "themed" {
+		st.Flow = checkoutFlowAfterCapture
+		raw["flow"] = checkoutFlowAfterCapture
+		session.SessionData[checkoutSessionKey] = raw
 	}
 	if addr, ok := raw["new_address"].(map[string]any); ok {
 		st.NewAddress = addr
@@ -450,8 +455,9 @@ func (a *App) beginPostCartLineFlow(account *models.WhatsAppAccount, contact *mo
 	a.beginAddonStep(account, contact, session, settings, st)
 }
 
-// beginThemedIntake starts capture → addons → fulfillment → handoff for after_capture collections.
-func (a *App) beginThemedIntake(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, category tickermcp.Category, productID string) {
+// beginAfterCaptureIntake starts capture → addons → fulfillment → handoff for after_capture collections.
+func (a *App) beginAfterCaptureIntake(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, category tickermcp.Category, productID string) {
+	migrateAfterCaptureSessionKeys(session)
 	fields := make([]map[string]any, 0, len(category.RequiredCaptureFields))
 	captured := jsonMapFromSession(session, "commerce_captured_fields")
 	for _, field := range category.RequiredCaptureFields {
@@ -463,7 +469,7 @@ func (a *App) beginThemedIntake(account *models.WhatsAppAccount, contact *models
 		})
 	}
 	st := &checkoutState{
-		Flow:             checkoutFlowThemed,
+		Flow:             checkoutFlowAfterCapture,
 		NewAddress:       map[string]any{},
 		PendingProductID: strings.TrimSpace(productID),
 		CaptureFields:    fields,
@@ -475,7 +481,7 @@ func (a *App) beginThemedIntake(account *models.WhatsAppAccount, contact *models
 	}
 	setCheckoutState(session, st)
 	if _, err := a.ensureCommerceDraft(contact, session, settings); err != nil {
-		a.Log.Error("themed draft create failed", "error", err)
+		a.Log.Error("after_capture draft create failed", "error", err)
 		_ = a.sendAndSaveTextMessage(account, contact, "I couldn’t start this request right now. Please try again.")
 		clearCheckoutState(session)
 		_ = a.persistSessionData(session)
@@ -602,7 +608,7 @@ func (a *App) promptFreeTextAddonsOrContinue(account *models.WhatsAppAccount, co
 		a.finishPostCartLineFlow(account, contact, session, settings)
 		return
 	}
-	// Themed without catalog addons: optional free-text extras, then fulfillment.
+	// After-capture without catalog addons: optional free-text extras, then fulfillment.
 	st.Step = "addons"
 	st.AddonChoices = nil
 	setCheckoutState(session, st)
@@ -671,7 +677,7 @@ func (a *App) handleCheckoutAddonText(account *models.WhatsAppAccount, contact *
 		a.promptStructuredAddons(account, contact, session, st)
 		return true
 	}
-	// Free-text themed extras → notes.
+	// Free-text after-capture extras → notes.
 	notes := jsonMapFromSession(session, "commerce_notes")
 	notes["addon_requests"] = strings.TrimSpace(text)
 	session.SessionData["commerce_notes"] = map[string]any(notes)
@@ -716,7 +722,7 @@ func (a *App) finishAddonStep(account *models.WhatsAppAccount, contact *models.C
 	switch st.Flow {
 	case checkoutFlowPostCart:
 		a.finishPostCartLineFlow(account, contact, session, settings)
-	case checkoutFlowThemed:
+	case checkoutFlowAfterCapture:
 		st.Step = "delivery_mode"
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
@@ -739,14 +745,14 @@ func (a *App) finishPostCartLineFlow(account *models.WhatsAppAccount, contact *m
 
 func (a *App) placeCheckoutOrderOrHandoff(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
 	st := getCheckoutState(session)
-	if st != nil && st.Flow == checkoutFlowThemed {
-		a.finishThemedHandoff(account, contact, session, settings, st)
+	if st != nil && st.Flow == checkoutFlowAfterCapture {
+		a.finishAfterCaptureHandoff(account, contact, session, settings, st)
 		return
 	}
 	a.placeCheckoutOrder(account, contact, session, settings)
 }
 
-func (a *App) finishThemedHandoff(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
+func (a *App) finishAfterCaptureHandoff(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
 	if st == nil {
 		st = getCheckoutState(session)
 	}
@@ -770,8 +776,8 @@ func (a *App) advanceToConfirmOrHandoff(account *models.WhatsAppAccount, contact
 	st.Step = "confirm"
 	setCheckoutState(session, st)
 	_ = a.persistSessionData(session)
-	if st.Flow == checkoutFlowThemed {
-		a.finishThemedHandoff(account, contact, session, settings, st)
+	if st.Flow == checkoutFlowAfterCapture {
+		a.finishAfterCaptureHandoff(account, contact, session, settings, st)
 		return
 	}
 	a.sendOrderConfirmPrompt(account, contact, session)
@@ -1215,7 +1221,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 
 	// Qty / edit intents take priority over step validation so users can fix the cart mid-checkout.
 	// Skip during slot entry — times like "in 45 minutes" / "today 5pm" must reach the parser.
-	if st.Step != "slot" && st.Flow != checkoutFlowThemed && a.handleCheckoutCartEditIntent(account, contact, session, settings, st, text) {
+	if st.Step != "slot" && st.Flow != checkoutFlowAfterCapture && a.handleCheckoutCartEditIntent(account, contact, session, settings, st, text) {
 		return true
 	}
 
@@ -1336,7 +1342,7 @@ func (a *App) continueAfterCaptureComplete(account *models.WhatsAppAccount, cont
 		return
 	}
 	switch st.Flow {
-	case checkoutFlowPostCart, checkoutFlowThemed:
+	case checkoutFlowPostCart, checkoutFlowAfterCapture:
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
 		a.advanceAfterLineCapture(account, contact, session, settings, st)

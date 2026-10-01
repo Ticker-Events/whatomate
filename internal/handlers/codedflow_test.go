@@ -1105,16 +1105,11 @@ func TestTiqrEcommerce_AfterCaptureHandoffCompletes(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happy Birthday", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "themed_addons_free", session.CurrentStep)
+	assert.Equal(t, "after_capture_addons_free", session.CurrentStep)
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Skip", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "fulfillment_time_1", session.CurrentStep)
-	assert.Contains(t, outgoingBlob(t, app, session), "When would you like")
-
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "in 45 minutes", "", nil))
-	reloadSession(t, app, session)
-	assert.Equal(t, "themed_details", session.CurrentStep)
+	assert.Equal(t, "after_capture_details", session.CurrentStep)
 	blob := outgoingBlob(t, app, session)
 	assert.Contains(t, blob, tiqrEcommercePickupFlowID)
 	assert.Contains(t, blob, "name, email, and phone number")
@@ -1148,6 +1143,72 @@ func TestTiqrEcommerce_AfterCaptureHandoffCompletes(t *testing.T) {
 	assert.Equal(t, "Ada", draft.AddressSnapshot["name"])
 	assert.Equal(t, "ada@example.com", draft.AddressSnapshot["email"])
 	assert.Equal(t, "Please call on arrival", draft.Notes["customer_notes"])
+	lines, ok := draft.Cart["lines"].([]any)
+	require.True(t, ok)
+	require.Len(t, lines, 1)
+	line, ok := lines[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "9", fieldString(line, "product_option"))
+	assert.Equal(t, "Regular", fieldString(line, "option_name"))
+	assert.Equal(t, "Themed Cake", fieldString(line, "product_name"))
+}
+
+func TestAfterCaptureProductOptionLineUsesChosenOption(t *testing.T) {
+	line, ok := afterCaptureProductOptionLine(map[string]any{
+		"after_capture_product_id": "101",
+		"option_id":                "12",
+		"after_capture_products": []any{
+			map[string]any{
+				"id":   "101",
+				"name": "Themed Cake",
+				"options": []any{
+					map[string]any{"id": "9", "name": "1 KG"},
+					map[string]any{"id": "12", "name": "2 KG"},
+				},
+			},
+		},
+	})
+	require.True(t, ok)
+	assert.Equal(t, "12", line["product_option"])
+	assert.Equal(t, "2 KG", line["option_name"])
+	assert.Equal(t, "Themed Cake", line["product_name"])
+}
+
+func TestMigrateAfterCaptureSessionKeys(t *testing.T) {
+	session := &models.ChatbotSession{
+		CurrentStep: "themed_addons_free",
+		SessionData: models.JSONB{
+			"themed_product_id": "101",
+			"themed_timezone":   "Asia/Kolkata",
+			checkoutSessionKey: map[string]any{
+				"flow": "themed",
+				"step": "addons",
+			},
+			codedCallsKey: []any{
+				map[string]any{"name": "themed_select_category", "ok": true},
+				map[string]any{"name": "themed_addons_free", "ok": true, "var": "themed_addons_free", "value": "Skip"},
+			},
+		},
+	}
+	migrateAfterCaptureSessionKeys(session)
+	assert.Equal(t, "after_capture_addons_free", session.CurrentStep)
+	assert.Equal(t, "101", session.SessionData["after_capture_product_id"])
+	assert.Equal(t, "Asia/Kolkata", session.SessionData["after_capture_timezone"])
+	_, hasOld := session.SessionData["themed_product_id"]
+	assert.False(t, hasOld)
+	st := getCheckoutState(session)
+	require.NotNil(t, st)
+	assert.Equal(t, checkoutFlowAfterCapture, st.Flow)
+	records, ok := anySlice(session.SessionData[codedCallsKey])
+	require.True(t, ok)
+	require.Len(t, records, 2)
+	first, ok := asStringMap(records[0])
+	require.True(t, ok)
+	assert.Equal(t, "after_capture_select_category", first["name"])
+	second, ok := asStringMap(records[1])
+	require.True(t, ok)
+	assert.Equal(t, "after_capture_addons_free", second["name"])
+	assert.Equal(t, "after_capture_addons_free", second["var"])
 }
 
 func TestTiqrEcommerce_AfterCaptureManyFieldsThenSkip(t *testing.T) {
@@ -1193,7 +1254,7 @@ func TestTiqrEcommerce_AfterCaptureManyFieldsThenSkip(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "2", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "themed_addons_free", session.CurrentStep)
+	assert.Equal(t, "after_capture_addons_free", session.CurrentStep)
 	captured, ok := session.SessionData["commerce_captured_fields"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Happye", captured["writing_on_cake"])
@@ -1202,10 +1263,10 @@ func TestTiqrEcommerce_AfterCaptureManyFieldsThenSkip(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "skip", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "fulfillment_time_1", session.CurrentStep)
+	assert.Equal(t, "after_capture_details", session.CurrentStep)
 	blob := outgoingBlob(t, app, session)
-	assert.Contains(t, blob, "When would you like")
-	assert.NotContains(t, blob, "couldn't understand that time")
+	assert.Contains(t, blob, tiqrEcommercePickupFlowID)
+	assert.NotContains(t, blob, "When would you like")
 	captured, ok = session.SessionData["commerce_captured_fields"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Happye", captured["writing_on_cake"])

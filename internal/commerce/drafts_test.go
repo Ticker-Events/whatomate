@@ -61,6 +61,28 @@ func TestDraftPersistenceAndRecovery(t *testing.T) {
 	assert.EqualValues(t, 2, recovered.Cart["10"].(map[string]any)["qty"])
 }
 
+func TestSaveNilJSONColumnsWritesEmptyValues(t *testing.T) {
+	repo, _ := testDraftRepository(t)
+	draft := newDraft()
+	require.NoError(t, repo.Create(draft))
+
+	draft.Addons = nil
+	draft.Attachments = nil
+	draft.Cart = nil
+	draft.CapturedFields = nil
+	draft.Notes = nil
+	draft.AddressSnapshot = nil
+	require.NoError(t, repo.Save(draft, 1))
+
+	saved, err := repo.Get(draft.ID, draft.OrganizationID)
+	require.NoError(t, err)
+	assert.NotNil(t, saved.Addons)
+	assert.Empty(t, saved.Addons)
+	assert.NotNil(t, saved.Attachments)
+	assert.NotNil(t, saved.Cart)
+	assert.NotNil(t, saved.AddressSnapshot)
+}
+
 func TestDraftOptimisticVersion(t *testing.T) {
 	repo, _ := testDraftRepository(t)
 	draft := newDraft()

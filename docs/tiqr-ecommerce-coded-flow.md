@@ -30,13 +30,13 @@ flowchart TD
   look --> endStatus[Say status and end]
   ful --> list[Collection list]
   list -->|row or collection id| policy{handoff_policy after_capture}
-  policy -->|yes| themed[Capture add-ons time Meta Flow]
-  themed --> commerceXfer[Commerce draft and agent transfer]
+  policy -->|yes| afterCapture[Capture add-ons Meta Flow]
+  afterCapture --> commerceXfer[Commerce draft and agent transfer]
   policy -->|no| prod[list_products]
   list -->|product query| search[search_products]
   search --> show[Carousel or one image]
   prod --> show
-  show -->|picked product collection after_capture| themed
+  show -->|picked product collection after_capture| afterCapture
   show --> opt{How many options}
   opt -->|none| skip[Say unavailable]
   opt -->|one| qty[Ask quantity]
@@ -55,7 +55,7 @@ flowchart TD
   create -->|give up or retries used| xfer
 ```
 
-Checkout said in free text on the menu, the collection list, a product card, an option list, the quantity prompt, or the add-more prompt jumps to the same checkout, after an empty-cart message if `tiqr_cart` has no lines. That divert is not applied during fulfillment or during an after-capture themed handoff. See Gaps.
+Checkout said in free text on the menu, the collection list, a product card, an option list, the quantity prompt, or the add-more prompt jumps to the same checkout, after an empty-cart message if `tiqr_cart` has no lines. That divert is not applied during fulfillment or during an after-capture handoff. See Gaps.
 
 ### 1. Load the store
 
@@ -120,14 +120,15 @@ The collection list uses header `Our collections`, button `Browse`, row title `{
 
 When the chosen collection has `handoff_policy: after_capture` (or a named product belongs to such a collection), the flow does not show product cards, does not ask quantity, and does not write `tiqr_cart` or call `create_order`.
 
-Code: `runThemedHandoff` in `codedflow_tiqr_themed.go`.
+Code: `runAfterCaptureHandoff` in `codedflow_tiqr_after_capture.go`.
 
 1. Intro: `This is a custom {name} request — I’ll collect a few details and connect you with our team.`
 2. Required capture fields from that collection (same prompts as the cart path). Checkout phrases do not divert away from these questions.
 3. Add-ons: if the collection has exactly one product with options, that product id is kept only for catalog add-ons. Otherwise free-text add-ons or Skip.
-4. Fulfillment time via `list_fulfillment_slots` then `propose_fulfillment_time` (REST uses a synthetic stand-in when MCP slots are not configured). Pickup vs delivery and the location pin already ran in step 3.
-5. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup flow `1484028330223507` (name, email, phone) or delivery flow `1557965846018132` (name, phone, address). Flow fields are copied onto the commerce draft address snapshot and notes.
-6. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. The cart and order paths are skipped.
+4. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup flow `1484028330223507` (name, email, phone) or delivery flow `1557965846018132` (name, phone, address). Flow fields are copied onto the commerce draft address snapshot and notes.
+5. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. The cart and order paths are skipped.
+
+Fulfillment time (`list_fulfillment_slots` / `propose_fulfillment_time`) is skipped for now. Pickup vs delivery and the location pin already ran earlier in the buy flow.
 
 Image and file capture fields are asked as text; the coded runner does not attach WhatsApp media the way the commerce chatbot does.
 
@@ -205,7 +206,7 @@ Retries come from `[codedflow] order_retries`, default 2. The loop is `attempt :
 
 ### Agent handoff snapshot
 
-Every `Transfer` from this flow (talk to staff, failed order, ungrounded intent, store or product load failure) snapshots the session onto a `CommerceDraft` and creates an agent transfer with `source: commerce` and `metadata.kind: commerce_handoff`, the same shape as after-capture themed handoffs.
+Every `Transfer` from this flow (talk to staff, failed order, ungrounded intent, store or product load failure) snapshots the session onto a `CommerceDraft` and creates an agent transfer with `source: commerce` and `metadata.kind: commerce_handoff`, the same shape as after-capture handoffs.
 
 | Draft / metadata field | Source |
 | --- | --- |

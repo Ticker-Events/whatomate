@@ -238,12 +238,12 @@ func (a *App) browseCommerceCategory(account *models.WhatsAppAccount, contact *m
 		productID := ""
 		products, prodErr := collectValidCategoryProducts(ctx, rt, categoryID)
 		if prodErr != nil {
-			a.Log.Warn("list themed category products failed", "error", prodErr, "category_id", categoryID)
+			a.Log.Warn("list after_capture category products failed", "error", prodErr, "category_id", categoryID)
 		} else if len(products) == 1 {
 			productID = strconv.Itoa(products[0].ID)
 		}
 		_ = a.sendAndSaveTextMessage(account, contact, "This is a custom "+category.Name+" request — I’ll collect a few details and connect you with our team.")
-		a.beginThemedIntake(account, contact, session, settings, category, productID)
+		a.beginAfterCaptureIntake(account, contact, session, settings, category, productID)
 		return
 	}
 

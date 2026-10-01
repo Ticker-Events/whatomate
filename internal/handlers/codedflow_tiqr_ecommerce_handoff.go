@@ -96,7 +96,7 @@ func stageTiqrEcommerceHandoffSession(session *models.ChatbotSession) {
 		session.SessionData = models.JSONB{}
 	}
 
-	st := themedCheckoutStateFromSession(session)
+	st := afterCaptureCheckoutStateFromSession(session)
 	st.Flow = "coded_ecommerce"
 	st.Step = "handoff"
 	setCheckoutState(session, st)

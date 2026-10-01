@@ -229,7 +229,7 @@ func buyProducts(c *Conv, collections []any, first Route) error {
 					}
 				}
 				productID := soleCategoryProductID(c, route.ID)
-				return runThemedHandoff(c, col, productID)
+				return runAfterCaptureHandoff(c, col, productID)
 			}
 		}
 		products, ok := productsForRoute(c, route)
@@ -252,7 +252,7 @@ func buyProducts(c *Conv, collections []any, first Route) error {
 		}
 		if product := selectedProductMap(c); product != nil {
 			if col := afterCaptureCollectionForProduct(c, product); col != nil {
-				return runThemedHandoff(c, col, fieldString(product, "id"))
+				return runAfterCaptureHandoff(c, col, fieldString(product, "id"))
 			}
 		}
 		if !addPickedProduct(c) {
