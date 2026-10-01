@@ -215,7 +215,8 @@ func TestOrderItemsForAPI_MergesAndSkipsInvalidQty(t *testing.T) {
 func TestTiqrCartUpsertAndUnitCount(t *testing.T) {
 	t.Parallel()
 	session := &models.ChatbotSession{SessionData: models.JSONB{
-		"option_name": "Kunafa",
+		"product_name": "Kunafa Cake",
+		"option_name":  "Kunafa",
 		"options": []any{
 			map[string]any{"id": "9", "name": "Kunafa", "price": 40.0},
 		},
@@ -237,7 +238,7 @@ func TestTiqrCartUpsertAndUnitCount(t *testing.T) {
 	assert.Equal(t, 1, cartLen(c))
 
 	summary := formatTiqrCartSummary(c)
-	assert.Contains(t, summary, "1. *Kunafa* x5")
+	assert.Contains(t, summary, "1. *Kunafa Cake(Kunafa)* x5")
 	assert.Contains(t, summary, "₹200.00")
 	assert.NotContains(t, summary, "each")
 	assert.Contains(t, summary, "*Subtotal:* ₹200.00")
@@ -445,17 +446,37 @@ func TestFormatTiqrCartSummaryNumbered(t *testing.T) {
 	t.Parallel()
 	session := &models.ChatbotSession{SessionData: models.JSONB{
 		"tiqr_cart": []any{
-			map[string]any{"product_option": "9", "quantity": "2", "option_name": "Kunafa", "price": 40.0},
-			map[string]any{"product_option": "8", "quantity": "1", "option_name": "Chocolate", "price": 50.0},
+			map[string]any{
+				"product_option": "9",
+				"quantity":       "2",
+				"product_name":   "Kunafa Cake",
+				"option_name":    "Kunafa",
+				"price":          40.0,
+			},
+			map[string]any{
+				"product_option": "8",
+				"quantity":       "1",
+				"product_name":   "Chocolate Cake",
+				"option_name":    "Chocolate",
+				"price":          50.0,
+			},
 		},
 	}}
 	c := &Conv{chat: &chatNodeCtx{session: session}}
 	summary := formatTiqrCartSummary(c)
-	assert.Contains(t, summary, "1. *Kunafa* x2 — ₹80.00")
-	assert.Contains(t, summary, "2. *Chocolate* x1 — ₹50.00")
+	assert.Contains(t, summary, "1. *Kunafa Cake(Kunafa)* x2 — ₹80.00")
+	assert.Contains(t, summary, "2. *Chocolate Cake(Chocolate)* x1 — ₹50.00")
 	assert.Contains(t, summary, "*Subtotal:* ₹130.00")
 	assert.NotContains(t, summary, "each")
-	assert.Less(t, strings.Index(summary, "1. *Kunafa*"), strings.Index(summary, "2. *Chocolate*"))
+	assert.Less(t, strings.Index(summary, "1. *Kunafa Cake(Kunafa)*"), strings.Index(summary, "2. *Chocolate Cake(Chocolate)*"))
+
+	// Older cart lines without product_name keep option-only labels.
+	session.SessionData["tiqr_cart"] = []any{
+		map[string]any{"product_option": "9", "quantity": "2", "option_name": "Kunafa", "price": 40.0},
+	}
+	summary = formatTiqrCartSummary(c)
+	assert.Contains(t, summary, "1. *Kunafa* x2 — ₹80.00")
+	assert.NotContains(t, summary, "Kunafa Cake")
 }
 
 func useStoreREST(t *testing.T, srv *httptest.Server) {

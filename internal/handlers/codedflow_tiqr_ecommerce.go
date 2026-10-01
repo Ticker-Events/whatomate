@@ -634,7 +634,7 @@ func formatTiqrCartSummary(c *Conv) string {
 		// Cart line prices are stored in major currency units after catalog conversion.
 		lineTotal := line.Price * float64(qty)
 		total += lineTotal
-		fmt.Fprintf(&b, "%d. *%s* x%d — %s\n", i+1, line.Name, qty, formatMoney(lineTotal, currency))
+		fmt.Fprintf(&b, "%d. *%s* x%d — %s\n", i+1, tiqrCartLineDisplayName(line), qty, formatMoney(lineTotal, currency))
 		if extra := formatLineCapture(line); extra != "" {
 			b.WriteString(extra)
 		}
@@ -644,12 +644,33 @@ func formatTiqrCartSummary(c *Conv) string {
 }
 
 type tiqrCartLine struct {
-	OptionID string
-	Name     string
-	Qty      int
-	Price    float64
-	Capture  map[string]any
-	Labels   map[string]string
+	OptionID    string
+	Name        string // option name; used for edit matching
+	ProductName string
+	Qty         int
+	Price       float64
+	Capture     map[string]any
+	Labels      map[string]string
+}
+
+// tiqrCartLineDisplayName returns "Product Name(Option Name)" when both are
+// present, otherwise the option name alone (or Option {id} fallback).
+func tiqrCartLineDisplayName(line tiqrCartLine) string {
+	name := strings.TrimSpace(line.Name)
+	productName := strings.TrimSpace(line.ProductName)
+	if productName != "" && name != "" {
+		return productName + "(" + name + ")"
+	}
+	if name != "" {
+		return name
+	}
+	if productName != "" {
+		return productName
+	}
+	if line.OptionID != "" {
+		return "Option " + line.OptionID
+	}
+	return ""
 }
 
 func tiqrCartLines(c *Conv) []tiqrCartLine {
@@ -677,12 +698,13 @@ func tiqrCartLines(c *Conv) []tiqrCartLine {
 		}
 		price, _ := anyToFloat64(item["price"])
 		out = append(out, tiqrCartLine{
-			OptionID: optionID,
-			Name:     name,
-			Qty:      qty,
-			Price:    price,
-			Capture:  lineCaptureMap(item["capture_fields"]),
-			Labels:   lineLabelMap(item["capture_labels"]),
+			OptionID:    optionID,
+			Name:        name,
+			ProductName: strings.TrimSpace(asString(item["product_name"])),
+			Qty:         qty,
+			Price:       price,
+			Capture:     lineCaptureMap(item["capture_fields"]),
+			Labels:      lineLabelMap(item["capture_labels"]),
 		})
 	}
 	return out
