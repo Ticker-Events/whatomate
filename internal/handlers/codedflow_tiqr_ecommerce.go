@@ -22,15 +22,9 @@ const (
 
 	tiqrEcommerceFallbackMedia = "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/d592fabca6314ee5a749da835b40cf5a-589041f37b35417d8122b31a1b645eee-p.jpg"
 
-	tiqrEcommerceThanks = "Thank you for shopping with us.\n\nMessage us anytime if you need help."
-
 	tiqrEcommerceUnavailable = "Sorry, this item isn't available right now.\n\nPlease choose another item from our collections."
 
 	tiqrEcommerceAdded = "*{{option_name}}* has been added to your cart.\n\n{{cart_summary}}\n\nYou now have *{{cart_count}}* items in your cart. Add something else, edit your cart, or check out when you're ready."
-
-	tiqrEcommerceConfirmed = "Your order is confirmed.\n\nIt's set for store pickup, and we'll have it ready for you.\n\nThank you for shopping with us."
-
-	tiqrEcommerceConfirmedDelivery = "Your order is confirmed.\n\nWe'll deliver it to the address you shared.\n\nThank you for shopping with us."
 
 	tiqrEcommerceFailed = "We couldn't place your order just now.\n\nPlease try again in a moment. If it still doesn't go through, message us and we'll help you complete it."
 
@@ -818,8 +812,9 @@ func singleProductCTA() ImageButtonPrompt {
 		Title:         "Add to cart",
 		StoreAs:       "product_selected",
 		Select: map[string]string{
-			"options":    "options",
-			"product_id": "id",
+			"options":      "options",
+			"product_id":   "id",
+			"product_name": "name",
 		},
 		Step: StepNote{
 			Doing:  "One product is on screen.",
@@ -839,8 +834,9 @@ func productCards() CarouselPrompt {
 		Title:         "Add to cart",
 		FallbackMedia: tiqrEcommerceFallbackMedia,
 		Select: map[string]string{
-			"options":    "options",
-			"product_id": "id",
+			"options":      "options",
+			"product_id":   "id",
+			"product_name": "name",
 		},
 		Step: StepNote{
 			Doing:  "Several products are on screen.",
@@ -905,13 +901,13 @@ func askQuantityAndAdd(c *Conv) bool {
 	if !ok {
 		return false
 	}
-	captured, ok := askCollectionCaptureFields(c)
+	captured, order, ok := askCollectionCaptureFields(c)
 	if !ok {
 		return false
 	}
 	optionID := asString(c.session().SessionData["option_id"])
 	c.Once("cart", func() {
-		upsertCartItem(c, optionID, quantity, captured)
+		upsertCartItem(c, optionID, quantity, captured, order)
 	})
 	refreshCartSessionFields(c)
 	c.Say(tiqrEcommerceAdded)
@@ -921,20 +917,23 @@ func askQuantityAndAdd(c *Conv) bool {
 // askCollectionCaptureFields asks each required collection field as its own
 // question before the option is added to the cart. Answers are stored on the
 // session and returned so the cart line can keep the values from this add.
-func askCollectionCaptureFields(c *Conv) (map[string]any, bool) {
+// order is the field key sequence as asked.
+func askCollectionCaptureFields(c *Conv) (map[string]any, []string, bool) {
 	fields := currentCollectionCaptureFields(c)
 	captured := map[string]any{}
+	order := make([]string, 0, len(fields))
 	for i, field := range fields {
 		name := captureCallName(i, asString(field["key"]))
 		value, ok := c.askCaptureField(name, field)
 		if !ok {
-			return nil, false
+			return nil, nil, false
 		}
 		key := asString(field["key"])
 		captured[key] = value
+		order = append(order, key)
 		saveSessionCapture(c, field, value)
 	}
-	return captured, true
+	return captured, order, true
 }
 
 func (c *Conv) askCaptureField(name string, field map[string]any) (any, bool) {
@@ -1189,7 +1188,7 @@ func captureOptionList(raw any) []any {
 	}
 }
 
-func upsertCartItem(c *Conv, optionID, quantity string, captured map[string]any) {
+func upsertCartItem(c *Conv, optionID, quantity string, captured map[string]any, captureOrder ...[]string) {
 	optionID = strings.TrimSpace(optionID)
 	qty := parsePositiveInt(quantity)
 	if optionID == "" || qty < 1 {
@@ -1197,8 +1196,13 @@ func upsertCartItem(c *Conv, optionID, quantity string, captured map[string]any)
 	}
 	cart, _ := anySlice(c.session().SessionData["tiqr_cart"])
 	name := strings.TrimSpace(asString(c.session().SessionData["option_name"]))
+	productName := strings.TrimSpace(asString(c.session().SessionData["product_name"]))
 	price := optionPriceFromSession(c, optionID)
 	labels := lineCaptureLabels(c, captured)
+	var order []string
+	if len(captureOrder) > 0 {
+		order = captureOrder[0]
+	}
 	for i, entry := range cart {
 		item, ok := asStringMap(entry)
 		if !ok {
@@ -1218,10 +1222,13 @@ func upsertCartItem(c *Conv, optionID, quantity string, captured map[string]any)
 		if name != "" {
 			item["option_name"] = name
 		}
+		if productName != "" {
+			item["product_name"] = productName
+		}
 		if price > 0 {
 			item["price"] = price
 		}
-		applyLineCapture(item, captured, labels)
+		applyLineCapture(item, captured, labels, order)
 		cart[i] = item
 		c.session().SessionData["tiqr_cart"] = cart
 		refreshCartSessionFields(c)
@@ -1234,10 +1241,13 @@ func upsertCartItem(c *Conv, optionID, quantity string, captured map[string]any)
 	if name != "" {
 		item["option_name"] = name
 	}
+	if productName != "" {
+		item["product_name"] = productName
+	}
 	if price > 0 {
 		item["price"] = price
 	}
-	applyLineCapture(item, captured, labels)
+	applyLineCapture(item, captured, labels, order)
 	cart = append(cart, item)
 	c.session().SessionData["tiqr_cart"] = cart
 	refreshCartSessionFields(c)
@@ -1279,7 +1289,7 @@ func captureDiffers(existing any, next map[string]any) bool {
 	return false
 }
 
-func applyLineCapture(item, captured, labels map[string]any) {
+func applyLineCapture(item, captured, labels map[string]any, captureOrder []string) {
 	if len(captured) == 0 {
 		return
 	}
@@ -1287,6 +1297,30 @@ func applyLineCapture(item, captured, labels map[string]any) {
 	if len(labels) > 0 {
 		item["capture_labels"] = map[string]any(cloneJSONMap(labels))
 	}
+	order := make([]any, 0, len(captureOrder))
+	seen := map[string]bool{}
+	for _, key := range captureOrder {
+		key = strings.TrimSpace(key)
+		if key == "" || seen[key] {
+			continue
+		}
+		if _, ok := captured[key]; !ok {
+			continue
+		}
+		seen[key] = true
+		order = append(order, key)
+	}
+	if len(order) == 0 {
+		keys := make([]string, 0, len(captured))
+		for key := range captured {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			order = append(order, key)
+		}
+	}
+	item["capture_order"] = order
 }
 
 func optionPriceFromSession(c *Conv, optionID string) float64 {
@@ -1728,10 +1762,11 @@ func pickupOrderParams(data map[string]any) map[string]string {
 			items = string(raw)
 		}
 	}
+	notes := codedOrderNotes(data)
 	params := map[string]string{
 		"email":         email,
 		"items":         items,
-		"notes":         codedOrderNotes(data),
+		"notes":         notes,
 		"delivery_mode": deliveryMode,
 	}
 	if phone != "" {
@@ -1763,12 +1798,8 @@ func pickupOrderParams(data map[string]any) map[string]string {
 			address = []byte("{}")
 		}
 		params["new_address"] = string(address)
-		if meta, ok := codedBuyerMetaJSON(data); ok {
-			params["buyer_meta_data"] = meta
-		}
-		return params
 	}
-	if meta, ok := codedPickupBuyerMetaJSON(name); ok {
+	if meta, ok := codedBuyerMetaJSON(data, notes); ok {
 		params["buyer_meta_data"] = meta
 	}
 	return params
@@ -1779,8 +1810,24 @@ func formatOrderCoordinate(v float64) string {
 	return strconv.FormatFloat(v, 'f', 6, 64)
 }
 
-func codedBuyerMetaJSON(data map[string]any) (string, bool) {
+// codedBuyerMetaJSON builds buyer_meta_data for pickup and delivery. Contact
+// fields and the same notes string as the order notes are included when set.
+// Delivery also keeps the location pin.
+func codedBuyerMetaJSON(data map[string]any, notes string) (string, bool) {
 	meta := map[string]any{}
+	if name := contextValue(data, "customer_name", "name"); name != "" {
+		meta["name"] = name
+	}
+	if email := contextEmail(data); email != "" {
+		meta["email"] = email
+	}
+	if phone := contextValue(data, "customer_phone", "phone", "phone_number"); phone != "" {
+		meta["phone"] = phone
+		meta["phone_number"] = phone
+	}
+	if notes = strings.TrimSpace(notes); notes != "" {
+		meta["notes"] = notes
+	}
 	if lat, ok := anyToFloat64(data["delivery_latitude"]); ok {
 		meta["latitude"] = lat
 	}
@@ -1791,18 +1838,6 @@ func codedBuyerMetaJSON(data map[string]any) (string, bool) {
 		return "", false
 	}
 	raw, err := json.Marshal(meta)
-	if err != nil {
-		return "", false
-	}
-	return string(raw), true
-}
-
-func codedPickupBuyerMetaJSON(name string) (string, bool) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", false
-	}
-	raw, err := json.Marshal(map[string]any{"name": name})
 	if err != nil {
 		return "", false
 	}
@@ -1845,50 +1880,42 @@ func contextValue(data map[string]any, keys ...string) string {
 	return ""
 }
 
-// codedOrderNotes sends collection answers with the order. A plain customer
-// note stays plain text. When capture answers exist they are JSON, matching
-// the commerce checkout notes payload, with one object per cart line when
-// more than one line has answers.
+// codedOrderNotes builds the order notes string from cart capture answers.
+// A plain customer note stays plain text when nothing was captured. With
+// answers, each line is:
+//
+//	{product_name}({option_name})
+//	- {label}: {value}
 func codedOrderNotes(data map[string]any) string {
-	notes := contextValue(data, "customer_notes", "notes")
-	lines := captureNotesLines(data["tiqr_cart"])
-	if len(lines) == 0 {
+	customerNote := contextValue(data, "customer_notes", "notes")
+	blocks := codedCaptureNoteBlocks(data["tiqr_cart"])
+	if len(blocks) == 0 {
 		captured := lineCaptureMap(data["commerce_captured_fields"])
 		if len(captured) == 0 {
-			return notes
+			return customerNote
 		}
-		lines = []map[string]any{{"fields": captured}}
-	}
-	payload := map[string]any{}
-	for _, line := range lines {
-		fields, _ := line["fields"].(map[string]any)
-		for key, value := range fields {
-			payload[key] = value
+		labels := lineLabelMap(data["commerce_capture_labels"])
+		block := formatCodedCaptureBlock("", "", captured, labels, nil)
+		if block != "" {
+			blocks = append(blocks, block)
 		}
 	}
-	if notes != "" {
-		if _, exists := payload["notes"]; exists {
-			payload["customer_notes"] = notes
-		} else {
-			payload["notes"] = notes
-		}
+	if len(blocks) == 0 {
+		return customerNote
 	}
-	if len(lines) > 1 {
-		payload["lines"] = lines
+	text := strings.Join(blocks, "\n\n")
+	if customerNote != "" {
+		text += "\n\nNote: " + customerNote
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return notes
-	}
-	return string(raw)
+	return text
 }
 
-func captureNotesLines(raw any) []map[string]any {
+func codedCaptureNoteBlocks(raw any) []string {
 	cart, ok := anySlice(raw)
 	if !ok {
 		return nil
 	}
-	out := make([]map[string]any, 0, len(cart))
+	out := make([]string, 0, len(cart))
 	for _, entry := range cart {
 		item, ok := asStringMap(entry)
 		if !ok {
@@ -1898,25 +1925,95 @@ func captureNotesLines(raw any) []map[string]any {
 		if len(fields) == 0 {
 			continue
 		}
-		line := map[string]any{
-			"product_option": strings.TrimSpace(asString(item["product_option"])),
-			"fields":         fields,
+		block := formatCodedCaptureBlock(
+			strings.TrimSpace(asString(item["product_name"])),
+			strings.TrimSpace(asString(item["option_name"])),
+			fields,
+			lineLabelMap(item["capture_labels"]),
+			captureOrderFrom(item["capture_order"]),
+		)
+		if block != "" {
+			out = append(out, block)
 		}
-		if name := strings.TrimSpace(asString(item["option_name"])); name != "" {
-			line["option_name"] = name
-		}
-		out = append(out, line)
 	}
 	return out
 }
 
+func captureOrderFrom(raw any) []string {
+	items, ok := anySlice(raw)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, entry := range items {
+		key := strings.TrimSpace(asString(entry))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	return out
+}
+
+func formatCodedCaptureBlock(productName, optionName string, fields map[string]any, labels map[string]string, order []string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(fields))
+	seen := map[string]bool{}
+	for _, key := range order {
+		if _, ok := fields[key]; !ok || seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	if len(keys) < len(fields) {
+		rest := make([]string, 0, len(fields)-len(keys))
+		for key := range fields {
+			if seen[key] {
+				continue
+			}
+			rest = append(rest, key)
+		}
+		sort.Strings(rest)
+		keys = append(keys, rest...)
+	}
+	var b strings.Builder
+	switch {
+	case productName != "" && optionName != "":
+		fmt.Fprintf(&b, "%s(%s)\n", productName, optionName)
+	case productName != "":
+		fmt.Fprintf(&b, "%s\n", productName)
+	case optionName != "":
+		fmt.Fprintf(&b, "%s\n", optionName)
+	}
+	wroteField := false
+	for _, key := range keys {
+		value := formatCaptureAnswer(fields[key])
+		if value == "" {
+			continue
+		}
+		label := strings.TrimSpace(labels[key])
+		if label == "" {
+			label = key
+		}
+		fmt.Fprintf(&b, "- %s: %s\n", label, value)
+		wroteField = true
+	}
+	if !wroteField {
+		return ""
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func checkout(c *Conv) error {
 	detailsBody := "Please share your name, email, and phone number so we can place your pickup order."
-	confirmMsg := tiqrEcommerceConfirmed
 	flowID := tiqrEcommercePickupFlowID
 	if asString(c.session().SessionData["delivery_mode"]) == tiqrModeDelivery {
 		detailsBody = "Please share your name, phone number, and address so we can place your delivery order."
-		confirmMsg = tiqrEcommerceConfirmedDelivery
 		flowID = tiqrEcommerceFlowID
 	}
 	ok := c.AskFlow("details", FlowPrompt{
@@ -1948,10 +2045,9 @@ func checkout(c *Conv) error {
 		if attempt > 0 {
 			name = fmt.Sprintf("order_retry_%d", attempt)
 		}
-		_, ok = c.Store(name, "create_order", params)
+		order, ok := c.Store(name, "create_order", params)
 		if ok {
-			c.Say(confirmMsg)
-			c.Say(tiqrEcommerceThanks)
+			c.SayPaymentCTA(order)
 			return c.End()
 		}
 		if c.stop || c.ended {

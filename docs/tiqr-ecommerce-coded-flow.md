@@ -142,9 +142,16 @@ After a valid quantity, and before the cart line is written, the flow reads `req
 
 Each field with `required: true` and a non-empty `key`, `label`, and `type` is its own question. Optional and incomplete fields are skipped. The prompt is the same text the commerce chatbot uses: label, then help text, then `Options:` when the field has options. A `number` must parse as a number. `single_select` and `multi_select` must match the options (`multi_select` is comma-separated). Any other non-empty reply is accepted. A value that fails that check is not stored; the customer is asked again with `Please provide a valid value.` A checkout phrase that is not a valid answer for that field leaves the question and follows the normal checkout divert.
 
-Answers are stored on the session as `commerce_captured_fields` (latest value per key) and `commerce_capture_labels`. The cart line also stores `capture_fields` and `capture_labels` for the answers given on that add. The same option added again with the same answers increases quantity. A different answer for the same option is a separate line, so two cakes can carry two messages. The cart summary and the failed-order handoff list each answer under its label.
+Answers are stored on the session as `commerce_captured_fields` (latest value per key) and `commerce_capture_labels`. The cart line also stores `product_name`, `option_name`, `capture_fields`, `capture_labels`, and `capture_order` (keys in the order asked) for the answers given on that add. The same option added again with the same answers increases quantity. A different answer for the same option is a separate line, so two cakes can carry two messages. The cart summary and the failed-order handoff list each answer under its label.
 
-`create_order` still sends items as `product_option` and `quantity` only. The answers go in `notes`. With no capture answers, `notes` stays the plain `customer_notes` string. With answers, `notes` is JSON: each field key plus `notes` when the customer also typed a note. Two or more lines with answers add a `lines` array so an earlier message is not dropped when a later line uses the same key.
+`create_order` still sends items as `product_option` and `quantity` only. The answers go in `notes`. With no capture answers, `notes` stays the plain `customer_notes` string. With answers, `notes` is plain text per cart line:
+
+```
+{product_name}({option_name})
+- {field label}: {answer}
+```
+
+A blank line separates products. When the customer also typed a form note, a final `Note: {customer note}` line is appended.
 
 Then buttons `add_more`, `edit_cart`, and `checkout`. Add more returns to the collection list. Checkout reviews the cart, then breaks the loop.
 
@@ -164,14 +171,14 @@ Then buttons `add_more`, `edit_cart`, and `checkout`. Add more returns to the co
 | `email` | `customer_email` or `email` if it matches a simple email. Phone fields are skipped. Other session values are scanned for an email |
 | `phone_number` | `customer_phone`, `phone`, or `phone_number` when present |
 | `items` | `tiqr_cart` lines reduced to `product_option` and `quantity`. The TiQR client turns those strings into integers |
-| `notes` | `customer_notes` or `notes` when the cart has no collection answers. Otherwise JSON of `commerce_captured_fields` / each line's `capture_fields`, plus the customer note |
+| `notes` | `customer_notes` or `notes` when the cart has no collection answers. Otherwise plain text: `{product_name}({option_name})` then `- {label}: {value}` per capture field, with a blank line between products and `Note: {customer note}` when a form note exists |
 | `new_address` | Delivery only: name, address lines, city, state, country, pincode, email, phone, plus latitude and longitude to 6 decimal places. Omitted for pickup |
 | `delivery_mode` | session value, or `PICKUP_FROM_STORE` if empty |
-| `buyer_meta_data` | Pickup: `{name}` when a customer name exists. Delivery: latitude and longitude |
+| `buyer_meta_data` | `name`, `email`, `phone`, `phone_number`, and `notes` when set (same notes string as the order). Delivery also includes latitude and longitude |
 
 `shipping_fee_paise` is not sent.
 
-Success sends the pickup or delivery confirmation, then `tiqrEcommerceThanks`, then `End`. There is no second confirmation.
+Success sends an order-placed message (display uid, delivery fee, total when present). When the create_order response includes a payment URL (`payment.meta_data.url_to_redirect`, or a top-level `payment_url` in preview mocks), that message is a WhatsApp CTA URL button labeled **Pay now**. The flow then `End`s. It does not tell the customer the order is already confirmed.
 
 Failure calls `createRecoverPlan`. If the plan is `missing_field` and retries remain, `collectRecoverFields` asks for every missing field in a fixed order, stores each reply on the session, and `create_order` runs again. Otherwise the customer is transferred with `formatFailedOrderHandoff`, which lists cart lines and the address. The recover model's own sentence is not sent on that path.
 
@@ -268,10 +275,10 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 | `delivery_latitude`, `delivery_longitude` | Accepted pin |
 | `delivery_zone`, `delivery_distance_km`, `shipping_fee_paise` | Deliverable pin. Fee stays unset while the calculator returns 0 |
 | `collection_id`, `collection_name` | Collection choice, or the search query for a product route |
-| `products`, `product_id`, `options`, `product_selected` | Product choice |
+| `products`, `product_id`, `product_name`, `options`, `product_selected` | Product choice |
 | `option_id`, `option_name`, `quantity` | Option and quantity |
 | `commerce_captured_fields`, `commerce_capture_labels` | Each required collection field answered while adding an option |
-| `tiqr_cart`, `cart_count` | Each append. A line may also include `capture_fields` and `capture_labels` |
+| `tiqr_cart`, `cart_count` | Each append. A line may also include `product_name`, `option_name`, `capture_fields`, `capture_labels`, and `capture_order` |
 | `customer_language` | First free-text intent, if unset |
 | form fields | WhatsApp Flow submission, plus any field recover asks for |
 | `order` | Successful `create_order` |

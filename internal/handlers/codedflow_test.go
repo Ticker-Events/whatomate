@@ -42,7 +42,48 @@ func TestPickupOrderParams_MapsFlowContext(t *testing.T) {
 	assert.NotContains(t, params["items"], "option_name")
 	assert.NotContains(t, params["items"], "Kunafa")
 	assert.NotContains(t, params, "new_address")
-	assert.JSONEq(t, `{"name":"Aswin Divakar"}`, params["buyer_meta_data"])
+	assert.JSONEq(t, `{
+		"name": "Aswin Divakar",
+		"email": "buyer@example.com",
+		"phone": "9846435358",
+		"phone_number": "9846435358",
+		"notes": "Note"
+	}`, params["buyer_meta_data"])
+}
+
+func TestCodedPaymentCTAContent(t *testing.T) {
+	t.Parallel()
+
+	body, paymentURL := codedPaymentCTAContent(map[string]any{
+		"display_uid": "TQ-1",
+		"amount":      40.0,
+		"payment": map[string]any{
+			"status": "initiated",
+			"meta_data": map[string]any{
+				"url_to_redirect": "https://pay.example/go",
+			},
+		},
+	}, "INR")
+	assert.Contains(t, body, "Order placed!")
+	assert.Contains(t, body, "TQ-1")
+	assert.Contains(t, body, "Total:")
+	assert.Equal(t, "https://pay.example/go", paymentURL)
+	assert.NotContains(t, body, "https://pay.example/go")
+	assert.NotContains(t, body, "order is confirmed")
+
+	body, paymentURL = codedPaymentCTAContent(map[string]any{
+		"display_uid": "TQ-MOCK",
+		"payment_url": "https://pay.example/mock",
+	}, "INR")
+	assert.Contains(t, body, "TQ-MOCK")
+	assert.Equal(t, "https://pay.example/mock", paymentURL)
+	assert.NotContains(t, body, "https://pay.example/mock")
+
+	body, paymentURL = codedPaymentCTAContent(map[string]any{
+		"display_uid": "TQ-NOPAY",
+	}, "INR")
+	assert.Contains(t, body, "TQ-NOPAY")
+	assert.Empty(t, paymentURL)
 }
 
 func TestPickupOrderParams_DeliveryIncludesAddress(t *testing.T) {
@@ -78,6 +119,13 @@ func TestPickupOrderParams_DeliveryIncludesAddress(t *testing.T) {
 		"phone_number": "9846435358",
 		"phone": "9846435358"
 	}`, params["new_address"])
+	assert.JSONEq(t, `{
+		"name": "Aswin Divakar",
+		"email": "buyer@example.com",
+		"phone": "9846435358",
+		"phone_number": "9846435358",
+		"notes": "Note"
+	}`, params["buyer_meta_data"])
 }
 
 func TestFormatFailedOrderHandoff(t *testing.T) {
@@ -111,7 +159,13 @@ func TestPickupOrderParams_UsesStoredDeliveryModeAndBuyerMeta(t *testing.T) {
 		"tiqr_cart":          []any{map[string]any{"product_option": "1", "quantity": "1"}},
 	})
 	assert.Equal(t, "DELIVERY_TO_LOCATION", params["delivery_mode"])
-	assert.JSONEq(t, `{"latitude":12.97,"longitude":77.59}`, params["buyer_meta_data"])
+	assert.JSONEq(t, `{
+		"email": "buyer@example.com",
+		"phone": "9846435358",
+		"phone_number": "9846435358",
+		"latitude": 12.97,
+		"longitude": 77.59
+	}`, params["buyer_meta_data"])
 
 	var address map[string]string
 	require.NoError(t, json.Unmarshal([]byte(params["new_address"]), &address))
@@ -255,34 +309,47 @@ func TestCodedOrderNotesIncludesCaptureAnswers(t *testing.T) {
 	notes := codedOrderNotes(map[string]any{
 		"customer_notes": "Leave at gate",
 		"tiqr_cart": []any{map[string]any{
-			"product_option": "9",
-			"option_name":    "Regular",
-			"quantity":       "1",
-			"capture_fields": map[string]any{"writing": "Happy birthday"},
+			"product_option":  "9",
+			"product_name":    "Normal Cake",
+			"option_name":     "Vancho",
+			"quantity":        "1",
+			"capture_fields":  map[string]any{"writing": "Happy Birthday Aswin", "delivery_date": "12/05/2026, 03 PM"},
+			"capture_labels":  map[string]any{"writing": "Writing on Cake", "delivery_date": "Delivery Date"},
+			"capture_order":   []any{"writing", "delivery_date"},
 		}},
 	})
-	assert.JSONEq(t, `{"notes":"Leave at gate","writing":"Happy birthday"}`, notes)
+	assert.Equal(t, "Normal Cake(Vancho)\n- Writing on Cake: Happy Birthday Aswin\n- Delivery Date: 12/05/2026, 03 PM\n\nNote: Leave at gate", notes)
 
 	notes = codedOrderNotes(map[string]any{
 		"tiqr_cart": []any{
 			map[string]any{
 				"product_option": "9",
+				"product_name":   "Normal Cake",
 				"option_name":    "Regular",
 				"capture_fields": map[string]any{"writing": "Happy birthday"},
+				"capture_labels": map[string]any{"writing": "Writing on Cake"},
+				"capture_order":  []any{"writing"},
 			},
 			map[string]any{
 				"product_option": "10",
+				"product_name":   "Normal Cake",
 				"option_name":    "Large",
 				"capture_fields": map[string]any{"writing": "Congrats"},
+				"capture_labels": map[string]any{"writing": "Writing on Cake"},
+				"capture_order":  []any{"writing"},
 			},
 		},
 	})
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal([]byte(notes), &payload))
-	assert.Equal(t, "Congrats", payload["writing"])
-	lines, ok := payload["lines"].([]any)
-	require.True(t, ok)
-	require.Len(t, lines, 2)
+	assert.Equal(t, "Normal Cake(Regular)\n- Writing on Cake: Happy birthday\n\nNormal Cake(Large)\n- Writing on Cake: Congrats", notes)
+
+	notes = codedOrderNotes(map[string]any{
+		"tiqr_cart": []any{map[string]any{
+			"product_option": "9",
+			"option_name":    "Vancho",
+			"capture_fields": map[string]any{"writing": "Happy birthday"},
+		}},
+	})
+	assert.Equal(t, "Vancho\n- writing: Happy birthday", notes)
 }
 
 func TestTiqrCartKeepsDistinctCaptureAnswers(t *testing.T) {
@@ -617,6 +684,8 @@ func TestSingleProductCTA_Config(t *testing.T) {
 	assert.Equal(t, "product_selected", prompt.StoreAs)
 	assert.Equal(t, "{{name}} ({{currency_symbol}}{{min_price}})", prompt.BodyField)
 	assert.Equal(t, tiqrEcommerceFallbackMedia, prompt.FallbackMedia)
+	assert.Equal(t, "name", prompt.Select["product_name"])
+	assert.Equal(t, "id", prompt.Select["product_id"])
 
 	c := &Conv{chat: &chatNodeCtx{session: &models.ChatbotSession{
 		SessionData: models.JSONB{customerLanguageKey: "en"},
@@ -904,11 +973,16 @@ func TestTiqrEcommerce_AsksCollectionCaptureBeforeCart(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "9", item["product_option"])
 	assert.Equal(t, "1", item["quantity"])
+	assert.Equal(t, "Kunafa", item["product_name"])
+	assert.Equal(t, "Regular", item["option_name"])
 	fields, ok := item["capture_fields"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Happy birthday", fields["writing"])
 	assert.Equal(t, "Chocolate", fields["flavor"])
 	assert.NotContains(t, fields, "optional_note")
+	order, ok := item["capture_order"].([]any)
+	require.True(t, ok)
+	assert.Equal(t, []any{"writing", "flavor"}, order)
 
 	captured, ok := session.SessionData["commerce_captured_fields"].(map[string]any)
 	require.True(t, ok)
@@ -916,7 +990,10 @@ func TestTiqrEcommerce_AsksCollectionCaptureBeforeCart(t *testing.T) {
 	assert.Equal(t, "Chocolate", captured["flavor"])
 
 	session.SessionData["customer_notes"] = "Leave at gate"
-	assert.JSONEq(t, `{"flavor":"Chocolate","notes":"Leave at gate","writing":"Happy birthday"}`, pickupOrderParams(session.SessionData)["notes"])
+	assert.Equal(t,
+		"Kunafa(Regular)\n- Cake writing: Happy birthday\n- Flavor: Chocolate\n\nNote: Leave at gate",
+		pickupOrderParams(session.SessionData)["notes"],
+	)
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add more items", tiqrAddMore, nil))
 	reloadSession(t, app, session)
@@ -1608,8 +1685,14 @@ func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
 	meta, ok := placed["buyer_meta_data"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Ada", meta["name"])
+	assert.Equal(t, "ada@example.com", meta["email"])
+	assert.Equal(t, "910000000000", meta["phone"])
+	assert.Equal(t, "910000000000", meta["phone_number"])
+	assert.Equal(t, "Leave at counter", meta["notes"])
 	blob := outgoingBlob(t, app, session)
-	assert.Contains(t, blob, "order is confirmed")
+	assert.Contains(t, blob, "Order placed!")
+	assert.Contains(t, blob, "TQ-1")
+	assert.NotContains(t, blob, "order is confirmed")
 	assert.NotContains(t, blob, "ticker api")
 	assert.NotContains(t, blob, "This field is required")
 }
@@ -1725,9 +1808,92 @@ func TestTiqrEcommerce_CreateOrderAsksEveryMissingFieldBeforeRetry(t *testing.T)
 	require.True(t, ok)
 	assert.Equal(t, "682020", address["pincode"])
 	blob = outgoingBlob(t, app, session)
-	assert.Contains(t, blob, "order is confirmed")
+	assert.Contains(t, blob, "Order placed!")
+	assert.Contains(t, blob, "TQ-1")
+	assert.NotContains(t, blob, "order is confirmed")
 	assert.NotContains(t, blob, "ticker api")
 	assert.NotContains(t, blob, "This field is required")
+}
+
+func TestTiqrEcommerce_CreateOrderSendsPayNowCTA(t *testing.T) {
+	var placed map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/category/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{
+					map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"},
+				},
+			})
+		case strings.Contains(r.URL.Path, "/product/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{
+					map[string]any{
+						"id": "101", "name": "Kunafa", "min_price": "40",
+						"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "40"}},
+					},
+				},
+			})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&placed))
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":          "ord-pay",
+				"display_uid": "TQ-PAY",
+				"amount":      4000,
+				"status":      "PENDING_PAYMENT",
+				"payment": map[string]any{
+					"status": "initiated",
+					"meta_data": map[string]any{
+						"url_to_redirect": "https://pay.example/go",
+					},
+				},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "Demo", "currency": "INR"})
+		}
+	}))
+	t.Cleanup(srv.Close)
+	useStoreREST(t, srv)
+
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	flow := codedFlowByKey(tiqrEcommerceKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrCheckout, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrConfirmItems, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
+		"customer_name":  "Ada",
+		"customer_phone": "910000000000",
+		"customer_email": "ada@example.com",
+	}))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Equal(t, "ada@example.com", placed["email"])
+
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Order placed!")
+	assert.Contains(t, blob, "TQ-PAY")
+	assert.Contains(t, blob, "Pay now")
+	assert.Contains(t, blob, "https://pay.example/go")
+	assert.Contains(t, blob, `"type":"cta_url"`)
+	assert.NotContains(t, blob, "Pay here:")
+	assert.NotContains(t, blob, "order is confirmed")
 }
 
 func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {

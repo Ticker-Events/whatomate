@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -8,17 +9,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 )
 
 const (
-	codedPreviewTTL       = 30 * time.Minute
-	codedPreviewWaitKey   = "_coded_preview_wait"
-	codedPreviewCTAKey    = "_coded_preview_cta"
-	codedPreviewPhone     = "910000000000"
-	codedPreviewInputNone = ""
+	codedPreviewTTL         = 30 * time.Minute
+	codedPreviewRedisPrefix = "coded-preview:"
+	codedPreviewWaitKey     = "_coded_preview_wait"
+	codedPreviewCTAKey      = "_coded_preview_cta"
+	codedPreviewPhone       = "910000000000"
+	codedPreviewInputNone   = ""
 )
 
 // CodedPreviewButton is one reply, list row, or carousel action.
@@ -209,6 +212,25 @@ func (s *codedPreviewSink) text(step, content string) {
 	})
 }
 
+// ctaURL records a Pay now-style URL button. It does not wait for a reply.
+func (s *codedPreviewSink) ctaURL(step, body, buttonText, url string) {
+	if s == nil {
+		return
+	}
+	s.appendMessage(CodedPreviewMessage{
+		Type:        "bot",
+		Content:     body,
+		Step:        step,
+		Interactive: "cta_url",
+		Buttons: []CodedPreviewButton{{
+			ID:    "pay_now",
+			Title: buttonText,
+			Type:  "url",
+			URL:   url,
+		}},
+	})
+}
+
 func (s *codedPreviewSink) expectText() {
 	if s == nil {
 		return
@@ -320,6 +342,21 @@ func (a *App) deliverCodedText(ctx *chatNodeCtx, step, text string) error {
 	return nil
 }
 
+// deliverCodedCTAURL sends a CTA URL button message, or records it in preview.
+// Preview does not wait for a reply — the button opens a URL and is not a choice.
+func (a *App) deliverCodedCTAURL(ctx *chatNodeCtx, step, body, buttonText, url string) error {
+	if ctx.capturing() {
+		ctx.preview.ctaURL(step, body, buttonText, url)
+		return nil
+	}
+	if err := a.sendAndSaveCTAURLButton(ctx.account, ctx.contact, body, buttonText, url); err != nil {
+		return err
+	}
+	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, step)
+	a.logCodedFlowWhatsApp(ctx, step, "cta_url", body)
+	return nil
+}
+
 // deliverCodedLocationRequest asks for a WhatsApp location pin, or records it in preview.
 func (a *App) deliverCodedLocationRequest(ctx *chatNodeCtx, step, body string) error {
 	if ctx.capturing() {
@@ -386,15 +423,16 @@ func previewCards(cards []map[string]any) ([]CodedPreviewCard, []CodedPreviewBut
 }
 
 type codedPreviewHold struct {
-	mu        sync.Mutex
-	orgID     uuid.UUID
-	userID    uuid.UUID
-	flowKey   string
-	account   *models.WhatsAppAccount
-	contact   *models.Contact
-	session   *models.ChatbotSession
-	updatedAt time.Time
-	mock      bool
+	mu          sync.Mutex
+	orgID       uuid.UUID
+	userID      uuid.UUID
+	flowKey     string
+	accountName string
+	account     *models.WhatsAppAccount
+	contact     *models.Contact
+	session     *models.ChatbotSession
+	updatedAt   time.Time
+	mock        bool
 }
 
 var codedPreviewStore = struct {
@@ -454,7 +492,12 @@ func (a *App) previewCodedTurn(orgID, userID uuid.UUID, accountName, flowKey str
 		runErr = nil
 	}
 	sink.flushPendingAIDebug()
-	return previewResponse(hold, sink, runErr), nil
+	resp := previewResponse(hold, sink, runErr)
+	if err := a.saveCodedPreview(hold); err != nil {
+		a.Log.Error("Failed to store coded flow preview session", "error", err, "flow", flow.Key)
+		return CodedPreviewResponse{}, err
+	}
+	return resp, nil
 }
 
 func previewResponse(hold *codedPreviewHold, sink *codedPreviewSink, runErr error) CodedPreviewResponse {
@@ -508,24 +551,23 @@ func previewResponse(hold *codedPreviewHold, sink *codedPreviewSink, runErr erro
 }
 
 func (a *App) previewHold(orgID, userID uuid.UUID, accountName, flowKey string, in codedPreviewInput) (*codedPreviewHold, error) {
-	codedPreviewStore.Lock()
-	defer codedPreviewStore.Unlock()
-	sweepCodedPreviews(time.Now())
-
+	account, err := a.previewAccount(orgID, accountName)
+	if err != nil {
+		return nil, err
+	}
 	if in.SessionID != uuid.Nil {
-		hold := codedPreviewStore.items[in.SessionID]
-		if hold == nil || hold.orgID != orgID || hold.userID != userID || hold.flowKey != flowKey || hold.account.Name != accountName {
+		hold, err := a.loadCodedPreview(in.SessionID)
+		if err != nil {
+			a.Log.Error("Failed to load coded flow preview session", "error", err, "session_id", in.SessionID)
+			return nil, err
+		}
+		if !previewHoldMatches(hold, orgID, userID, flowKey, accountName) {
 			return nil, errCodedPreviewSession
 		}
-		hold.updatedAt = time.Now()
+		hold.account = account
 		return hold, nil
 	}
 
-	var account models.WhatsAppAccount
-	err := a.DB.Where("organization_id = ? AND name = ?", orgID, accountName).First(&account).Error
-	if err != nil {
-		return nil, errCodedPreviewAccount
-	}
 	phone := strings.TrimSpace(in.Phone)
 	if phone == "" {
 		phone = codedPreviewPhone
@@ -548,18 +590,192 @@ func (a *App) previewHold(orgID, userID uuid.UUID, accountName, flowKey string, 
 		StartedAt:       now,
 		LastActivityAt:  now,
 	}
-	hold := &codedPreviewHold{
-		orgID:     orgID,
-		userID:    userID,
-		flowKey:   flowKey,
-		account:   &account,
-		contact:   contact,
-		session:   session,
-		updatedAt: now,
-		mock:      in.mockOn(),
+	return &codedPreviewHold{
+		orgID:       orgID,
+		userID:      userID,
+		flowKey:     flowKey,
+		accountName: account.Name,
+		account:     account,
+		contact:     contact,
+		session:     session,
+		updatedAt:   now,
+		mock:        in.mockOn(),
+	}, nil
+}
+
+func previewHoldMatches(hold *codedPreviewHold, orgID, userID uuid.UUID, flowKey, accountName string) bool {
+	if hold == nil || hold.orgID != orgID || hold.userID != userID || hold.flowKey != flowKey {
+		return false
 	}
-	codedPreviewStore.items[session.ID] = hold
-	return hold, nil
+	name := hold.accountName
+	if name == "" && hold.account != nil {
+		name = hold.account.Name
+	}
+	return name == accountName
+}
+
+func (a *App) previewAccount(orgID uuid.UUID, accountName string) (*models.WhatsAppAccount, error) {
+	var account models.WhatsAppAccount
+	err := a.DB.Where("organization_id = ? AND name = ?", orgID, accountName).First(&account).Error
+	if err != nil {
+		return nil, errCodedPreviewAccount
+	}
+	return &account, nil
+}
+
+// Preview sessions stay in Redis when the API runs more than one replica.
+// A process-local map only works for a single server, which is why preview
+// continues locally and returns "preview session not found" in production.
+func (a *App) loadCodedPreview(id uuid.UUID) (*codedPreviewHold, error) {
+	if a.Redis != nil {
+		raw, err := a.Redis.Get(context.Background(), codedPreviewRedisKey(id)).Result()
+		if errors.Is(err, redis.Nil) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		var state codedPreviewState
+		if err := json.Unmarshal([]byte(raw), &state); err != nil {
+			return nil, err
+		}
+		return state.hold(), nil
+	}
+	codedPreviewStore.Lock()
+	defer codedPreviewStore.Unlock()
+	sweepCodedPreviews(time.Now())
+	return codedPreviewStore.items[id], nil
+}
+
+func (a *App) saveCodedPreview(hold *codedPreviewHold) error {
+	if hold == nil || hold.session == nil {
+		return errCodedPreviewSession
+	}
+	hold.updatedAt = time.Now()
+	if a.Redis == nil {
+		codedPreviewStore.Lock()
+		defer codedPreviewStore.Unlock()
+		codedPreviewStore.items[hold.session.ID] = hold
+		return nil
+	}
+	data, err := json.Marshal(codedPreviewStateFrom(hold))
+	if err != nil {
+		return err
+	}
+	return a.Redis.Set(context.Background(), codedPreviewRedisKey(hold.session.ID), data, codedPreviewTTL).Err()
+}
+
+func codedPreviewRedisKey(id uuid.UUID) string {
+	return codedPreviewRedisPrefix + id.String()
+}
+
+type codedPreviewState struct {
+	OrgID       uuid.UUID           `json:"org_id"`
+	UserID      uuid.UUID           `json:"user_id"`
+	FlowKey     string              `json:"flow_key"`
+	AccountName string              `json:"account_name"`
+	Mock        bool                `json:"mock"`
+	Contact     codedPreviewContact `json:"contact"`
+	Session     codedPreviewSession `json:"session"`
+}
+
+type codedPreviewContact struct {
+	ID             uuid.UUID `json:"id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	PhoneNumber    string    `json:"phone_number"`
+	ProfileName    string    `json:"profile_name"`
+}
+
+type codedPreviewSession struct {
+	ID              uuid.UUID            `json:"id"`
+	OrganizationID  uuid.UUID            `json:"organization_id"`
+	ContactID       uuid.UUID            `json:"contact_id"`
+	WhatsAppAccount string               `json:"whatsapp_account"`
+	PhoneNumber     string               `json:"phone_number"`
+	Status          models.SessionStatus `json:"status"`
+	CurrentStep     string               `json:"current_step"`
+	StepRetries     int                  `json:"step_retries"`
+	SessionData     models.JSONB         `json:"session_data"`
+	StartedAt       time.Time            `json:"started_at"`
+	LastActivityAt  time.Time            `json:"last_activity_at"`
+	CompletedAt     *time.Time           `json:"completed_at,omitempty"`
+}
+
+func codedPreviewStateFrom(hold *codedPreviewHold) codedPreviewState {
+	contact := codedPreviewContact{}
+	if hold.contact != nil {
+		contact = codedPreviewContact{
+			ID:             hold.contact.ID,
+			OrganizationID: hold.contact.OrganizationID,
+			PhoneNumber:    hold.contact.PhoneNumber,
+			ProfileName:    hold.contact.ProfileName,
+		}
+	}
+	session := codedPreviewSession{}
+	if hold.session != nil {
+		session = codedPreviewSession{
+			ID:              hold.session.ID,
+			OrganizationID:  hold.session.OrganizationID,
+			ContactID:       hold.session.ContactID,
+			WhatsAppAccount: hold.session.WhatsAppAccount,
+			PhoneNumber:     hold.session.PhoneNumber,
+			Status:          hold.session.Status,
+			CurrentStep:     hold.session.CurrentStep,
+			StepRetries:     hold.session.StepRetries,
+			SessionData:     hold.session.SessionData,
+			StartedAt:       hold.session.StartedAt,
+			LastActivityAt:  hold.session.LastActivityAt,
+			CompletedAt:     hold.session.CompletedAt,
+		}
+	}
+	name := hold.accountName
+	if name == "" && hold.account != nil {
+		name = hold.account.Name
+	}
+	return codedPreviewState{
+		OrgID:       hold.orgID,
+		UserID:      hold.userID,
+		FlowKey:     hold.flowKey,
+		AccountName: name,
+		Mock:        hold.mock,
+		Contact:     contact,
+		Session:     session,
+	}
+}
+
+func (state codedPreviewState) hold() *codedPreviewHold {
+	contact := &models.Contact{
+		BaseModel:      models.BaseModel{ID: state.Contact.ID},
+		OrganizationID: state.Contact.OrganizationID,
+		PhoneNumber:    state.Contact.PhoneNumber,
+		ProfileName:    state.Contact.ProfileName,
+	}
+	session := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: state.Session.ID},
+		OrganizationID:  state.Session.OrganizationID,
+		ContactID:       state.Session.ContactID,
+		WhatsAppAccount: state.Session.WhatsAppAccount,
+		PhoneNumber:     state.Session.PhoneNumber,
+		Status:          state.Session.Status,
+		CurrentStep:     state.Session.CurrentStep,
+		StepRetries:     state.Session.StepRetries,
+		SessionData:     state.Session.SessionData,
+		StartedAt:       state.Session.StartedAt,
+		LastActivityAt:  state.Session.LastActivityAt,
+		CompletedAt:     state.Session.CompletedAt,
+	}
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
+	return &codedPreviewHold{
+		orgID:       state.OrgID,
+		userID:      state.UserID,
+		flowKey:     state.FlowKey,
+		accountName: state.AccountName,
+		contact:     contact,
+		session:     session,
+		mock:        state.Mock,
+	}
 }
 
 func sweepCodedPreviews(now time.Time) {

@@ -157,6 +157,50 @@ func (c *Conv) Say(message string) {
 	c.appendCall(map[string]any{"name": "say", "ok": true})
 }
 
+// SayPaymentCTA asks the shopper to pay after create_order, matching ecommerce checkout.
+// When payment_url is present it sends a Pay now CTA URL button; otherwise text only.
+func (c *Conv) SayPaymentCTA(order map[string]any) {
+	if c.stop {
+		return
+	}
+	if _, done := c.doneCall(); done {
+		return
+	}
+	body, paymentURL := codedPaymentCTAContent(order, sessionCurrencyCode(c.session()))
+	body = c.text(body)
+	if paymentURL == "" {
+		node := &ChatNode{ID: "say_payment_cta", Type: ChatNodeMessage, Config: map[string]any{"message": body}}
+		if _, err := c.app.execChatMessage(node, c.chat); err != nil {
+			c.fail(err)
+			return
+		}
+		c.appendCall(map[string]any{"name": "say_payment_cta", "ok": true})
+		return
+	}
+	if err := c.app.deliverCodedCTAURL(c.chat, "say_payment_cta", body, "Pay now", paymentURL); err != nil {
+		fallback := body + "\nPay here: " + paymentURL
+		node := &ChatNode{ID: "say_payment_cta", Type: ChatNodeMessage, Config: map[string]any{"message": fallback}}
+		if _, err := c.app.execChatMessage(node, c.chat); err != nil {
+			c.fail(err)
+			return
+		}
+	}
+	c.appendCall(map[string]any{"name": "say_payment_cta", "ok": true})
+}
+
+// codedPaymentCTAContent builds the order-placed body and payment URL for coded flows.
+// It accepts payment_url from compactOrderCreateResult (nested payment.meta_data) or a
+// top-level payment_url (preview mocks).
+func codedPaymentCTAContent(order map[string]any, currency string) (string, string) {
+	compacted := compactOrderCreateResult(order, currency)
+	if asString(compacted["payment_url"]) == "" {
+		if u := strings.TrimSpace(asString(order["payment_url"])); u != "" {
+			compacted["payment_url"] = u
+		}
+	}
+	return paymentCTAContent(compacted)
+}
+
 // AskButtons accepts only a button id from this prompt.
 func (c *Conv) AskButtons(name string, prompt ButtonPrompt) (Choice, bool) {
 	if choice, done, ok := c.replayChoice(); done {

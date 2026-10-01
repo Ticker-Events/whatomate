@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,11 +25,19 @@ func previewMessageText(messages []CodedPreviewMessage) string {
 	for _, msg := range messages {
 		b.WriteString(msg.Content)
 		b.WriteByte('\n')
+		if msg.Interactive != "" {
+			b.WriteString(msg.Interactive)
+			b.WriteByte('\n')
+		}
 		for _, button := range msg.Buttons {
 			b.WriteString(button.Title)
 			b.WriteByte('\n')
 			b.WriteString(button.ID)
 			b.WriteByte('\n')
+			if button.URL != "" {
+				b.WriteString(button.URL)
+				b.WriteByte('\n')
+			}
 		}
 	}
 	return b.String()
@@ -107,6 +117,100 @@ func TestPreviewCodedFlow_ButtonAdvances(t *testing.T) {
 	assert.Equal(t, "button", next.Input)
 	assert.Equal(t, "list", next.Messages[0].Interactive)
 	assert.Contains(t, previewMessageText(next.Messages), "Sweets")
+}
+
+func TestCodedPreviewRedisRoundTripIgnoresProcessMemory(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	app := &App{Redis: rdb}
+
+	orgID := uuid.New()
+	userID := uuid.New()
+	sessionID := uuid.New()
+	contactID := uuid.New()
+	hold := &codedPreviewHold{
+		orgID:       orgID,
+		userID:      userID,
+		flowKey:     tiqrEcommerceKey,
+		accountName: "shop",
+		mock:        true,
+		contact: &models.Contact{
+			BaseModel:      models.BaseModel{ID: contactID},
+			OrganizationID: orgID,
+			PhoneNumber:    codedPreviewPhone,
+			ProfileName:    "Preview",
+		},
+		session: &models.ChatbotSession{
+			BaseModel:       models.BaseModel{ID: sessionID},
+			OrganizationID:  orgID,
+			ContactID:       contactID,
+			WhatsAppAccount: "shop",
+			PhoneNumber:     codedPreviewPhone,
+			Status:          models.SessionStatusActive,
+			CurrentStep:     "collection",
+			SessionData: models.JSONB{
+				"collections": []map[string]any{{"id": "57", "name": "Sweets"}},
+				"store":       map[string]any{"id": "42"},
+			},
+		},
+	}
+	require.NoError(t, app.saveCodedPreview(hold))
+
+	codedPreviewStore.Lock()
+	delete(codedPreviewStore.items, sessionID)
+	codedPreviewStore.Unlock()
+
+	loaded, err := app.loadCodedPreview(sessionID)
+	require.NoError(t, err)
+	require.True(t, previewHoldMatches(loaded, orgID, userID, tiqrEcommerceKey, "shop"))
+	assert.Equal(t, "collection", loaded.session.CurrentStep)
+	assert.Equal(t, codedPreviewPhone, loaded.contact.PhoneNumber)
+	items, ok := anySlice(loaded.session.SessionData["collections"])
+	require.True(t, ok)
+	require.Len(t, items, 1)
+	rec, ok := asStringMap(items[0])
+	require.True(t, ok)
+	assert.Equal(t, "Sweets", asString(rec["name"]))
+	assert.False(t, previewHoldMatches(loaded, orgID, uuid.New(), tiqrEcommerceKey, "shop"))
+}
+
+func TestPreviewCodedFlow_SessionSurvivesEmptyProcessMemory(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	useCodedIntent(t, nil, nil)
+	useCodedTranslate(t, nil)
+	srv := newStoreServer(t, twoProducts(nil), nil)
+	useStoreREST(t, srv)
+	app, org, account, _, _ := newGraphTestFixtures(t)
+	app.Redis = rdb
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	userID := uuid.New()
+
+	first, err := app.previewCodedTurn(org.ID, userID, account.Name, tiqrEcommerceKey, codedPreviewInput{Mock: previewLive()})
+	require.NoError(t, err)
+	sessionID, err := uuid.Parse(first.SessionID)
+	require.NoError(t, err)
+	require.True(t, mr.Exists(codedPreviewRedisKey(sessionID)))
+
+	codedPreviewStore.Lock()
+	delete(codedPreviewStore.items, sessionID)
+	codedPreviewStore.Unlock()
+
+	next, err := app.previewCodedTurn(org.ID, userID, account.Name, tiqrEcommerceKey, codedPreviewInput{
+		SessionID: sessionID,
+		Text:      "Buy products",
+		ButtonID:  tiqrBuyProducts,
+		Mock:      previewLive(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "waiting_input", next.Status)
+	assert.Equal(t, "collection", next.Step)
 }
 
 func TestPreviewCodedFlow_IncludesAIDetails(t *testing.T) {
@@ -255,10 +359,22 @@ func TestPreviewCodedFlow_MockCreateOrderIsNotSent(t *testing.T) {
 	asked = turn(codedPreviewInput{FlowResponse: map[string]any{"customer_name": "Preview Customer"}})
 	require.Equal(t, "create_order", asked.MockOperation)
 	done := turn(codedPreviewInput{Mocks: map[string]any{
-		"create_order": map[string]any{"id": "preview-order"},
+		"create_order": map[string]any{
+			"id":          "preview-order",
+			"display_uid": "TQ-PREVIEW",
+			"amount":      40.0,
+			"payment_url": "https://pay.example/preview",
+		},
 	}})
 	assert.Equal(t, "completed", done.Status)
-	assert.Contains(t, previewMessageText(done.Messages), "Your order is confirmed.")
+	blob := previewMessageText(done.Messages)
+	assert.Contains(t, blob, "Order placed!")
+	assert.Contains(t, blob, "TQ-PREVIEW")
+	assert.Contains(t, blob, "cta_url")
+	assert.Contains(t, blob, "Pay now")
+	assert.Contains(t, blob, "https://pay.example/preview")
+	assert.NotContains(t, blob, "Pay here:")
+	assert.NotContains(t, blob, "order is confirmed")
 	assert.Zero(t, orders)
 }
 
@@ -273,7 +389,7 @@ func TestPreviewCodedFlow_LiveCreateOrderIsSent(t *testing.T) {
 			orders++
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&orderBody))
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": "real-order"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "real-order", "display_uid": "TQ-LIVE"})
 		case strings.Contains(r.URL.Path, "/category/"):
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"count": 1,
@@ -332,7 +448,10 @@ func TestPreviewCodedFlow_LiveCreateOrderIsSent(t *testing.T) {
 	})
 
 	assert.Equal(t, "completed", done.Status)
-	assert.Contains(t, previewMessageText(done.Messages), "Your order is confirmed.")
+	blob := previewMessageText(done.Messages)
+	assert.Contains(t, blob, "Order placed!")
+	assert.Contains(t, blob, "TQ-LIVE")
+	assert.NotContains(t, blob, "order is confirmed")
 	assert.Equal(t, 1, orders)
 	assert.Equal(t, "preview@example.com", orderBody["email"])
 	assert.Equal(t, "910000000000", orderBody["phone_number"])
@@ -343,6 +462,10 @@ func TestPreviewCodedFlow_LiveCreateOrderIsSent(t *testing.T) {
 	meta, ok := orderBody["buyer_meta_data"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Preview Customer", meta["name"])
+	assert.Equal(t, "preview@example.com", meta["email"])
+	assert.Equal(t, "910000000000", meta["phone"])
+	assert.Equal(t, "910000000000", meta["phone_number"])
+	assert.Equal(t, "Pickup note", meta["notes"])
 
 	_, _, transfers := countRows(t, app, org.ID, account.Name)
 	assert.Zero(t, transfers)

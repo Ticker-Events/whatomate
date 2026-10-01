@@ -258,7 +258,15 @@ The answers are saved on the cart line and on the session. The same option with 
 A collection with no required fields skips the questions. The saved line includes the answers when any were asked:
 
 ```json
-{ "product_option": "9", "quantity": "2", "capture_fields": { "writing": "Happy birthday" } }
+{
+  "product_option": "9",
+  "quantity": "2",
+  "product_name": "Normal Cake",
+  "option_name": "Vancho",
+  "capture_fields": { "writing": "Happy Birthday Aswin" },
+  "capture_labels": { "writing": "Writing on Cake" },
+  "capture_order": ["writing"]
+}
 ```
 
 `capture_fields` is omitted when the collection did not ask anything. `tiqr_cart` is the list of those lines. `cart_count` is the sum of quantities. The customer then sees the option name, the cart summary (including collection answers), and how many units are in the cart.
@@ -277,10 +285,10 @@ The order is placed with `create_order` only after that form is submitted. Each 
 | --- | --- |
 | `email` | `customer_email`, or `email` when that value contains an `@`. A phone number in either field is not sent as the email. |
 | `items` | `tiqr_cart` |
-| `notes` | `customer_notes` when no collection answers were captured. Otherwise a JSON object of those answers, plus `notes` for the customer's note. Two or more answered lines also include a `lines` array |
+| `notes` | `customer_notes` when no collection answers were captured. Otherwise plain text per cart line: `{product_name}({option_name})` then `- {label}: {value}`, with an optional trailing `Note: {customer note}` |
 | `delivery_mode` | Session `delivery_mode` from fulfillment (`PICKUP_FROM_STORE` or `DELIVERY_TO_LOCATION`). Empty defaults to pickup. |
 | `new_address` | The address object below. Delivery also includes `latitude` and `longitude` from the pin, rounded to 6 decimal places |
-| `buyer_meta_data` | For delivery: `latitude` / `longitude` from the pin (`delivery_latitude` / `delivery_longitude`) |
+| `buyer_meta_data` | `name`, `email`, `phone`, `phone_number`, and `notes` when set. Delivery also includes `latitude` / `longitude` from the pin (`delivery_latitude` / `delivery_longitude`) |
 | `phone_number` | The WhatsApp number on the session. The form's phone is stored on the address, not copied into `email`. |
 
 `product_option` and `quantity` are stored as text and sent to TiQR as integers.
@@ -304,12 +312,12 @@ The order is placed with `create_order` only after that form is submitted. Each 
 
 The WhatsApp Flow has to submit those field names. The Email input must be an email address. `email` is required to create the order. Guest checkout also needs `email` on the address. If the address omits it, the order email is copied onto the address. For delivery, `latitude` and `longitude` on the address are the stored pin, rounded to 6 decimal places. Location-based stores require that pin on the address to confirm the order.
 
-There is no second confirmation step. A successful create tells the customer the order is confirmed for pickup or delivery, matching the stored mode. If create fails because customer details are missing, the recover role asks for every missing field from the error, one reply at a time, in this order: name, phone, email, address line 1, address line 2, city, state, country, pincode, notes. `create_order` is retried only after all of those replies are saved on the session, with the same cart. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details. The thank-you message is sent and the flow ends:
+There is no second confirmation step. A successful create sends an order-placed message (order number, delivery fee, and total when present). When the response includes a payment URL, that message is a WhatsApp **Pay now** CTA URL button so the shopper can complete payment. The flow then ends. If create fails because customer details are missing, the recover role asks for every missing field from the error, one reply at a time, in this order: name, phone, email, address line 1, address line 2, city, state, country, pincode, notes. `create_order` is retried only after all of those replies are saved on the session, with the same cart. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details.
 
 ```text
-Thank you for shopping with us.
-
-Message us anytime if you need help.
+Order placed! Your order number is TQ-1.
+Total: ₹40.00
+[Pay now]
 ```
 
 ### Order status
@@ -344,11 +352,11 @@ These are the values later messages and the order payload read back.
 | `delivery_zone`, `shipping_fee_paise` | Delivery eligibility succeeds |
 | `collection_id`, `collection_name` | A collection row is chosen |
 | `products` | `list_products` returns rows |
-| `product_id`, `options`, `product_selected` | A product card is chosen |
+| `product_id`, `product_name`, `options`, `product_selected` | A product card is chosen |
 | `option_id`, `option_name` | An option is selected |
 | `quantity` | A whole number is accepted |
 | `commerce_captured_fields`, `commerce_capture_labels` | A required collection field is answered while adding an option |
-| `tiqr_cart`, `cart_count` | A line is appended. The line can include `capture_fields` and `capture_labels` |
+| `tiqr_cart`, `cart_count` | A line is appended. The line can include `product_name`, `option_name`, `capture_fields`, `capture_labels`, and `capture_order` |
 | `customer_name`, `customer_email`, `customer_phone`, address fields, `customer_notes` | The WhatsApp Flow is submitted, using the form's own field names. A failed `create_order` can also fill any of these that the error said were missing |
 | `order` | `create_order` succeeds |
 

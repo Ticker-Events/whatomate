@@ -85,7 +85,7 @@ export interface SimulationMessage {
   stepName?: string
   buttons?: ButtonConfig[]
   /** list messages always open the picker; reply buttons use a count split */
-  interactive?: 'buttons' | 'list' | 'carousel'
+  interactive?: 'buttons' | 'list' | 'carousel' | 'cta_url'
   cards?: PreviewCarouselCard[]
   header?: string
   headerImage?: string

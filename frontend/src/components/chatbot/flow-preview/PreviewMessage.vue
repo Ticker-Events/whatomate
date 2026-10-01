@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { SimulationMessage } from '@/types/flow-preview'
-import { Bug, Braces, ChevronDown, ChevronRight, Info, Sparkles } from 'lucide-vue-next'
+import { Bug, Braces, ChevronDown, ChevronRight, ExternalLink, Info, Sparkles } from 'lucide-vue-next'
 import JsonTree from './JsonTree.vue'
 
 const props = defineProps<{
@@ -27,6 +27,11 @@ const isDebug = computed(() => props.message.type === 'debug')
 const contextEntries = computed(() => Object.entries(props.message.context || {}))
 const hasContext = computed(() => contextEntries.value.length > 0)
 const hasAI = computed(() => Array.isArray(props.message.ai) && props.message.ai.length > 0)
+
+const ctaButtons = computed(() => {
+  if (props.message.interactive !== 'cta_url' || !props.message.buttons?.length) return []
+  return props.message.buttons.filter((btn) => btn.type === 'url' && btn.url)
+})
 
 function formatValue(value: unknown) {
   if (value === null || value === undefined) return String(value)
@@ -59,6 +64,22 @@ function formatValue(value: unknown) {
           {{ message.footer }}
         </p>
         <p class="text-[10px] text-gray-400 text-right mt-1">{{ formattedTime }}</p>
+        <div
+          v-if="ctaButtons.length"
+          class="mt-2 -mx-3 -mb-3 border-t border-black/5 dark:border-white/10"
+        >
+          <a
+            v-for="btn in ctaButtons"
+            :key="btn.id"
+            :href="btn.url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="py-2.5 text-sm text-center font-medium text-[#00a884] flex items-center justify-center gap-1.5 hover:bg-gray-50 dark:hover:bg-[#2a3942] transition-colors"
+          >
+            <ExternalLink class="h-3.5 w-3.5" />
+            {{ btn.title || 'Open' }}
+          </a>
+        </div>
       </div>
 
       <p v-if="message.stepName" class="text-[10px] text-gray-400 mt-0.5 ml-1">

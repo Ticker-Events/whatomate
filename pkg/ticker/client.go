@@ -71,6 +71,7 @@ func (c *Client) SearchProducts(ctx context.Context, storeID, search string, lim
 	q := url.Values{}
 	q.Set("store_id", storeID)
 	q.Set("limit", strconv.Itoa(limit))
+	q.Set("include_custom_pricing", "true")
 	if strings.TrimSpace(search) != "" {
 		q.Set("search", strings.TrimSpace(search))
 	}
@@ -96,8 +97,10 @@ func (c *Client) GetProduct(ctx context.Context, productID string) (map[string]a
 	if productID == "" {
 		return nil, fmt.Errorf("product_id is required")
 	}
+	q := url.Values{}
+	q.Set("include_custom_pricing", "true")
 	var raw map[string]any
-	if err := c.getJSON(ctx, "/service/buyer/product/"+url.PathEscape(productID)+"/", &raw); err != nil {
+	if err := c.getJSON(ctx, "/service/buyer/product/"+url.PathEscape(productID)+"/?"+q.Encode(), &raw); err != nil {
 		return nil, err
 	}
 	NormalizeProductMoney(raw)
@@ -201,6 +204,7 @@ func (c *Client) ListProductsPage(ctx context.Context, storeID string, params Li
 	}
 	q := url.Values{}
 	q.Set("store_id", storeID)
+	q.Set("include_custom_pricing", "true")
 	if params.Limit > 0 {
 		q.Set("limit", strconv.Itoa(params.Limit))
 	}
