@@ -134,11 +134,19 @@ One product is an image reply with Add to cart, because a carousel needs two car
 | 1 | That option is taken. No list |
 | 2 or more | Option list. Title is `{{name}} (₹{{price}})` |
 
-Quantity uses `AskNumber` with pattern `^[0-9]+$`. Digits are accepted in code, including `0`. A number word is accepted only when intent returns route `answer` with a value that matches the pattern.
+Quantity uses `AskNumber` with pattern `^[1-9][0-9]*$`. Digits of 1 or more are accepted in code. A number word is accepted only when intent returns route `answer` with a value that matches the pattern.
 
-`Once("cart")` appends `{product_option, quantity, option_name}` onto `tiqr_cart`. `cart_count` is the number of lines, not the sum of quantities. The same option added twice is two lines. Replay of that same call does not append again.
+### Collection capture fields
 
-Then buttons `add_more` and `checkout`. Add more returns to the collection list. Checkout breaks the loop.
+After a valid quantity, and before the cart line is written, the flow reads `required_capture_fields` for the collection this product belongs to. The product's `category_id` (or embedded `category`) wins when it matches a loaded collection. Otherwise the selected `collection_id` is used.
+
+Each field with `required: true` and a non-empty `key`, `label`, and `type` is its own question. Optional and incomplete fields are skipped. The prompt is the same text the commerce chatbot uses: label, then help text, then `Options:` when the field has options. A `number` must parse as a number. `single_select` and `multi_select` must match the options (`multi_select` is comma-separated). Any other non-empty reply is accepted. A value that fails that check is not stored; the customer is asked again with `Please provide a valid value.` A checkout phrase that is not a valid answer for that field leaves the question and follows the normal checkout divert.
+
+Answers are stored on the session as `commerce_captured_fields` (latest value per key) and `commerce_capture_labels`. The cart line also stores `capture_fields` and `capture_labels` for the answers given on that add. The same option added again with the same answers increases quantity. A different answer for the same option is a separate line, so two cakes can carry two messages. The cart summary and the failed-order handoff list each answer under its label.
+
+`create_order` still sends items as `product_option` and `quantity` only. The answers go in `notes`. With no capture answers, `notes` stays the plain `customer_notes` string. With answers, `notes` is JSON: each field key plus `notes` when the customer also typed a note. Two or more lines with answers add a `lines` array so an earlier message is not dropped when a later line uses the same key.
+
+Then buttons `add_more`, `edit_cart`, and `checkout`. Add more returns to the collection list. Checkout reviews the cart, then breaks the loop.
 
 ### 6. Checkout
 
@@ -156,7 +164,7 @@ Then buttons `add_more` and `checkout`. Add more returns to the collection list.
 | `email` | `customer_email` or `email` if it matches a simple email. Phone fields are skipped. Other session values are scanned for an email |
 | `phone_number` | `customer_phone`, `phone`, or `phone_number` when present |
 | `items` | `tiqr_cart` lines reduced to `product_option` and `quantity`. The TiQR client turns those strings into integers |
-| `notes` | `customer_notes` or `notes` |
+| `notes` | `customer_notes` or `notes` when the cart has no collection answers. Otherwise JSON of `commerce_captured_fields` / each line's `capture_fields`, plus the customer note |
 | `new_address` | Delivery only: name, address lines, city, state, country, pincode, email, phone, plus latitude and longitude to 6 decimal places. Omitted for pickup |
 | `delivery_mode` | session value, or `PICKUP_FROM_STORE` if empty |
 | `buyer_meta_data` | Pickup: `{name}` when a customer name exists. Delivery: latitude and longitude |
@@ -248,7 +256,7 @@ Fetch failures in this flow do not call `recoverFetchMessage`. Store, collection
 - Exact taps on an offered id or title
 - The decision to transfer after an ungrounded route
 
-Collection `AIInstructions` and required capture fields used by the commerce chatbot are not read here.
+Collection `AIInstructions` are not read aloud. Required capture fields on the loaded collection are asked one at a time when an option is added. See Collection capture fields.
 
 ## Session values this flow writes
 
@@ -262,7 +270,8 @@ Collection `AIInstructions` and required capture fields used by the commerce cha
 | `collection_id`, `collection_name` | Collection choice, or the search query for a product route |
 | `products`, `product_id`, `options`, `product_selected` | Product choice |
 | `option_id`, `option_name`, `quantity` | Option and quantity |
-| `tiqr_cart`, `cart_count` | Each append |
+| `commerce_captured_fields`, `commerce_capture_labels` | Each required collection field answered while adding an option |
+| `tiqr_cart`, `cart_count` | Each append. A line may also include `capture_fields` and `capture_labels` |
 | `customer_language` | First free-text intent, if unset |
 | form fields | WhatsApp Flow submission, plus any field recover asks for |
 | `order` | Successful `create_order` |
@@ -297,4 +306,4 @@ Collection `AIInstructions` and required capture fields used by the commerce cha
 
 13. **Order status is thinner than commerce checkout.** No payment link, no retry payment, no order id prompt. A failed lookup and a customer with no orders share one sentence.
 
-14. **Collection AI instructions are ignored.** The commerce chatbot loads per-collection instructions and required capture fields. This flow never reads them, so a collection that needs an extra question (for example a cake message) is not asked before the cart line.
+14. **Collection AI instructions are not read aloud.** Required capture fields are asked as their own questions before the cart line. The store-authored `ai_instructions` text is still not added to the prompt. File fields accept a text reply, because this flow does not collect a WhatsApp attachment.

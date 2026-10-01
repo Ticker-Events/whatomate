@@ -103,12 +103,12 @@ func TestFormatFailedOrderHandoff(t *testing.T) {
 
 func TestPickupOrderParams_UsesStoredDeliveryModeAndBuyerMeta(t *testing.T) {
 	params := pickupOrderParams(map[string]any{
-		"customer_email":      "buyer@example.com",
-		"customer_phone":      "9846435358",
-		"delivery_mode":       "DELIVERY_TO_LOCATION",
-		"delivery_latitude":   12.97,
-		"delivery_longitude":  77.59,
-		"tiqr_cart":           []any{map[string]any{"product_option": "1", "quantity": "1"}},
+		"customer_email":     "buyer@example.com",
+		"customer_phone":     "9846435358",
+		"delivery_mode":      "DELIVERY_TO_LOCATION",
+		"delivery_latitude":  12.97,
+		"delivery_longitude": 77.59,
+		"tiqr_cart":          []any{map[string]any{"product_option": "1", "quantity": "1"}},
 	})
 	assert.Equal(t, "DELIVERY_TO_LOCATION", params["delivery_mode"])
 	assert.JSONEq(t, `{"latitude":12.97,"longitude":77.59}`, params["buyer_meta_data"])
@@ -168,18 +168,18 @@ func TestTiqrCartUpsertAndUnitCount(t *testing.T) {
 	}}
 	c := &Conv{chat: &chatNodeCtx{session: session}}
 
-	upsertCartItem(c, "9", "2")
+	upsertCartItem(c, "9", "2", nil)
 	assert.Equal(t, 1, cartLen(c))
 	assert.Equal(t, 2, cartUnitCount(c))
 	assert.Equal(t, float64(2), session.SessionData["cart_count"])
 
-	upsertCartItem(c, "9", "3")
+	upsertCartItem(c, "9", "3", nil)
 	assert.Equal(t, 1, cartLen(c))
 	assert.Equal(t, 5, cartUnitCount(c))
 
-	upsertCartItem(c, "", "1") // empty option ignored
+	upsertCartItem(c, "", "1", nil) // empty option ignored
 	assert.Equal(t, 1, cartLen(c))
-	upsertCartItem(c, "8", "0") // qty 0 ignored
+	upsertCartItem(c, "8", "0", nil) // qty 0 ignored
 	assert.Equal(t, 1, cartLen(c))
 
 	summary := formatTiqrCartSummary(c)
@@ -193,6 +193,118 @@ func TestTiqrCartUpsertAndUnitCount(t *testing.T) {
 	assert.Equal(t, "Kunafa", name)
 	assert.Equal(t, 0, cartLen(c))
 	assert.Equal(t, 0, cartUnitCount(c))
+}
+
+func TestRequiredCaptureFieldsFromCollection(t *testing.T) {
+	t.Parallel()
+	fields := requiredCaptureFieldsFrom(map[string]any{
+		"required_capture_fields": []any{
+			map[string]any{"key": "writing", "label": "Cake writing", "type": "text", "required": true, "help_text": "Short message"},
+			map[string]any{"key": "optional_note", "label": "Note", "type": "text", "required": false},
+			map[string]any{"key": "", "label": "Broken", "type": "text", "required": true},
+			map[string]any{"key": "flavor", "label": "Flavor", "type": "single_select", "required": "true", "options": []any{"Vanilla", "Chocolate"}},
+		},
+	})
+	require.Len(t, fields, 2)
+	assert.Equal(t, "writing", fields[0]["key"])
+	assert.Equal(t, "Short message", fields[0]["help_text"])
+	assert.Equal(t, "flavor", fields[1]["key"])
+	assert.Equal(t, []any{"Vanilla", "Chocolate"}, fields[1]["options"])
+}
+
+func TestCurrentCollectionCaptureFieldsPrefersProductCategory(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		"collection_id": "57",
+		"product_id":    "101",
+		"products": []any{map[string]any{
+			"id":          "101",
+			"category_id": "58",
+		}},
+		"collections": []any{
+			map[string]any{
+				"id": "57",
+				"required_capture_fields": []any{
+					map[string]any{"key": "writing", "label": "Cake writing", "type": "text", "required": true},
+				},
+			},
+			map[string]any{
+				"id": "58",
+				"required_capture_fields": []any{
+					map[string]any{"key": "message", "label": "Card message", "type": "text", "required": true},
+				},
+			},
+		},
+	}}
+	c := &Conv{chat: &chatNodeCtx{session: session}}
+	fields := currentCollectionCaptureFields(c)
+	require.Len(t, fields, 1)
+	assert.Equal(t, "message", fields[0]["key"])
+
+	delete(session.SessionData["products"].([]any)[0].(map[string]any), "category_id")
+	fields = currentCollectionCaptureFields(c)
+	require.Len(t, fields, 1)
+	assert.Equal(t, "writing", fields[0]["key"])
+}
+
+func TestCodedOrderNotesIncludesCaptureAnswers(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "Note", codedOrderNotes(map[string]any{"customer_notes": "Note"}))
+	assert.Equal(t, "", codedOrderNotes(map[string]any{}))
+
+	notes := codedOrderNotes(map[string]any{
+		"customer_notes": "Leave at gate",
+		"tiqr_cart": []any{map[string]any{
+			"product_option": "9",
+			"option_name":    "Regular",
+			"quantity":       "1",
+			"capture_fields": map[string]any{"writing": "Happy birthday"},
+		}},
+	})
+	assert.JSONEq(t, `{"notes":"Leave at gate","writing":"Happy birthday"}`, notes)
+
+	notes = codedOrderNotes(map[string]any{
+		"tiqr_cart": []any{
+			map[string]any{
+				"product_option": "9",
+				"option_name":    "Regular",
+				"capture_fields": map[string]any{"writing": "Happy birthday"},
+			},
+			map[string]any{
+				"product_option": "10",
+				"option_name":    "Large",
+				"capture_fields": map[string]any{"writing": "Congrats"},
+			},
+		},
+	})
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(notes), &payload))
+	assert.Equal(t, "Congrats", payload["writing"])
+	lines, ok := payload["lines"].([]any)
+	require.True(t, ok)
+	require.Len(t, lines, 2)
+}
+
+func TestTiqrCartKeepsDistinctCaptureAnswers(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		"option_name":             "Kunafa",
+		"commerce_capture_labels": map[string]any{"writing": "Cake writing"},
+		"options": []any{
+			map[string]any{"id": "9", "name": "Kunafa", "price": 40.0},
+		},
+	}}
+	c := &Conv{chat: &chatNodeCtx{session: session}}
+	upsertCartItem(c, "9", "1", map[string]any{"writing": "Happy birthday"})
+	upsertCartItem(c, "9", "1", map[string]any{"writing": "Congrats"})
+	assert.Equal(t, 2, cartLen(c))
+	summary := formatTiqrCartSummary(c)
+	assert.Contains(t, summary, "Cake writing: Happy birthday")
+	assert.Contains(t, summary, "Cake writing: Congrats")
+
+	upsertCartItem(c, "9", "2", map[string]any{"writing": "Happy birthday"})
+	assert.Equal(t, 2, cartLen(c))
+	assert.Equal(t, 4, cartUnitCount(c))
 }
 
 func TestTiqrCartSetQty(t *testing.T) {
@@ -403,12 +515,16 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 			if counts != nil {
 				counts.collections++
 			}
+			results := []any{
+				map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"},
+				map[string]any{"id": "58", "name": "Cakes", "description": "Celebration cakes"},
+			}
+			if extra, ok := store["test_collections"].([]any); ok && len(extra) > 0 {
+				results = extra
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"count": 2,
-				"results": []any{
-					map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"},
-					map[string]any{"id": "58", "name": "Cakes", "description": "Celebration cakes"},
-				},
+				"count":   len(results),
+				"results": results,
 			})
 		case strings.Contains(r.URL.Path, "/product/"):
 			if counts != nil {
@@ -426,7 +542,14 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 			if counts != nil {
 				counts.store++
 			}
-			_ = json.NewEncoder(w).Encode(store)
+			payload := map[string]any{}
+			for key, value := range store {
+				if key == "test_collections" {
+					continue
+				}
+				payload[key] = value
+			}
+			_ = json.NewEncoder(w).Encode(payload)
 		}
 	}))
 	t.Cleanup(srv.Close)
@@ -707,6 +830,104 @@ func TestTiqrEcommerce_AppendsCartAndAddMoreSkipsCollections(t *testing.T) {
 	assert.Equal(t, "collection", session.CurrentStep)
 	assert.Equal(t, before, counts.collections)
 	assert.Equal(t, 1, counts.store)
+}
+
+func TestTiqrEcommerce_AsksCollectionCaptureBeforeCart(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":          "57",
+				"name":        "Sweets",
+				"description": "Desserts",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "writing", "label": "Cake writing", "type": "text", "required": true,
+						"help_text": "Short message for the cake",
+					},
+					map[string]any{
+						"key": "flavor", "label": "Flavor", "type": "single_select", "required": true,
+						"options": []any{"Vanilla", "Chocolate"},
+					},
+					map[string]any{"key": "optional_note", "label": "Note", "type": "text", "required": false},
+				},
+			},
+			map[string]any{"id": "58", "name": "Cakes", "description": "Celebration cakes"},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "quantity", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_0_writing", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Cake writing")
+	assert.Contains(t, blob, "Short message for the cake")
+	_, hasCart := session.SessionData["tiqr_cart"]
+	assert.False(t, hasCart)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happy birthday", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_1_flavor", session.CurrentStep)
+	blob = outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Flavor")
+	assert.Contains(t, blob, "Vanilla")
+	assert.Contains(t, blob, "Chocolate")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Strawberry", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_1_flavor", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "Please provide a valid value.")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Chocolate", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "next", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "added to your cart")
+	assert.Contains(t, asString(session.SessionData["cart_summary"]), "Cake writing: Happy birthday")
+	assert.Contains(t, asString(session.SessionData["cart_summary"]), "Flavor: Chocolate")
+
+	cart, ok := session.SessionData["tiqr_cart"].([]any)
+	require.True(t, ok)
+	require.Len(t, cart, 1)
+	item, ok := cart[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "9", item["product_option"])
+	assert.Equal(t, "1", item["quantity"])
+	fields, ok := item["capture_fields"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Happy birthday", fields["writing"])
+	assert.Equal(t, "Chocolate", fields["flavor"])
+	assert.NotContains(t, fields, "optional_note")
+
+	captured, ok := session.SessionData["commerce_captured_fields"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Happy birthday", captured["writing"])
+	assert.Equal(t, "Chocolate", captured["flavor"])
+
+	session.SessionData["customer_notes"] = "Leave at gate"
+	assert.JSONEq(t, `{"flavor":"Chocolate","notes":"Leave at gate","writing":"Happy birthday"}`, pickupOrderParams(session.SessionData)["notes"])
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add more items", tiqrAddMore, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_0_writing", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "Cake writing")
 }
 
 func TestTiqrEcommerce_GuideUnclearStays(t *testing.T) {
@@ -1633,15 +1854,15 @@ func TestTiqrEcommerce_BothModesPickupSkipsLocation(t *testing.T) {
 func TestTiqrEcommerce_DeliveryInRangeContinuesToCollections(t *testing.T) {
 	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
 	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
-		"id":                       42,
-		"name":                     "Demo",
-		"address":                  "Vadakara",
-		"latitude":                 "11.2",
-		"longitude":                "75.8",
-		"location_based_delivery":  true,
-		"free_delivery_radius":     8,
-		"delivery_radius":          16,
-		"delivery_modes":           []any{"DELIVERY_TO_LOCATION"},
+		"id":                      42,
+		"name":                    "Demo",
+		"address":                 "Vadakara",
+		"latitude":                "11.2",
+		"longitude":               "75.8",
+		"location_based_delivery": true,
+		"free_delivery_radius":    8,
+		"delivery_radius":         16,
+		"delivery_modes":          []any{"DELIVERY_TO_LOCATION"},
 	}, nil)
 	flow := codedFlowByKey(tiqrEcommerceKey)
 

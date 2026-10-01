@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -621,6 +622,9 @@ func formatTiqrCartSummary(c *Conv) string {
 		lineTotal := line.Price * float64(qty)
 		total += lineTotal
 		fmt.Fprintf(&b, "%d. *%s* x%d — %s\n", i+1, line.Name, qty, formatMoney(lineTotal, currency))
+		if extra := formatLineCapture(line); extra != "" {
+			b.WriteString(extra)
+		}
 	}
 	fmt.Fprintf(&b, "\n*Subtotal:* %s", formatMoney(total, currency))
 	return strings.TrimSpace(b.String())
@@ -631,6 +635,8 @@ type tiqrCartLine struct {
 	Name     string
 	Qty      int
 	Price    float64
+	Capture  map[string]any
+	Labels   map[string]string
 }
 
 func tiqrCartLines(c *Conv) []tiqrCartLine {
@@ -662,9 +668,81 @@ func tiqrCartLines(c *Conv) []tiqrCartLine {
 			Name:     name,
 			Qty:      qty,
 			Price:    price,
+			Capture:  lineCaptureMap(item["capture_fields"]),
+			Labels:   lineLabelMap(item["capture_labels"]),
 		})
 	}
 	return out
+}
+
+func lineCaptureMap(raw any) map[string]any {
+	fields, ok := asStringMap(raw)
+	if !ok || len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
+func lineLabelMap(raw any) map[string]string {
+	fields, ok := asStringMap(raw)
+	if !ok || len(fields) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for key, value := range fields {
+		if label := strings.TrimSpace(asString(value)); label != "" {
+			out[key] = label
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func formatLineCapture(line tiqrCartLine) string {
+	if len(line.Capture) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(line.Capture))
+	for key := range line.Capture {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, key := range keys {
+		value := formatCaptureAnswer(line.Capture[key])
+		if value == "" {
+			continue
+		}
+		label := strings.TrimSpace(line.Labels[key])
+		if label == "" {
+			label = key
+		}
+		fmt.Fprintf(&b, "   %s: %s\n", label, value)
+	}
+	return b.String()
+}
+
+func formatCaptureAnswer(value any) string {
+	switch typed := value.(type) {
+	case []string:
+		return strings.Join(nonEmpty(typed...), ", ")
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(fmt.Sprint(item)); text != "" && text != "<nil>" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, ", ")
+	default:
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text == "<nil>" {
+			return ""
+		}
+		return text
+	}
 }
 
 func productsForRoute(c *Conv, route Route) ([]any, bool) {
@@ -827,16 +905,291 @@ func askQuantityAndAdd(c *Conv) bool {
 	if !ok {
 		return false
 	}
+	captured, ok := askCollectionCaptureFields(c)
+	if !ok {
+		return false
+	}
 	optionID := asString(c.session().SessionData["option_id"])
 	c.Once("cart", func() {
-		upsertCartItem(c, optionID, quantity)
+		upsertCartItem(c, optionID, quantity, captured)
 	})
 	refreshCartSessionFields(c)
 	c.Say(tiqrEcommerceAdded)
 	return true
 }
 
-func upsertCartItem(c *Conv, optionID, quantity string) {
+// askCollectionCaptureFields asks each required collection field as its own
+// question before the option is added to the cart. Answers are stored on the
+// session and returned so the cart line can keep the values from this add.
+func askCollectionCaptureFields(c *Conv) (map[string]any, bool) {
+	fields := currentCollectionCaptureFields(c)
+	captured := map[string]any{}
+	for i, field := range fields {
+		name := captureCallName(i, asString(field["key"]))
+		value, ok := c.askCaptureField(name, field)
+		if !ok {
+			return nil, false
+		}
+		key := asString(field["key"])
+		captured[key] = value
+		saveSessionCapture(c, field, value)
+	}
+	return captured, true
+}
+
+func (c *Conv) askCaptureField(name string, field map[string]any) (any, bool) {
+	if c.stop {
+		return nil, false
+	}
+	if rec, done := c.doneCall(); done {
+		if !callOK(rec) {
+			return nil, false
+		}
+		value, ok := rec["value"]
+		if !ok {
+			return nil, false
+		}
+		return value, true
+	}
+	body := strings.TrimSpace(promptCaptureField(field))
+	if body == "" {
+		body = "Please share " + asString(field["label"]) + "."
+	}
+	if c.noAnswerYet() {
+		if !c.sendCapturePrompt(name, body) {
+			return nil, false
+		}
+		c.wait(name)
+		return nil, false
+	}
+	input := strings.TrimSpace(c.chat.userInput)
+	if isCheckoutStartIntent(input) && !validCaptureValue(field, input) {
+		c.chat.consumed = true
+		c.divert = codedRouteCheckout
+		return nil, false
+	}
+	if input == "" || !validCaptureValue(field, input) {
+		c.chat.consumed = true
+		if !c.sendCapturePrompt(name, "Please provide a valid value.\n"+body) {
+			return nil, false
+		}
+		c.wait(name)
+		return nil, false
+	}
+	value := normalizedCaptureValue(field, input)
+	c.chat.consumed = true
+	c.appendCall(map[string]any{"name": name, "ok": true, "value": value})
+	return value, true
+}
+
+func (c *Conv) sendCapturePrompt(name, body string) bool {
+	node := &ChatNode{ID: name, Type: ChatNodeMessage, Config: map[string]any{"message": c.text(body)}}
+	if _, err := c.app.execChatMessage(node, c.chat); err != nil {
+		c.fail(err)
+		return false
+	}
+	if c.chat.capturing() {
+		c.chat.preview.expectText()
+	}
+	return true
+}
+
+func captureCallName(index int, key string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(key)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	safe := strings.Trim(b.String(), "_")
+	if safe == "" {
+		safe = "field"
+	}
+	return fmt.Sprintf("capture_%d_%s", index, safe)
+}
+
+func saveSessionCapture(c *Conv, field map[string]any, value any) {
+	key := asString(field["key"])
+	if key == "" || c == nil || c.session() == nil {
+		return
+	}
+	captured := jsonMapFromSession(c.session(), "commerce_captured_fields")
+	captured[key] = value
+	c.session().SessionData["commerce_captured_fields"] = map[string]any(captured)
+	labels := jsonMapFromSession(c.session(), "commerce_capture_labels")
+	if label := asString(field["label"]); label != "" {
+		labels[key] = label
+	}
+	c.session().SessionData["commerce_capture_labels"] = map[string]any(labels)
+}
+
+func currentCollectionCaptureFields(c *Conv) []map[string]any {
+	if product := selectedProductMap(c); product != nil {
+		if cat, ok := asStringMap(product["category"]); ok {
+			if fields := requiredCaptureFieldsFrom(cat); len(fields) > 0 {
+				return fields
+			}
+			if id := fieldString(cat, "id"); id != "" {
+				if col := collectionByID(c, id); col != nil {
+					return requiredCaptureFieldsFrom(col)
+				}
+				return nil
+			}
+		}
+		if id := productCategoryID(product); id != "" {
+			if col := collectionByID(c, id); col != nil {
+				return requiredCaptureFieldsFrom(col)
+			}
+			return nil
+		}
+	}
+	if id := strings.TrimSpace(asString(c.session().SessionData["collection_id"])); id != "" {
+		if col := collectionByID(c, id); col != nil {
+			return requiredCaptureFieldsFrom(col)
+		}
+	}
+	return nil
+}
+
+func selectedProductMap(c *Conv) map[string]any {
+	want := strings.TrimSpace(asString(c.session().SessionData["product_id"]))
+	if want == "" {
+		return nil
+	}
+	items, ok := anySlice(c.session().SessionData["products"])
+	if !ok {
+		return nil
+	}
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if fieldString(item, "id") == want {
+			return item
+		}
+	}
+	return nil
+}
+
+func productCategoryID(product map[string]any) string {
+	if product == nil {
+		return ""
+	}
+	if cat, ok := asStringMap(product["category"]); ok {
+		if id := fieldString(cat, "id"); id != "" && id != "0" {
+			return id
+		}
+	}
+	for _, key := range []string{"category_id", "collection_id"} {
+		if id := fieldString(product, key); id != "" && id != "0" {
+			return id
+		}
+	}
+	if _, isMap := asStringMap(product["category"]); !isMap {
+		if id := fieldString(product, "category"); id != "" && id != "0" && !strings.HasPrefix(id, "map[") {
+			return id
+		}
+	}
+	return ""
+}
+
+func collectionByID(c *Conv, id string) map[string]any {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	items, ok := anySlice(c.session().SessionData["collections"])
+	if !ok {
+		return nil
+	}
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if fieldString(item, "id") == id {
+			return item
+		}
+	}
+	return nil
+}
+
+// requiredCaptureFieldsFrom keeps required collection fields that have a key,
+// label, and type. Optional and incomplete fields are not asked.
+func requiredCaptureFieldsFrom(raw map[string]any) []map[string]any {
+	if raw == nil {
+		return nil
+	}
+	var items []any
+	switch fields := raw["required_capture_fields"].(type) {
+	case []any:
+		items = fields
+	case []map[string]any:
+		items = make([]any, 0, len(fields))
+		for _, field := range fields {
+			items = append(items, field)
+		}
+	default:
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, entry := range items {
+		field, ok := asStringMap(entry)
+		if !ok || !captureFieldRequired(field["required"]) {
+			continue
+		}
+		key := strings.TrimSpace(asString(field["key"]))
+		label := strings.TrimSpace(asString(field["label"]))
+		fieldType := strings.TrimSpace(asString(field["type"]))
+		if key == "" || label == "" || fieldType == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"key":       key,
+			"label":     label,
+			"type":      fieldType,
+			"help_text": strings.TrimSpace(asString(field["help_text"])),
+			"options":   captureOptionList(field["options"]),
+		})
+	}
+	return out
+}
+
+func captureFieldRequired(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	case float64:
+		return typed != 0
+	case int:
+		return typed != 0
+	default:
+		return false
+	}
+}
+
+func captureOptionList(raw any) []any {
+	switch typed := raw.(type) {
+	case []any:
+		return typed
+	case []string:
+		out := make([]any, len(typed))
+		for i, option := range typed {
+			out[i] = option
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func upsertCartItem(c *Conv, optionID, quantity string, captured map[string]any) {
 	optionID = strings.TrimSpace(optionID)
 	qty := parsePositiveInt(quantity)
 	if optionID == "" || qty < 1 {
@@ -845,12 +1198,16 @@ func upsertCartItem(c *Conv, optionID, quantity string) {
 	cart, _ := anySlice(c.session().SessionData["tiqr_cart"])
 	name := strings.TrimSpace(asString(c.session().SessionData["option_name"]))
 	price := optionPriceFromSession(c, optionID)
+	labels := lineCaptureLabels(c, captured)
 	for i, entry := range cart {
 		item, ok := asStringMap(entry)
 		if !ok {
 			continue
 		}
 		if strings.TrimSpace(asString(item["product_option"])) != optionID {
+			continue
+		}
+		if captureDiffers(item["capture_fields"], captured) {
 			continue
 		}
 		existing := parsePositiveInt(asString(item["quantity"]))
@@ -864,6 +1221,7 @@ func upsertCartItem(c *Conv, optionID, quantity string) {
 		if price > 0 {
 			item["price"] = price
 		}
+		applyLineCapture(item, captured, labels)
 		cart[i] = item
 		c.session().SessionData["tiqr_cart"] = cart
 		refreshCartSessionFields(c)
@@ -879,9 +1237,56 @@ func upsertCartItem(c *Conv, optionID, quantity string) {
 	if price > 0 {
 		item["price"] = price
 	}
+	applyLineCapture(item, captured, labels)
 	cart = append(cart, item)
 	c.session().SessionData["tiqr_cart"] = cart
 	refreshCartSessionFields(c)
+}
+
+func lineCaptureLabels(c *Conv, captured map[string]any) map[string]any {
+	if len(captured) == 0 || c == nil || c.session() == nil {
+		return nil
+	}
+	all := jsonMapFromSession(c.session(), "commerce_capture_labels")
+	out := map[string]any{}
+	for key := range captured {
+		if label := asString(all[key]); label != "" {
+			out[key] = label
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func captureDiffers(existing any, next map[string]any) bool {
+	if len(next) == 0 {
+		return false
+	}
+	current := lineCaptureMap(existing)
+	if len(current) == 0 {
+		return false
+	}
+	if len(current) != len(next) {
+		return true
+	}
+	for key, value := range next {
+		if formatCaptureAnswer(current[key]) != formatCaptureAnswer(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func applyLineCapture(item, captured, labels map[string]any) {
+	if len(captured) == 0 {
+		return
+	}
+	item["capture_fields"] = map[string]any(cloneJSONMap(captured))
+	if len(labels) > 0 {
+		item["capture_labels"] = map[string]any(cloneJSONMap(labels))
+	}
 }
 
 func optionPriceFromSession(c *Conv, optionID string) float64 {
@@ -1326,7 +1731,7 @@ func pickupOrderParams(data map[string]any) map[string]string {
 	params := map[string]string{
 		"email":         email,
 		"items":         items,
-		"notes":         contextValue(data, "customer_notes", "notes"),
+		"notes":         codedOrderNotes(data),
 		"delivery_mode": deliveryMode,
 	}
 	if phone != "" {
@@ -1438,6 +1843,71 @@ func contextValue(data map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// codedOrderNotes sends collection answers with the order. A plain customer
+// note stays plain text. When capture answers exist they are JSON, matching
+// the commerce checkout notes payload, with one object per cart line when
+// more than one line has answers.
+func codedOrderNotes(data map[string]any) string {
+	notes := contextValue(data, "customer_notes", "notes")
+	lines := captureNotesLines(data["tiqr_cart"])
+	if len(lines) == 0 {
+		captured := lineCaptureMap(data["commerce_captured_fields"])
+		if len(captured) == 0 {
+			return notes
+		}
+		lines = []map[string]any{{"fields": captured}}
+	}
+	payload := map[string]any{}
+	for _, line := range lines {
+		fields, _ := line["fields"].(map[string]any)
+		for key, value := range fields {
+			payload[key] = value
+		}
+	}
+	if notes != "" {
+		if _, exists := payload["notes"]; exists {
+			payload["customer_notes"] = notes
+		} else {
+			payload["notes"] = notes
+		}
+	}
+	if len(lines) > 1 {
+		payload["lines"] = lines
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return notes
+	}
+	return string(raw)
+}
+
+func captureNotesLines(raw any) []map[string]any {
+	cart, ok := anySlice(raw)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(cart))
+	for _, entry := range cart {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		fields := lineCaptureMap(item["capture_fields"])
+		if len(fields) == 0 {
+			continue
+		}
+		line := map[string]any{
+			"product_option": strings.TrimSpace(asString(item["product_option"])),
+			"fields":         fields,
+		}
+		if name := strings.TrimSpace(asString(item["option_name"])); name != "" {
+			line["option_name"] = name
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 func checkout(c *Conv) error {
@@ -1559,6 +2029,13 @@ func formatFailedOrderHandoff(data map[string]any) string {
 		b.WriteString(name)
 		b.WriteString(" x ")
 		b.WriteString(qty)
+		if extra := formatLineCapture(tiqrCartLine{
+			Capture: lineCaptureMap(item["capture_fields"]),
+			Labels:  lineLabelMap(item["capture_labels"]),
+		}); extra != "" {
+			b.WriteByte('\n')
+			b.WriteString(strings.TrimRight(extra, "\n"))
+		}
 	}
 	if addr := formatCheckoutAddress(data); addr != "" {
 		b.WriteString("\n\nAddress\n")
