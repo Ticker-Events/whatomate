@@ -218,6 +218,20 @@ func buyProducts(c *Conv, collections []any, first Route) error {
 				return nil
 			}
 		}
+		if route.Kind == codedRouteCollection || (route.Kind == codedRouteChoice && strings.TrimSpace(route.ID) != "") {
+			if col := collectionByID(c, route.ID); col != nil && collectionHandoffAfterCapture(col) {
+				if route.Kind == codedRouteCollection {
+					c.applyCollectionSelection(route)
+				} else {
+					c.session().SessionData["collection_id"] = route.ID
+					if route.Title != "" {
+						c.session().SessionData["collection_name"] = route.Title
+					}
+				}
+				productID := soleCategoryProductID(c, route.ID)
+				return runThemedHandoff(c, col, productID)
+			}
+		}
 		products, ok := productsForRoute(c, route)
 		if !ok {
 			if c.stop || c.ended {
@@ -235,6 +249,11 @@ func buyProducts(c *Conv, collections []any, first Route) error {
 				continue
 			}
 			return nil
+		}
+		if product := selectedProductMap(c); product != nil {
+			if col := afterCaptureCollectionForProduct(c, product); col != nil {
+				return runThemedHandoff(c, col, fieldString(product, "id"))
+			}
 		}
 		if !addPickedProduct(c) {
 			res, err := c.applyCheckoutDivert()

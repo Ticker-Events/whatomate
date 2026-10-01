@@ -29,10 +29,14 @@ flowchart TD
   menu -->|Talk to staff| xfer
   look --> endStatus[Say status and end]
   ful --> list[Collection list]
-  list -->|row or collection id| prod[list_products]
+  list -->|row or collection id| policy{handoff_policy after_capture}
+  policy -->|yes| themed[Capture add-ons time Meta Flow]
+  themed --> commerceXfer[Commerce draft and agent transfer]
+  policy -->|no| prod[list_products]
   list -->|product query| search[search_products]
-  prod --> show[Carousel or one image]
-  search --> show
+  search --> show[Carousel or one image]
+  prod --> show
+  show -->|picked product collection after_capture| themed
   show --> opt{How many options}
   opt -->|none| skip[Say unavailable]
   opt -->|one| qty[Ask quantity]
@@ -51,7 +55,7 @@ flowchart TD
   create -->|give up or retries used| xfer
 ```
 
-Checkout said in free text on the menu, the collection list, a product card, an option list, the quantity prompt, or the add-more prompt jumps to the same checkout, after an empty-cart message if `tiqr_cart` has no lines. That divert is not applied during fulfillment. See Gaps.
+Checkout said in free text on the menu, the collection list, a product card, an option list, the quantity prompt, or the add-more prompt jumps to the same checkout, after an empty-cart message if `tiqr_cart` has no lines. That divert is not applied during fulfillment or during an after-capture themed handoff. See Gaps.
 
 ### 1. Load the store
 
@@ -111,6 +115,21 @@ A deliverable pin stores `delivery_mode`, `delivery_zone`, `delivery_distance_km
 The collection list uses header `Our collections`, button `Browse`, row title `{{name}}`, description `{{description}}`. A chosen row saves `collection_id` from `id` and `collection_name` from the rendered title.
 
 `askRouteList` also has `AllowCatalog: true`, so free text on this step can name another loaded collection or a product.
+
+#### After-capture collections
+
+When the chosen collection has `handoff_policy: after_capture` (or a named product belongs to such a collection), the flow does not show product cards, does not ask quantity, and does not write `tiqr_cart` or call `create_order`.
+
+Code: `runThemedHandoff` in `codedflow_tiqr_themed.go`.
+
+1. Intro: `This is a custom {name} request — I’ll collect a few details and connect you with our team.`
+2. Required capture fields from that collection (same prompts as the cart path). Checkout phrases do not divert away from these questions.
+3. Add-ons: if the collection has exactly one product with options, that product id is kept only for catalog add-ons. Otherwise free-text add-ons or Skip.
+4. Fulfillment time via `list_fulfillment_slots` then `propose_fulfillment_time` (REST uses a synthetic stand-in when MCP slots are not configured). Pickup vs delivery and the location pin already ran in step 3.
+5. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup flow `1484028330223507` (name, email, phone) or delivery flow `1557965846018132` (name, phone, address). Flow fields are copied onto the commerce draft address snapshot and notes.
+6. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. The cart and order paths are skipped.
+
+Image and file capture fields are asked as text; the coded runner does not attach WhatsApp media the way the commerce chatbot does.
 
 `productsForRoute`:
 
@@ -307,7 +326,7 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 
 10. **Empty store data is a transfer, not a retry inside the session.** `get_store` or `list_collections` failure completes the session. A later keyword can start a new session and call TiQR again. Within one session those calls are not retried, because the flow has already ended.
 
-11. **Hardcoded Meta flow ids and fallback image.** Pickup uses `tiqrEcommercePickupFlowID` (`1484028330223507`). Delivery uses `tiqrEcommerceFlowID` (`1557965846018132`). The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
+11. **Hardcoded Meta flow ids and fallback image.** Pickup uses `tiqrEcommercePickupFlowID` (`1484028330223507`). Delivery uses `tiqrEcommerceFlowID` (`1557965846018132`). Both checkout and after-capture handoff use these. The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
 
 12. **Language is sticky.** The first non-empty intent language wins for the session. A later message in another language does not replace it, so translation keeps using the first label.
 

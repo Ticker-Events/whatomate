@@ -276,11 +276,61 @@ func invokeTiqrStoreRESTOperation(
 			return nil, fmt.Errorf("order_uuid is required")
 		}
 		return client.GetOrder(ctx, uuid)
+	case "list_fulfillment_slots":
+		return syntheticFulfillmentSlots(params["delivery_mode"]), nil
+	case "propose_fulfillment_time":
+		return syntheticProposeFulfillment(params)
 	case "check_delivery", "lookup_order_status", "retry_payment":
 		return nil, fmt.Errorf("operation %q is not available over REST (use MCP)", operation)
 	default:
 		return nil, fmt.Errorf("unknown tiqr store operation %q", operation)
 	}
+}
+
+// syntheticFulfillmentSlots is a REST-only stand-in so coded flows can ask for a
+// time without MCP. Production stores with MCP should call list_fulfillment_slots
+// over MCP for signed slots; handoff drafts only need the buyer's requested time.
+func syntheticFulfillmentSlots(deliveryMode string) map[string]any {
+	earliest := time.Now().UTC().Add(45 * time.Minute).Truncate(time.Minute)
+	mode := strings.TrimSpace(deliveryMode)
+	if mode == "" {
+		mode = "PICKUP_FROM_STORE"
+	}
+	stamp := earliest.Format(time.RFC3339)
+	return map[string]any{
+		"store_id": 0,
+		"slots": []any{
+			map[string]any{
+				"requested_fulfillment_at": stamp,
+				"promised_ready_at":        stamp,
+				"timezone":                 "UTC",
+				"delivery_mode":            mode,
+				"preparation_time_minutes": 45,
+				"token":                    "synthetic",
+			},
+		},
+	}
+}
+
+func syntheticProposeFulfillment(params map[string]string) (map[string]any, error) {
+	requested := strings.TrimSpace(params["requested_fulfillment_at"])
+	if requested == "" {
+		return nil, fmt.Errorf("requested_fulfillment_at is required")
+	}
+	if _, err := time.Parse(time.RFC3339, requested); err != nil {
+		return nil, fmt.Errorf("invalid requested_fulfillment_at")
+	}
+	mode := strings.TrimSpace(params["delivery_mode"])
+	if mode == "" {
+		mode = "PICKUP_FROM_STORE"
+	}
+	return map[string]any{
+		"requested_fulfillment_at": requested,
+		"promised_ready_at":        requested,
+		"timezone":                 "UTC",
+		"delivery_mode":            mode,
+		"token":                    "synthetic:" + requested,
+	}, nil
 }
 
 func orderMapToCreateRequest(order map[string]any) (ticker.CreateOrderRequest, error) {
@@ -399,6 +449,33 @@ func buildTiqrStoreToolArgs(operation string, storeID int, phone string, params 
 			return "", nil, fmt.Errorf("order_uuid is required")
 		}
 		return "retry_payment", map[string]any{"order_uuid": uuid}, nil
+	case "list_fulfillment_slots":
+		args := map[string]any{
+			"store_id":      storeID,
+			"delivery_mode": strings.TrimSpace(params["delivery_mode"]),
+		}
+		if ids, err := parseIntListParam(params["product_option_ids"]); err != nil {
+			return "", nil, err
+		} else if len(ids) > 0 {
+			args["product_option_ids"] = ids
+		}
+		return "list_fulfillment_slots", args, nil
+	case "propose_fulfillment_time":
+		requested := strings.TrimSpace(params["requested_fulfillment_at"])
+		if requested == "" {
+			return "", nil, fmt.Errorf("requested_fulfillment_at is required")
+		}
+		args := map[string]any{
+			"store_id":                 storeID,
+			"delivery_mode":            strings.TrimSpace(params["delivery_mode"]),
+			"requested_fulfillment_at": requested,
+		}
+		if ids, err := parseIntListParam(params["product_option_ids"]); err != nil {
+			return "", nil, err
+		} else if len(ids) > 0 {
+			args["product_option_ids"] = ids
+		}
+		return "propose_fulfillment_time", args, nil
 	default:
 		return "", nil, fmt.Errorf("unknown tiqr store operation %q", operation)
 	}

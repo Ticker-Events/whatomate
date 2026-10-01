@@ -1007,6 +1007,185 @@ func TestTiqrEcommerce_AsksCollectionCaptureBeforeCart(t *testing.T) {
 	assert.Contains(t, outgoingBlob(t, app, session), "Cake writing")
 }
 
+func TestTiqrEcommerce_AfterCaptureSkipsProductsAndOrders(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":             "57",
+				"name":           "Custom Cakes",
+				"description":    "Made to order",
+				"handoff_policy": "after_capture",
+				"handoff_message": "A baker will review this and continue with you here.",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "writing", "label": "Cake writing", "type": "text", "required": true,
+					},
+				},
+			},
+			map[string]any{"id": "58", "name": "Cakes", "description": "Celebration cakes"},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Custom Cakes", "57", nil))
+	reloadSession(t, app, session)
+
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "custom Custom Cakes request")
+	assert.Contains(t, blob, "Cake writing")
+	assert.NotContains(t, blob, "Add to cart")
+	assert.NotEqual(t, "product", session.CurrentStep)
+	assert.NotEqual(t, "quantity", session.CurrentStep)
+	_, hasCart := session.SessionData["tiqr_cart"]
+	assert.False(t, hasCart)
+	_ = contact
+}
+
+func TestTiqrEcommerce_AfterCaptureHandoffCompletes(t *testing.T) {
+	product := []any{
+		map[string]any{
+			"id": "101", "name": "Themed Cake", "min_price": "500",
+			"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "500"}},
+		},
+	}
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":              "57",
+				"name":            "Custom Cakes",
+				"description":     "Made to order",
+				"handoff_policy":  "after_capture",
+				"handoff_message": "A baker will review this and continue with you here.",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "writing", "label": "Cake writing", "type": "text", "required": true,
+					},
+				},
+			},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, product, nil, store, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Custom Cakes", "57", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_0_writing", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happy Birthday", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "themed_addons_free", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Skip", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "fulfillment_time_1", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "When would you like")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "in 45 minutes", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "themed_details", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, tiqrEcommercePickupFlowID)
+	assert.Contains(t, blob, "name, email, and phone number")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
+		"customer_name":  "Ada",
+		"customer_email": "ada@example.com",
+		"customer_phone": "910000000000",
+		"customer_notes": "Please call on arrival",
+	}))
+	reloadSession(t, app, session)
+
+	assert.Equal(t, models.SessionStatusCancelled, session.Status)
+	assert.Empty(t, session.CurrentStep)
+	assert.Nil(t, session.SessionData[codedFlowDataKey])
+	blob = outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "A baker will review this")
+	_, hasCart := session.SessionData["tiqr_cart"]
+	assert.False(t, hasCart)
+
+	var transfers []models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ? AND source = ?", contact.ID, models.TransferSourceCommerce).Find(&transfers).Error)
+	require.Len(t, transfers, 1)
+	assert.Equal(t, models.TransferStatusActive, transfers[0].Status)
+	require.NotNil(t, transfers[0].CommerceDraftID)
+
+	var draft models.CommerceDraft
+	require.NoError(t, app.DB.First(&draft, "id = ?", *transfers[0].CommerceDraftID).Error)
+	assert.Equal(t, "transferred", draft.Status)
+	assert.Equal(t, "Happy Birthday", draft.CapturedFields["writing"])
+	assert.Equal(t, "Ada", draft.AddressSnapshot["name"])
+	assert.Equal(t, "ada@example.com", draft.AddressSnapshot["email"])
+	assert.Equal(t, "Please call on arrival", draft.Notes["customer_notes"])
+}
+
+func TestTiqrEcommerce_AfterCaptureNamedProductSkipsQuantity(t *testing.T) {
+	products := []any{
+		map[string]any{
+			"id": "101", "name": "Themed Cake", "min_price": "500",
+			"category_id": "57",
+			"options":     []any{map[string]any{"id": "9", "name": "Regular", "price": "500"}},
+		},
+		map[string]any{
+			"id": "102", "name": "Other Cake", "min_price": "400",
+			"category_id": "57",
+			"options":     []any{map[string]any{"id": "10", "name": "Default", "price": "400"}},
+		},
+	}
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":             "57",
+				"name":           "Custom Cakes",
+				"description":    "Made to order",
+				"handoff_policy": "after_capture",
+				"handoff_message": "A baker will help next.",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "writing", "label": "Cake writing", "type": "text", "required": true,
+					},
+				},
+			},
+		},
+	}
+	useCodedIntent(t, func(_ string, ctx codedIntentContext) (codedIntentResult, error) {
+		return codedIntentResult{
+			Language:     "en",
+			Route:        codedRouteProduct,
+			ProductQuery: "Themed Cake",
+			Confidence:   0.95,
+		}, nil
+	}, nil)
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I want Themed Cake", "", nil))
+	reloadSession(t, app, session)
+	// Product search shows carousel; pick the product.
+	require.Equal(t, "product", session.CurrentStep)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Themed Cake", "101", nil))
+	reloadSession(t, app, session)
+
+	assert.NotEqual(t, "quantity", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "custom Custom Cakes request")
+	assert.Contains(t, blob, "Cake writing")
+	_, hasCart := session.SessionData["tiqr_cart"]
+	assert.False(t, hasCart)
+	_ = contact
+}
+
 func TestTiqrEcommerce_GuideUnclearStays(t *testing.T) {
 	useCodedIntent(t, func(string, codedIntentContext) (codedIntentResult, error) {
 		return codedIntentResult{Language: "en", Route: codedRouteUnclear, Confidence: 0.4}, nil

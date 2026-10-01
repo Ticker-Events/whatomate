@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,19 +76,93 @@ func captureValueEmpty(value any) bool {
 
 func (a *App) selectedCommerceCategory(session *models.ChatbotSession, settings *models.ChatbotSettings) (tickermcp.Category, error) {
 	categoryID := selectedCategoryID(session)
-	rt := a.newCommerceRuntime(settings, session)
-	if categoryID == "" || rt == nil {
+	if categoryID == "" {
 		return tickermcp.Category{}, errors.New("selected commerce collection is unavailable")
 	}
-	defer rt.Close()
-	page, err := rt.Client.ListCategoryPage(context.Background(), rt.StoreID, categoryID, 1, 0)
-	if err != nil {
-		return tickermcp.Category{}, err
+	rt := a.newCommerceRuntime(settings, session)
+	if rt != nil {
+		defer rt.Close()
+		page, err := rt.Client.ListCategoryPage(context.Background(), rt.StoreID, categoryID, 1, 0)
+		if err == nil && len(page.Results) == 1 && strconv.Itoa(page.Results[0].ID) == categoryID {
+			return page.Results[0], nil
+		}
 	}
-	if len(page.Results) != 1 {
-		return tickermcp.Category{}, errors.New("selected commerce collection was not found")
+	if col := sessionCollectionByID(session, categoryID); col != nil {
+		return categoryFromCollectionMap(col), nil
 	}
-	return page.Results[0], nil
+	return tickermcp.Category{}, errors.New("selected commerce collection was not found")
+}
+
+func sessionCollectionByID(session *models.ChatbotSession, id string) map[string]any {
+	id = strings.TrimSpace(id)
+	if session == nil || session.SessionData == nil || id == "" {
+		return nil
+	}
+	items, ok := anySlice(session.SessionData["collections"])
+	if !ok {
+		return nil
+	}
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if fieldString(item, "id") == id {
+			return item
+		}
+	}
+	return nil
+}
+
+func categoryFromCollectionMap(raw map[string]any) tickermcp.Category {
+	if raw == nil {
+		return tickermcp.Category{}
+	}
+	category := tickermcp.Category{
+		ID:             anyToInt(raw["id"]),
+		Name:           asString(raw["name"]),
+		Description:    asString(raw["description"]),
+		AIInstructions: asString(raw["ai_instructions"]),
+		HandoffPolicy:  strings.ToLower(strings.TrimSpace(asString(raw["handoff_policy"]))),
+		HandoffMessage: asString(raw["handoff_message"]),
+	}
+	if category.HandoffPolicy != "after_capture" {
+		category.HandoffPolicy = "none"
+	}
+	for _, field := range requiredCaptureFieldsFrom(raw) {
+		category.RequiredCaptureFields = append(category.RequiredCaptureFields, tickermcp.CaptureField{
+			Key:      asString(field["key"]),
+			Label:    asString(field["label"]),
+			Type:     asString(field["type"]),
+			HelpText: asString(field["help_text"]),
+			Required: true,
+			Options:  stringOptionsFromAny(field["options"]),
+		})
+	}
+	category.Tags = stringSliceFromAny(raw["tags"])
+	category.VisualTags = stringSliceFromAny(raw["visual_tags"])
+	return category
+}
+
+func stringOptionsFromAny(raw any) []string {
+	switch typed := raw.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(fmt.Sprint(item)); text != "" && text != "<nil>" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func stringSliceFromAny(raw any) []string {
+	return stringOptionsFromAny(raw)
 }
 
 // completeCommerceCapture performs schema completeness validation and hands
@@ -98,6 +173,10 @@ func (a *App) completeCommerceCapture(account *models.WhatsAppAccount, contact *
 		a.Log.Warn("validate commerce capture failed", "error", err)
 		return false
 	}
+	return a.completeCommerceCaptureWithCategory(account, contact, session, settings, st, category)
+}
+
+func (a *App) completeCommerceCaptureWithCategory(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState, category tickermcp.Category) bool {
 	missing := requiredCaptureMissing(category.RequiredCaptureFields, jsonMapFromSession(session, "commerce_captured_fields"))
 	if len(missing) > 0 {
 		a.Log.Warn("commerce capture incomplete", "missing", missing)
