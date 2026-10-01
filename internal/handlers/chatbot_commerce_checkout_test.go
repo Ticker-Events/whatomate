@@ -699,9 +699,9 @@ func TestParseProductAddonChoices(t *testing.T) {
 func TestAppendCommerceAddon(t *testing.T) {
 	t.Parallel()
 	session := &models.ChatbotSession{SessionData: models.JSONB{}}
-	appendCommerceAddon(session, 9, 1)
-	appendCommerceAddon(session, 9, 2)
-	appendCommerceAddon(session, 3, 1)
+	appendCommerceAddon(session, 9, 1, "")
+	appendCommerceAddon(session, 9, 2, "")
+	appendCommerceAddon(session, 3, 1, "")
 	addons := checkoutAddons(session)
 	require.Len(t, addons, 2)
 	assert.Equal(t, 9, anyToInt(addons[0]["addon"]))

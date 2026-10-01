@@ -238,6 +238,7 @@ func (a *App) stageCommerceHandoffSessionData(session *models.ChatbotSession, ca
 	session.SessionData["commerce_handoff"] = map[string]any{
 		"draft_id": draft.ID.String(), "captured_fields": jsonMapFromSession(session, "commerce_captured_fields"),
 		"media_references": media, "summary": summary,
+		"addons": draft.Addons,
 	}
 }
 

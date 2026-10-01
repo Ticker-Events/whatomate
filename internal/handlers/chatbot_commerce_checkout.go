@@ -646,7 +646,14 @@ func (a *App) handleCheckoutAddonChoice(account *models.WhatsAppAccount, contact
 		if err != nil || id <= 0 {
 			return
 		}
-		appendCommerceAddon(session, id, 1)
+		name := ""
+		for _, choice := range st.AddonChoices {
+			if anyToInt(choice["id"]) == id {
+				name = asString(choice["name"])
+				break
+			}
+		}
+		appendCommerceAddon(session, id, 1, name)
 		_ = a.persistSessionData(session)
 		a.promptAddonContinue(account, contact, st)
 	}
@@ -665,7 +672,7 @@ func (a *App) handleCheckoutAddonText(account *models.WhatsAppAccount, contact *
 		if n := parsePositiveInt(text); n >= 1 && n <= len(st.AddonChoices) {
 			id := anyToInt(st.AddonChoices[n-1]["id"])
 			if id > 0 {
-				appendCommerceAddon(session, id, 1)
+				appendCommerceAddon(session, id, 1, asString(st.AddonChoices[n-1]["name"]))
 				setCheckoutState(session, st)
 				_ = a.persistSessionData(session)
 				_ = a.sendAndSaveTextMessage(account, contact, "Added "+asString(st.AddonChoices[n-1]["name"])+".")
@@ -686,7 +693,7 @@ func (a *App) handleCheckoutAddonText(account *models.WhatsAppAccount, contact *
 	return true
 }
 
-func appendCommerceAddon(session *models.ChatbotSession, addonID, qty int) {
+func appendCommerceAddon(session *models.ChatbotSession, addonID, qty int, name string) {
 	if session == nil || addonID <= 0 {
 		return
 	}
@@ -703,6 +710,9 @@ func appendCommerceAddon(session *models.ChatbotSession, addonID, qty int) {
 		addon, _ := value.(map[string]any)
 		if anyToInt(addon["addon"]) == addonID {
 			addon["quantity"] = anyToInt(addon["quantity"]) + qty
+			if name != "" && strings.TrimSpace(asString(addon["name"])) == "" {
+				addon["name"] = name
+			}
 			next = append(next, addon)
 			found = true
 			continue
@@ -710,7 +720,11 @@ func appendCommerceAddon(session *models.ChatbotSession, addonID, qty int) {
 		next = append(next, value)
 	}
 	if !found {
-		next = append(next, map[string]any{"addon": addonID, "quantity": qty})
+		item := map[string]any{"addon": addonID, "quantity": qty}
+		if strings.TrimSpace(name) != "" {
+			item["name"] = strings.TrimSpace(name)
+		}
+		next = append(next, item)
 	}
 	session.SessionData["commerce_addons"] = next
 }

@@ -42,7 +42,11 @@ flowchart TD
   opt -->|one| qty[Ask quantity]
   opt -->|many| olist[Option list]
   olist --> qty
-  qty --> cart[Append tiqr_cart]
+  qty --> capture[Capture fields]
+  capture --> addons{Product has catalog add-ons}
+  addons -->|yes| addonAsk[Numbered add-on list]
+  addonAsk --> cart[Append tiqr_cart]
+  addons -->|no| cart
   skip --> next[Add more or Checkout]
   cart --> next
   next -->|Add more| list
@@ -124,7 +128,7 @@ Code: `runAfterCaptureHandoff` in `codedflow_tiqr_after_capture.go`.
 
 1. Intro: `This is a custom {name} request — I’ll collect a few details and connect you with our team.`
 2. Required capture fields from that collection (same prompts as the cart path). Checkout phrases do not divert away from these questions.
-3. Add-ons: if the collection has exactly one product with options, that product id is kept only for catalog add-ons. Otherwise free-text add-ons or Skip.
+3. Add-ons: shared `askCatalogAddons` when the product has catalog add-ons (numbered list + AI parse). Otherwise free-text add-ons or Skip.
 4. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup flow `1484028330223507` (name, email, phone) or delivery flow `1557965846018132` (name, phone, address). Flow fields are copied onto the commerce draft address snapshot and notes.
 5. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. The cart and order paths are skipped.
 
@@ -155,6 +159,34 @@ One product is an image reply with Add to cart, because a carousel needs two car
 | 2 or more | Option list. Title is `{{name}} (₹{{price}})` |
 
 Quantity uses `AskNumber` with pattern `^[1-9][0-9]*$`. Digits of 1 or more are accepted in code. A number word is accepted only when intent returns route `answer` with a value that matches the pattern.
+
+### Catalog add-ons
+
+After capture fields and before the cart line is written, the flow loads the product with `get_product` and reads active catalog add-ons. The same step runs in after-capture handoff (`askCatalogAddons` with prefixes `product_addons` and `after_capture_addons`).
+
+When the product has catalog add-ons, the customer sees a numbered list with prices when present:
+
+```
+This product has the following add-ons:
+1. Candles — ₹50
+2. Flowers — ₹100
+
+Reply with the item number and how many you want, for example item 1 - 2.
+You can list more than one item. Say Skip if you don't want any.
+```
+
+Exact `skip`, `no`, `none`, or `done` continues with nothing stored. Every other reply is parsed by the guide AI role into JSON (`intent`, `confidence`, `items` with list indexes and quantities, `missing_quantity`, `question`). The model is told to use list indexes only and never invent addon ids.
+
+Go then grounds that JSON against the loaded choices:
+
+| Outcome | Next step |
+| --- | --- |
+| Grounded `select` at confidence ≥ 0.75 | Save `{addon, quantity, name}` onto `commerce_addons`, confirm, continue |
+| Missing quantity for a named item | Ask specifically for that item's quantity (up to 3 clarify turns) |
+| Unclear, low confidence, or out-of-range index | Ask a short clarifying question (up to 3 turns) |
+| Still unclear after 3 clarify turns | Transfer to an agent |
+
+Products with no catalog add-ons skip this step on the buy path. After-capture without catalog add-ons still asks the free-text Skip question (`after_capture_addons_free`).
 
 ### Collection capture fields
 
@@ -191,6 +223,7 @@ Then buttons `add_more`, `edit_cart`, and `checkout`. Add more returns to the co
 | `email` | `customer_email` or `email` if it matches a simple email. Phone fields are skipped. Other session values are scanned for an email |
 | `phone_number` | `customer_phone`, `phone`, or `phone_number` when present |
 | `items` | `tiqr_cart` lines reduced to `product_option` and `quantity`. The TiQR client turns those strings into integers |
+| `addons` | `commerce_addons` reduced to `addon` and `quantity` when any were selected. Display names are not sent |
 | `notes` | `customer_notes` or `notes` when the cart has no collection answers. Otherwise plain text: `{product_name}({option_name})` then `- {label}: {value}` per capture field, with a blank line between products and `Note: {customer note}` when a form note exists |
 | `new_address` | Delivery only: name, address lines, city, state, country, pincode, email, phone, plus latitude and longitude to 6 decimal places. Omitted for pickup |
 | `delivery_mode` | session value, or `PICKUP_FROM_STORE` if empty |
@@ -211,6 +244,7 @@ Every `Transfer` from this flow (talk to staff, failed order, ungrounded intent,
 | Draft / metadata field | Source |
 | --- | --- |
 | `cart` | `{ "source": "tiqr_ecommerce", "lines": [...] }` from `tiqr_cart` (option id, quantity, names, capture fields). Empty cart still transfers with `lines: []` |
+| `addons` | `commerce_addons` as `{addon, quantity, name}` when selected. Shown on the owner handoff API and chat panel; Create order prefills quantities |
 | `address` / `AddressSnapshot` | WhatsApp Flow contact and address fields, plus delivery pin |
 | `fulfillment` | `delivery_mode`, latitude, longitude |
 | `captured_fields` | `commerce_captured_fields` |
@@ -266,6 +300,8 @@ Language from the first successful intent call is stored as `customer_language` 
 
 `askGuide`. One short question, in the stored language (default `en`). Up to 3 questions per step, counted in `SessionData._coded_guide`. The 4th unclear reply transfers. An empty question or a guide error also transfers. A later confident route clears the counter.
 
+Catalog add-on selection also uses the guide role to parse free text into indexed quantities. Clarify turns for missing quantity or unclear replies share the same 3-turn cap on that add-on step before transfer.
+
 ### Translation
 
 `Conv.text` in `codedflow_ai.go` runs on every authored line before send, including button titles (then truncated to 20 characters). It does not run when `customer_language` is empty, `en`, or `en-*`. English taps therefore stay in the authored English.
@@ -313,6 +349,7 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 | `products`, `product_id`, `product_name`, `options`, `product_selected` | Product choice |
 | `option_id`, `option_name`, `quantity` | Option and quantity |
 | `commerce_captured_fields`, `commerce_capture_labels` | Each required collection field answered while adding an option |
+| `commerce_addons` | Catalog add-ons chosen for this session (`addon`, `quantity`, `name`) |
 | `tiqr_cart`, `cart_count` | Each append. A line may also include `product_name`, `option_name`, `capture_fields`, `capture_labels`, and `capture_order` |
 | `customer_language` | First free-text intent, if unset |
 | form fields | WhatsApp Flow submission, plus any field recover asks for |

@@ -249,9 +249,12 @@ func (c *Conv) askCaptureFieldNoCheckout(name string, field map[string]any) (any
 
 func askAfterCaptureAddons(c *Conv, productID string) bool {
 	productID = strings.TrimSpace(productID)
-	choices := loadAfterCaptureAddonChoices(c, productID)
+	if !askCatalogAddons(c, productID, "after_capture_addons") {
+		return false
+	}
+	choices := loadCatalogAddonChoicesReplay(c, "after_capture_addons")
 	if len(choices) > 0 {
-		return askAfterCaptureStructuredAddons(c, choices)
+		return true
 	}
 	text, ok := c.AskText("after_capture_addons_free",
 		"Any add-ons (candles, flowers, etc.)? Reply with details, or say Skip.",
@@ -275,54 +278,16 @@ func askAfterCaptureAddons(c *Conv, productID string) bool {
 	return true
 }
 
-func loadAfterCaptureAddonChoices(c *Conv, productID string) []map[string]any {
-	if productID == "" {
+// loadCatalogAddonChoicesReplay reads choices already fetched by askCatalogAddons.
+func loadCatalogAddonChoicesReplay(c *Conv, prefix string) []map[string]any {
+	if c == nil || c.session() == nil {
 		return nil
 	}
-	raw, ok := c.Store("after_capture_product", "get_product", map[string]string{"product_id": productID})
+	raw, ok := asStringMap(c.session().SessionData[prefix+"_product"])
 	if !ok || raw == nil {
 		return nil
 	}
 	return parseProductAddonChoices(raw["addons"])
-}
-
-func askAfterCaptureStructuredAddons(c *Conv, choices []map[string]any) bool {
-	currency := sessionCurrencyCode(c.session())
-	var b strings.Builder
-	b.WriteString("Would you like any add-ons?\n")
-	for i, choice := range choices {
-		fmt.Fprintf(&b, "%d. %s", i+1, asString(choice["name"]))
-		if price := asToolFloat(choice["price"]); price > 0 {
-			b.WriteString(" — ")
-			b.WriteString(formatMoney(price, currency))
-		}
-		b.WriteByte('\n')
-	}
-	b.WriteString("Reply with a number to add one, or say Skip.")
-
-	for attempt := 1; ; attempt++ {
-		text, ok := c.AskText(fmt.Sprintf("after_capture_addons_%d", attempt), strings.TrimSpace(b.String()), StepNote{
-			Doing:  "The customer is picking catalog add-ons for a custom request.",
-			Expect: "A listed number, or Skip.",
-		})
-		if !ok {
-			return false
-		}
-		lower := strings.ToLower(strings.TrimSpace(text))
-		if lower == "skip" || lower == "no" || lower == "none" || lower == "done" || lower == "continue" {
-			return true
-		}
-		if n := parsePositiveInt(text); n >= 1 && n <= len(choices) {
-			id := anyToInt(choices[n-1]["id"])
-			if id > 0 {
-				appendCommerceAddon(c.session(), id, 1)
-				c.Once(fmt.Sprintf("after_capture_addon_added_%d_%d", attempt, id), func() {})
-				c.Say("Added " + asString(choices[n-1]["name"]) + ".")
-				continue
-			}
-		}
-		c.Say("Please reply with a listed number, or say Skip.")
-	}
 }
 
 func askAfterCaptureFulfillmentTime(c *Conv) bool {

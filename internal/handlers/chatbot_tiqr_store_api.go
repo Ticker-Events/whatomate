@@ -584,7 +584,50 @@ func buildGuestOrderPayload(storeID int, phone string, params map[string]string)
 		}
 		order["buyer_meta_data"] = parsed
 	}
+	if addonsRaw := strings.TrimSpace(params["addons"]); addonsRaw != "" {
+		parsed, err := parseJSONParam(addonsRaw)
+		if err != nil {
+			return nil, fmt.Errorf("addons must be JSON: %w", err)
+		}
+		order["addons"] = coerceOrderAddonNumbers(parsed)
+	}
 	return order, nil
+}
+
+// coerceOrderAddonNumbers turns numeric strings on addons into ints and drops names.
+func coerceOrderAddonNumbers(addons any) any {
+	arr, ok := addons.([]any)
+	if !ok {
+		return addons
+	}
+	out := make([]any, 0, len(arr))
+	for _, raw := range arr {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := anyToInt(item["addon"])
+		qty := anyToInt(item["quantity"])
+		if id <= 0 {
+			if text, ok := item["addon"].(string); ok {
+				if n, err := strconv.Atoi(strings.TrimSpace(text)); err == nil {
+					id = n
+				}
+			}
+		}
+		if qty <= 0 {
+			if text, ok := item["quantity"].(string); ok {
+				if n, err := strconv.Atoi(strings.TrimSpace(text)); err == nil {
+					qty = n
+				}
+			}
+		}
+		if id <= 0 || qty < 1 {
+			continue
+		}
+		out = append(out, map[string]any{"addon": id, "quantity": qty})
+	}
+	return out
 }
 
 // coerceOrderItemNumbers turns numeric strings on line items into ints.

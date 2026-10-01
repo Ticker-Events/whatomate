@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -621,6 +622,34 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 				if q := r.URL.Query().Get("search"); q != "" {
 					counts.searches++
 					counts.lastSearch = q
+				}
+			}
+			// Detail: /service/buyer/product/{id}/ — return one product object.
+			path := strings.TrimSuffix(r.URL.Path, "/")
+			parts := strings.Split(path, "/")
+			if len(parts) > 0 {
+				last := parts[len(parts)-1]
+				if last != "product" && r.URL.Query().Get("search") == "" &&
+					!strings.Contains(r.URL.RawQuery, "category_id") &&
+					r.Method == http.MethodGet {
+					if _, err := strconv.Atoi(last); err == nil {
+						for _, product := range products {
+							item, ok := product.(map[string]any)
+							if !ok {
+								continue
+							}
+							if fieldString(item, "id") == last || asString(item["id"]) == last {
+								_ = json.NewEncoder(w).Encode(item)
+								return
+							}
+						}
+						if len(products) == 1 {
+							_ = json.NewEncoder(w).Encode(products[0])
+							return
+						}
+						http.NotFound(w, r)
+						return
+					}
 				}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{

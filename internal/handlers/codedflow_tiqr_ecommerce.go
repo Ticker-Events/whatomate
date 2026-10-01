@@ -946,6 +946,10 @@ func askQuantityAndAdd(c *Conv) bool {
 	if !ok {
 		return false
 	}
+	productID := strings.TrimSpace(asString(c.session().SessionData["product_id"]))
+	if !askCatalogAddons(c, productID, "product_addons") {
+		return false
+	}
 	optionID := asString(c.session().SessionData["option_id"])
 	c.Once("cart", func() {
 		upsertCartItem(c, optionID, quantity, captured, order)
@@ -1813,6 +1817,11 @@ func pickupOrderParams(data map[string]any) map[string]string {
 	if phone != "" {
 		params["phone_number"] = phone
 	}
+	if addons := orderAddonsForAPI(data["commerce_addons"]); len(addons) > 0 {
+		if raw, err := json.Marshal(addons); err == nil {
+			params["addons"] = string(raw)
+		}
+	}
 	if deliveryMode == tiqrModeDelivery {
 		addressFields := map[string]string{
 			"name":           name,
@@ -2140,6 +2149,31 @@ func orderItemsForAPI(raw any) []map[string]any {
 	return out
 }
 
+// orderAddonsForAPI returns create_order addons with only addon id and quantity.
+func orderAddonsForAPI(raw any) []map[string]any {
+	items, ok := anySlice(raw)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		id := anyToInt(item["addon"])
+		qty := anyToInt(item["quantity"])
+		if id <= 0 || qty < 1 {
+			continue
+		}
+		out = append(out, map[string]any{
+			"addon":    id,
+			"quantity": qty,
+		})
+	}
+	return out
+}
+
 // formatFailedOrderHandoff builds the agent handoff text when create_order fails.
 func formatFailedOrderHandoff(data map[string]any) string {
 	var b strings.Builder
@@ -2174,6 +2208,10 @@ func formatFailedOrderHandoff(data map[string]any) string {
 			b.WriteString(strings.TrimRight(extra, "\n"))
 		}
 	}
+	if addons := formatHandoffAddons(data["commerce_addons"]); addons != "" {
+		b.WriteString("\n\nAdd-ons\n")
+		b.WriteString(addons)
+	}
 	if addr := formatCheckoutAddress(data); addr != "" {
 		b.WriteString("\n\nAddress\n")
 		b.WriteString(addr)
@@ -2181,6 +2219,31 @@ func formatFailedOrderHandoff(data map[string]any) string {
 	b.WriteString("\n\n")
 	b.WriteString(tiqrEcommerceHandoffConnect)
 	return b.String()
+}
+
+func formatHandoffAddons(raw any) string {
+	items, ok := anySlice(raw)
+	if !ok || len(items) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		id := anyToInt(item["addon"])
+		qty := anyToInt(item["quantity"])
+		if id <= 0 || qty < 1 {
+			continue
+		}
+		name := strings.TrimSpace(asString(item["name"]))
+		if name == "" {
+			name = fmt.Sprintf("Addon #%d", id)
+		}
+		lines = append(lines, fmt.Sprintf("%s x %d", name, qty))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // formatCheckoutAddress formats name and shipping lines from the checkout session.
