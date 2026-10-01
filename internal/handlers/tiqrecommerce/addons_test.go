@@ -1,4 +1,4 @@
-package handlers
+package tiqrecommerce
 
 import (
 	"testing"
@@ -73,7 +73,7 @@ func TestGroundAddonParse_OutOfRangeIgnoredAsUnclear(t *testing.T) {
 }
 
 func TestOrderAddonsForAPI_DropsName(t *testing.T) {
-	out := orderAddonsForAPI([]any{
+	out := OrderAddonsForAPI([]any{
 		map[string]any{"addon": 9, "quantity": 2, "name": "Candles"},
 		map[string]any{"addon": 0, "quantity": 1},
 	})
@@ -85,7 +85,7 @@ func TestOrderAddonsForAPI_DropsName(t *testing.T) {
 }
 
 func TestPickupOrderParams_IncludesAddons(t *testing.T) {
-	params := pickupOrderParams(map[string]any{
+	params := PickupOrderParams(map[string]any{
 		"customer_email": "buyer@example.com",
 		"tiqr_cart": []any{map[string]any{
 			"product_option": "1312",
@@ -101,7 +101,7 @@ func TestPickupOrderParams_IncludesAddons(t *testing.T) {
 }
 
 func TestFormatHandoffAddons(t *testing.T) {
-	text := formatHandoffAddons([]any{
+	text := FormatHandoffAddons([]any{
 		map[string]any{"addon": 9, "quantity": 2, "name": "Candles"},
 	})
 	assert.Equal(t, "Candles x 2", text)
@@ -111,152 +111,11 @@ func TestAppendCommerceAddon_KeepsName(t *testing.T) {
 	session := &models.ChatbotSession{SessionData: models.JSONB{}}
 	appendCommerceAddon(session, 9, 2, "Candles")
 	appendCommerceAddon(session, 9, 1, "Candles")
-	addons := checkoutAddons(session)
-	require.Len(t, addons, 1)
-	assert.Equal(t, 9, anyToInt(addons[0]["addon"]))
-	assert.Equal(t, 3, anyToInt(addons[0]["quantity"]))
-	assert.Equal(t, "Candles", asString(addons[0]["name"]))
-}
-
-func useCodedAddonParse(t *testing.T, parse func(string) (codedAddonParseResult, error)) {
-	t.Helper()
-	prev := parseCodedAddons
-	parseCodedAddons = func(_ *App, _ *models.ChatbotSession, prompt string) (codedAddonParseResult, error) {
-		if parse == nil {
-			t.Fatal("addon parse was called")
-		}
-		return parse(prompt)
-	}
-	t.Cleanup(func() { parseCodedAddons = prev })
-}
-
-func productWithAddons() []any {
-	return []any{
-		map[string]any{
-			"id": "101", "name": "Themed Cake", "min_price": "500",
-			"description": "Celebration cake",
-			"images":      []any{map[string]any{"original_url": "https://example.com/cake.jpg"}},
-			"options":     []any{map[string]any{"id": "9", "name": "Regular", "price": "500"}},
-			"addons": []any{
-				map[string]any{"id": 21, "name": "Candles", "price": 50, "is_active": true},
-				map[string]any{"id": 22, "name": "Flowers", "price": 100, "is_active": true},
-			},
-		},
-	}
-}
-
-func TestTiqrEcommerce_BuyFlowStoresCatalogAddons(t *testing.T) {
-	useCodedIntent(t, nil, nil)
-	qty := 2
-	useCodedAddonParse(t, func(string) (codedAddonParseResult, error) {
-		return codedAddonParseResult{
-			Intent:     codedAddonIntentSelect,
-			Confidence: 0.92,
-			Items:      []codedAddonParseItem{{Index: 1, Quantity: &qty}},
-		}, nil
-	})
-	app, account, contact, session := startEcommerce(t, productWithAddons(), nil)
-	flow := codedFlowByKey(tiqrEcommerceKey)
-
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
-	reloadSession(t, app, session)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Cakes", "58", nil))
-	reloadSession(t, app, session)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "101", nil))
-	reloadSession(t, app, session)
-	assert.Equal(t, "quantity", session.CurrentStep)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
-	reloadSession(t, app, session)
-	assert.Contains(t, outgoingBlob(t, app, session), "This product has the following add-ons")
-	assert.Contains(t, outgoingBlob(t, app, session), "1. Candles")
-	assert.Equal(t, "product_addons_1", session.CurrentStep)
-
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "item 1 - 2", "", nil))
-	reloadSession(t, app, session)
-	addons := checkoutAddons(session)
-	require.Len(t, addons, 1)
-	assert.Equal(t, 21, anyToInt(addons[0]["addon"]))
-	assert.Equal(t, 2, anyToInt(addons[0]["quantity"]))
-	assert.Equal(t, "Candles", asString(addons[0]["name"]))
-	assert.Contains(t, outgoingBlob(t, app, session), "Added Candles x2")
-	_, hasCart := session.SessionData["tiqr_cart"]
-	assert.True(t, hasCart)
-}
-
-func TestTiqrEcommerce_AddonMissingQuantityThenSave(t *testing.T) {
-	useCodedIntent(t, nil, nil)
-	calls := 0
-	useCodedAddonParse(t, func(string) (codedAddonParseResult, error) {
-		calls++
-		if calls == 1 {
-			return codedAddonParseResult{
-				Intent:          codedAddonIntentSelect,
-				Confidence:      0.9,
-				Items:           []codedAddonParseItem{{Index: 1}},
-				MissingQuantity: []int{1},
-			}, nil
-		}
-		qty := 3
-		return codedAddonParseResult{
-			Intent:     codedAddonIntentSelect,
-			Confidence: 0.95,
-			Items:      []codedAddonParseItem{{Index: 1, Quantity: &qty}},
-		}, nil
-	})
-	app, account, contact, session := startEcommerce(t, productWithAddons(), nil)
-	flow := codedFlowByKey(tiqrEcommerceKey)
-
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
-	reloadSession(t, app, session)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Cakes", "58", nil))
-	reloadSession(t, app, session)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "101", nil))
-	reloadSession(t, app, session)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
-	reloadSession(t, app, session)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Candles", "", nil))
-	reloadSession(t, app, session)
-	assert.Contains(t, outgoingBlob(t, app, session), "How many of item 1 (Candles)")
-	assert.Empty(t, checkoutAddons(session))
-
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "3", "", nil))
-	reloadSession(t, app, session)
-	addons := checkoutAddons(session)
-	require.Len(t, addons, 1)
-	assert.Equal(t, 3, anyToInt(addons[0]["quantity"]))
-}
-
-func TestTiqrEcommerce_AddonUnclearTransfersAfterGuides(t *testing.T) {
-	useCodedIntent(t, nil, nil)
-	useCodedAddonParse(t, func(string) (codedAddonParseResult, error) {
-		return codedAddonParseResult{
-			Intent:     codedAddonIntentUnclear,
-			Confidence: 0.2,
-			Question:   "Which add-on did you mean?",
-		}, nil
-	})
-	app, account, contact, session := startEcommerceWithStore(t, productWithAddons(), nil, map[string]any{
-		"id": 42, "name": "Demo",
-	}, &models.AIConfig{CommerceEnabled: true})
-	flow := codedFlowByKey(tiqrEcommerceKey)
-
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
-	reloadSession(t, app, session)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Cakes", "58", nil))
-	reloadSession(t, app, session)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "101", nil))
-	reloadSession(t, app, session)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
-	reloadSession(t, app, session)
-
-	for i := 0; i < codedIntentSettings.MaxGuideTurns; i++ {
-		require.NoError(t, app.runCodedFlow(account, contact, session, flow, "something weird", "", nil))
-		reloadSession(t, app, session)
-		assert.Empty(t, checkoutAddons(session))
-		assert.NotEqual(t, models.SessionStatusCancelled, session.Status)
-	}
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "still unclear", "", nil))
-	reloadSession(t, app, session)
-	assert.Equal(t, models.SessionStatusCancelled, session.Status)
-	assert.Empty(t, checkoutAddons(session))
+	raw, _ := session.SessionData["commerce_addons"].([]any)
+	require.Len(t, raw, 1)
+	addon, ok := raw[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, 9, anyToInt(addon["addon"]))
+	assert.Equal(t, 3, anyToInt(addon["quantity"]))
+	assert.Equal(t, "Candles", asString(addon["name"]))
 }

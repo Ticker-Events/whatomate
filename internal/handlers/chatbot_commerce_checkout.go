@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	draftrepo "github.com/shridarpatil/whatomate/internal/commerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
@@ -37,7 +38,7 @@ const (
 	cartPendingOptionKey         = "cart_pending_option_id"
 	checkoutFlowCheckout         = "checkout"
 	checkoutFlowPostCart         = "post_cart"
-	checkoutFlowAfterCapture     = "after_capture"
+	checkoutFlowEarlyHandoff     = "early_handoff"
 	checkoutLocationPrompt       = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
 	checkoutAddressPrompt        = "Please provide your full delivery address, including your name, phone number, street address, city, state, country, and pincode."
 	checkoutAddressMessageBody   = "Thanks for your order! Tell us what address you'd like this order delivered to."
@@ -99,8 +100,8 @@ func getCheckoutState(session *models.ChatbotSession) *checkoutState {
 		PendingProductID: asString(raw["pending_product_id"]),
 	}
 	if st.Flow == "themed" {
-		st.Flow = checkoutFlowAfterCapture
-		raw["flow"] = checkoutFlowAfterCapture
+		st.Flow = checkoutFlowEarlyHandoff
+		raw["flow"] = checkoutFlowEarlyHandoff
 		session.SessionData[checkoutSessionKey] = raw
 	}
 	if addr, ok := raw["new_address"].(map[string]any); ok {
@@ -455,9 +456,10 @@ func (a *App) beginPostCartLineFlow(account *models.WhatsAppAccount, contact *mo
 	a.beginAddonStep(account, contact, session, settings, st)
 }
 
-// beginAfterCaptureIntake starts capture → addons → fulfillment → handoff for after_capture collections.
-func (a *App) beginAfterCaptureIntake(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, category tickermcp.Category, productID string) {
-	migrateAfterCaptureSessionKeys(session)
+// beginEarlyHandoffIntake starts capture → addons → fulfillment → handoff for
+// collections with catalog handoff_policy after_capture.
+func (a *App) beginEarlyHandoffIntake(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, category tickermcp.Category, productID string) {
+	tiqrecommerce.MigrateEarlyHandoffSessionKeys(session)
 	fields := make([]map[string]any, 0, len(category.RequiredCaptureFields))
 	captured := jsonMapFromSession(session, "commerce_captured_fields")
 	for _, field := range category.RequiredCaptureFields {
@@ -469,7 +471,7 @@ func (a *App) beginAfterCaptureIntake(account *models.WhatsAppAccount, contact *
 		})
 	}
 	st := &checkoutState{
-		Flow:             checkoutFlowAfterCapture,
+		Flow:             checkoutFlowEarlyHandoff,
 		NewAddress:       map[string]any{},
 		PendingProductID: strings.TrimSpace(productID),
 		CaptureFields:    fields,
@@ -481,7 +483,7 @@ func (a *App) beginAfterCaptureIntake(account *models.WhatsAppAccount, contact *
 	}
 	setCheckoutState(session, st)
 	if _, err := a.ensureCommerceDraft(contact, session, settings); err != nil {
-		a.Log.Error("after_capture draft create failed", "error", err)
+		a.Log.Error("early_handoff draft create failed", "error", err)
 		_ = a.sendAndSaveTextMessage(account, contact, "I couldn’t start this request right now. Please try again.")
 		clearCheckoutState(session)
 		_ = a.persistSessionData(session)
@@ -736,7 +738,7 @@ func (a *App) finishAddonStep(account *models.WhatsAppAccount, contact *models.C
 	switch st.Flow {
 	case checkoutFlowPostCart:
 		a.finishPostCartLineFlow(account, contact, session, settings)
-	case checkoutFlowAfterCapture:
+	case checkoutFlowEarlyHandoff:
 		st.Step = "delivery_mode"
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
@@ -759,14 +761,14 @@ func (a *App) finishPostCartLineFlow(account *models.WhatsAppAccount, contact *m
 
 func (a *App) placeCheckoutOrderOrHandoff(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
 	st := getCheckoutState(session)
-	if st != nil && st.Flow == checkoutFlowAfterCapture {
-		a.finishAfterCaptureHandoff(account, contact, session, settings, st)
+	if st != nil && st.Flow == checkoutFlowEarlyHandoff {
+		a.finishEarlyHandoff(account, contact, session, settings, st)
 		return
 	}
 	a.placeCheckoutOrder(account, contact, session, settings)
 }
 
-func (a *App) finishAfterCaptureHandoff(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
+func (a *App) finishEarlyHandoff(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
 	if st == nil {
 		st = getCheckoutState(session)
 	}
@@ -790,8 +792,8 @@ func (a *App) advanceToConfirmOrHandoff(account *models.WhatsAppAccount, contact
 	st.Step = "confirm"
 	setCheckoutState(session, st)
 	_ = a.persistSessionData(session)
-	if st.Flow == checkoutFlowAfterCapture {
-		a.finishAfterCaptureHandoff(account, contact, session, settings, st)
+	if st.Flow == checkoutFlowEarlyHandoff {
+		a.finishEarlyHandoff(account, contact, session, settings, st)
 		return
 	}
 	a.sendOrderConfirmPrompt(account, contact, session)
@@ -1235,7 +1237,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 
 	// Qty / edit intents take priority over step validation so users can fix the cart mid-checkout.
 	// Skip during slot entry — times like "in 45 minutes" / "today 5pm" must reach the parser.
-	if st.Step != "slot" && st.Flow != checkoutFlowAfterCapture && a.handleCheckoutCartEditIntent(account, contact, session, settings, st, text) {
+	if st.Step != "slot" && st.Flow != checkoutFlowEarlyHandoff && a.handleCheckoutCartEditIntent(account, contact, session, settings, st, text) {
 		return true
 	}
 
@@ -1254,7 +1256,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		return true
 	case "capture":
 		if st.CaptureIndex < 0 || st.CaptureIndex >= len(st.CaptureFields) {
-			a.continueAfterCaptureComplete(account, contact, session, settings, st)
+			a.continueEarlyHandoffComplete(account, contact, session, settings, st)
 			return true
 		}
 		field := st.CaptureFields[st.CaptureIndex]
@@ -1270,7 +1272,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 			a.appendDraftAttachments(session, attachments)
 			st.CaptureIndex++
 			if st.CaptureIndex >= len(st.CaptureFields) {
-				a.continueAfterCaptureComplete(account, contact, session, settings, st)
+				a.continueEarlyHandoffComplete(account, contact, session, settings, st)
 				return true
 			}
 			setCheckoutState(session, st)
@@ -1287,7 +1289,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		session.SessionData["commerce_captured_fields"] = map[string]any(captured)
 		st.CaptureIndex++
 		if st.CaptureIndex >= len(st.CaptureFields) {
-			a.continueAfterCaptureComplete(account, contact, session, settings, st)
+			a.continueEarlyHandoffComplete(account, contact, session, settings, st)
 			return true
 		}
 		setCheckoutState(session, st)
@@ -1351,12 +1353,12 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 	}
 }
 
-func (a *App) continueAfterCaptureComplete(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
+func (a *App) continueEarlyHandoffComplete(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
 	if st == nil {
 		return
 	}
 	switch st.Flow {
-	case checkoutFlowPostCart, checkoutFlowAfterCapture:
+	case checkoutFlowPostCart, checkoutFlowEarlyHandoff:
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
 		a.advanceAfterLineCapture(account, contact, session, settings, st)

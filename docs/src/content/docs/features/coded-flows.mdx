@@ -364,12 +364,12 @@ These are the values later messages and the order payload read back.
 
 | File | Role |
 | --- | --- |
-| `internal/handlers/codedflow.go` | Registration, session marker, replay entry, keyword match |
-| `internal/handlers/codedflow_conv.go` | `Conv` calls: prompts, store, cart-once, transfer, end |
-| `internal/handlers/codedflow_ai.go` | Language detection, translation, off-script answers, order lookup |
+| `internal/handlers/codedflow/` | Engine package (`Host`/`Chat`, `Conv`, AI, intent, recover, preview sink, `Register`/`Run`) |
+| `internal/handlers/codedflow_host.go` | Handlers adapter: `*App` as `Host`, `codedChat` as `Chat` |
+| `internal/handlers/codedflow_run.go` | Resume / trigger wrappers calling `codedflow.Run` |
 | `internal/handlers/codedflow_api.go` | List and keyword binding |
-| `internal/handlers/codedflow_preview.go` | In-memory preview |
-| `internal/handlers/codedflow_tiqr_ecommerce.go` | TiQR Ecommerce |
+| `internal/handlers/codedflow_preview.go` | HTTP preview + Redis/DB preview helpers |
+| `internal/handlers/tiqrecommerce/` | TiQR Ecommerce coded flow (`codedflow.Register` in `init`) |
 | `internal/handlers/chatbot_processor.go` | Resume and trigger, ahead of visual flows |
 
-A new flow is a `CodedFlow` value passed to `registerCodedFlow` from `init`. It needs a unique `Key`, a `Name`, a `Description`, the outline `Steps`, and a `run` function. The admin UI picks it up from the binary. There is no API to create or delete the definition.
+A new flow is a `CodedFlow` value passed to `codedflow.Register` from `init`. It needs a unique `Key`, a `Name`, a `Description`, the outline `Steps`, and a `run` function. The admin UI picks it up from the binary. There is no API to create or delete the definition.

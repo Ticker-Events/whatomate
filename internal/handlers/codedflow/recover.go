@@ -1,4 +1,4 @@
-package handlers
+package codedflow
 
 import (
 	"encoding/json"
@@ -12,9 +12,12 @@ import (
 )
 
 const (
-	codedRecoverTryLater     = "try_later"
-	codedRecoverMissingField = "missing_field"
-	codedRecoverGiveUp       = "give_up"
+	RecoverTryLater     = "try_later"
+	codedRecoverTryLater     = RecoverTryLater
+	RecoverMissingField = "missing_field"
+	codedRecoverMissingField = RecoverMissingField
+	RecoverGiveUp       = "give_up"
+	codedRecoverGiveUp       = RecoverGiveUp
 )
 
 // Customer-facing session keys the recover role may ask to refill on create_order.
@@ -32,7 +35,7 @@ var codedRecoverFieldOrder = []string{
 	"customer_notes",
 }
 
-var codedRecoverFields = map[string]string{
+var RecoverFields = map[string]string{
 	"customer_email":   "email address",
 	"customer_name":    "name",
 	"customer_phone":   "phone number",
@@ -57,26 +60,26 @@ var recoverFieldAliases = map[string]string{
 }
 
 var (
-	recoverCodedFailure = defaultRecoverCodedFailure
+	RecoverCodedFailure = defaultRecoverCodedFailure
 	tiqrErrStatusRE     = regexp.MustCompile(`(?i)ticker api error (\d+):\s*(.*)`)
 	recoverBannedRE     = regexp.MustCompile(`(?i)https?://|authorization|api[_ ]?key|bearer |curl |token=|whatomate_|password|secret`)
 )
 
-type codedRecoverAsk struct {
+type RecoverAsk struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`
 }
 
-type codedRecoverResult struct {
+type RecoverResult struct {
 	Kind       string            `json:"kind"`
 	Field      string            `json:"field"`
-	Fields     []codedRecoverAsk `json:"fields,omitempty"`
+	Fields     []RecoverAsk `json:"fields,omitempty"`
 	Message    string            `json:"message"`
 	Confidence float64           `json:"confidence"`
 	Reasoning  string            `json:"reasoning"`
 }
 
-type codedRecoverContext struct {
+type RecoverContext struct {
 	Kind      string // fetch | create
 	Operation string
 	Resource  string // store, collections, products, order
@@ -84,13 +87,13 @@ type codedRecoverContext struct {
 	Hint      string // sanitized field names / short reason for the model only
 }
 
-func noteTiqrFailure(ctx *chatNodeCtx, status int, errText string) {
-	if ctx == nil {
+func NoteTiqrFailure(chat Chat, status int, errText string) {
+	if chat == nil {
 		return
 	}
 	status, body := parseTiqrErr(status, errText)
-	ctx.lastTiqrStatus = status
-	ctx.lastTiqrErr = truncateRunes(body, 800)
+	chat.SetLastTiqrStatus(status)
+	chat.SetLastTiqrErr(truncateRunes(body, 800))
 }
 
 func parseTiqrErr(status int, errText string) (int, string) {
@@ -104,7 +107,7 @@ func parseTiqrErr(status int, errText string) (int, string) {
 	return status, errText
 }
 
-func sanitizeRecoverHint(raw string) string {
+func SanitizeRecoverHint(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
@@ -130,7 +133,7 @@ func collectValidationFields(v any, out []string) []string {
 				out = collectValidationFields(child, out)
 				continue
 			}
-			if _, ok := codedRecoverFields[key]; ok || looksLikeFieldName(key) {
+			if _, ok := RecoverFields[key]; ok || looksLikeFieldName(key) {
 				out = appendUnique(out, key)
 			}
 			out = collectValidationFields(child, out)
@@ -165,8 +168,8 @@ func appendUnique(list []string, item string) []string {
 	return append(list, item)
 }
 
-func (c *Conv) lastTiqrRecoverContext(operation, resource, kind string) codedRecoverContext {
-	ctx := codedRecoverContext{
+func (c *Conv) lastTiqrRecoverContext(operation, resource, kind string) RecoverContext {
+	ctx := RecoverContext{
 		Kind:      kind,
 		Operation: operation,
 		Resource:  resource,
@@ -174,8 +177,8 @@ func (c *Conv) lastTiqrRecoverContext(operation, resource, kind string) codedRec
 	if c == nil || c.chat == nil {
 		return ctx
 	}
-	ctx.Status = c.chat.lastTiqrStatus
-	ctx.Hint = sanitizeRecoverHint(c.chat.lastTiqrErr)
+	ctx.Status = c.chat.LastTiqrStatus()
+	ctx.Hint = SanitizeRecoverHint(c.chat.LastTiqrErr())
 	return ctx
 }
 
@@ -187,8 +190,8 @@ func (c *Conv) recoverFetchMessage(operation, resource, fallback string) string 
 	return fallback
 }
 
-func (c *Conv) runRecover(ctx codedRecoverContext, fallback string) codedRecoverResult {
-	fallbackResult := codedRecoverResult{
+func (c *Conv) runRecover(ctx RecoverContext, fallback string) RecoverResult {
+	fallbackResult := RecoverResult{
 		Kind:       codedRecoverTryLater,
 		Message:    fallback,
 		Confidence: 1,
@@ -196,9 +199,9 @@ func (c *Conv) runRecover(ctx codedRecoverContext, fallback string) codedRecover
 	if c == nil || c.app == nil {
 		return fallbackResult
 	}
-	prompt := buildRecoverPrompt(ctx)
-	raw, err := recoverCodedFailure(c.app, c.session(), ctx)
-	raw.Reasoning = limitWords(raw.Reasoning, 200)
+	prompt := BuildRecoverPrompt(ctx)
+	raw, err := RecoverCodedFailure(c.app, c.session(), ctx)
+	raw.Reasoning = LimitWords(raw.Reasoning, 200)
 	call := CodedPreviewAICall{
 		Role:      "recover",
 		Prompt:    prompt,
@@ -207,22 +210,22 @@ func (c *Conv) runRecover(ctx codedRecoverContext, fallback string) codedRecover
 	if err != nil {
 		call.Error = err.Error()
 		c.notePreviewAI(call)
-		c.app.logCodedFlowAI(c.session(), "recover", prompt, "", err.Error(),
+		c.app.LogCodedFlowAI(c.session(), "recover", prompt, "", err.Error(),
 			"operation", ctx.Operation, "kind", ctx.Kind)
 		return fallbackResult
 	}
-	result, ok := validateCodedRecover(raw, ctx)
+	result, ok := ValidateCodedRecover(raw, ctx)
 	if !ok {
 		result = fallbackResult
 	}
 	if ctx.Kind == "create" {
-		result = expandRecoverAsks(result, ctx.Hint)
+		result = ExpandRecoverAsks(result, ctx.Hint)
 	}
 	call.Response = formatRecoverResponse(result)
 	call.Parsed = map[string]any{
 		"kind":       result.Kind,
 		"field":      result.Field,
-		"fields":     recoverAskFields(result.Fields),
+		"fields":     RecoverAskFields(result.Fields),
 		"message":    result.Message,
 		"confidence": raw.Confidence,
 		"reasoning":  raw.Reasoning,
@@ -231,10 +234,10 @@ func (c *Conv) runRecover(ctx codedRecoverContext, fallback string) codedRecover
 	grounded := ok
 	call.Grounded = &grounded
 	c.notePreviewAI(call)
-	c.app.logCodedFlowAI(c.session(), "recover", prompt, call.Response, "",
+	c.app.LogCodedFlowAI(c.session(), "recover", prompt, call.Response, "",
 		"kind", result.Kind,
 		"field", result.Field,
-		"fields", strings.Join(recoverAskFields(result.Fields), ","),
+		"fields", strings.Join(RecoverAskFields(result.Fields), ","),
 		"grounded", ok,
 		"operation", ctx.Operation,
 		"reasoning", raw.Reasoning,
@@ -251,35 +254,35 @@ func (c *Conv) runRecover(ctx codedRecoverContext, fallback string) codedRecover
 // createRecoverPlan returns the saved create_order recovery for this attempt,
 // or asks the model once and stores that plan. Later turns replay the plan so
 // every missing field is asked before the order is retried.
-func (c *Conv) createRecoverPlan(name, fallback string) codedRecoverResult {
+func (c *Conv) CreateRecoverPlan(name, fallback string) RecoverResult {
 	if plan, ok := c.replayRecoverPlan(name); ok {
 		return plan
 	}
 	ctx := c.lastTiqrRecoverContext("create_order", "order", "create")
 	result := c.runRecover(ctx, fallback)
-	result = expandRecoverAsks(result, ctx.Hint)
+	result = ExpandRecoverAsks(result, ctx.Hint)
 	c.appendCall(recoverPlanRecord(name, result))
 	return result
 }
 
-func (c *Conv) replayRecoverPlan(name string) (codedRecoverResult, bool) {
-	if c == nil || c.stop {
-		return codedRecoverResult{}, false
+func (c *Conv) replayRecoverPlan(name string) (RecoverResult, bool) {
+	if c == nil || c.Stop {
+		return RecoverResult{}, false
 	}
 	records := c.callRecords()
 	if c.seq >= len(records) {
-		return codedRecoverResult{}, false
+		return RecoverResult{}, false
 	}
 	rec := records[c.seq]
 	if asString(rec["name"]) != name || asString(rec["plan"]) != "recover" {
-		return codedRecoverResult{}, false
+		return RecoverResult{}, false
 	}
 	c.seq++
 	c.restore(rec)
 	return recoverResultFromRecord(rec), true
 }
 
-func recoverPlanRecord(name string, result codedRecoverResult) map[string]any {
+func recoverPlanRecord(name string, result RecoverResult) map[string]any {
 	asks := make([]any, 0, len(result.Fields))
 	for _, ask := range result.Fields {
 		asks = append(asks, map[string]any{
@@ -298,8 +301,8 @@ func recoverPlanRecord(name string, result codedRecoverResult) map[string]any {
 	}
 }
 
-func recoverResultFromRecord(rec map[string]any) codedRecoverResult {
-	result := codedRecoverResult{
+func recoverResultFromRecord(rec map[string]any) RecoverResult {
+	result := RecoverResult{
 		Kind:       asString(rec["kind"]),
 		Field:      asString(rec["field"]),
 		Message:    asString(rec["message"]),
@@ -314,7 +317,7 @@ func recoverResultFromRecord(rec map[string]any) codedRecoverResult {
 		if !ok {
 			continue
 		}
-		result.Fields = append(result.Fields, codedRecoverAsk{
+		result.Fields = append(result.Fields, RecoverAsk{
 			Field:   asString(ask["field"]),
 			Message: asString(ask["message"]),
 		})
@@ -322,7 +325,7 @@ func recoverResultFromRecord(rec map[string]any) codedRecoverResult {
 	return result
 }
 
-func formatRecoverResponse(raw codedRecoverResult) string {
+func formatRecoverResponse(raw RecoverResult) string {
 	b, err := json.Marshal(raw)
 	if err != nil {
 		return ""
@@ -330,11 +333,11 @@ func formatRecoverResponse(raw codedRecoverResult) string {
 	return string(b)
 }
 
-func validateCodedRecover(raw codedRecoverResult, ctx codedRecoverContext) (codedRecoverResult, bool) {
+func ValidateCodedRecover(raw RecoverResult, ctx RecoverContext) (RecoverResult, bool) {
 	raw.Kind = strings.ToLower(strings.TrimSpace(raw.Kind))
 	raw.Field = strings.TrimSpace(raw.Field)
 	raw.Message = strings.TrimSpace(raw.Message)
-	raw.Reasoning = limitWords(raw.Reasoning, 200)
+	raw.Reasoning = LimitWords(raw.Reasoning, 200)
 	if raw.Message != "" && recoverBannedRE.MatchString(raw.Message) {
 		return raw, false
 	}
@@ -348,9 +351,9 @@ func validateCodedRecover(raw codedRecoverResult, ctx codedRecoverContext) (code
 		if ctx.Kind != "create" {
 			return raw, false
 		}
-		asks := append([]codedRecoverAsk{}, raw.Fields...)
+		asks := append([]RecoverAsk{}, raw.Fields...)
 		if raw.Field != "" {
-			asks = append(asks, codedRecoverAsk{Field: raw.Field, Message: raw.Message})
+			asks = append(asks, RecoverAsk{Field: raw.Field, Message: raw.Message})
 		}
 		asks = orderRecoverAsks(asks)
 		if len(asks) == 0 {
@@ -375,14 +378,14 @@ func canonicalizeRecoverField(field string) (string, bool) {
 	if canon, ok := recoverFieldAliases[field]; ok {
 		return canon, true
 	}
-	if _, ok := codedRecoverFields[field]; ok {
+	if _, ok := RecoverFields[field]; ok {
 		return field, true
 	}
 	lower := strings.ToLower(field)
 	if lower != field {
 		return canonicalizeRecoverField(lower)
 	}
-	for key := range codedRecoverFields {
+	for key := range RecoverFields {
 		if strings.ToLower(key) == lower {
 			return canonicalizeRecoverField(key)
 		}
@@ -395,10 +398,10 @@ func canonicalizeRecoverField(field string) (string, bool) {
 	return "", false
 }
 
-func orderRecoverAsks(asks []codedRecoverAsk) []codedRecoverAsk {
+func orderRecoverAsks(asks []RecoverAsk) []RecoverAsk {
 	rank := recoverFieldRanks()
 	type item struct {
-		ask  codedRecoverAsk
+		ask  RecoverAsk
 		rank int
 	}
 	seen := map[string]struct{}{}
@@ -414,26 +417,26 @@ func orderRecoverAsks(asks []codedRecoverAsk) []codedRecoverAsk {
 		seen[canon] = struct{}{}
 		msg := strings.TrimSpace(ask.Message)
 		if msg == "" || recoverBannedRE.MatchString(msg) {
-			msg = defaultRecoverAsk(canon)
+			msg = DefaultRecoverAsk(canon)
 		}
 		r, ok := rank[canon]
 		if !ok {
 			r = len(rank)
 		}
-		items = append(items, item{ask: codedRecoverAsk{Field: canon, Message: msg}, rank: r})
+		items = append(items, item{ask: RecoverAsk{Field: canon, Message: msg}, rank: r})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].rank < items[j].rank
 	})
-	out := make([]codedRecoverAsk, len(items))
+	out := make([]RecoverAsk, len(items))
 	for i, it := range items {
 		out[i] = it.ask
 	}
 	return out
 }
 
-func expandRecoverAsks(result codedRecoverResult, hint string) codedRecoverResult {
-	wanted := canonicalFieldsFromHint(hint)
+func ExpandRecoverAsks(result RecoverResult, hint string) RecoverResult {
+	wanted := CanonicalFieldsFromHint(hint)
 	if len(wanted) == 0 {
 		return result
 	}
@@ -446,13 +449,13 @@ func expandRecoverAsks(result codedRecoverResult, hint string) codedRecoverResul
 	if result.Kind == codedRecoverMissingField && result.Field != "" && messages[result.Field] == "" {
 		messages[result.Field] = result.Message
 	}
-	asks := make([]codedRecoverAsk, 0, len(wanted))
+	asks := make([]RecoverAsk, 0, len(wanted))
 	for _, field := range wanted {
 		msg := strings.TrimSpace(messages[field])
 		if msg == "" || recoverBannedRE.MatchString(msg) {
-			msg = defaultRecoverAsk(field)
+			msg = DefaultRecoverAsk(field)
 		}
-		asks = append(asks, codedRecoverAsk{Field: field, Message: msg})
+		asks = append(asks, RecoverAsk{Field: field, Message: msg})
 	}
 	result.Kind = codedRecoverMissingField
 	result.Fields = asks
@@ -463,7 +466,7 @@ func expandRecoverAsks(result codedRecoverResult, hint string) codedRecoverResul
 	return result
 }
 
-func canonicalFieldsFromHint(hint string) []string {
+func CanonicalFieldsFromHint(hint string) []string {
 	hint = strings.TrimSpace(hint)
 	rest, ok := strings.CutPrefix(hint, "validation fields:")
 	if !ok {
@@ -549,15 +552,15 @@ func sortHintFields(names []string) []string {
 	return out
 }
 
-func defaultRecoverAsk(field string) string {
-	label := codedRecoverFields[field]
+func DefaultRecoverAsk(field string) string {
+	label := RecoverFields[field]
 	if label == "" {
 		label = strings.ReplaceAll(field, "_", " ")
 	}
 	return "Could you share your " + label + "?"
 }
 
-func recoverAskFields(asks []codedRecoverAsk) []string {
+func RecoverAskFields(asks []RecoverAsk) []string {
 	out := make([]string, 0, len(asks))
 	for _, ask := range asks {
 		if ask.Field != "" {
@@ -567,16 +570,16 @@ func recoverAskFields(asks []codedRecoverAsk) []string {
 	return out
 }
 
-func defaultRecoverCodedFailure(a *App, session *models.ChatbotSession, ctx codedRecoverContext) (codedRecoverResult, error) {
-	prompt := buildRecoverPrompt(ctx)
-	answer, err := a.completeCodedRoleText(session, codedFlowRoleRecover, prompt)
+func defaultRecoverCodedFailure(a Host, session *models.ChatbotSession, ctx RecoverContext) (RecoverResult, error) {
+	prompt := BuildRecoverPrompt(ctx)
+	answer, err := a.CompleteCodedRoleText(session, codedFlowRoleRecover, prompt)
 	if err != nil {
-		return codedRecoverResult{}, err
+		return RecoverResult{}, err
 	}
-	return parseCodedRecover(answer)
+	return ParseCodedRecover(answer)
 }
 
-func parseCodedRecover(raw string) (codedRecoverResult, error) {
+func ParseCodedRecover(raw string) (RecoverResult, error) {
 	raw = strings.TrimSpace(raw)
 	if start := strings.Index(raw, "{"); start >= 0 {
 		if end := strings.LastIndex(raw, "}"); end > start {
@@ -592,23 +595,23 @@ func parseCodedRecover(raw string) (codedRecoverResult, error) {
 		Reasoning  string          `json:"reasoning"`
 	}
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return codedRecoverResult{}, err
+		return RecoverResult{}, err
 	}
-	return codedRecoverResult{
+	return RecoverResult{
 		Kind:       payload.Kind,
 		Field:      payload.Field,
 		Fields:     decodeRecoverAsks(payload.Fields),
 		Message:    payload.Message,
 		Confidence: payload.Confidence,
-		Reasoning:  limitWords(payload.Reasoning, 200),
+		Reasoning:  LimitWords(payload.Reasoning, 200),
 	}, nil
 }
 
-func decodeRecoverAsks(raw json.RawMessage) []codedRecoverAsk {
+func decodeRecoverAsks(raw json.RawMessage) []RecoverAsk {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
 	}
-	var asks []codedRecoverAsk
+	var asks []RecoverAsk
 	if err := json.Unmarshal(raw, &asks); err == nil {
 		return asks
 	}
@@ -616,14 +619,14 @@ func decodeRecoverAsks(raw json.RawMessage) []codedRecoverAsk {
 	if err := json.Unmarshal(raw, &names); err != nil {
 		return nil
 	}
-	asks = make([]codedRecoverAsk, 0, len(names))
+	asks = make([]RecoverAsk, 0, len(names))
 	for _, name := range names {
-		asks = append(asks, codedRecoverAsk{Field: name})
+		asks = append(asks, RecoverAsk{Field: name})
 	}
 	return asks
 }
 
-func buildRecoverPrompt(ctx codedRecoverContext) string {
+func BuildRecoverPrompt(ctx RecoverContext) string {
 	kind := ctx.Kind
 	if kind == "" {
 		kind = "fetch"
@@ -642,7 +645,7 @@ func buildRecoverPrompt(ctx codedRecoverContext) string {
 	}
 	fields := make([]string, 0, len(codedRecoverFieldOrder))
 	for _, key := range codedRecoverFieldOrder {
-		fields = append(fields, key+" ("+codedRecoverFields[key]+")")
+		fields = append(fields, key+" ("+RecoverFields[key]+")")
 	}
 	return fmt.Sprintf(`You help a shopping chatbot recover from a store lookup or order failure.
 You write only what the customer should see. Never mention APIs, URLs, HTTP, tokens, keys, payloads, curl, databases, servers, or internal ids.
@@ -666,9 +669,12 @@ Return JSON only:
 `, kind, resource, status, hint, strings.Join(fields, ", "))
 }
 
-func (a *App) codedOrderRetries() int {
-	if a != nil && a.Config != nil {
-		return a.Config.CodedFlow.OrderRetryCount()
+func codedOrderRetries(h Host) int {
+	if h != nil {
+		return h.CodedOrderRetries()
 	}
-	return codedIntentSettings.OrderRetries
+	return IntentSettings.OrderRetries
 }
+
+
+type codedRecoverContext = RecoverContext

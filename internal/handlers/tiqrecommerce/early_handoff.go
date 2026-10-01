@@ -1,6 +1,7 @@
-package handlers
+package tiqrecommerce
 
 import (
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"fmt"
 	"strings"
 	"time"
@@ -9,21 +10,21 @@ import (
 )
 
 const (
-	tiqrEcommerceAfterCaptureIntro = "This is a custom %s request — I’ll collect a few details and connect you with our team."
+	tiqrEcommerceEarlyHandoffIntro = "This is a custom %s request — I’ll collect a few details and connect you with our team."
 
-	tiqrEcommerceAfterCaptureHandoffFail = "We saved your request, but could not connect an expert just now. Please try again shortly."
+	tiqrEcommerceEarlyHandoffFail = "We saved your request, but could not connect an expert just now. Please try again shortly."
 )
 
-// Legacy session keys from when this path was named for themed cakes.
-// migrateAfterCaptureSessionKeys rewrites them once on entry.
+// Catalog handoff_policy value stays "after_capture" (store API). Session keys,
+// coded-call names, and checkout flow id use early_handoff_*.
 
-func collectionHandoffAfterCapture(col map[string]any) bool {
+func collectionHandoffEarly(col map[string]any) bool {
 	return strings.EqualFold(strings.TrimSpace(asString(col["handoff_policy"])), "after_capture")
 }
 
-// migrateAfterCaptureSessionKeys rewrites legacy themed_* keys and step names
-// so in-progress sessions continue under after_capture_* identifiers.
-func migrateAfterCaptureSessionKeys(session *models.ChatbotSession) {
+// MigrateEarlyHandoffSessionKeys rewrites legacy themed_* and after_capture_*
+// keys and step names so in-progress sessions continue under early_handoff_*.
+func MigrateEarlyHandoffSessionKeys(session *models.ChatbotSession) {
 	if session == nil {
 		return
 	}
@@ -32,34 +33,55 @@ func migrateAfterCaptureSessionKeys(session *models.ChatbotSession) {
 	}
 	data := session.SessionData
 
-	legacyKeys := make([]string, 0)
-	for oldKey := range data {
-		if strings.HasPrefix(oldKey, "themed_") {
-			legacyKeys = append(legacyKeys, oldKey)
-		}
-	}
-	for _, oldKey := range legacyKeys {
-		newKey := "after_capture_" + strings.TrimPrefix(oldKey, "themed_")
+	rewriteLegacyKey := func(oldKey, prefix string) {
+		newKey := "early_handoff_" + strings.TrimPrefix(oldKey, prefix)
 		if _, exists := data[newKey]; !exists {
 			data[newKey] = data[oldKey]
 		}
 		delete(data, oldKey)
 	}
+	legacyKeys := make([]string, 0)
+	for oldKey := range data {
+		if strings.HasPrefix(oldKey, "themed_") || strings.HasPrefix(oldKey, "after_capture_") {
+			legacyKeys = append(legacyKeys, oldKey)
+		}
+	}
+	for _, oldKey := range legacyKeys {
+		if strings.HasPrefix(oldKey, "themed_") {
+			rewriteLegacyKey(oldKey, "themed_")
+		} else {
+			rewriteLegacyKey(oldKey, "after_capture_")
+		}
+	}
 
 	if raw, ok := data[checkoutSessionKey].(map[string]any); ok && raw != nil {
-		if asString(raw["flow"]) == "themed" {
-			raw["flow"] = checkoutFlowAfterCapture
+		switch asString(raw["flow"]) {
+		case "themed", "after_capture":
+			raw["flow"] = checkoutFlowEarlyHandoff
 			data[checkoutSessionKey] = raw
 		}
 	}
 
-	if strings.HasPrefix(session.CurrentStep, "themed_") {
-		session.CurrentStep = "after_capture_" + strings.TrimPrefix(session.CurrentStep, "themed_")
+	switch {
+	case strings.HasPrefix(session.CurrentStep, "themed_"):
+		session.CurrentStep = "early_handoff_" + strings.TrimPrefix(session.CurrentStep, "themed_")
+	case strings.HasPrefix(session.CurrentStep, "after_capture_"):
+		session.CurrentStep = "early_handoff_" + strings.TrimPrefix(session.CurrentStep, "after_capture_")
 	}
 
-	records, ok := anySlice(data[codedCallsKey])
+	records, ok := anySlice(data[codedflow.CallsKey])
 	if !ok || len(records) == 0 {
 		return
+	}
+	rewriteCallField := func(value string) (string, bool) {
+		switch {
+		case strings.HasPrefix(value, "themed_"):
+			return "early_handoff_" + strings.TrimPrefix(value, "themed_"), true
+		case strings.HasPrefix(value, "after_capture_"):
+			return "early_handoff_" + strings.TrimPrefix(value, "after_capture_"), true
+		default:
+			return value, false
+		}
 	}
 	next := make([]any, len(records))
 	for i, entry := range records {
@@ -69,12 +91,12 @@ func migrateAfterCaptureSessionKeys(session *models.ChatbotSession) {
 			continue
 		}
 		changed := false
-		if name := asString(rec["name"]); strings.HasPrefix(name, "themed_") {
-			rec["name"] = "after_capture_" + strings.TrimPrefix(name, "themed_")
+		if name, ok := rewriteCallField(asString(rec["name"])); ok {
+			rec["name"] = name
 			changed = true
 		}
-		if key := asString(rec["var"]); strings.HasPrefix(key, "themed_") {
-			rec["var"] = "after_capture_" + strings.TrimPrefix(key, "themed_")
+		if key, ok := rewriteCallField(asString(rec["var"])); ok {
+			rec["var"] = key
 			changed = true
 		}
 		if changed {
@@ -83,13 +105,13 @@ func migrateAfterCaptureSessionKeys(session *models.ChatbotSession) {
 			next[i] = entry
 		}
 	}
-	data[codedCallsKey] = next
+	data[codedflow.CallsKey] = next
 }
 
 // soleCategoryProductID returns the product id when the collection has exactly
-// one product that exposes options. Used only for after-capture add-on prompts.
+// one product that exposes options. Used only for early-handoff add-on prompts.
 func soleCategoryProductID(c *Conv, categoryID string) string {
-	products, ok := c.StoreList("after_capture_products", "list_products", map[string]string{"category_id": categoryID})
+	products, ok := c.StoreList("early_handoff_products", "list_products", map[string]string{"category_id": categoryID})
 	if !ok {
 		return ""
 	}
@@ -123,42 +145,42 @@ func productOptionCount(product map[string]any) int {
 	}
 }
 
-func afterCaptureCollectionForProduct(c *Conv, product map[string]any) map[string]any {
+func earlyHandoffCollectionForProduct(c *Conv, product map[string]any) map[string]any {
 	if product == nil {
 		return nil
 	}
 	if cat, ok := asStringMap(product["category"]); ok {
 		if id := fieldString(cat, "id"); id != "" {
-			if col := collectionByID(c, id); col != nil && collectionHandoffAfterCapture(col) {
+			if col := collectionByID(c, id); col != nil && collectionHandoffEarly(col) {
 				return col
 			}
-			if collectionHandoffAfterCapture(cat) {
+			if collectionHandoffEarly(cat) {
 				return cat
 			}
 		}
 	}
 	if id := productCategoryID(product); id != "" {
-		if col := collectionByID(c, id); col != nil && collectionHandoffAfterCapture(col) {
+		if col := collectionByID(c, id); col != nil && collectionHandoffEarly(col) {
 			return col
 		}
 	}
-	if id := strings.TrimSpace(asString(c.session().SessionData["collection_id"])); id != "" {
-		if col := collectionByID(c, id); col != nil && collectionHandoffAfterCapture(col) {
+	if id := strings.TrimSpace(asString(c.Session().SessionData["collection_id"])); id != "" {
+		if col := collectionByID(c, id); col != nil && collectionHandoffEarly(col) {
 			return col
 		}
 	}
 	return nil
 }
 
-// runAfterCaptureHandoff collects capture → add-ons → Meta Flow details,
+// runEarlyHandoff collects capture → add-ons → Meta Flow details,
 // then creates a commerce agent transfer. It does not write tiqr_cart or place
 // an order. The known product option is copied onto the handoff cart so the
 // store order form can select it. Fulfillment time is skipped for now.
-func runAfterCaptureHandoff(c *Conv, collection map[string]any, productID string) error {
+func runEarlyHandoff(c *Conv, collection map[string]any, productID string) error {
 	if collection == nil {
-		return c.Transfer(codedAgentHandoff)
+		return c.Transfer(codedflow.AgentHandoff)
 	}
-	migrateAfterCaptureSessionKeys(c.session())
+	MigrateEarlyHandoffSessionKeys(c.Session())
 
 	categoryID := fieldString(collection, "id")
 	name := strings.TrimSpace(asString(collection["name"]))
@@ -166,35 +188,35 @@ func runAfterCaptureHandoff(c *Conv, collection map[string]any, productID string
 		name = "order"
 	}
 
-	c.Once("after_capture_select_category", func() {
-		setSelectedCategoryID(c.session(), categoryID)
-		c.session().SessionData["collection_id"] = categoryID
-		c.session().SessionData["collection_name"] = name
+	c.Once("early_handoff_select_category", func() {
+		c.App().SetSelectedCategoryID(c.Session(), categoryID)
+		c.Session().SessionData["collection_id"] = categoryID
+		c.Session().SessionData["collection_name"] = name
 		if productID != "" {
-			c.session().SessionData["product_id"] = productID
-			c.session().SessionData["after_capture_product_id"] = productID
+			c.Session().SessionData["product_id"] = productID
+			c.Session().SessionData["early_handoff_product_id"] = productID
 		}
 	})
 
-	c.Say(fmt.Sprintf(tiqrEcommerceAfterCaptureIntro, name))
+	c.Say(fmt.Sprintf(tiqrEcommerceEarlyHandoffIntro, name))
 
-	if !askAfterCaptureCaptureFields(c, collection) {
+	if !askEarlyHandoffCaptureFields(c, collection) {
 		return nil
 	}
-	if !askAfterCaptureAddons(c, productID) {
+	if !askEarlyHandoffAddons(c, productID) {
 		return nil
 	}
-	if !askAfterCaptureCustomerDetails(c) {
+	if !askEarlyHandoffCustomerDetails(c) {
 		return nil
 	}
-	return finishCodedAfterCaptureHandoff(c, collection)
+	return finishCodedEarlyHandoff(c, collection)
 }
 
-func askAfterCaptureCaptureFields(c *Conv, collection map[string]any) bool {
+func askEarlyHandoffCaptureFields(c *Conv, collection map[string]any) bool {
 	// Replay every field in order. Skipping a field already stored in
 	// commerce_captured_fields would skip its call record and shift later
 	// answers (and Skip) onto the wrong steps.
-	fields := requiredCaptureFieldsFrom(collection)
+	fields := RequiredCaptureFieldsFrom(collection)
 	for i, field := range fields {
 		name := captureCallName(i, asString(field["key"]))
 		value, ok := c.askCaptureFieldNoCheckout(name, field)
@@ -203,16 +225,16 @@ func askAfterCaptureCaptureFields(c *Conv, collection map[string]any) bool {
 		}
 		saveSessionCapture(c, field, value)
 	}
-	return !c.stop
+	return !c.Stop
 }
 
 // askCaptureFieldNoCheckout is askCaptureField without diverting to checkout.
 func (c *Conv) askCaptureFieldNoCheckout(name string, field map[string]any) (any, bool) {
-	if c.stop {
+	if c.Stop {
 		return nil, false
 	}
-	if rec, done := c.doneCall(); done {
-		if !callOK(rec) {
+	if rec, done := c.DoneCall(); done {
+		if !codedflow.CallOK(rec) {
 			return nil, false
 		}
 		value, ok := rec["value"]
@@ -225,40 +247,40 @@ func (c *Conv) askCaptureFieldNoCheckout(name string, field map[string]any) (any
 	if body == "" {
 		body = "Please share " + asString(field["label"]) + "."
 	}
-	if c.noAnswerYet() {
+	if c.NoAnswerYet() {
 		if !c.sendCapturePrompt(name, body) {
 			return nil, false
 		}
-		c.wait(name)
+		c.Wait(name)
 		return nil, false
 	}
-	input := strings.TrimSpace(c.chat.userInput)
+	input := strings.TrimSpace(c.ChatCtx().UserInput())
 	if input == "" || !validCaptureValue(field, input) {
-		c.chat.consumed = true
+		c.ChatCtx().SetConsumed(true)
 		if !c.sendCapturePrompt(name, "Please provide a valid value.\n"+body) {
 			return nil, false
 		}
-		c.wait(name)
+		c.Wait(name)
 		return nil, false
 	}
 	value := normalizedCaptureValue(field, input)
-	c.chat.consumed = true
-	c.appendCall(map[string]any{"name": name, "ok": true, "value": value})
+	c.ChatCtx().SetConsumed(true)
+	c.AppendCall(map[string]any{"name": name, "ok": true, "value": value})
 	return value, true
 }
 
-func askAfterCaptureAddons(c *Conv, productID string) bool {
+func askEarlyHandoffAddons(c *Conv, productID string) bool {
 	productID = strings.TrimSpace(productID)
-	if !askCatalogAddons(c, productID, "after_capture_addons") {
+	if !askCatalogAddons(c, productID, "early_handoff_addons") {
 		return false
 	}
-	choices := loadCatalogAddonChoicesReplay(c, "after_capture_addons")
+	choices := loadCatalogAddonChoicesReplay(c, "early_handoff_addons")
 	if len(choices) > 0 {
 		return true
 	}
-	text, ok := c.AskText("after_capture_addons_free",
+	text, ok := c.AskText("early_handoff_addons_free",
 		"Any add-ons (candles, flowers, etc.)? Reply with details, or say Skip.",
-		StepNote{
+		codedflow.StepNote{
 			Doing:  "Collecting optional add-on notes for a custom request.",
 			Expect: "Add-on details, or Skip.",
 		},
@@ -270,28 +292,28 @@ func askAfterCaptureAddons(c *Conv, productID string) bool {
 	if lower == "skip" || lower == "no" || lower == "none" || lower == "done" || lower == "continue" {
 		return true
 	}
-	c.Once("after_capture_addons_free_save", func() {
-		notes := jsonMapFromSession(c.session(), "commerce_notes")
+	c.Once("early_handoff_addons_free_save", func() {
+		notes := jsonMapFromSession(c.Session(), "commerce_notes")
 		notes["addon_requests"] = strings.TrimSpace(text)
-		c.session().SessionData["commerce_notes"] = map[string]any(notes)
+		c.Session().SessionData["commerce_notes"] = map[string]any(notes)
 	})
 	return true
 }
 
 // loadCatalogAddonChoicesReplay reads choices already fetched by askCatalogAddons.
 func loadCatalogAddonChoicesReplay(c *Conv, prefix string) []map[string]any {
-	if c == nil || c.session() == nil {
+	if c == nil || c.Session() == nil {
 		return nil
 	}
-	raw, ok := asStringMap(c.session().SessionData[prefix+"_product"])
+	raw, ok := asStringMap(c.Session().SessionData[prefix+"_product"])
 	if !ok || raw == nil {
 		return nil
 	}
 	return parseProductAddonChoices(raw["addons"])
 }
 
-func askAfterCaptureFulfillmentTime(c *Conv) bool {
-	mode := strings.TrimSpace(asString(c.session().SessionData["delivery_mode"]))
+func askEarlyHandoffFulfillmentTime(c *Conv) bool {
+	mode := strings.TrimSpace(asString(c.Session().SessionData["delivery_mode"]))
 	if mode == "" {
 		mode = tiqrModePickup
 	}
@@ -307,16 +329,16 @@ func askAfterCaptureFulfillmentTime(c *Conv) bool {
 	earliestAt, tzName := earliestSlotFromPayload(slotsPayload)
 	if tzName == "" {
 		tzName = "UTC"
-		if store, ok := asStringMap(c.session().SessionData["store"]); ok {
+		if store, ok := asStringMap(c.Session().SessionData["store"]); ok {
 			if tz := asString(store["timezone"]); tz != "" {
 				tzName = tz
 			}
 		}
 	}
-	c.Once("after_capture_slot_meta", func() {
-		c.session().SessionData["after_capture_earliest_at"] = earliestAt
-		c.session().SessionData["after_capture_timezone"] = tzName
-		c.session().SessionData["delivery_mode"] = mode
+	c.Once("early_handoff_slot_meta", func() {
+		c.Session().SessionData["early_handoff_earliest_at"] = earliestAt
+		c.Session().SessionData["early_handoff_timezone"] = tzName
+		c.Session().SessionData["delivery_mode"] = mode
 	})
 
 	modeWord := "pickup"
@@ -340,7 +362,7 @@ func askAfterCaptureFulfillmentTime(c *Conv) bool {
 		if attempt > 1 {
 			body = "I couldn't understand that time. Try \"in 30 minutes\", \"today 5pm\", or \"tomorrow 10:30am\".\n\n" + prompt
 		}
-		text, ok := c.AskText(fmt.Sprintf("fulfillment_time_%d", attempt), body, StepNote{
+		text, ok := c.AskText(fmt.Sprintf("fulfillment_time_%d", attempt), body, codedflow.StepNote{
 			Doing:  "Collecting a pickup or delivery time for a custom request.",
 			Expect: "A relative or absolute time such as in 45 minutes or tomorrow 10am.",
 		})
@@ -360,13 +382,13 @@ func askAfterCaptureFulfillmentTime(c *Conv) bool {
 			c.Say("That time isn't available. Please choose another time within store hours.")
 			continue
 		}
-		c.Once(fmt.Sprintf("after_capture_slot_saved_%d", attempt), func() {
-			c.session().SessionData["fulfillment_slot_token"] = asString(slot["token"])
-			c.session().SessionData["requested_fulfillment_at"] = asString(slot["requested_fulfillment_at"])
+		c.Once(fmt.Sprintf("early_handoff_slot_saved_%d", attempt), func() {
+			c.Session().SessionData["fulfillment_slot_token"] = asString(slot["token"])
+			c.Session().SessionData["requested_fulfillment_at"] = asString(slot["requested_fulfillment_at"])
 			if promised := asString(slot["promised_ready_at"]); promised != "" {
-				c.session().SessionData["promised_ready_at"] = promised
+				c.Session().SessionData["promised_ready_at"] = promised
 			}
-			c.session().SessionData["after_capture_timezone"] = firstNonEmpty(asString(slot["timezone"]), tzName)
+			c.Session().SessionData["early_handoff_timezone"] = firstNonEmpty(asString(slot["timezone"]), tzName)
 		})
 		return true
 	}
@@ -384,117 +406,50 @@ func earliestSlotFromPayload(payload map[string]any) (earliestAt, timezone strin
 	return asString(first["requested_fulfillment_at"]), asString(first["timezone"])
 }
 
-func askAfterCaptureCustomerDetails(c *Conv) bool {
+func askEarlyHandoffCustomerDetails(c *Conv) bool {
 	detailsBody := "Please share your name, email, and phone number so we can continue your request."
-	flowID := tiqrEcommercePickupFlowID
-	if asString(c.session().SessionData["delivery_mode"]) == tiqrModeDelivery {
+	flowID := TiqrEcommercePickupFlowID
+	if asString(c.Session().SessionData["delivery_mode"]) == tiqrModeDelivery {
 		detailsBody = "Please share your name, phone number, and address so we can continue your request."
 		flowID = tiqrEcommerceFlowID
 	}
-	return c.AskFlow("after_capture_details", FlowPrompt{
+	return c.AskFlow("early_handoff_details", codedflow.FlowPrompt{
 		FlowID: flowID,
 		CTA:    "Enter details",
 		Header: "Your details",
 		Body:   detailsBody,
-		Step: StepNote{
+		Step: codedflow.StepNote{
 			Doing:  "Collecting customer details for a custom request before agent handoff.",
 			Expect: "A WhatsApp Flow submission with contact details.",
 		},
 	})
 }
 
-func finishCodedAfterCaptureHandoff(c *Conv, collection map[string]any) error {
-	if c.stop || c.ended {
+func finishCodedEarlyHandoff(c *Conv, collection map[string]any) error {
+	if c.Stop || c.Ended {
 		return nil
 	}
-	account := c.chat.account
-	contact := c.chat.contact
-	session := c.session()
-	if account == nil || contact == nil || session == nil {
-		c.Say(tiqrEcommerceAfterCaptureHandoffFail)
-		c.stop = true
+	session := c.Session()
+	if c.ChatCtx() == nil || c.ChatCtx().Account() == nil || c.ChatCtx().Contact() == nil || session == nil {
+		c.Say(tiqrEcommerceEarlyHandoffFail)
+		c.Stop = true
 		return nil
 	}
-
-	settings, err := c.app.getChatbotSettingsCached(account.OrganizationID, account.Name)
-	if err != nil || settings == nil {
-		c.Say(tiqrEcommerceAfterCaptureHandoffFail)
-		c.stop = true
+	stageEarlyHandoffProductOptionCart(session)
+	if !c.App().CompleteCodedEarlyHandoff(c.ChatCtx(), collection) {
+		c.Say(tiqrEcommerceEarlyHandoffFail)
+		c.Stop = true
 		return nil
 	}
-
-	st := afterCaptureCheckoutStateFromSession(session)
-	setCheckoutState(session, st)
-	setSelectedCategoryID(session, fieldString(collection, "id"))
-	stageAfterCaptureProductOptionCart(session)
-
-	if _, err := c.app.ensureCommerceDraft(contact, session, settings); err != nil {
-		c.app.Log.Error("after_capture draft create failed", "error", err)
-		c.Say(tiqrEcommerceAfterCaptureHandoffFail)
-		c.stop = true
-		return nil
-	}
-	_ = c.app.syncReferencedCommerceDraft(session)
-
-	category := categoryFromCollectionMap(collection)
-	if !c.app.completeCommerceCaptureWithCategory(account, contact, session, settings, st, category) {
-		c.Say(tiqrEcommerceAfterCaptureHandoffFail)
-		c.stop = true
-		return nil
-	}
-
-	// createCommerceTransfer cancels the session in the DB. Keep the in-memory
-	// session cancelled so persistChatSession does not revive it as completed.
-	clearCodedAfterCaptureSession(session)
-	c.stop = true
-	c.ended = true
+	clearCodedEarlyHandoffSession(session)
+	c.Stop = true
+	c.Ended = true
 	return nil
 }
 
-func afterCaptureCheckoutStateFromSession(session *models.ChatbotSession) *checkoutState {
-	data := session.SessionData
-	st := &checkoutState{
-		Flow:             checkoutFlowAfterCapture,
-		Step:             "confirm",
-		NewAddress:       map[string]any{},
-		DeliveryMode:     asString(data["delivery_mode"]),
-		SlotToken:        asString(data["fulfillment_slot_token"]),
-		RequestedAt:      asString(data["requested_fulfillment_at"]),
-		PromisedAt:       asString(data["promised_ready_at"]),
-		Timezone:         asString(data["after_capture_timezone"]),
-		EarliestAt:       asString(data["after_capture_earliest_at"]),
-		PendingProductID: asString(data["after_capture_product_id"]),
-		Email:            contextEmail(data),
-	}
-	if st.DeliveryMode == "" {
-		st.DeliveryMode = tiqrModePickup
-	}
-	st.NewAddress = afterCaptureAddressFromFlow(data)
-	if lat, ok := anyToFloat64(data["delivery_latitude"]); ok {
-		st.Latitude, st.HasLocation = lat, true
-	}
-	if lng, ok := anyToFloat64(data["delivery_longitude"]); ok {
-		st.Longitude = lng
-		st.HasLocation = true
-	}
-	if zone := asString(data["delivery_zone"]); zone != "" {
-		st.DeliveryZone = zone
-	}
-	if fee, ok := anyToFloat64(data["shipping_fee_paise"]); ok {
-		st.ShippingFeePaise = int64(fee)
-	}
-	if notes := strings.TrimSpace(contextValue(data, "customer_notes", "notes")); notes != "" {
-		existing := jsonMapFromSession(session, "commerce_notes")
-		if asString(existing["customer_notes"]) == "" {
-			existing["customer_notes"] = notes
-			session.SessionData["commerce_notes"] = map[string]any(existing)
-		}
-	}
-	return st
-}
 
-// afterCaptureAddressFromFlow builds the draft address snapshot from WhatsApp Flow fields.
-func afterCaptureAddressFromFlow(data map[string]any) map[string]any {
+// earlyHandoffAddressFromFlow builds the draft address snapshot from WhatsApp Flow fields.
+func earlyHandoffAddressFromFlow(data map[string]any) map[string]any {
 	name := contextValue(data, "customer_name", "name")
 	phone := contextValue(data, "customer_phone", "phone", "phone_number")
 	email := contextEmail(data)
@@ -529,10 +484,10 @@ func afterCaptureAddressFromFlow(data map[string]any) map[string]any {
 	return addr
 }
 
-// stageAfterCaptureProductOptionCart copies the product's option onto the
+// stageEarlyHandoffProductOptionCart copies the product's option onto the
 // handoff cart. A custom request never builds tiqr_cart, so without this the
 // order form has no product option to select.
-func stageAfterCaptureProductOptionCart(session *models.ChatbotSession) {
+func stageEarlyHandoffProductOptionCart(session *models.ChatbotSession) {
 	if session == nil {
 		return
 	}
@@ -540,24 +495,24 @@ func stageAfterCaptureProductOptionCart(session *models.ChatbotSession) {
 		session.SessionData = models.JSONB{}
 	}
 	if len(tiqrCartLinesFromData(session.SessionData)) > 0 {
-		session.SessionData[commerceHandoffCartKey] = map[string]any(tiqrEcommerceCartSnapshot(session))
+		session.SessionData[HandoffCartKey] = map[string]any(tiqrEcommerceCartSnapshot(session))
 		return
 	}
-	line, ok := afterCaptureProductOptionLine(session.SessionData)
+	line, ok := EarlyHandoffProductOptionLine(session.SessionData)
 	if !ok {
 		return
 	}
-	session.SessionData[commerceHandoffCartKey] = map[string]any{
-		"source": tiqrEcommerceCartSource,
+	session.SessionData[HandoffCartKey] = map[string]any{
+		"source": CartSource,
 		"lines":  []any{line},
 	}
 }
 
-func afterCaptureProductOptionLine(data map[string]any) (map[string]any, bool) {
+func EarlyHandoffProductOptionLine(data map[string]any) (map[string]any, bool) {
 	if data == nil {
 		return nil, false
 	}
-	productID := strings.TrimSpace(asString(data["after_capture_product_id"]))
+	productID := strings.TrimSpace(asString(data["early_handoff_product_id"]))
 	if productID == "" {
 		productID = strings.TrimSpace(asString(data["product_id"]))
 	}
@@ -575,7 +530,7 @@ func afterCaptureProductOptionLine(data map[string]any) (map[string]any, bool) {
 	if len(options) == 0 {
 		options = optionMapsFrom(data["options"])
 	}
-	optionID, optionName, ok := pickAfterCaptureProductOption(data, options)
+	optionID, optionName, ok := pickEarlyHandoffProductOption(data, options)
 	if !ok {
 		return nil, false
 	}
@@ -593,7 +548,7 @@ func afterCaptureProductOptionLine(data map[string]any) (map[string]any, bool) {
 }
 
 func findSessionProduct(data map[string]any, productID string) map[string]any {
-	for _, key := range []string{"after_capture_products", "products"} {
+	for _, key := range []string{"early_handoff_products", "products"} {
 		items, ok := anySlice(data[key])
 		if !ok {
 			continue
@@ -610,7 +565,7 @@ func findSessionProduct(data map[string]any, productID string) map[string]any {
 			}
 		}
 	}
-	if raw, ok := asStringMap(data["after_capture_product"]); ok {
+	if raw, ok := asStringMap(data["early_handoff_product"]); ok {
 		if nested, ok := asStringMap(raw["product"]); ok {
 			raw = nested
 		}
@@ -637,7 +592,7 @@ func optionMapsFrom(raw any) []map[string]any {
 	return out
 }
 
-func pickAfterCaptureProductOption(data map[string]any, options []map[string]any) (string, string, bool) {
+func pickEarlyHandoffProductOption(data map[string]any, options []map[string]any) (string, string, bool) {
 	want := strings.TrimSpace(asString(data["option_id"]))
 	if want != "" {
 		for _, option := range options {
@@ -661,12 +616,12 @@ func pickAfterCaptureProductOption(data map[string]any, options []map[string]any
 	return id, fieldString(options[0], "name"), true
 }
 
-func clearCodedAfterCaptureSession(session *models.ChatbotSession) {
+func clearCodedEarlyHandoffSession(session *models.ChatbotSession) {
 	if session == nil {
 		return
 	}
 	if session.SessionData != nil {
-		delete(session.SessionData, codedFlowDataKey)
+		delete(session.SessionData, codedflow.DataKey)
 	}
 	session.CurrentStep = ""
 	session.StepRetries = 0

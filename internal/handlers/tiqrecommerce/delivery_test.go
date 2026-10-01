@@ -1,4 +1,4 @@
-package handlers
+package tiqrecommerce
 
 import (
 	"testing"

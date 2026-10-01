@@ -1,4 +1,4 @@
-package handlers
+package codedflow
 
 import (
 	"encoding/json"
@@ -6,27 +6,16 @@ import (
 	"os"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/shridarpatil/whatomate/internal/models"
 )
 
 const (
-	codedFlowTraceComponent = "coded_flow"
+	CodedFlowTraceComponent = "coded_flow"
 	codedFlowTraceMaxRunes  = 8000
 )
 
-// codedFlowTraceEnabled reports whether detailed coded-flow tracing is on.
-// WHATOMATE_CODEDFLOW_TRACE defaults to enabled when the variable is unset or blank.
-// Set to 0/false/no/off to disable. Config [codedflow].trace is used when the
-// env var is unset and Config is loaded.
-func (a *App) codedFlowTraceEnabled() bool {
-	if v, ok := os.LookupEnv("WHATOMATE_CODEDFLOW_TRACE"); ok {
-		return parseTruthyEnv(v, true)
-	}
-	if a != nil && a.Config != nil {
-		return a.Config.CodedFlow.TraceEnabled()
-	}
-	return true
+// ParseTruthyEnv parses an env-style truthy string. Empty uses defaultWhenEmpty.
+func ParseTruthyEnv(raw string, defaultWhenEmpty bool) bool {
+	return parseTruthyEnv(raw, defaultWhenEmpty)
 }
 
 func parseTruthyEnv(raw string, defaultWhenEmpty bool) bool {
@@ -42,121 +31,16 @@ func parseTruthyEnv(raw string, defaultWhenEmpty bool) bool {
 	}
 }
 
-func (a *App) shouldTraceCodedFlow(session *models.ChatbotSession) bool {
-	if a == nil || !a.codedFlowTraceEnabled() {
-		return false
+// CodedFlowTraceEnv reports WHATOMATE_CODEDFLOW_TRACE (default enabled when unset).
+func CodedFlowTraceEnv() (enabled bool, set bool) {
+	v, ok := os.LookupEnv("WHATOMATE_CODEDFLOW_TRACE")
+	if !ok {
+		return true, false
 	}
-	return codedFlowSessionKey(session) != ""
+	return parseTruthyEnv(v, true), true
 }
 
-// logCodedFlow writes a structured, SignOz-filterable log line.
-// Filter in SignOz with: attributes.component = "coded_flow"
-// and attributes.event in {inbound, turn_context, whatsapp_outbound, ai_request, ai_response, tiqr_request, tiqr_response}.
-func (a *App) logCodedFlow(event string, session *models.ChatbotSession, attrs ...any) {
-	if a == nil || !a.shouldTraceCodedFlow(session) {
-		return
-	}
-	fields := []any{
-		"component", codedFlowTraceComponent,
-		"event", event,
-	}
-	if session != nil {
-		fields = append(fields,
-			"session_id", session.ID.String(),
-			"org_id", session.OrganizationID.String(),
-			"account", session.WhatsAppAccount,
-			"phone", session.PhoneNumber,
-			"flow_key", codedFlowSessionKey(session),
-			"step", session.CurrentStep,
-			"session_status", string(session.Status),
-		)
-	}
-	fields = append(fields, attrs...)
-	a.Log.Info("coded_flow."+event, fields...)
-}
-
-func (a *App) logCodedFlowInbound(ctx *chatNodeCtx) {
-	if ctx == nil || ctx.capturing() || !a.shouldTraceCodedFlow(ctx.session) {
-		return
-	}
-	a.logCodedFlow("inbound", ctx.session,
-		"user_text", truncateTrace(ctx.userInput),
-		"button_id", strings.TrimSpace(ctx.buttonID),
-		"has_flow_response", len(ctx.flowResponseData) > 0,
-	)
-}
-
-func (a *App) logCodedFlowContext(session *models.ChatbotSession, reason string) {
-	if !a.shouldTraceCodedFlow(session) {
-		return
-	}
-	a.logCodedFlow("turn_context", session,
-		"reason", reason,
-		"context_json", truncateTrace(mustJSON(previewSessionContext(session))),
-	)
-}
-
-func (a *App) logCodedFlowWhatsApp(ctx *chatNodeCtx, step, interactive, content string, extra ...any) {
-	if ctx == nil || ctx.capturing() || !a.shouldTraceCodedFlow(ctx.session) {
-		return
-	}
-	attrs := []any{
-		"whatsapp_step", step,
-		"interactive", interactive,
-		"message_body", truncateTrace(content),
-	}
-	attrs = append(attrs, extra...)
-	a.logCodedFlow("whatsapp_outbound", ctx.session, attrs...)
-}
-
-func (a *App) logCodedFlowAI(session *models.ChatbotSession, role, prompt, response, errMsg string, extra ...any) {
-	if !a.shouldTraceCodedFlow(session) {
-		return
-	}
-	a.logCodedFlow("ai_request", session,
-		append([]any{
-			"ai_role", role,
-			"prompt", truncateTrace(prompt),
-		}, extra...)...,
-	)
-	attrs := []any{
-		"ai_role", role,
-		"response", truncateTrace(response),
-	}
-	if errMsg != "" {
-		attrs = append(attrs, "error", errMsg)
-	}
-	attrs = append(attrs, extra...)
-	a.logCodedFlow("ai_response", session, attrs...)
-}
-
-func (a *App) logCodedFlowTiqrRequest(session *models.ChatbotSession, apiType, operation, curl string, params map[string]string) {
-	if !a.shouldTraceCodedFlow(session) {
-		return
-	}
-	a.logCodedFlow("tiqr_request", session,
-		"api_type", apiType,
-		"operation", operation,
-		"curl", truncateTrace(curl),
-		"params_json", truncateTrace(mustJSON(params)),
-	)
-}
-
-func (a *App) logCodedFlowTiqrResponse(session *models.ChatbotSession, apiType, operation string, status int, body any, errMsg string) {
-	if !a.shouldTraceCodedFlow(session) {
-		return
-	}
-	attrs := []any{
-		"api_type", apiType,
-		"operation", operation,
-		"http_status", status,
-		"response_json", truncateTrace(mustJSON(body)),
-	}
-	if errMsg != "" {
-		attrs = append(attrs, "error", errMsg)
-	}
-	a.logCodedFlow("tiqr_response", session, attrs...)
-}
+func MustJSON(v any) string { return mustJSON(v) }
 
 func mustJSON(v any) string {
 	if v == nil {
@@ -169,6 +53,8 @@ func mustJSON(v any) string {
 	return string(b)
 }
 
+func TruncateTrace(s string) string { return truncateTrace(s) }
+
 func truncateTrace(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -179,6 +65,11 @@ func truncateTrace(s string) string {
 	}
 	runes := []rune(s)
 	return string(runes[:codedFlowTraceMaxRunes]) + "…[truncated]"
+}
+
+// FormatHTTPCurl builds a curl string for trace logs.
+func FormatHTTPCurl(method, rawURL string, headers map[string]string, body string) string {
+	return formatHTTPCurl(method, rawURL, headers, body)
 }
 
 func formatHTTPCurl(method, rawURL string, headers map[string]string, body string) string {

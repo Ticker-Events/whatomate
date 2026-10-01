@@ -1,6 +1,6 @@
 # TiQR Ecommerce coded flow
 
-Code: `internal/handlers/codedflow_tiqr_ecommerce.go`. Key: `tiqr_ecommerce`.
+Code: `internal/handlers/tiqrecommerce/`. Key: `tiqr_ecommerce`. Engine: `internal/handlers/codedflow/`.
 
 This is the code-level map of that function: the customer path, where AI actually runs, and the gaps. The admin-facing page is `docs/src/content/docs/features/coded-flows.mdx`. AI role settings are in `docs/coded-flow-ai.md`.
 
@@ -8,7 +8,7 @@ The function is a script. It does not let a model browse the catalog or place th
 
 ## How a turn runs
 
-`runCodedFlow` in `codedflow.go` starts the function from the top on every inbound message. Finished calls are replayed from `SessionData._coded_calls` in order. Call order is the identity of a step. Names can repeat inside the buy loop (`products`, `cart`, `quantity`) because the next unread record is what matters, not the name.
+`runCodedFlow` in handlers (via `codedflow.Run`) starts the function from the top on every inbound message. Finished calls are replayed from `SessionData._coded_calls` in order. Call order is the identity of a step. Names can repeat inside the buy loop (`products`, `cart`, `quantity`) because the next unread record is what matters, not the name.
 
 The keyword that started the flow is not an answer. `CurrentStep` is empty on that first turn, so the trigger text is cleared before `tiqrEcommerce` runs.
 
@@ -30,13 +30,13 @@ flowchart TD
   look --> endStatus[Say status and end]
   ful --> list[Collection list]
   list -->|row or collection id| policy{handoff_policy after_capture}
-  policy -->|yes| afterCapture[Capture add-ons Meta Flow]
-  afterCapture --> commerceXfer[Commerce draft and agent transfer]
+  policy -->|yes| earlyHandoff[Capture add-ons Meta Flow]
+  earlyHandoff --> commerceXfer[Commerce draft and agent transfer]
   policy -->|no| prod[list_products]
   list -->|product query| search[search_products]
   search --> show[Carousel or one image]
   prod --> show
-  show -->|picked product collection after_capture| afterCapture
+  show -->|picked product collection after_capture| earlyHandoff
   show --> opt{How many options}
   opt -->|none| skip[Say unavailable]
   opt -->|one| qty[Ask quantity]
@@ -59,7 +59,7 @@ flowchart TD
   create -->|give up or retries used| xfer
 ```
 
-Checkout said in free text on the menu, the collection list, a product card, an option list, the quantity prompt, or the add-more prompt jumps to the same checkout, after an empty-cart message if `tiqr_cart` has no lines. That divert is not applied during fulfillment or during an after-capture handoff. See Gaps.
+Checkout said in free text on the menu, the collection list, a product card, an option list, the quantity prompt, or the add-more prompt jumps to the same checkout, after an empty-cart message if `tiqr_cart` has no lines. That divert is not applied during fulfillment or during an early handoff. See Gaps.
 
 ### 1. Load the store
 
@@ -102,7 +102,7 @@ The body is `Welcome to {store name}.` plus `What would you like to do?` when th
 | Both | Store pickup or Delivery |
 | Only `DELIVERY_TO_LOCATION` | No mode buttons. Goes straight to a location pin. `delivery_mode` is set inside `Once` |
 
-Delivery asks for a WhatsApp location pin (`AskLocation`). Distance is computed in `evaluateStoreDelivery` (`codedflow_delivery.go`) from the store latitude, longitude, `free_delivery_radius`, and `delivery_radius`. There is no MCP call.
+Delivery asks for a WhatsApp location pin (`AskLocation`). Distance is computed in `evaluateStoreDelivery` (`internal/handlers/tiqrecommerce/delivery.go`) from the store latitude, longitude, `free_delivery_radius`, and `delivery_radius`. There is no MCP call.
 
 | Zone | Next step |
 | --- | --- |
@@ -120,11 +120,11 @@ The collection list uses header `Our collections`, button `Browse`, row title `{
 
 `askRouteList` also has `AllowCatalog: true`, so free text on this step can name another loaded collection or a product.
 
-#### After-capture collections
+#### Early-handoff collections (`handoff_policy: after_capture`)
 
-When the chosen collection has `handoff_policy: after_capture` (or a named product belongs to such a collection), the flow does not show product cards, does not ask quantity, and does not write `tiqr_cart` or call `create_order`.
+When the chosen collection has `handoff_policy: after_capture` (or a named product belongs to such a collection), the flow does not show product cards, does not ask quantity, and does not write `tiqr_cart` or call `create_order`. Catalog value stays `after_capture`; session keys and coded-call names use `early_handoff_*`.
 
-Code: `runAfterCaptureHandoff` in `codedflow_tiqr_after_capture.go`.
+Code: `runEarlyHandoff` in `internal/handlers/tiqrecommerce/early_handoff.go`.
 
 1. Intro: `This is a custom {name} request — I’ll collect a few details and connect you with our team.`
 2. Required capture fields from that collection (same prompts as the cart path). Checkout phrases do not divert away from these questions.
@@ -162,7 +162,7 @@ Quantity uses `AskNumber` with pattern `^[1-9][0-9]*$`. Digits of 1 or more are 
 
 ### Catalog add-ons
 
-After capture fields and before the cart line is written, the flow loads the product with `get_product` and reads active catalog add-ons. The same step runs in after-capture handoff (`askCatalogAddons` with prefixes `product_addons` and `after_capture_addons`).
+After capture fields and before the cart line is written, the flow loads the product with `get_product` and reads active catalog add-ons. The same step runs in early handoff (`askCatalogAddons` with prefixes `product_addons` and `early_handoff_addons`).
 
 When the product has catalog add-ons, the customer sees a numbered list with prices when present:
 
@@ -186,7 +186,7 @@ Go then grounds that JSON against the loaded choices:
 | Unclear, low confidence, or out-of-range index | Ask a short clarifying question (up to 3 turns) |
 | Still unclear after 3 clarify turns | Transfer to an agent |
 
-Products with no catalog add-ons skip this step on the buy path. After-capture without catalog add-ons still asks the free-text Skip question (`after_capture_addons_free`).
+Products with no catalog add-ons skip this step on the buy path. Early handoff without catalog add-ons still asks the free-text Skip question (`early_handoff_addons_free`).
 
 ### Collection capture fields
 
@@ -239,7 +239,7 @@ Retries come from `[codedflow] order_retries`, default 2. The loop is `attempt :
 
 ### Agent handoff snapshot
 
-Every `Transfer` from this flow (talk to staff, failed order, ungrounded intent, store or product load failure) snapshots the session onto a `CommerceDraft` and creates an agent transfer with `source: commerce` and `metadata.kind: commerce_handoff`, the same shape as after-capture handoffs.
+Every `Transfer` from this flow (talk to staff, failed order, ungrounded intent, store or product load failure) snapshots the session onto a `CommerceDraft` and creates an agent transfer with `source: commerce` and `metadata.kind: commerce_handoff`, the same shape as early handoffs.
 
 | Draft / metadata field | Source |
 | --- | --- |
@@ -265,7 +265,7 @@ This file never calls a model itself. The calls are inside `Conv`.
 
 ### Intent
 
-`resolveFreeText` in `codedflow_intent.go`. It runs when the reply is not an offered button id or title.
+`resolveFreeText` in `internal/handlers/codedflow/intent.go`. It runs when the reply is not an offered button id or title.
 
 Steps in this flow that can reach it:
 
@@ -304,7 +304,7 @@ Catalog add-on selection also uses the guide role to parse free text into indexe
 
 ### Translation
 
-`Conv.text` in `codedflow_ai.go` runs on every authored line before send, including button titles (then truncated to 20 characters). It does not run when `customer_language` is empty, `en`, or `en-*`. English taps therefore stay in the authored English.
+`Conv.text` in `internal/handlers/codedflow/ai.go` runs on every authored line before send, including button titles (then truncated to 20 characters). It does not run when `customer_language` is empty, `en`, or `en-*`. English taps therefore stay in the authored English.
 
 Catalog text is not translated: collection names, product names, option names, and prices stay as the store sent them. Placeholders, asterisks, numbers, prices, and line breaks are supposed to be kept. Results are cached on the session under `_translations`. A translation error sends the English source.
 
@@ -379,7 +379,7 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 
 10. **Empty store data is a transfer, not a retry inside the session.** `get_store` or `list_collections` failure completes the session. A later keyword can start a new session and call TiQR again. Within one session those calls are not retried, because the flow has already ended.
 
-11. **Hardcoded Meta flow ids and fallback image.** Pickup uses `tiqrEcommercePickupFlowID` (`1484028330223507`). Delivery uses `tiqrEcommerceFlowID` (`1557965846018132`). Both checkout and after-capture handoff use these. The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
+11. **Hardcoded Meta flow ids and fallback image.** Pickup uses `tiqrEcommercePickupFlowID` (`1484028330223507`). Delivery uses `tiqrEcommerceFlowID` (`1557965846018132`). Both checkout and early handoff use these. The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
 
 12. **Language is sticky.** The first non-empty intent language wins for the session. A later message in another language does not replace it, so translation keeps using the first label.
 

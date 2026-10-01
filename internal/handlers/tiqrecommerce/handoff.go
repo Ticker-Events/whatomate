@@ -1,6 +1,7 @@
-package handlers
+package tiqrecommerce
 
 import (
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"errors"
 	"fmt"
 	"strconv"
@@ -12,8 +13,8 @@ import (
 )
 
 const (
-	commerceHandoffCartKey    = "commerce_handoff_cart"
-	tiqrEcommerceCartSource   = "tiqr_ecommerce"
+	HandoffCartKey    = "commerce_handoff_cart"
+	CartSource   = "tiqr_ecommerce"
 	commerceNotesMissingKey   = "missing_fields"
 	commerceNotesOrderNotesKey = "order_notes"
 )
@@ -23,62 +24,66 @@ const (
 // Outside business hours it sends the out-of-hours message and ends without a
 // draft. Any other failure returns an error so Transfer can fall back to the
 // queue transfer.
+func TransferEcommerce(base *codedflow.Conv, message string) error {
+	return wrap(base).transferTiqrEcommerce(message)
+}
+
 func (c *Conv) transferTiqrEcommerce(message string) error {
-	if c == nil || c.app == nil || c.chat == nil {
+	if c == nil || c.App() == nil || c.ChatCtx() == nil {
 		return errors.New("coded ecommerce transfer is not configured")
 	}
-	account := c.chat.account
-	contact := c.chat.contact
-	session := c.session()
+	account := c.ChatCtx().Account()
+	contact := c.ChatCtx().Contact()
+	session := c.Session()
 	if account == nil || contact == nil || session == nil {
 		return errors.New("coded ecommerce transfer is missing account or contact")
 	}
 
-	settings, err := c.app.getChatbotSettingsCached(account.OrganizationID, account.Name)
+	settings, err := c.App().GetChatbotSettingsCached(account.OrganizationID, account.Name)
 	if err != nil || settings == nil {
 		return fmt.Errorf("load chatbot settings for ecommerce handoff: %w", err)
 	}
 
-	body := strings.TrimSpace(c.text(message))
+	body := strings.TrimSpace(c.Text(message))
 	if body == "" {
-		body = codedAgentHandoff
+		body = codedflow.AgentHandoff
 	}
 
 	if settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 &&
-		!c.app.isWithinBusinessHours(settings.BusinessHours.Hours) {
-		c.app.Log.Info("Outside business hours, sending out-of-hours message instead of ecommerce handoff",
+		!c.App().IsWithinBusinessHours(settings.BusinessHours.Hours) {
+		c.App().LogInfo("Outside business hours, sending out-of-hours message instead of ecommerce handoff",
 			"contact_id", contact.ID)
 		if settings.BusinessHours.OutOfHoursMessage != "" {
-			_ = c.app.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
+			_ = c.App().SendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
 		} else {
-			_ = c.app.sendAndSaveTextMessage(account, contact, body)
+			_ = c.App().SendAndSaveTextMessage(account, contact, body)
 		}
-		finishCodedSession(session)
+		codedflow.FinishSession(session)
 		return nil
 	}
 
-	stageTiqrEcommerceHandoffSession(session)
+	stageTiqrEcommerceHandoffSession(c.App(), session)
 
-	if _, err := c.app.ensureCommerceDraft(contact, session, settings); err != nil {
+	if _, err := c.App().EnsureCommerceDraft(contact, session, settings); err != nil {
 		return fmt.Errorf("ensure commerce draft for ecommerce handoff: %w", err)
 	}
-	_ = c.app.syncReferencedCommerceDraft(session)
+	_ = c.App().SyncReferencedCommerceDraft(session)
 
 	category := tiqrEcommerceHandoffCategory(session)
 
-	if err := c.app.persistSessionData(session); err != nil {
-		c.app.Log.Warn("persist ecommerce handoff session before transfer failed", "error", err)
+	if err := c.App().PersistSessionData(session); err != nil {
+		c.App().LogWarn("persist ecommerce handoff session before transfer failed", "error", err)
 	}
 
-	_ = c.app.sendAndSaveTextMessage(account, contact, body)
+	_ = c.App().SendAndSaveTextMessage(account, contact, body)
 
-	transfer, created, err := c.app.createCommerceTransfer(account, contact, session, settings, category)
+	transfer, created, err := c.App().CreateCommerceTransfer(account, contact, session, settings, category)
 	if err != nil {
 		return fmt.Errorf("create commerce transfer for ecommerce handoff: %w", err)
 	}
-	c.app.stageCommerceHandoffSessionData(session, category)
+	c.App().StageCommerceHandoffSessionData(session, category)
 	if created {
-		c.app.Log.Info("tiqr ecommerce handoff active",
+		c.App().LogInfo("tiqr ecommerce handoff active",
 			"transfer_id", transfer.ID, "draft_id", transfer.CommerceDraftID)
 	}
 
@@ -88,7 +93,7 @@ func (c *Conv) transferTiqrEcommerce(message string) error {
 	return nil
 }
 
-func stageTiqrEcommerceHandoffSession(session *models.ChatbotSession) {
+func stageTiqrEcommerceHandoffSession(h codedflow.Host, session *models.ChatbotSession) {
 	if session == nil {
 		return
 	}
@@ -96,17 +101,20 @@ func stageTiqrEcommerceHandoffSession(session *models.ChatbotSession) {
 		session.SessionData = models.JSONB{}
 	}
 
-	st := afterCaptureCheckoutStateFromSession(session)
-	st.Flow = "coded_ecommerce"
-	st.Step = "handoff"
-	setCheckoutState(session, st)
-
-	if id := strings.TrimSpace(asString(session.SessionData["collection_id"])); id != "" {
-		setSelectedCategoryID(session, id)
+	if h != nil {
+		h.StageEarlyHandoffCheckout(session)
+		if raw, ok := session.SessionData[checkoutSessionKey].(map[string]any); ok && raw != nil {
+			raw["flow"] = "coded_ecommerce"
+			raw["step"] = "handoff"
+			session.SessionData[checkoutSessionKey] = raw
+		}
+		if id := strings.TrimSpace(asString(session.SessionData["collection_id"])); id != "" {
+			h.SetSelectedCategoryID(session, id)
+		}
 	}
 
 	notes := jsonMapFromSession(session, "commerce_notes")
-	if orderNotes := strings.TrimSpace(codedOrderNotes(session.SessionData)); orderNotes != "" {
+	if orderNotes := strings.TrimSpace(CodedOrderNotes(session.SessionData)); orderNotes != "" {
 		notes[commerceNotesOrderNotesKey] = orderNotes
 	}
 	if customerNotes := strings.TrimSpace(contextValue(session.SessionData, "customer_notes", "notes")); customerNotes != "" {
@@ -122,7 +130,7 @@ func stageTiqrEcommerceHandoffSession(session *models.ChatbotSession) {
 		notes[commerceNotesMissingKey] = values
 	}
 	session.SessionData["commerce_notes"] = map[string]any(notes)
-	session.SessionData[commerceHandoffCartKey] = map[string]any(tiqrEcommerceCartSnapshot(session))
+	session.SessionData[HandoffCartKey] = map[string]any(tiqrEcommerceCartSnapshot(session))
 
 	if storeID := tiqrEcommerceStoreID(session); storeID != "" {
 		if store, ok := asStringMap(session.SessionData["store"]); ok {
@@ -133,12 +141,15 @@ func stageTiqrEcommerceHandoffSession(session *models.ChatbotSession) {
 }
 
 func tiqrEcommerceHandoffCategory(session *models.ChatbotSession) tickermcp.Category {
-	id := selectedCategoryID(session)
+	id := asString(session.SessionData["selected_category_id"])
+	if id == "" {
+		id = asString(session.SessionData["collection_id"])
+	}
 	if id == "" {
 		id = strings.TrimSpace(asString(session.SessionData["collection_id"]))
 	}
 	if col := sessionCollectionByID(session, id); col != nil {
-		return categoryFromCollectionMap(col)
+		return categoryFromCollectionMapLocal(col)
 	}
 	name := strings.TrimSpace(asString(session.SessionData["collection_name"]))
 	if name == "" {
@@ -178,12 +189,12 @@ func tiqrEcommerceCartSnapshot(session *models.ChatbotSession) models.JSONB {
 		}
 	}
 	return models.JSONB{
-		"source": tiqrEcommerceCartSource,
+		"source": CartSource,
 		"lines":  lines,
 	}
 }
 
-func tiqrCartLinesFromData(data map[string]any) []tiqrCartLine {
+func tiqrCartLinesFromData(data map[string]any) []TiqrCartLine {
 	if data == nil {
 		return nil
 	}
@@ -191,7 +202,7 @@ func tiqrCartLinesFromData(data map[string]any) []tiqrCartLine {
 	if !ok {
 		return nil
 	}
-	out := make([]tiqrCartLine, 0, len(cart))
+	out := make([]TiqrCartLine, 0, len(cart))
 	for _, entry := range cart {
 		item, ok := asStringMap(entry)
 		if !ok {
@@ -214,7 +225,7 @@ func tiqrCartLinesFromData(data map[string]any) []tiqrCartLine {
 			}
 		}
 		price, _ := anyToFloat64(item["price"])
-		out = append(out, tiqrCartLine{
+		out = append(out, TiqrCartLine{
 			OptionID:    optionID,
 			Name:        name,
 			ProductName: strings.TrimSpace(asString(item["product_name"])),
@@ -243,7 +254,7 @@ func codedMissingFieldsFromSession(session *models.ChatbotSession) []string {
 	if session == nil || session.SessionData == nil {
 		return nil
 	}
-	records, ok := anySlice(session.SessionData[codedCallsKey])
+	records, ok := anySlice(session.SessionData[codedflow.CallsKey])
 	if !ok {
 		return nil
 	}
@@ -252,7 +263,7 @@ func codedMissingFieldsFromSession(session *models.ChatbotSession) []string {
 		if !ok || asString(rec["plan"]) != "recover" {
 			continue
 		}
-		if asString(rec["kind"]) != codedRecoverMissingField {
+		if asString(rec["kind"]) != /*recover*/ "missing_field" {
 			return nil
 		}
 		asks, ok := anySlice(rec["asks"])
@@ -285,7 +296,7 @@ func sessionHandoffCart(session *models.ChatbotSession) models.JSONB {
 	if session == nil || session.SessionData == nil {
 		return nil
 	}
-	raw, ok := asStringMap(session.SessionData[commerceHandoffCartKey])
+	raw, ok := asStringMap(session.SessionData[HandoffCartKey])
 	if !ok || len(raw) == 0 {
 		return nil
 	}
@@ -297,8 +308,8 @@ func finishCodedEcommerceHandoffSession(session *models.ChatbotSession) {
 		return
 	}
 	if session.SessionData != nil {
-		delete(session.SessionData, codedFlowDataKey)
-		delete(session.SessionData, commerceHandoffCartKey)
+		delete(session.SessionData, codedflow.DataKey)
+		delete(session.SessionData, HandoffCartKey)
 	}
 	session.CurrentStep = ""
 	session.StepRetries = 0
@@ -308,7 +319,7 @@ func finishCodedEcommerceHandoffSession(session *models.ChatbotSession) {
 	session.CompletedAt = &now
 }
 
-func commerceHandoffContact(draft *models.CommerceDraft) map[string]any {
+func CommerceHandoffContact(draft *models.CommerceDraft) map[string]any {
 	if draft == nil {
 		return map[string]any{}
 	}
@@ -331,7 +342,7 @@ func commerceHandoffContact(draft *models.CommerceDraft) map[string]any {
 	return out
 }
 
-func commerceHandoffMissingFields(draft *models.CommerceDraft) []string {
+func CommerceHandoffMissingFields(draft *models.CommerceDraft) []string {
 	if draft == nil || draft.Notes == nil {
 		return nil
 	}
@@ -351,7 +362,7 @@ func commerceHandoffMissingFields(draft *models.CommerceDraft) []string {
 	return out
 }
 
-func commerceHandoffNotesText(draft *models.CommerceDraft) string {
+func CommerceHandoffNotesText(draft *models.CommerceDraft) string {
 	if draft == nil || draft.Notes == nil {
 		return ""
 	}
@@ -372,7 +383,7 @@ func ensureDraftStoreID(draft *models.CommerceDraft, session *models.ChatbotSess
 	}
 }
 
-func applySessionHandoffCart(draft *models.CommerceDraft, session *models.ChatbotSession) {
+func ApplySessionHandoffCart(draft *models.CommerceDraft, session *models.ChatbotSession) {
 	if draft == nil {
 		return
 	}
@@ -380,4 +391,26 @@ func applySessionHandoffCart(draft *models.CommerceDraft, session *models.Chatbo
 		draft.Cart = cart
 	}
 	ensureDraftStoreID(draft, session)
+}
+
+func categoryFromCollectionMapLocal(raw map[string]any) tickermcp.Category {
+	if raw == nil {
+		return tickermcp.Category{Name: "Ecommerce request", HandoffPolicy: "none"}
+	}
+	cat := tickermcp.Category{
+		Name:           asString(raw["name"]),
+		Description:    asString(raw["description"]),
+		AIInstructions: asString(raw["ai_instructions"]),
+		HandoffPolicy:  strings.ToLower(strings.TrimSpace(asString(raw["handoff_policy"]))),
+		HandoffMessage: asString(raw["handoff_message"]),
+	}
+	if id := fieldString(raw, "id"); id != "" {
+		if n, err := strconv.Atoi(id); err == nil {
+			cat.ID = n
+		}
+	}
+	if cat.Name == "" {
+		cat.Name = "Ecommerce request"
+	}
+	return cat
 }

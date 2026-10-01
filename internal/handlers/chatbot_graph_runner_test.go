@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
@@ -1783,7 +1784,7 @@ func TestDynamicButtonsFromSession_ReplyBodyFieldForIntent(t *testing.T) {
 	assert.Equal(t, "42", buttons[0]["id"])
 	assert.Equal(t, "Add to cart", buttons[0]["title"])
 	assert.Equal(t, "Mango Kunafa (₹250)", buttons[0]["body"])
-	assert.Equal(t, "Mango Kunafa (₹250) — Add to cart", choiceLabel(buttons[0]))
+	assert.Equal(t, "Mango Kunafa (₹250) — Add to cart", codedflow.ChoiceLabel(buttons[0]))
 }
 
 func TestDynamicButtonsFromSession_URLTemplate(t *testing.T) {

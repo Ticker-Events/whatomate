@@ -1,4 +1,4 @@
-package handlers
+package codedflow
 
 import (
 	"encoding/json"
@@ -9,9 +9,11 @@ import (
 )
 
 const (
-	codedCallsKey        = "_coded_calls"
+	CallsKey            = "_coded_calls"
+	codedCallsKey       = CallsKey
 	codedTranslationsKey = "_translations"
-	customerLanguageKey  = "customer_language"
+	CustomerLanguageKey = "customer_language"
+	customerLanguageKey = CustomerLanguageKey
 )
 
 // Choice is one accepted answer. ID is the button or row id, never a translated title.
@@ -119,38 +121,56 @@ type LocationPin struct {
 // Conv is one replay of a coded flow. Finished calls return their saved
 // result and do not send or call the store again.
 type Conv struct {
-	app        *App
-	chat       *chatNodeCtx
+	app        Host
+	chat       Chat
 	seq        int
-	stop       bool
-	ended      bool
+	Stop       bool
+	Ended      bool
 	err        error
 	skipIntent bool   // true after a failed normalized answer; avoid a second AI call
-	divert     string // codedRouteCheckout when free text should leave the current ask
+	Divert     string // codedRouteCheckout when free text should leave the current ask
 }
 
 func (c *Conv) session() *models.ChatbotSession {
-	return c.chat.session
+	return c.chat.Session()
 }
+
+// Session returns the chatbot session for this turn.
+func (c *Conv) Session() *models.ChatbotSession { return c.session() }
+
+// Text translates (when needed) and returns authored copy for the customer.
+func (c *Conv) Text(src string) string { return c.text(src) }
+
+// App returns the Host for this conversation.
+func (c *Conv) App() Host { return c.app }
+
+// ChatCtx returns the Chat for this turn.
+func (c *Conv) ChatCtx() Chat { return c.chat }
+
+// Fail records the first error and stops the turn.
+func (c *Conv) Fail(err error) { c.fail(err) }
+
+func (c *Conv) Seq() int { return c.seq }
+func (c *Conv) SetSeq(n int) { c.seq = n }
+func (c *Conv) AdvanceSeq() { c.seq++ }
 
 func (c *Conv) fail(err error) {
 	if err == nil || c.err != nil {
 		return
 	}
 	c.err = err
-	c.stop = true
+	c.Stop = true
 }
 
 // Say sends one authored message. A replay skips it.
 func (c *Conv) Say(message string) {
-	if c.stop {
+	if c.Stop {
 		return
 	}
 	if _, done := c.doneCall(); done {
 		return
 	}
-	node := &ChatNode{ID: "say", Type: ChatNodeMessage, Config: map[string]any{"message": c.text(message)}}
-	if _, err := c.app.execChatMessage(node, c.chat); err != nil {
+	if _, err := c.app.ExecChatMessage(c.chat, "say", map[string]any{"message": c.text(message)}); err != nil {
 		c.fail(err)
 		return
 	}
@@ -160,27 +180,25 @@ func (c *Conv) Say(message string) {
 // SayPaymentCTA asks the shopper to pay after create_order, matching ecommerce checkout.
 // When payment_url is present it sends a Pay now CTA URL button; otherwise text only.
 func (c *Conv) SayPaymentCTA(order map[string]any) {
-	if c.stop {
+	if c.Stop {
 		return
 	}
 	if _, done := c.doneCall(); done {
 		return
 	}
-	body, paymentURL := codedPaymentCTAContent(order, sessionCurrencyCode(c.session()))
+	body, paymentURL := c.codedPaymentCTAContent(order, c.app.SessionCurrencyCode(c.session()))
 	body = c.text(body)
 	if paymentURL == "" {
-		node := &ChatNode{ID: "say_payment_cta", Type: ChatNodeMessage, Config: map[string]any{"message": body}}
-		if _, err := c.app.execChatMessage(node, c.chat); err != nil {
+		if _, err := c.app.ExecChatMessage(c.chat, "say_payment_cta", map[string]any{"message": body}); err != nil {
 			c.fail(err)
 			return
 		}
 		c.appendCall(map[string]any{"name": "say_payment_cta", "ok": true})
 		return
 	}
-	if err := c.app.deliverCodedCTAURL(c.chat, "say_payment_cta", body, "Pay now", paymentURL); err != nil {
+	if err := c.app.DeliverCodedCTAURL(c.chat, "say_payment_cta", body, "Pay now", paymentURL); err != nil {
 		fallback := body + "\nPay here: " + paymentURL
-		node := &ChatNode{ID: "say_payment_cta", Type: ChatNodeMessage, Config: map[string]any{"message": fallback}}
-		if _, err := c.app.execChatMessage(node, c.chat); err != nil {
+		if _, err := c.app.ExecChatMessage(c.chat, "say_payment_cta", map[string]any{"message": fallback}); err != nil {
 			c.fail(err)
 			return
 		}
@@ -191,14 +209,14 @@ func (c *Conv) SayPaymentCTA(order map[string]any) {
 // codedPaymentCTAContent builds the order-placed body and payment URL for coded flows.
 // It accepts payment_url from compactOrderCreateResult (nested payment.meta_data) or a
 // top-level payment_url (preview mocks).
-func codedPaymentCTAContent(order map[string]any, currency string) (string, string) {
-	compacted := compactOrderCreateResult(order, currency)
+func (c *Conv) codedPaymentCTAContent(order map[string]any, currency string) (string, string) {
+	compacted := c.app.CompactOrderCreateResult(order, currency)
 	if asString(compacted["payment_url"]) == "" {
 		if u := strings.TrimSpace(asString(order["payment_url"])); u != "" {
 			compacted["payment_url"] = u
 		}
 	}
-	return paymentCTAContent(compacted)
+	return c.app.PaymentCTAContent(compacted)
 }
 
 // AskButtons accepts only a button id from this prompt.
@@ -244,7 +262,7 @@ func (c *Conv) AskImageButtons(name string, items []any, prompt ImageButtonPromp
 
 // AskNumber accepts only text that matches the prompt pattern.
 func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
-	if c.stop {
+	if c.Stop {
 		return "", false
 	}
 	if rec, done := c.doneCall(); done {
@@ -254,14 +272,13 @@ func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
 		return asString(c.session().SessionData[name]), true
 	}
 	body := c.text(prompt.Body)
-	if c.chat.consumed || strings.TrimSpace(c.chat.userInput) == "" {
-		node := &ChatNode{ID: name, Type: ChatNodeMessage, Config: map[string]any{"message": body}}
-		if _, err := c.app.execChatMessage(node, c.chat); err != nil {
+	if c.chat.Consumed() || strings.TrimSpace(c.chat.UserInput()) == "" {
+		if _, err := c.app.ExecChatMessage(c.chat, name, map[string]any{"message": body}); err != nil {
 			c.fail(err)
 			return "", false
 		}
-		if c.chat.capturing() {
-			c.chat.preview.expectText()
+		if c.chat.Capturing() {
+			c.chat.Preview().ExpectText()
 		}
 		c.wait(name)
 		return "", false
@@ -271,7 +288,7 @@ func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
 		c.fail(err)
 		return "", false
 	}
-	input := strings.TrimSpace(c.chat.userInput)
+	input := strings.TrimSpace(c.chat.UserInput())
 	if !re.MatchString(input) {
 		if c.skipIntent {
 			c.skipIntent = false
@@ -291,7 +308,7 @@ func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
 			return "", false
 		}
 	}
-	c.chat.consumed = true
+	c.chat.SetConsumed(true)
 	c.session().SessionData[name] = input
 	c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": input})
 	return input, true
@@ -299,7 +316,7 @@ func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
 
 // AskText accepts any non-empty reply and stores it under name.
 func (c *Conv) AskText(name, body string, step StepNote) (string, bool) {
-	if c.stop {
+	if c.Stop {
 		return "", false
 	}
 	if rec, done := c.doneCall(); done {
@@ -309,23 +326,22 @@ func (c *Conv) AskText(name, body string, step StepNote) (string, bool) {
 		return asString(c.session().SessionData[name]), true
 	}
 	message := c.text(body)
-	if c.chat.consumed || strings.TrimSpace(c.chat.userInput) == "" {
-		node := &ChatNode{ID: name, Type: ChatNodeMessage, Config: map[string]any{"message": message}}
-		if _, err := c.app.execChatMessage(node, c.chat); err != nil {
+	if c.chat.Consumed() || strings.TrimSpace(c.chat.UserInput()) == "" {
+		if _, err := c.app.ExecChatMessage(c.chat, name, map[string]any{"message": message}); err != nil {
 			c.fail(err)
 			return "", false
 		}
-		if c.chat.capturing() {
-			c.chat.preview.expectText()
+		if c.chat.Capturing() {
+			c.chat.Preview().ExpectText()
 		}
 		c.wait(name)
 		return "", false
 	}
-	input := strings.TrimSpace(c.chat.userInput)
+	input := strings.TrimSpace(c.chat.UserInput())
 	if input == "" {
 		return "", false
 	}
-	c.chat.consumed = true
+	c.chat.SetConsumed(true)
 	c.session().SessionData[name] = input
 	c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": input})
 	_ = step // notes reserved for future intent on this step
@@ -334,7 +350,7 @@ func (c *Conv) AskText(name, body string, step StepNote) (string, bool) {
 
 // AskLocation sends a WhatsApp location request and accepts a pin reply.
 func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, bool) {
-	if c.stop {
+	if c.Stop {
 		return LocationPin{}, false
 	}
 	if rec, done := c.doneCall(); done {
@@ -344,15 +360,15 @@ func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, boo
 		return locationPinFromSession(c.session().SessionData, name), true
 	}
 	body := c.text(prompt.Body)
-	if c.chat.consumed || strings.TrimSpace(c.chat.userInput) == "" {
-		if err := c.app.deliverCodedLocationRequest(c.chat, name, body); err != nil {
+	if c.chat.Consumed() || strings.TrimSpace(c.chat.UserInput()) == "" {
+		if err := c.app.DeliverCodedLocationRequest(c.chat, name, body); err != nil {
 			c.fail(err)
 			return LocationPin{}, false
 		}
 		c.wait(name)
 		return LocationPin{}, false
 	}
-	pin, ok := parseLocationInput(c.chat.userInput)
+	pin, ok := parseLocationInput(c.chat.UserInput())
 	if !ok {
 		if c.skipIntent {
 			c.skipIntent = false
@@ -363,7 +379,7 @@ func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, boo
 		_, _ = c.resolveFreeText(name, cfg, RouteOptions{})
 		return LocationPin{}, false
 	}
-	c.chat.consumed = true
+	c.chat.SetConsumed(true)
 	c.session().SessionData[name] = map[string]any{
 		"latitude":  pin.Latitude,
 		"longitude": pin.Longitude,
@@ -387,7 +403,7 @@ func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, boo
 
 // AskFlow accepts a WhatsApp Flow submission. Free text is a diversion.
 func (c *Conv) AskFlow(name string, prompt FlowPrompt) bool {
-	if c.stop {
+	if c.Stop {
 		return false
 	}
 	if rec, done := c.doneCall(); done {
@@ -400,17 +416,16 @@ func (c *Conv) AskFlow(name string, prompt FlowPrompt) bool {
 		"cta":     c.text(prompt.CTA),
 	}
 	putStepNote(cfg, prompt.Step)
-	node := &ChatNode{ID: name, Type: ChatNodeWhatsAppFlow, Config: cfg}
-	if !c.chat.consumed && len(c.chat.flowResponseData) > 0 {
-		if _, err := c.app.execChatWhatsAppFlow(node, c.chat); err != nil {
+	if !c.chat.Consumed() && len(c.chat.FlowResponseData()) > 0 {
+		if _, err := c.app.ExecChatWhatsAppFlow(c.chat, name, cfg); err != nil {
 			c.fail(err)
 			return false
 		}
-		c.appendCall(map[string]any{"name": name, "ok": true, "fields": c.chat.flowResponseData})
+		c.appendCall(map[string]any{"name": name, "ok": true, "fields": c.chat.FlowResponseData()})
 		return true
 	}
-	if c.chat.consumed || (c.chat.buttonID == "" && strings.TrimSpace(c.chat.userInput) == "" && len(c.chat.flowResponseData) == 0) {
-		if _, err := c.app.execChatWhatsAppFlow(node, c.chat); err != nil {
+	if c.chat.Consumed() || (c.chat.ButtonID() == "" && strings.TrimSpace(c.chat.UserInput()) == "" && len(c.chat.FlowResponseData()) == 0) {
+		if _, err := c.app.ExecChatWhatsAppFlow(c.chat, name, cfg); err != nil {
 			c.fail(err)
 			return false
 		}
@@ -432,7 +447,7 @@ func (c *Conv) StoreMCP(name, operation string, params map[string]string) (map[s
 }
 
 func (c *Conv) storeAPI(name, operation, apiType string, params map[string]string) (map[string]any, bool) {
-	if c.stop {
+	if c.Stop {
 		return nil, false
 	}
 	if rec, done := c.doneCall(); done {
@@ -450,18 +465,18 @@ func (c *Conv) storeAPI(name, operation, apiType string, params map[string]strin
 		c.fail(err)
 		return nil, false
 	}
-	if !ok || c.chat.lastTiqr == nil {
+	if !ok || c.chat.LastTiqr() == nil {
 		c.appendCall(map[string]any{"name": name, "ok": false})
 		return nil, false
 	}
-	c.session().SessionData[name] = c.chat.lastTiqr
-	c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": c.chat.lastTiqr})
-	return c.chat.lastTiqr, true
+	c.session().SessionData[name] = c.chat.LastTiqr()
+	c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": c.chat.LastTiqr()})
+	return c.chat.LastTiqr(), true
 }
 
 // StoreList calls a TiQR list operation once and returns its results.
 func (c *Conv) StoreList(name, operation string, params map[string]string) ([]any, bool) {
-	if c.stop {
+	if c.Stop {
 		return nil, false
 	}
 	if rec, done := c.doneCall(); done {
@@ -480,8 +495,8 @@ func (c *Conv) StoreList(name, operation string, params map[string]string) ([]an
 		return nil, false
 	}
 	var items []any
-	if ok && c.chat.lastTiqr != nil {
-		items, ok = anySlice(c.chat.lastTiqr["results"])
+	if ok && c.chat.LastTiqr() != nil {
+		items, ok = anySlice(c.chat.LastTiqr()["results"])
 	}
 	if !ok || len(items) == 0 {
 		c.appendCall(map[string]any{"name": name, "ok": false})
@@ -495,7 +510,7 @@ func (c *Conv) StoreList(name, operation string, params map[string]string) ([]an
 // LookupOrder loads the latest order for this WhatsApp number. The lookup
 // is MCP-only, so it does not go through the REST store operations.
 func (c *Conv) LookupOrder(name string) (map[string]any, bool) {
-	if c.stop {
+	if c.Stop {
 		return nil, false
 	}
 	if rec, done := c.doneCall(); done {
@@ -505,17 +520,17 @@ func (c *Conv) LookupOrder(name string) (map[string]any, bool) {
 		order, _ := asStringMap(c.session().SessionData[name])
 		return order, true
 	}
-	if c.chat.capturing() && c.chat.preview.mock {
-		order, ok := c.chat.preview.mockFor("lookup_order_status")
+	if c.chat.Capturing() && c.chat.Preview().Mock {
+		order, ok := c.chat.Preview().MockFor("lookup_order_status")
 		if !ok {
-			c.stop = true
+			c.Stop = true
 			return nil, false
 		}
 		c.session().SessionData[name] = order
 		c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": order})
 		return order, true
 	}
-	order, err := lookupLatestOrder(c.app, c.chat.account, c.session())
+	order, err := c.app.LookupLatestOrder(c.chat.Account(), c.session())
 	if err != nil || order == nil {
 		c.appendCall(map[string]any{"name": name, "ok": false})
 		return nil, false
@@ -527,7 +542,7 @@ func (c *Conv) LookupOrder(name string) (map[string]any, bool) {
 
 // Once runs fn on the first visit and skips it on replay.
 func (c *Conv) Once(name string, fn func()) bool {
-	if c.stop {
+	if c.Stop {
 		return false
 	}
 	if _, done := c.doneCall(); done {
@@ -542,44 +557,44 @@ func (c *Conv) Once(name string, fn func()) bool {
 // TiQR ecommerce sessions snapshot the cart and checkout fields onto a
 // commerce draft before creating the agent transfer.
 func (c *Conv) Transfer(message string) error {
-	if c.ended {
+	if c.Ended {
 		return nil
 	}
-	if !c.chat.capturing() && codedFlowSessionKey(c.session()) == tiqrEcommerceKey {
-		if err := c.transferTiqrEcommerce(message); err == nil {
-			c.stop = true
-			c.ended = true
-			return nil
-		} else if c.app != nil {
-			c.app.Log.Warn("tiqr ecommerce handoff snapshot failed; falling back to queue transfer",
-				"error", err)
+	if !c.chat.Capturing() {
+		if handled, err := c.app.TryEcommerceTransfer(c.chat, message); handled {
+			if err != nil {
+				c.app.LogWarn("tiqr ecommerce handoff snapshot failed; falling back to queue transfer", "error", err)
+			} else {
+				c.Stop = true
+				c.Ended = true
+				return nil
+			}
 		}
 	}
-	node := &ChatNode{ID: "transfer", Type: ChatNodeTransfer, Config: map[string]any{"body": c.text(message)}}
-	_, err := c.app.execChatTransfer(node, c.chat)
+	_, err := c.app.ExecChatTransfer(c.chat, "transfer", map[string]any{"body": c.text(message)})
 	finishCodedSession(c.session())
-	c.stop = true
-	c.ended = true
+	c.Stop = true
+	c.Ended = true
 	return err
 }
 
 // End marks the coded flow finished.
 func (c *Conv) End() error {
-	if c.ended {
+	if c.Ended {
 		return nil
 	}
-	if c.chat.capturing() && c.chat.preview.needsMock != "" {
-		c.stop = true
+	if c.chat.Capturing() && c.chat.Preview().NeedsMock != "" {
+		c.Stop = true
 		return nil
 	}
 	finishCodedSession(c.session())
-	c.stop = true
-	c.ended = true
+	c.Stop = true
+	c.Ended = true
 	return nil
 }
 
 func (c *Conv) replayChoice() (Choice, bool, bool) {
-	if c.stop {
+	if c.Stop {
 		return Choice{}, true, false
 	}
 	rec, done := c.doneCall()
@@ -593,34 +608,33 @@ func (c *Conv) replayChoice() (Choice, bool, bool) {
 }
 
 func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
-	if c.stop {
+	if c.Stop {
 		return Choice{}, false
 	}
 	if id := c.offeredButtonID(cfg); id != "" {
-		c.chat.buttonID = id
+		c.chat.SetButtonID(id)
 		return c.acceptButton(name, cfg)
 	}
 	// A button tap that is not one of this step's choices is not a request
 	// for an agent. Show the choices again.
-	if !c.noAnswerYet() && strings.TrimSpace(c.chat.buttonID) != "" {
-		c.app.Log.Warn("Coded flow button did not match this step",
+	if !c.noAnswerYet() && strings.TrimSpace(c.chat.ButtonID()) != "" {
+		c.app.LogWarn("Coded flow button did not match this step",
 			"step", name,
-			"button_id", c.chat.buttonID,
-			"text", c.chat.userInput,
+			"button_id", c.chat.ButtonID(),
+			"text", c.chat.UserInput(),
 		)
-		c.chat.buttonID = ""
-		c.chat.userInput = ""
-		c.chat.consumed = false
-		c.chat.flowResponseData = nil
+		c.chat.SetButtonID("")
+		c.chat.SetUserInput("")
+		c.chat.SetConsumed(false)
+		c.chat.SetFlowResponseData(nil)
 	}
 	if c.noAnswerYet() {
-		node := &ChatNode{ID: name, Type: ChatNodeButtons, Config: cfg}
-		out, err := c.app.execChatButtons(node, c.chat)
+		out, err := c.app.ExecChatButtons(c.chat, name, cfg)
 		if err != nil {
 			c.fail(err)
 			return Choice{}, false
 		}
-		if out.yield {
+		if out.Yield {
 			c.wait(name)
 		}
 		return Choice{}, false
@@ -632,7 +646,7 @@ func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 	return Choice{ID: route.ID, Title: route.Title}, true
 }
 
-const codedAgentHandoff = "I'm connecting you with a team member who can help."
+const AgentHandoff = "I'm connecting you with a team member who can help."
 
 func (c *Conv) matchingButton(cfg map[string]any) bool {
 	return c.offeredButtonID(cfg) != ""
@@ -642,15 +656,15 @@ func (c *Conv) matchingButton(cfg map[string]any) bool {
 // when the inbound reply matches by id (exact after trim) or by title
 // (case-insensitive). Empty means no match.
 func (c *Conv) offeredButtonID(cfg map[string]any) string {
-	if c.chat.consumed {
+	if c.chat.Consumed() {
 		return ""
 	}
-	buttons, err := buttonsForNode(cfg, c.session().SessionData)
+	buttons, err := c.app.ButtonsForNode(cfg, c.session().SessionData)
 	if err != nil || len(buttons) == 0 {
 		return ""
 	}
-	buttonID := strings.TrimSpace(c.chat.buttonID)
-	userInput := strings.TrimSpace(c.chat.userInput)
+	buttonID := strings.TrimSpace(c.chat.ButtonID())
+	userInput := strings.TrimSpace(c.chat.UserInput())
 	titleMatch := ""
 	for _, button := range buttons {
 		id := fieldString(button, "id")
@@ -669,17 +683,18 @@ func (c *Conv) offeredButtonID(cfg map[string]any) string {
 	return titleMatch
 }
 
+func (c *Conv) NoAnswerYet() bool { return c.noAnswerYet() }
+
 func (c *Conv) noAnswerYet() bool {
-	return c.chat.consumed || (c.chat.buttonID == "" && strings.TrimSpace(c.chat.userInput) == "" && len(c.chat.flowResponseData) == 0)
+	return c.chat.Consumed() || (c.chat.ButtonID() == "" && strings.TrimSpace(c.chat.UserInput()) == "" && len(c.chat.FlowResponseData()) == 0)
 }
 
 func (c *Conv) acceptButton(name string, cfg map[string]any) (Choice, bool) {
-	node := &ChatNode{ID: name, Type: ChatNodeButtons, Config: cfg}
-	if _, err := c.app.execChatButtons(node, c.chat); err != nil {
+	if _, err := c.app.ExecChatButtons(c.chat, name, cfg); err != nil {
 		c.fail(err)
 		return Choice{}, false
 	}
-	choice := Choice{ID: c.chat.buttonID, Title: c.chat.userInput}
+	choice := Choice{ID: c.chat.ButtonID(), Title: c.chat.UserInput()}
 	c.appendCall(map[string]any{
 		"name":   name,
 		"ok":     true,
@@ -690,16 +705,18 @@ func (c *Conv) acceptButton(name string, cfg map[string]any) (Choice, bool) {
 	return choice, true
 }
 
+func (c *Conv) Wait(name string) { c.wait(name) }
+
 func (c *Conv) wait(name string) {
 	c.session().CurrentStep = name
-	c.stop = true
+	c.Stop = true
 }
 
 func (c *Conv) waitingForPreviewMock() bool {
-	if !c.chat.capturing() || c.chat.preview.needsMock == "" {
+	if !c.chat.Capturing() || c.chat.Preview().NeedsMock == "" {
 		return false
 	}
-	c.stop = true
+	c.Stop = true
 	return true
 }
 
@@ -711,20 +728,15 @@ func (c *Conv) tiqr(name, operation, apiType string, params map[string]string) (
 	for key, value := range params {
 		raw[key] = value
 	}
-	node := &ChatNode{
-		ID:   name,
-		Type: ChatNodeTiqrStoreAPI,
-		Config: map[string]any{
-			"api_type":  apiType,
-			"operation": operation,
-			"params":    raw,
-		},
-	}
-	out, err := c.app.execChatTiqrStoreAPI(node, c.chat)
+	out, err := c.app.ExecChatTiqrStoreAPI(c.chat, name, map[string]any{
+		"api_type":  apiType,
+		"operation": operation,
+		"params":    raw,
+	})
 	if err != nil {
 		return false, err
 	}
-	return out.outcome == "http:2xx", nil
+	return out.Outcome == "http:2xx", nil
 }
 
 func parseLocationInput(raw string) (LocationPin, bool) {
@@ -826,6 +838,8 @@ func (c *Conv) carouselConfig(prompt CarouselPrompt) map[string]any {
 	return cfg
 }
 
+func (c *Conv) ImageButtonConfig(prompt ImageButtonPrompt) map[string]any { return c.imageButtonConfig(prompt) }
+
 func (c *Conv) imageButtonConfig(prompt ImageButtonPrompt) map[string]any {
 	cfg := map[string]any{
 		"body":               c.text(prompt.Body),
@@ -863,8 +877,10 @@ func putStepNote(cfg map[string]any, step StepNote) {
 	}
 }
 
+func (c *Conv) DoneCall() (map[string]any, bool) { return c.doneCall() }
+
 func (c *Conv) doneCall() (map[string]any, bool) {
-	if c.stop {
+	if c.Stop {
 		return nil, false
 	}
 	records := c.callRecords()
@@ -891,6 +907,9 @@ func (c *Conv) restore(rec map[string]any) {
 	}
 }
 
+// CallRecords returns saved call records for this session.
+func (c *Conv) CallRecords() []map[string]any { return c.callRecords() }
+
 func (c *Conv) callRecords() []map[string]any {
 	items, ok := anySlice(c.session().SessionData[codedCallsKey])
 	if !ok {
@@ -906,6 +925,9 @@ func (c *Conv) callRecords() []map[string]any {
 	return out
 }
 
+// AppendCall records a finished call for replay.
+func (c *Conv) AppendCall(rec map[string]any) { c.appendCall(rec) }
+
 func (c *Conv) appendCall(rec map[string]any) {
 	items, _ := anySlice(c.session().SessionData[codedCallsKey])
 	next := make([]any, 0, len(items)+1)
@@ -916,6 +938,9 @@ func (c *Conv) appendCall(rec map[string]any) {
 	// same turn does not replay it as its own saved result.
 	c.seq = len(c.callRecords())
 }
+
+// CallOK reports whether a saved call succeeded.
+func CallOK(rec map[string]any) bool { return callOK(rec) }
 
 func callOK(rec map[string]any) bool {
 	ok, _ := rec["ok"].(bool)
@@ -941,22 +966,6 @@ func snapshotFields(data models.JSONB, cfg map[string]any) map[string]any {
 	return out
 }
 
-func buttonOffered(cfg map[string]any, data models.JSONB, buttonID string) bool {
-	buttonID = strings.TrimSpace(buttonID)
-	if buttonID == "" {
-		return false
-	}
-	buttons, err := buttonsForNode(cfg, data)
-	if err != nil {
-		return false
-	}
-	for _, button := range buttons {
-		if fieldString(button, "id") == buttonID || fieldString(button, "id_2") == buttonID {
-			return true
-		}
-	}
-	return false
-}
 
 func stringMapAny(in map[string]string) map[string]any {
 	if len(in) == 0 {

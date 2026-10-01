@@ -1,6 +1,7 @@
-package handlers
+package tiqrecommerce
 
 import (
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -22,6 +23,37 @@ var (
 	parseCodedAddons = defaultParseCodedAddons
 	addonIDMentionRE = regexp.MustCompile(`(?i)\b(addon|product|option)[_\s-]?id\b|\bid\s*[:=]\s*\d+`)
 )
+
+// AddonParseFunc is the AI parse hook used by catalog add-on prompts.
+type AddonParseFunc func(host codedflow.Host, session *models.ChatbotSession, prompt string) (AddonParseResult, error)
+
+// AddonParseResult is the grounded AI parse payload for catalog add-ons.
+type AddonParseResult = codedAddonParseResult
+
+// AddonParseItem is one numbered add-on selection from the AI parse.
+type AddonParseItem = codedAddonParseItem
+
+const (
+	// AddonIntentSelect means the shopper chose one or more add-ons.
+	AddonIntentSelect = codedAddonIntentSelect
+	// AddonIntentSkip means the shopper declined add-ons.
+	AddonIntentSkip = codedAddonIntentSkip
+	// AddonIntentUnclear means the reply could not be grounded.
+	AddonIntentUnclear = codedAddonIntentUnclear
+)
+
+// SetParseCodedAddonsForTest replaces the AI parse hook. Tests must restore via the returned function.
+func SetParseCodedAddonsForTest(fn AddonParseFunc) (restore func()) {
+	prev := parseCodedAddons
+	if fn == nil {
+		parseCodedAddons = defaultParseCodedAddons
+	} else {
+		parseCodedAddons = func(host codedflow.Host, session *models.ChatbotSession, prompt string) (codedAddonParseResult, error) {
+			return fn(host, session, prompt)
+		}
+	}
+	return func() { parseCodedAddons = prev }
+}
 
 type codedAddonParseItem struct {
 	Index    int  `json:"index"`
@@ -48,7 +80,7 @@ type groundedAddonLine struct {
 // commerce_addons. Returns false when waiting for a reply or after transfer.
 // An empty product or no catalog add-ons returns true without asking.
 func askCatalogAddons(c *Conv, productID, prefix string) bool {
-	if c == nil || c.stop {
+	if c == nil || c.Stop {
 		return false
 	}
 	productID = strings.TrimSpace(productID)
@@ -57,7 +89,7 @@ func askCatalogAddons(c *Conv, productID, prefix string) bool {
 		prefix = "product_addons"
 	}
 	choices := loadCatalogAddonChoices(c, productID, prefix)
-	if c.stop {
+	if c.Stop {
 		return false
 	}
 	if len(choices) == 0 {
@@ -79,16 +111,16 @@ func loadCatalogAddonChoices(c *Conv, productID, prefix string) []map[string]any
 
 func askStructuredCatalogAddons(c *Conv, choices []map[string]any, prefix string) bool {
 	step := prefix
-	prompt := catalogAddonPrompt(c.session(), choices)
+	prompt := catalogAddonPrompt(c.Session(), choices)
 
 		for attempt := 1; ; attempt++ {
 		askName := fmt.Sprintf("%s_%d", prefix, attempt)
 		body := prompt
-		if pending := pendingAddonMissing(c.session(), step); len(pending) > 0 {
+		if pending := pendingAddonMissing(c.Session(), step); len(pending) > 0 {
 			body = missingAddonQuantityQuestion(choices, pending)
 		}
 
-		text, ok := c.AskText(askName, body, StepNote{
+		text, ok := c.AskText(askName, body, codedflow.StepNote{
 			Doing:  "The customer is choosing catalog add-ons for this product.",
 			Expect: "Item numbers with quantities such as item 1 - 2, or Skip.",
 		})
@@ -98,8 +130,8 @@ func askStructuredCatalogAddons(c *Conv, choices []map[string]any, prefix string
 
 		lower := strings.ToLower(strings.TrimSpace(text))
 		if isAddonSkipReply(lower) {
-			c.clearGuide()
-			clearPendingAddonMissing(c.session(), step)
+			c.ClearGuide()
+			clearPendingAddonMissing(c.Session(), step)
 			c.Once(fmt.Sprintf("%s_done_%d", prefix, attempt), func() {})
 			return true
 		}
@@ -107,18 +139,18 @@ func askStructuredCatalogAddons(c *Conv, choices []map[string]any, prefix string
 		parseName := fmt.Sprintf("%s_parse_%d", prefix, attempt)
 		result, replayed := replayAddonParse(c, parseName)
 		if !replayed {
-			result = runAddonParse(c, text, choices, pendingAddonMissing(c.session(), step))
-			c.appendCall(addonParseRecord(parseName, result))
+			result = runAddonParse(c, text, choices, pendingAddonMissing(c.Session(), step))
+			c.AppendCall(addonParseRecord(parseName, result))
 		}
 
 		outcome := groundAddonParse(result, choices)
 		switch outcome.kind {
 		case codedAddonIntentSelect:
-			c.clearGuide()
-			clearPendingAddonMissing(c.session(), step)
+			c.ClearGuide()
+			clearPendingAddonMissing(c.Session(), step)
 			c.Once(fmt.Sprintf("%s_save_%d", prefix, attempt), func() {
 				for _, line := range outcome.lines {
-					appendCommerceAddon(c.session(), line.ID, line.Quantity, line.Name)
+					appendCommerceAddon(c.Session(), line.ID, line.Quantity, line.Name)
 				}
 			})
 			if msg := confirmAddonLines(outcome.lines); msg != "" {
@@ -126,26 +158,26 @@ func askStructuredCatalogAddons(c *Conv, choices []map[string]any, prefix string
 			}
 			return true
 		case codedAddonIntentSkip:
-			c.clearGuide()
-			clearPendingAddonMissing(c.session(), step)
+			c.ClearGuide()
+			clearPendingAddonMissing(c.Session(), step)
 			return true
 		case "missing_quantity":
 			if !noteAddonClarify(c, prefix, attempt, step, outcome) {
 				return false
 			}
-			setPendingAddonMissing(c.session(), step, outcome.missing)
+			setPendingAddonMissing(c.Session(), step, outcome.missing)
 			prompt = missingAddonQuantityQuestion(choices, outcome.missing)
 			continue
 		default:
 			if !noteAddonClarify(c, prefix, attempt, step, outcome) {
 				return false
 			}
-			clearPendingAddonMissing(c.session(), step)
+			clearPendingAddonMissing(c.Session(), step)
 			question := sanitizeAddonQuestion(outcome.question)
 			if question == "" {
 				question = "I didn't catch that. " + codedAddonPromptHint
 			}
-			prompt = question + "\n\n" + catalogAddonPrompt(c.session(), choices)
+			prompt = question + "\n\n" + catalogAddonPrompt(c.Session(), choices)
 			continue
 		}
 	}
@@ -156,18 +188,18 @@ func askStructuredCatalogAddons(c *Conv, choices []map[string]any, prefix string
 func noteAddonClarify(c *Conv, prefix string, attempt int, step string, outcome addonGroundOutcome) bool {
 	clarifyName := fmt.Sprintf("%s_clarify_%d", prefix, attempt)
 	if rec, done := replayAddonClarify(c, clarifyName); done {
-		return callOK(rec)
+		return codedflow.CallOK(rec)
 	}
-	turns := c.guideTurns(step)
-	if turns >= codedIntentSettings.MaxGuideTurns {
-		c.clearGuide()
-		clearPendingAddonMissing(c.session(), step)
-		c.appendCall(map[string]any{"name": clarifyName, "ok": false, "kind": "handoff"})
-		_ = c.Transfer(codedAgentHandoff)
+	turns := c.GuideTurns(step)
+	if turns >= codedflow.MaxGuideTurns() {
+		c.ClearGuide()
+		clearPendingAddonMissing(c.Session(), step)
+		c.AppendCall(map[string]any{"name": clarifyName, "ok": false, "kind": "handoff"})
+		_ = c.Transfer(codedflow.AgentHandoff)
 		return false
 	}
-	c.setGuide(step, turns+1)
-	c.appendCall(map[string]any{
+	c.SetGuide(step, turns+1)
+	c.AppendCall(map[string]any{
 		"name": clarifyName,
 		"ok":   true,
 		"kind": outcome.kind,
@@ -176,18 +208,18 @@ func noteAddonClarify(c *Conv, prefix string, attempt int, step string, outcome 
 }
 
 func replayAddonClarify(c *Conv, name string) (map[string]any, bool) {
-	if c == nil || c.stop {
+	if c == nil || c.Stop {
 		return nil, false
 	}
-	records := c.callRecords()
-	if c.seq >= len(records) {
+	records := c.CallRecords()
+	if c.Seq() >= len(records) {
 		return nil, false
 	}
-	rec := records[c.seq]
+	rec := records[c.Seq()]
 	if asString(rec["name"]) != name {
 		return nil, false
 	}
-	c.seq++
+	c.AdvanceSeq()
 	return rec, true
 }
 
@@ -202,7 +234,7 @@ func groundAddonParse(raw codedAddonParseResult, choices []map[string]any) addon
 	raw.Intent = strings.ToLower(strings.TrimSpace(raw.Intent))
 	raw.Question = strings.TrimSpace(raw.Question)
 	if raw.Intent == codedAddonIntentSkip {
-		if raw.Confidence > 0 && raw.Confidence < codedIntentSettings.IntentThreshold {
+		if raw.Confidence > 0 && raw.Confidence < codedflow.IntentThreshold() {
 			return addonGroundOutcome{kind: codedAddonIntentUnclear, question: raw.Question}
 		}
 		return addonGroundOutcome{kind: codedAddonIntentSkip}
@@ -210,7 +242,7 @@ func groundAddonParse(raw codedAddonParseResult, choices []map[string]any) addon
 	if raw.Intent != codedAddonIntentSelect {
 		return addonGroundOutcome{kind: codedAddonIntentUnclear, question: raw.Question}
 	}
-	if raw.Confidence < codedIntentSettings.IntentThreshold {
+	if raw.Confidence < codedflow.IntentThreshold() {
 		return addonGroundOutcome{kind: codedAddonIntentUnclear, question: raw.Question}
 	}
 
@@ -392,19 +424,19 @@ func runAddonParse(c *Conv, text string, choices []map[string]any, pending []int
 		Confidence: 0,
 		Question:   "I didn't catch that. " + codedAddonPromptHint,
 	}
-	if c == nil || c.app == nil {
+	if c == nil || c.App() == nil {
 		return fallback
 	}
 	prompt := buildAddonParsePrompt(text, choices, pending)
-	raw, err := parseCodedAddons(c.app, c.session(), prompt)
-	call := CodedPreviewAICall{Role: "guide", Prompt: prompt}
+	raw, err := parseCodedAddons(c.App(), c.Session(), prompt)
+	call := codedflow.CodedPreviewAICall{Role: "guide", Prompt: prompt}
 	if err != nil {
 		call.Error = err.Error()
-		c.notePreviewAI(call)
-		c.app.logCodedFlowAI(c.session(), "guide", prompt, "", err.Error(), "role", "addon_parse")
+		c.NotePreviewAI(call)
+		c.App().LogCodedFlowAI(c.Session(), "guide", prompt, "", err.Error(), "role", "addon_parse")
 		return fallback
 	}
-	raw.Reasoning = limitWords(raw.Reasoning, 200)
+	raw.Reasoning = codedflow.LimitWords(raw.Reasoning, 200)
 	call.Response = formatAddonParseResponse(raw)
 	call.Parsed = map[string]any{
 		"intent":           raw.Intent,
@@ -415,8 +447,8 @@ func runAddonParse(c *Conv, text string, choices []map[string]any, pending []int
 		"reasoning":        raw.Reasoning,
 	}
 	call.Confidence = raw.Confidence
-	c.notePreviewAI(call)
-	c.app.logCodedFlowAI(c.session(), "guide", prompt, call.Response, "",
+	c.NotePreviewAI(call)
+	c.App().LogCodedFlowAI(c.Session(), "guide", prompt, call.Response, "",
 		"role", "addon_parse",
 		"intent", raw.Intent,
 		"confidence", fmt.Sprintf("%.2f", raw.Confidence),
@@ -424,8 +456,8 @@ func runAddonParse(c *Conv, text string, choices []map[string]any, pending []int
 	return raw
 }
 
-func defaultParseCodedAddons(a *App, session *models.ChatbotSession, prompt string) (codedAddonParseResult, error) {
-	answer, err := a.completeCodedRoleText(session, codedFlowRoleGuide, prompt)
+func defaultParseCodedAddons(a codedflow.Host, session *models.ChatbotSession, prompt string) (codedAddonParseResult, error) {
+	answer, err := a.CompleteCodedRoleText(session, "guide", prompt)
 	if err != nil {
 		return codedAddonParseResult{}, err
 	}
@@ -496,18 +528,18 @@ Return JSON only:
 }
 
 func replayAddonParse(c *Conv, name string) (codedAddonParseResult, bool) {
-	if c == nil || c.stop {
+	if c == nil || c.Stop {
 		return codedAddonParseResult{}, false
 	}
-	records := c.callRecords()
-	if c.seq >= len(records) {
+	records := c.CallRecords()
+	if c.Seq() >= len(records) {
 		return codedAddonParseResult{}, false
 	}
-	rec := records[c.seq]
+	rec := records[c.Seq()]
 	if asString(rec["name"]) != name || asString(rec["plan"]) != "addon_parse" {
 		return codedAddonParseResult{}, false
 	}
-	c.seq++
+	c.AdvanceSeq()
 	return addonParseFromRecord(rec), true
 }
 

@@ -733,29 +733,29 @@ func TestFinishPostCartLineFlowClearsCheckoutState(t *testing.T) {
 	assert.Nil(t, getCheckoutState(session))
 }
 
-func TestFinishAddonStepAfterCaptureSetsDeliveryMode(t *testing.T) {
+func TestFinishAddonStepEarlyHandoffSetsDeliveryMode(t *testing.T) {
 	t.Parallel()
 	session := &models.ChatbotSession{SessionData: models.JSONB{}}
-	st := &checkoutState{Flow: checkoutFlowAfterCapture, Step: "addons", NewAddress: map[string]any{}}
+	st := &checkoutState{Flow: checkoutFlowEarlyHandoff, Step: "addons", NewAddress: map[string]any{}}
 	// Mirror finishAddonStep after-capture branch without WhatsApp I/O.
 	st.Step = "delivery_mode"
 	setCheckoutState(session, st)
 	got := getCheckoutState(session)
 	require.NotNil(t, got)
 	assert.Equal(t, "delivery_mode", got.Step)
-	assert.Equal(t, checkoutFlowAfterCapture, got.Flow)
+	assert.Equal(t, checkoutFlowEarlyHandoff, got.Flow)
 }
 
-func TestAdvanceToConfirmOrHandoffAfterCaptureUsesConfirmStep(t *testing.T) {
+func TestAdvanceToConfirmOrHandoffEarlyHandoffUsesConfirmStep(t *testing.T) {
 	t.Parallel()
 	session := &models.ChatbotSession{SessionData: models.JSONB{}}
-	st := &checkoutState{Flow: checkoutFlowAfterCapture, Step: "address", NewAddress: map[string]any{}}
+	st := &checkoutState{Flow: checkoutFlowEarlyHandoff, Step: "address", NewAddress: map[string]any{}}
 	st.Step = "confirm"
 	setCheckoutState(session, st)
 	got := getCheckoutState(session)
 	require.NotNil(t, got)
 	assert.Equal(t, "confirm", got.Step)
-	assert.Equal(t, checkoutFlowAfterCapture, got.Flow)
+	assert.Equal(t, checkoutFlowEarlyHandoff, got.Flow)
 }
 
 func TestIsCheckoutButtonIncludesItemsConfirm(t *testing.T) {

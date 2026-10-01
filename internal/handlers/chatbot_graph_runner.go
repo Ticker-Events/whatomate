@@ -12,6 +12,7 @@ import (
 
 	"github.com/expr-lang/expr"
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
 
@@ -39,7 +40,11 @@ type chatNodeCtx struct {
 	lastTiqr         map[string]any // payload from the latest tiqr_store_api call
 	lastTiqrErr      string         // truncated error from the latest failed tiqr call
 	lastTiqrStatus   int            // HTTP status when known (0 otherwise)
-	preview          *codedPreviewSink
+	preview          *codedflow.PreviewSink
+}
+
+func (ctx *chatNodeCtx) capturing() bool {
+	return ctx != nil && ctx.preview != nil
 }
 
 // nodeOutcome is the return value of a node executor.
@@ -280,14 +285,14 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 			}
 		}
 		if ctx.capturing() {
-			ctx.preview.carousel(node.ID, body, cards)
+			ctx.preview.Carousel(node.ID, body, cards)
 			return nodeOutcome{yield: true}, nil
 		}
 		if err := a.sendAndSaveInteractiveCarousel(ctx.account, ctx.contact, body, cards); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send carousel: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
-		a.logCodedFlowWhatsApp(ctx, node.ID, "carousel", body, "card_count", len(cards))
+		a.LogCodedFlowWhatsApp(newCodedChat(ctx), node.ID, "carousel", body, "card_count", len(cards))
 		return nodeOutcome{yield: true}, nil
 	}
 	buttons, err := buttonsForNode(node.Config, ctx.session.SessionData)
@@ -312,26 +317,26 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		listButton := processTemplate(stringFromConfig(node.Config, "list_button"), ctx.session.SessionData)
 		section := processTemplate(stringFromConfig(node.Config, "section_title"), ctx.session.SessionData)
 		if ctx.capturing() {
-			ctx.preview.buttons(node.ID, body, "list", buttons, header, footer, listButton, "")
+			ctx.preview.Buttons(node.ID, body, "list", buttons, header, footer, listButton, "")
 			return nodeOutcome{yield: true}, nil
 		}
 		if err := a.sendAndSaveInteractiveList(ctx.account, ctx.contact, body, header, footer, listButton, section, buttons); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send list: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
-		a.logCodedFlowWhatsApp(ctx, node.ID, "list", body, "button_count", len(buttons))
+		a.LogCodedFlowWhatsApp(newCodedChat(ctx), node.ID, "list", body, "button_count", len(buttons))
 		return nodeOutcome{yield: true}, nil
 	}
 	headerImage := replyHeaderImage(node.Config, ctx.session.SessionData)
 	if ctx.capturing() {
-		ctx.preview.buttons(node.ID, body, "buttons", buttons, "", "", "", headerImage)
+		ctx.preview.Buttons(node.ID, body, "buttons", buttons, "", "", "", headerImage)
 		return nodeOutcome{yield: true}, nil
 	}
 	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons, headerImage); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
-	a.logCodedFlowWhatsApp(ctx, node.ID, "buttons", body, "button_count", len(buttons))
+	a.LogCodedFlowWhatsApp(newCodedChat(ctx), node.ID, "buttons", body, "button_count", len(buttons))
 	return nodeOutcome{yield: true}, nil
 }
 
@@ -1090,7 +1095,7 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	header := processTemplate(stringFromConfig(node.Config, "header"), ctx.session.SessionData)
 	cta := processTemplate(stringFromConfig(node.Config, "cta"), ctx.session.SessionData)
 	if ctx.capturing() {
-		ctx.preview.flow(node.ID, header, body, cta)
+		ctx.preview.Flow(node.ID, header, body, cta)
 		return nodeOutcome{yield: true}, nil
 	}
 

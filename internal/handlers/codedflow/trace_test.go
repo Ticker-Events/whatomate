@@ -1,4 +1,4 @@
-package handlers
+package codedflow
 
 import (
 	"os"
@@ -19,17 +19,18 @@ func TestParseTruthyEnv(t *testing.T) {
 	assert.True(t, parseTruthyEnv("yes", false))
 }
 
-func TestCodedFlowTraceEnabled_EnvDefaultOn(t *testing.T) {
-	t.Setenv("WHATOMATE_CODEDFLOW_TRACE", "")
+func TestCodedFlowTraceEnv_DefaultOn(t *testing.T) {
 	os.Unsetenv("WHATOMATE_CODEDFLOW_TRACE")
-	app := &App{}
-	assert.True(t, app.codedFlowTraceEnabled())
+	enabled, set := CodedFlowTraceEnv()
+	assert.False(t, set)
+	assert.True(t, enabled)
 }
 
-func TestCodedFlowTraceEnabled_EnvOff(t *testing.T) {
+func TestCodedFlowTraceEnv_Off(t *testing.T) {
 	t.Setenv("WHATOMATE_CODEDFLOW_TRACE", "false")
-	app := &App{}
-	assert.False(t, app.codedFlowTraceEnabled())
+	enabled, set := CodedFlowTraceEnv()
+	assert.True(t, set)
+	assert.False(t, enabled)
 }
 
 func TestFormatHTTPCurl(t *testing.T) {

@@ -1,4 +1,4 @@
-package handlers
+package codedflow
 
 import (
 	"encoding/json"
@@ -12,13 +12,21 @@ import (
 const (
 	codedGuideKey = "_coded_guide"
 
-	codedRouteChoice     = "choice"
-	codedRouteCollection = "collection"
-	codedRouteProduct    = "product"
-	codedRouteAnswer     = "answer"
-	codedRouteCheckout   = "checkout"
-	codedRouteHandoff    = "handoff"
-	codedRouteUnclear    = "unclear"
+	RouteChoice     = "choice"
+	RouteCollection = "collection"
+	RouteProduct    = "product"
+	RouteAnswer     = "answer"
+	RouteCheckout   = "checkout"
+	RouteHandoff    = "handoff"
+	RouteUnclear    = "unclear"
+
+	codedRouteChoice     = RouteChoice
+	codedRouteCollection = RouteCollection
+	codedRouteProduct    = RouteProduct
+	codedRouteAnswer     = RouteAnswer
+	codedRouteCheckout   = RouteCheckout
+	codedRouteHandoff    = RouteHandoff
+	codedRouteUnclear    = RouteUnclear
 )
 
 // Route is one accepted free-text or exact answer from AskRoute.
@@ -54,13 +62,14 @@ type codedIntentConfig struct {
 	Recover         codedAIRoleConfig
 }
 
-var codedIntentSettings = codedIntentConfig{
+var IntentSettings = &codedIntentConfig{
+
 	IntentThreshold: 0.75,
 	MaxGuideTurns:   3,
 	OrderRetries:    2,
 }
 
-type codedIntentResult struct {
+type IntentResult struct {
 	Language     string  `json:"language"`
 	Route        string  `json:"route"`
 	ChoiceID     string  `json:"choice_id"`
@@ -71,7 +80,7 @@ type codedIntentResult struct {
 	Reasoning    string  `json:"reasoning"`
 }
 
-type codedIntentContext struct {
+type IntentContext struct {
 	AllowCatalog bool
 	Question     string
 	Doing        string
@@ -82,18 +91,18 @@ type codedIntentContext struct {
 }
 
 var (
-	identifyCodedIntent = defaultIdentifyCodedIntent
-	guideCodedIntent    = defaultGuideCodedIntent
+	IdentifyCodedIntent = defaultIdentifyCodedIntent
+	GuideCodedIntent    = defaultGuideCodedIntent
 )
 
-func (c *Conv) askRouteButtons(name string, prompt ButtonPrompt, opts RouteOptions) (Route, bool) {
+func (c *Conv) AskRouteButtons(name string, prompt ButtonPrompt, opts RouteOptions) (Route, bool) {
 	if route, done, ok := c.replayRoute(); done {
 		return route, ok
 	}
 	return c.askRoute(name, c.buttonConfig(prompt), opts)
 }
 
-func (c *Conv) askRouteList(name string, items []any, prompt ListPrompt, opts RouteOptions) (Route, bool) {
+func (c *Conv) AskRouteList(name string, items []any, prompt ListPrompt, opts RouteOptions) (Route, bool) {
 	if route, done, ok := c.replayRoute(); done {
 		return route, ok
 	}
@@ -103,7 +112,7 @@ func (c *Conv) askRouteList(name string, items []any, prompt ListPrompt, opts Ro
 	return c.askRoute(name, c.listConfig(prompt), opts)
 }
 
-func (c *Conv) askRouteCarousel(name string, items []any, prompt CarouselPrompt, opts RouteOptions) (Route, bool) {
+func (c *Conv) AskRouteCarousel(name string, items []any, prompt CarouselPrompt, opts RouteOptions) (Route, bool) {
 	if route, done, ok := c.replayRoute(); done {
 		return route, ok
 	}
@@ -114,7 +123,7 @@ func (c *Conv) askRouteCarousel(name string, items []any, prompt CarouselPrompt,
 }
 
 func (c *Conv) replayRoute() (Route, bool, bool) {
-	if c.stop {
+	if c.Stop {
 		return Route{}, true, false
 	}
 	rec, done := c.doneCall()
@@ -137,11 +146,11 @@ func (c *Conv) replayRoute() (Route, bool, bool) {
 }
 
 func (c *Conv) askRoute(name string, cfg map[string]any, opts RouteOptions) (Route, bool) {
-	if c.stop {
+	if c.Stop {
 		return Route{}, false
 	}
 	if id := c.offeredButtonID(cfg); id != "" {
-		c.chat.buttonID = id
+		c.chat.SetButtonID(id)
 		choice, ok := c.acceptButton(name, cfg)
 		if !ok {
 			return Route{}, false
@@ -149,25 +158,24 @@ func (c *Conv) askRoute(name string, cfg map[string]any, opts RouteOptions) (Rou
 		c.clearGuide()
 		return Route{Kind: codedRouteChoice, ID: choice.ID, Title: choice.Title}, true
 	}
-	if !c.noAnswerYet() && strings.TrimSpace(c.chat.buttonID) != "" {
-		c.app.Log.Warn("Coded flow button did not match this step",
+	if !c.noAnswerYet() && strings.TrimSpace(c.chat.ButtonID()) != "" {
+		c.app.LogWarn("Coded flow button did not match this step",
 			"step", name,
-			"button_id", c.chat.buttonID,
-			"text", c.chat.userInput,
+			"button_id", c.chat.ButtonID(),
+			"text", c.chat.UserInput(),
 		)
-		c.chat.buttonID = ""
-		c.chat.userInput = ""
-		c.chat.consumed = false
-		c.chat.flowResponseData = nil
+		c.chat.SetButtonID("")
+		c.chat.SetUserInput("")
+		c.chat.SetConsumed(false)
+		c.chat.SetFlowResponseData(nil)
 	}
 	if c.noAnswerYet() {
-		node := &ChatNode{ID: name, Type: ChatNodeButtons, Config: cfg}
-		out, err := c.app.execChatButtons(node, c.chat)
+		out, err := c.app.ExecChatButtons(c.chat, name, cfg)
 		if err != nil {
 			c.fail(err)
 			return Route{}, false
 		}
-		if out.yield {
+		if out.Yield {
 			c.wait(name)
 		}
 		return Route{}, false
@@ -176,12 +184,12 @@ func (c *Conv) askRoute(name string, cfg map[string]any, opts RouteOptions) (Rou
 }
 
 func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOptions) (Route, bool) {
-	c.chat.consumed = true
+	c.chat.SetConsumed(true)
 	c.session().CurrentStep = name
 	ctx := c.intentContext(cfg, opts)
-	prompt := buildIntentPrompt(c.chat.userInput, ctx)
-	raw, err := identifyCodedIntent(c.app, c.session(), c.chat.userInput, ctx)
-	raw.Reasoning = limitWords(raw.Reasoning, 200)
+	prompt := BuildIntentPrompt(c.chat.UserInput(), ctx)
+	raw, err := IdentifyCodedIntent(c.app, c.session(), c.chat.UserInput(), ctx)
+	raw.Reasoning = LimitWords(raw.Reasoning, 200)
 	call := CodedPreviewAICall{
 		Role:      "intent",
 		Prompt:    prompt,
@@ -192,8 +200,8 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 	if err != nil {
 		call.Error = err.Error()
 		c.notePreviewAI(call)
-		c.app.logCodedFlowAI(c.session(), "intent", prompt, "", err.Error())
-		_ = c.Transfer(codedAgentHandoff)
+		c.app.LogCodedFlowAI(c.session(), "intent", prompt, "", err.Error())
+		_ = c.Transfer(AgentHandoff)
 		return Route{}, false
 	}
 	call.Response = formatIntentResponse(raw)
@@ -208,12 +216,12 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		"reasoning":     raw.Reasoning,
 	}
 	call.Confidence = raw.Confidence
-	result, grounded := validateCodedIntent(raw, ctx)
+	result, grounded := ValidateCodedIntent(raw, ctx)
 	call.Grounded = &grounded
 	call.Route = result.Route
 	call.Language = result.Language
 	c.notePreviewAI(call)
-	c.app.logCodedFlowAI(c.session(), "intent", prompt, call.Response, "",
+	c.app.LogCodedFlowAI(c.session(), "intent", prompt, call.Response, "",
 		"route", result.Route,
 		"confidence", result.Confidence,
 		"grounded", grounded,
@@ -226,15 +234,15 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 	)
 	c.rememberLanguage(result.Language)
 	if !grounded {
-		_ = c.Transfer(codedAgentHandoff)
+		_ = c.Transfer(AgentHandoff)
 		return Route{}, false
 	}
-	if result.Route == codedRouteHandoff && result.Confidence >= codedIntentSettings.IntentThreshold {
+	if result.Route == codedRouteHandoff && result.Confidence >= IntentSettings.IntentThreshold {
 		c.clearGuide()
-		_ = c.Transfer(codedAgentHandoff)
+		_ = c.Transfer(AgentHandoff)
 		return Route{}, false
 	}
-	if result.Confidence >= codedIntentSettings.IntentThreshold {
+	if result.Confidence >= IntentSettings.IntentThreshold {
 		switch result.Route {
 		case codedRouteChoice:
 			c.clearGuide()
@@ -245,7 +253,7 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		case codedRouteCollection:
 			c.clearGuide()
 			route := Route{Kind: codedRouteCollection, ID: result.CollectionID, Title: ctx.Collections[result.CollectionID]}
-			c.applyCollectionSelection(route)
+			c.ApplyCollectionSelection(route)
 			c.appendRouteCall(name, route, cfg)
 			return route, true
 		case codedRouteProduct:
@@ -259,7 +267,7 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 			return Route{Kind: codedRouteAnswer, Answer: result.Answer}, true
 		case codedRouteCheckout:
 			c.clearGuide()
-			c.divert = codedRouteCheckout
+			c.Divert = codedRouteCheckout
 			// No shopping call — buy/menu checks divert and leaves the step.
 			return Route{Kind: codedRouteCheckout}, true
 		}
@@ -267,19 +275,19 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 	return c.askGuide(name, ctx)
 }
 
-func (c *Conv) askGuide(name string, ctx codedIntentContext) (Route, bool) {
+func (c *Conv) askGuide(name string, ctx IntentContext) (Route, bool) {
 	turns := c.guideTurns(name)
-	if turns >= codedIntentSettings.MaxGuideTurns {
+	if turns >= IntentSettings.MaxGuideTurns {
 		c.clearGuide()
-		_ = c.Transfer(codedAgentHandoff)
+		_ = c.Transfer(AgentHandoff)
 		return Route{}, false
 	}
 	lang := asString(c.session().SessionData[customerLanguageKey])
 	if lang == "" {
 		lang = "en"
 	}
-	prompt := buildGuidePrompt(c.chat.userInput, lang, ctx)
-	question, err := guideCodedIntent(c.app, c.session(), c.chat.userInput, lang, ctx)
+	prompt := buildGuidePrompt(c.chat.UserInput(), lang, ctx)
+	question, err := GuideCodedIntent(c.app, c.session(), c.chat.UserInput(), lang, ctx)
 	call := CodedPreviewAICall{
 		Role:     "guide",
 		Prompt:   prompt,
@@ -288,37 +296,42 @@ func (c *Conv) askGuide(name string, ctx codedIntentContext) (Route, bool) {
 	if err != nil {
 		call.Error = err.Error()
 		c.notePreviewAI(call)
-		c.app.logCodedFlowAI(c.session(), "guide", prompt, "", err.Error(), "language", lang)
-		_ = c.Transfer(codedAgentHandoff)
+		c.app.LogCodedFlowAI(c.session(), "guide", prompt, "", err.Error(), "language", lang)
+		_ = c.Transfer(AgentHandoff)
 		return Route{}, false
 	}
 	call.Response = question
 	if strings.TrimSpace(question) == "" {
 		call.Error = "empty guide question"
 		c.notePreviewAI(call)
-		c.app.logCodedFlowAI(c.session(), "guide", prompt, "", "empty guide question", "language", lang)
-		_ = c.Transfer(codedAgentHandoff)
+		c.app.LogCodedFlowAI(c.session(), "guide", prompt, "", "empty guide question", "language", lang)
+		_ = c.Transfer(AgentHandoff)
 		return Route{}, false
 	}
 	c.notePreviewAI(call)
-	c.app.logCodedFlowAI(c.session(), "guide", prompt, question, "", "language", lang)
+	c.app.LogCodedFlowAI(c.session(), "guide", prompt, question, "", "language", lang)
 	c.setGuide(name, turns+1)
-	if err := c.app.deliverCodedText(c.chat, name, question); err != nil {
+	if err := c.app.DeliverCodedText(c.chat, name, question); err != nil {
 		c.fail(err)
 		return Route{}, false
 	}
-	c.stop = true
+	c.Stop = true
 	return Route{}, false
 }
 
+// NotePreviewAI records an AI call on the preview sink when capturing.
+func (c *Conv) NotePreviewAI(call CodedPreviewAICall) { c.notePreviewAI(call) }
+
 func (c *Conv) notePreviewAI(call CodedPreviewAICall) {
-	if c == nil || c.chat == nil || !c.chat.capturing() {
+	if c == nil || c.chat == nil || !c.chat.Capturing() {
 		return
 	}
-	c.chat.preview.noteAI(call)
+	if p := c.chat.Preview(); p != nil {
+		p.NoteAI(call)
+	}
 }
 
-func formatIntentResponse(raw codedIntentResult) string {
+func formatIntentResponse(raw IntentResult) string {
 	b, err := json.Marshal(raw)
 	if err != nil {
 		return ""
@@ -326,8 +339,8 @@ func formatIntentResponse(raw codedIntentResult) string {
 	return string(b)
 }
 
-func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) codedIntentContext {
-	ctx := codedIntentContext{
+func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) IntentContext {
+	ctx := IntentContext{
 		AllowCatalog: opts.AllowCatalog,
 		Question:     asString(cfg["body"]),
 		Doing:        asString(cfg["step_doing"]),
@@ -336,7 +349,7 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) codedIntentC
 		ChoiceIDs:    map[string]string{},
 		Collections:  map[string]string{},
 	}
-	buttons, err := buttonsForNode(cfg, c.session().SessionData)
+	buttons, err := c.app.ButtonsForNode(cfg, c.session().SessionData)
 	if err == nil {
 		for _, button := range buttons {
 			id := fieldString(button, "id")
@@ -370,6 +383,8 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) codedIntentC
 	return ctx
 }
 
+func ChoiceLabel(button map[string]any) string { return choiceLabel(button) }
+
 func choiceLabel(button map[string]any) string {
 	title := fieldString(button, "title")
 	body := fieldString(button, "body")
@@ -401,10 +416,10 @@ func (c *Conv) applyRouteSelection(cfg map[string]any, route Route) {
 	if route.Kind != codedRouteChoice || route.ID == "" {
 		return
 	}
-	c.session().SessionData = applyButtonSelection(cfg, c.session().SessionData, route.ID, route.Title)
+	c.session().SessionData = c.app.ApplyButtonSelection(cfg, c.session().SessionData, route.ID, route.Title)
 }
 
-func (c *Conv) applyCollectionSelection(route Route) {
+func (c *Conv) ApplyCollectionSelection(route Route) {
 	if route.ID == "" {
 		return
 	}
@@ -427,6 +442,9 @@ func (c *Conv) rememberLanguage(lang string) {
 	c.session().SessionData[customerLanguageKey] = lang
 }
 
+// GuideTurns returns how many guide turns have been used for step.
+func (c *Conv) GuideTurns(step string) int { return c.guideTurns(step) }
+
 func (c *Conv) guideTurns(step string) int {
 	raw, ok := asStringMap(c.session().SessionData[codedGuideKey])
 	if !ok {
@@ -445,6 +463,9 @@ func (c *Conv) guideTurns(step string) int {
 	}
 }
 
+// SetGuide records guide turns for a step.
+func (c *Conv) SetGuide(step string, turns int) { c.setGuide(step, turns) }
+
 func (c *Conv) setGuide(step string, turns int) {
 	c.session().SessionData[codedGuideKey] = map[string]any{
 		"step":  step,
@@ -452,18 +473,21 @@ func (c *Conv) setGuide(step string, turns int) {
 	}
 }
 
+// ClearGuide clears the guide turn counter.
+func (c *Conv) ClearGuide() { c.clearGuide() }
+
 func (c *Conv) clearGuide() {
 	delete(c.session().SessionData, codedGuideKey)
 }
 
-func validateCodedIntent(raw codedIntentResult, ctx codedIntentContext) (codedIntentResult, bool) {
+func ValidateCodedIntent(raw IntentResult, ctx IntentContext) (IntentResult, bool) {
 	raw.Route = strings.ToLower(strings.TrimSpace(raw.Route))
 	raw.ChoiceID = strings.TrimSpace(raw.ChoiceID)
 	raw.CollectionID = strings.TrimSpace(raw.CollectionID)
 	raw.ProductQuery = strings.TrimSpace(raw.ProductQuery)
 	raw.Answer = strings.TrimSpace(raw.Answer)
 	raw.Language = strings.TrimSpace(raw.Language)
-	raw.Reasoning = limitWords(raw.Reasoning, 200)
+	raw.Reasoning = LimitWords(raw.Reasoning, 200)
 	if raw.Language == "" {
 		raw.Language = "en"
 	}
@@ -538,9 +562,9 @@ func matchCodedPattern(pattern, value string) bool {
 	return re.MatchString(value)
 }
 
-func defaultIdentifyCodedIntent(a *App, session *models.ChatbotSession, message string, ctx codedIntentContext) (codedIntentResult, error) {
+func defaultIdentifyCodedIntent(a Host, session *models.ChatbotSession, message string, ctx IntentContext) (IntentResult, error) {
 	if a != nil && session != nil {
-		settings, err := a.getChatbotSettingsCached(session.OrganizationID, session.WhatsAppAccount)
+		settings, err := a.GetChatbotSettingsCached(session.OrganizationID, session.WhatsAppAccount)
 		if err == nil && settings != nil {
 			switch codedIntentProvider(settings) {
 			case models.IntentProviderJev, models.IntentProviderGateway:
@@ -548,24 +572,24 @@ func defaultIdentifyCodedIntent(a *App, session *models.ChatbotSession, message 
 			}
 		}
 	}
-	roleSettings, ok := codedRoleSettings(a, session, codedIntentSettings.Intent)
+	roleSettings, ok := codedRoleSettings(a, session, IntentSettings.Intent)
 	if !ok {
-		return codedIntentResult{}, fmt.Errorf("ai is not configured")
+		return IntentResult{}, fmt.Errorf("ai is not configured")
 	}
-	prompt := buildIntentPrompt(message, ctx)
-	answer, err := a.completeCodedText(roleSettings, session, prompt, "")
+	prompt := BuildIntentPrompt(message, ctx)
+	answer, err := a.CompleteCodedText(roleSettings, session, prompt, "")
 	if err != nil {
-		return codedIntentResult{}, err
+		return IntentResult{}, err
 	}
 	return parseCodedIntent(answer)
 }
 
-func defaultGuideCodedIntent(a *App, session *models.ChatbotSession, message, lang string, ctx codedIntentContext) (string, error) {
+func defaultGuideCodedIntent(a Host, session *models.ChatbotSession, message, lang string, ctx IntentContext) (string, error) {
 	prompt := buildGuidePrompt(message, lang, ctx)
-	return a.completeCodedRoleText(session, codedFlowRoleGuide, prompt)
+	return a.CompleteCodedRoleText(session, codedFlowRoleGuide, prompt)
 }
 
-func codedRoleSettings(a *App, session *models.ChatbotSession, role codedAIRoleConfig) (*models.ChatbotSettings, bool) {
+func codedRoleSettings(a Host, session *models.ChatbotSession, role codedAIRoleConfig) (*models.ChatbotSettings, bool) {
 	if strings.EqualFold(strings.TrimSpace(role.Provider), "jev") {
 		return nil, false
 	}
@@ -586,7 +610,7 @@ func codedRoleSettings(a *App, session *models.ChatbotSession, role codedAIRoleC
 	return &out, true
 }
 
-func buildIntentPrompt(message string, ctx codedIntentContext) string {
+func BuildIntentPrompt(message string, ctx IntentContext) string {
 	var choices strings.Builder
 	if len(ctx.ChoiceIDs) == 0 {
 		choices.WriteString("(none)")
@@ -658,7 +682,7 @@ Customer message:
 %s`, question, doing, expect, patternLine, choices.String(), collections.String(), message)
 }
 
-func buildGuidePrompt(message, lang string, ctx codedIntentContext) string {
+func buildGuidePrompt(message, lang string, ctx IntentContext) string {
 	names := make([]string, 0, len(ctx.Collections))
 	for _, name := range ctx.Collections {
 		if name != "" {
@@ -701,7 +725,7 @@ Customer message:
 %s`, collectionNames, question, doing, expect, lang, message)
 }
 
-func limitWords(text string, max int) string {
+func LimitWords(text string, max int) string {
 	text = strings.TrimSpace(text)
 	if text == "" || max <= 0 {
 		return ""
@@ -713,17 +737,27 @@ func limitWords(text string, max int) string {
 	return strings.Join(words[:max], " ")
 }
 
-func parseCodedIntent(raw string) (codedIntentResult, error) {
+func parseCodedIntent(raw string) (IntentResult, error) {
 	raw = strings.TrimSpace(raw)
 	if start := strings.Index(raw, "{"); start >= 0 {
 		if end := strings.LastIndex(raw, "}"); end > start {
 			raw = raw[start : end+1]
 		}
 	}
-	var body codedIntentResult
+	var body IntentResult
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
-		return codedIntentResult{}, err
+		return IntentResult{}, err
 	}
-	body.Reasoning = limitWords(body.Reasoning, 200)
+	body.Reasoning = LimitWords(body.Reasoning, 200)
 	return body, nil
 }
+
+
+// MaxGuideTurns is the guide-attempt limit before handoff.
+func MaxGuideTurns() int { return IntentSettings.MaxGuideTurns }
+func IntentThreshold() float64 { return IntentSettings.IntentThreshold }
+func DefaultOrderRetries() int { return IntentSettings.OrderRetries }
+
+
+type codedIntentContext = IntentContext
+type codedIntentResult = IntentResult

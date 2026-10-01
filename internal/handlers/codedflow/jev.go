@@ -1,14 +1,10 @@
-package handlers
+package codedflow
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -23,7 +19,7 @@ const (
 	jevMaxSpans = 200
 )
 
-type jevEndpoint struct {
+type JevEndpoint struct {
 	URL   string
 	Key   string
 	Model string
@@ -41,7 +37,7 @@ type jevNoulAnswer struct {
 	Noul float64 `json:"noul"`
 }
 
-type jevSystemOneResponse struct {
+type JevSystemOneResponse struct {
 	Model   string                     `json:"model"`
 	Answers map[string]json.RawMessage `json:"answers"`
 }
@@ -50,42 +46,42 @@ func codedIntentProvider(settings *models.ChatbotSettings) models.IntentProvider
 	return codedFlowRoleProvider(settings, codedFlowRoleIntent)
 }
 
-func jevEndpointFor(settings *models.ChatbotSettings) (jevEndpoint, error) {
+func jevEndpointFor(settings *models.ChatbotSettings) (JevEndpoint, error) {
 	if settings == nil {
-		return jevEndpoint{}, fmt.Errorf("ai is not configured")
+		return JevEndpoint{}, fmt.Errorf("ai is not configured")
 	}
 	switch codedIntentProvider(settings) {
 	case models.IntentProviderJev:
 		key := strings.TrimSpace(settings.AI.TypeSafeAPIKey)
 		if key == "" {
-			return jevEndpoint{}, fmt.Errorf("typesafe api key is not configured")
+			return JevEndpoint{}, fmt.Errorf("typesafe api key is not configured")
 		}
-		return jevEndpoint{URL: typeSafeSystemOneURL, Key: key, Model: models.IntentTypeSafeModel}, nil
+		return JevEndpoint{URL: typeSafeSystemOneURL, Key: key, Model: models.IntentTypeSafeModel}, nil
 	case models.IntentProviderGateway:
 		key := strings.TrimSpace(settings.AI.GatewayAPIKey)
 		if key == "" {
-			return jevEndpoint{}, fmt.Errorf("ai gateway api key is not configured")
+			return JevEndpoint{}, fmt.Errorf("ai gateway api key is not configured")
 		}
 		model := strings.TrimSpace(settings.AI.GatewayModel)
 		if model == "" {
 			model = models.IntentGatewayModelJev
 		}
 		if !models.ValidIntentGatewayModel(model) {
-			return jevEndpoint{}, fmt.Errorf("invalid ai gateway model: %s", model)
+			return JevEndpoint{}, fmt.Errorf("invalid ai gateway model: %s", model)
 		}
-		return jevEndpoint{URL: aiGatewaySystemOneURL, Key: key, Model: model}, nil
+		return JevEndpoint{URL: aiGatewaySystemOneURL, Key: key, Model: model}, nil
 	default:
-		return jevEndpoint{}, fmt.Errorf("intent provider is not jev or gateway")
+		return JevEndpoint{}, fmt.Errorf("intent provider is not jev or gateway")
 	}
 }
 
-func identifyCodedIntentJev(a *App, settings *models.ChatbotSettings, message string, ctx codedIntentContext) (codedIntentResult, error) {
+func identifyCodedIntentJev(a Host, settings *models.ChatbotSettings, message string, ctx codedIntentContext) (codedIntentResult, error) {
 	endpoint, err := jevEndpointFor(settings)
 	if err != nil {
 		return codedIntentResult{}, err
 	}
 	state, questions := buildJevIntentRequest(message, ctx)
-	raw, err := a.callSystemOne(endpoint, state, questions)
+	raw, err := a.CallSystemOne(endpoint, state, questions)
 	if err != nil {
 		return codedIntentResult{}, err
 	}
@@ -316,62 +312,8 @@ func productSpanCandidates(message string) []string {
 	return out
 }
 
-func (a *App) callSystemOne(endpoint jevEndpoint, state map[string]any, questions map[string]any) (jevSystemOneResponse, error) {
-	payload, err := json.Marshal(map[string]any{
-		"model":     endpoint.Model,
-		"state":     state,
-		"questions": questions,
-	})
-	if err != nil {
-		return jevSystemOneResponse{}, fmt.Errorf("failed to marshal typesafe payload: %w", err)
-	}
-	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
-		}
-		req, err := http.NewRequest(http.MethodPost, endpoint.URL, bytes.NewReader(payload))
-		if err != nil {
-			return jevSystemOneResponse{}, fmt.Errorf("failed to create typesafe request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+endpoint.Key)
 
-		client := a.HTTPClient
-		if client == nil {
-			client = http.DefaultClient
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("typesafe request failed: %w", err)
-			continue
-		}
-		body, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			lastErr = fmt.Errorf("failed to read typesafe response: %w", readErr)
-			continue
-		}
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == 529 {
-			lastErr = fmt.Errorf("typesafe temporary error: %d", resp.StatusCode)
-			continue
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return jevSystemOneResponse{}, fmt.Errorf("typesafe error %d: %s", resp.StatusCode, truncateRunes(string(body), 200))
-		}
-		var parsed jevSystemOneResponse
-		if err := json.Unmarshal(body, &parsed); err != nil {
-			return jevSystemOneResponse{}, fmt.Errorf("failed to parse typesafe response: %w", err)
-		}
-		return parsed, nil
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("typesafe request failed")
-	}
-	return jevSystemOneResponse{}, lastErr
-}
-
-func composeJevIntent(raw jevSystemOneResponse, message string, ctx codedIntentContext) (codedIntentResult, error) {
+func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentContext) (codedIntentResult, error) {
 	routeAns, routeOK := parseJevChoice(raw.Answers["route"])
 	langAns, _ := parseJevChoice(raw.Answers["language"])
 	choiceAns, _ := parseJevChoice(raw.Answers["choice_id"])
@@ -510,7 +452,7 @@ func composeJevIntent(raw jevSystemOneResponse, message string, ctx codedIntentC
 }
 
 func isTalkToStaffChoice(id string, ctx codedIntentContext) bool {
-	if id == tiqrTalkToAgent {
+	if id == "talk_to_agent" {
 		return true
 	}
 	title := strings.ToLower(strings.TrimSpace(ctx.ChoiceIDs[id]))

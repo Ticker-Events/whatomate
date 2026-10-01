@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	draftrepo "github.com/shridarpatil/whatomate/internal/commerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
 	"gorm.io/gorm"
@@ -129,7 +130,7 @@ func categoryFromCollectionMap(raw map[string]any) tickermcp.Category {
 	if category.HandoffPolicy != "after_capture" {
 		category.HandoffPolicy = "none"
 	}
-	for _, field := range requiredCaptureFieldsFrom(raw) {
+	for _, field := range tiqrecommerce.RequiredCaptureFieldsFrom(raw) {
 		category.RequiredCaptureFields = append(category.RequiredCaptureFields, tickermcp.CaptureField{
 			Key:      asString(field["key"]),
 			Label:    asString(field["label"]),
@@ -277,7 +278,7 @@ func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *m
 			return err
 		}
 
-		applySessionHandoffCart(&draft, session)
+		tiqrecommerce.ApplySessionHandoffCart(&draft, session)
 		metadata := commerceHandoffMetadata(&draft, category)
 		var agentID *uuid.UUID
 		if settings != nil && settings.AgentAssignment.AssignToSameAgent && contact.AssignedUserID != nil {
@@ -315,7 +316,7 @@ func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *m
 			"transfer_id": transfer.ID, "status": draft.Status, "active_owner_key": nil,
 			"version": gorm.Expr("version + 1"),
 		}
-		if asString(draft.Cart["source"]) == tiqrEcommerceCartSource {
+		if asString(draft.Cart["source"]) == tiqrecommerce.CartSource {
 			updates["cart"] = map[string]any(draft.Cart)
 		}
 		if strings.TrimSpace(draft.StoreID) != "" {
@@ -380,13 +381,13 @@ func commerceHandoffMetadata(draft *models.CommerceDraft, category tickermcp.Cat
 		"captured_fields": draft.CapturedFields, "cart": draft.Cart, "addons": draft.Addons,
 		"fulfillment_mode": draft.FulfillmentMode, "requested_fulfillment_at": draft.RequestedFulfillmentAt,
 		"address": draft.AddressSnapshot, "media": media,
-		"contact": commerceHandoffContact(draft),
-		"notes":   commerceHandoffNotesText(draft),
+		"contact": tiqrecommerce.CommerceHandoffContact(draft),
+		"notes":   tiqrecommerce.CommerceHandoffNotesText(draft),
 	}
 	if len(fulfillment) > 0 {
 		meta["fulfillment"] = fulfillment
 	}
-	if missing := commerceHandoffMissingFields(draft); len(missing) > 0 {
+	if missing := tiqrecommerce.CommerceHandoffMissingFields(draft); len(missing) > 0 {
 		values := make([]any, 0, len(missing))
 		for _, field := range missing {
 			values = append(values, field)
