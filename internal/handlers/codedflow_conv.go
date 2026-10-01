@@ -539,9 +539,21 @@ func (c *Conv) Once(name string, fn func()) bool {
 }
 
 // Transfer tells the customer, queues the chat, and ends the flow.
+// TiQR ecommerce sessions snapshot the cart and checkout fields onto a
+// commerce draft before creating the agent transfer.
 func (c *Conv) Transfer(message string) error {
 	if c.ended {
 		return nil
+	}
+	if !c.chat.capturing() && codedFlowSessionKey(c.session()) == tiqrEcommerceKey {
+		if err := c.transferTiqrEcommerce(message); err == nil {
+			c.stop = true
+			c.ended = true
+			return nil
+		} else if c.app != nil {
+			c.app.Log.Warn("tiqr ecommerce handoff snapshot failed; falling back to queue transfer",
+				"error", err)
+		}
 	}
 	node := &ChatNode{ID: "transfer", Type: ChatNodeTransfer, Config: map[string]any{"body": c.text(message)}}
 	_, err := c.app.execChatTransfer(node, c.chat)

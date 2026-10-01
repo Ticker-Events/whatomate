@@ -122,16 +122,12 @@ func runThemedHandoff(c *Conv, collection map[string]any, productID string) erro
 }
 
 func askThemedCaptureFields(c *Conv, collection map[string]any) bool {
+	// Replay every field in order. Skipping a field already stored in
+	// commerce_captured_fields would skip its call record and shift later
+	// answers (and Skip) onto the wrong steps.
 	fields := requiredCaptureFieldsFrom(collection)
-	captured := jsonMapFromSession(c.session(), "commerce_captured_fields")
-	index := 0
-	for _, field := range fields {
-		key := asString(field["key"])
-		if key == "" || captured[key] != nil {
-			continue
-		}
-		name := captureCallName(index, key)
-		index++
+	for i, field := range fields {
+		name := captureCallName(i, asString(field["key"]))
 		value, ok := c.askCaptureFieldNoCheckout(name, field)
 		if !ok {
 			return false

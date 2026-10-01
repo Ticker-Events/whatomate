@@ -3185,8 +3185,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_handoff.go": {
-    "mtime": 1790850933.2365708,
-    "ast_hash": "6136de3bbc3d20368072c2f98744e9d9",
+    "mtime": 1790848800.6260252,
+    "ast_hash": "3949794d95933a75f6bfc2375045ff86",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_llm.go": {
@@ -3255,8 +3255,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_tiqr_store_api_test.go": {
-    "mtime": 1790849226.9664102,
-    "ast_hash": "61934661d7322de290c1143b5accc13e",
+    "mtime": 1790751592.1916077,
+    "ast_hash": "13d21614317652d95cccebb9365f5c30",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow.go": {
@@ -3280,8 +3280,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_conv.go": {
-    "mtime": 1790851003.9995399,
-    "ast_hash": "d5a5181c70a6462dee5ba60725d0da7f",
+    "mtime": 1790839337.6727347,
+    "ast_hash": "e27d3c044c2e5570b55ee0ae4387a747",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_delivery.go": {
@@ -3330,18 +3330,18 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_test.go": {
-    "mtime": 1790851018.114946,
-    "ast_hash": "5589c9aae97e81ca586a9fd6ab8cf16e",
+    "mtime": 1790849143.50826,
+    "ast_hash": "89fccb87af4cf8d999116be18fa3afdb",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_tiqr_ecommerce.go": {
-    "mtime": 1790849621.7525542,
-    "ast_hash": "4d2133c80cc6a502d52920b31b25102d",
+    "mtime": 1790848999.1685228,
+    "ast_hash": "44a14011d51c55d7086837dddc16b6a0",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_tiqr_themed.go": {
-    "mtime": 1790849475.2537034,
-    "ast_hash": "aaaa10635be20f7f8309f4f8615419f5",
+    "mtime": 1790849029.4336665,
+    "ast_hash": "4e6d0567028def6da0c21e284781ba94",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_trace.go": {
@@ -4435,8 +4435,8 @@
     "semantic_hash": ""
   },
   "docs/tiqr-ecommerce-coded-flow.md": {
-    "mtime": 1790850994.5082088,
-    "ast_hash": "0c3d78242c0b2ed769feb5687a86542e",
+    "mtime": 1790849178.6410708,
+    "ast_hash": "5af4b61b90f1d69cd27718d4193d8e23",
     "semantic_hash": ""
   },
   "frontend/crowdin.yml": {
@@ -4577,11 +4577,6 @@
   "frontend/public/notification.mp3": {
     "mtime": 1788240746.781184,
     "ast_hash": "41bcd6b84430e92d9a06aa20e9db5970",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_tiqr_ecommerce_handoff.go": {
-    "mtime": 1790850899.1439734,
-    "ast_hash": "ff388332742c60b5d2b618e8a5c01802",
     "semantic_hash": ""
   }
 }

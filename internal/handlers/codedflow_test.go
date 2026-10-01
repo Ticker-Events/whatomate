@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1149,6 +1150,70 @@ func TestTiqrEcommerce_AfterCaptureHandoffCompletes(t *testing.T) {
 	assert.Equal(t, "Please call on arrival", draft.Notes["customer_notes"])
 }
 
+func TestTiqrEcommerce_AfterCaptureManyFieldsThenSkip(t *testing.T) {
+	product := []any{
+		map[string]any{
+			"id": "101", "name": "Themed Cake", "min_price": "500",
+			"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "500"}},
+		},
+	}
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":             "57",
+				"name":           "Custom Cakes",
+				"description":    "Made to order",
+				"handoff_policy": "after_capture",
+				"required_capture_fields": []any{
+					map[string]any{"key": "writing_on_cake", "label": "Writing on cake", "type": "text", "required": true},
+					map[string]any{"key": "delivery_date", "label": "Delivery date", "type": "text", "required": true},
+					map[string]any{"key": "number_of_layers", "label": "Number of layers", "type": "text", "required": true},
+				},
+			},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, product, nil, store, nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrBuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Custom Cakes", "57", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_0_writing_on_cake", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happye", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_1_delivery_date", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "October 02, 04 pm", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_2_number_of_layers", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "2", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "themed_addons_free", session.CurrentStep)
+	captured, ok := session.SessionData["commerce_captured_fields"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Happye", captured["writing_on_cake"])
+	assert.Equal(t, "October 02, 04 pm", captured["delivery_date"])
+	assert.Equal(t, "2", captured["number_of_layers"])
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "skip", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "fulfillment_time_1", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "When would you like")
+	assert.NotContains(t, blob, "couldn't understand that time")
+	captured, ok = session.SessionData["commerce_captured_fields"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Happye", captured["writing_on_cake"])
+	assert.Equal(t, "October 02, 04 pm", captured["delivery_date"])
+	assert.Equal(t, "2", captured["number_of_layers"])
+	_ = contact
+}
+
 func TestTiqrEcommerce_AfterCaptureNamedProductSkipsQuantity(t *testing.T) {
 	products := []any{
 		map[string]any{
@@ -1240,12 +1305,113 @@ func TestTiqrEcommerce_HandoffTransfers(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I want to talk to a person", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Equal(t, models.SessionStatusCancelled, session.Status)
 	assert.Nil(t, session.SessionData[codedFlowDataKey])
 	assert.Nil(t, session.SessionData["collection_id"])
-	var transfers int64
-	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
-	assert.Equal(t, int64(1), transfers)
+
+	var transfers []models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).Find(&transfers).Error)
+	require.Len(t, transfers, 1)
+	assert.Equal(t, models.TransferSourceCommerce, transfers[0].Source)
+	require.NotNil(t, transfers[0].CommerceDraftID)
+
+	cart, ok := transfers[0].Metadata["cart"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, tiqrEcommerceCartSource, cart["source"])
+	lines, ok := cart["lines"].([]any)
+	require.True(t, ok)
+	assert.Empty(t, lines)
+
+	var draft models.CommerceDraft
+	require.NoError(t, app.DB.First(&draft, "id = ?", *transfers[0].CommerceDraftID).Error)
+	assert.Equal(t, "transferred", draft.Status)
+	assert.Equal(t, tiqrEcommerceCartSource, draft.Cart["source"])
+}
+
+func TestTiqrEcommerce_HandoffSnapshotsCartAndAddress(t *testing.T) {
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	flow := codedFlowByKey(tiqrEcommerceKey)
+
+	session.SessionData["tiqr_cart"] = []any{map[string]any{
+		"product_option": "1312",
+		"quantity":       "2",
+		"product_name":   "Kunafa Cake",
+		"option_name":    "Kunafa",
+		"price":          40.0,
+		"capture_fields": map[string]any{"writing": "Happy Birthday"},
+		"capture_labels": map[string]any{"writing": "Cake writing"},
+	}}
+	session.SessionData["commerce_captured_fields"] = map[string]any{"writing": "Happy Birthday"}
+	session.SessionData["delivery_mode"] = tiqrModeDelivery
+	session.SessionData["delivery_latitude"] = 10.015
+	session.SessionData["delivery_longitude"] = 76.341
+	session.SessionData["customer_name"] = "Ada"
+	session.SessionData["customer_email"] = "ada@example.com"
+	session.SessionData["customer_phone"] = "910000000000"
+	session.SessionData["address_line_one"] = "Infopark Rd"
+	session.SessionData["city"] = "Kochi"
+	session.SessionData["state"] = "Kerala"
+	session.SessionData["country"] = "India"
+	session.SessionData["pincode"] = "682042"
+	session.SessionData["customer_notes"] = "Leave at gate"
+	session.SessionData["collection_id"] = "57"
+	session.SessionData["collection_name"] = "Cakes"
+	session.SessionData["collections"] = []any{map[string]any{
+		"id": "57", "name": "Cakes", "description": "Sweet",
+	}}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", tiqrTalkToAgent, nil))
+	reloadSession(t, app, session)
+
+	assert.Equal(t, models.SessionStatusCancelled, session.Status)
+
+	var transfers []models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ? AND source = ?", contact.ID, models.TransferSourceCommerce).Find(&transfers).Error)
+	require.Len(t, transfers, 1)
+	require.NotNil(t, transfers[0].CommerceDraftID)
+
+	meta := transfers[0].Metadata
+	cart, ok := meta["cart"].(map[string]any)
+	require.True(t, ok)
+	lines, ok := cart["lines"].([]any)
+	require.True(t, ok)
+	require.Len(t, lines, 1)
+	line, ok := lines[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "1312", asString(line["product_option"]))
+	assert.Equal(t, "2", fmt.Sprint(line["quantity"]))
+	assert.Equal(t, "Kunafa Cake", asString(line["product_name"]))
+	capture, ok := line["capture_fields"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Happy Birthday", asString(capture["writing"]))
+
+	address, ok := meta["address"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Ada", asString(address["name"]))
+	assert.Equal(t, "Infopark Rd", asString(address["address_line_1"]))
+	assert.Equal(t, "682042", asString(address["pincode"]))
+
+	contactMeta, ok := meta["contact"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Ada", asString(contactMeta["name"]))
+	assert.Equal(t, "ada@example.com", asString(contactMeta["email"]))
+
+	fulfillment, ok := meta["fulfillment"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, tiqrModeDelivery, asString(fulfillment["delivery_mode"]))
+
+	assert.Contains(t, asString(meta["notes"]), "Leave at gate")
+	assert.Equal(t, "Happy Birthday", asString(meta["captured_fields"].(map[string]any)["writing"]))
+
+	var draft models.CommerceDraft
+	require.NoError(t, app.DB.First(&draft, "id = ?", *transfers[0].CommerceDraftID).Error)
+	assert.Equal(t, "transferred", draft.Status)
+	assert.Equal(t, tiqrModeDelivery, draft.FulfillmentMode)
+	assert.Equal(t, "Ada", asString(draft.AddressSnapshot["name"]))
+	draftLines, ok := draft.Cart["lines"].([]any)
+	require.True(t, ok)
+	require.Len(t, draftLines, 1)
 }
 
 func TestTiqrEcommerce_AIErrorTransfers(t *testing.T) {

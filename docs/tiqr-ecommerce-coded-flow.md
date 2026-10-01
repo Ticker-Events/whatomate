@@ -203,6 +203,21 @@ Failure calls `createRecoverPlan`. If the plan is `missing_field` and retries re
 
 Retries come from `[codedflow] order_retries`, default 2. The loop is `attempt := 0; attempt <= retries`, so the default is one try plus two retries. Missing fields are collected only while `attempt < retries`.
 
+### Agent handoff snapshot
+
+Every `Transfer` from this flow (talk to staff, failed order, ungrounded intent, store or product load failure) snapshots the session onto a `CommerceDraft` and creates an agent transfer with `source: commerce` and `metadata.kind: commerce_handoff`, the same shape as after-capture themed handoffs.
+
+| Draft / metadata field | Source |
+| --- | --- |
+| `cart` | `{ "source": "tiqr_ecommerce", "lines": [...] }` from `tiqr_cart` (option id, quantity, names, capture fields). Empty cart still transfers with `lines: []` |
+| `address` / `AddressSnapshot` | WhatsApp Flow contact and address fields, plus delivery pin |
+| `fulfillment` | `delivery_mode`, latitude, longitude |
+| `captured_fields` | `commerce_captured_fields` |
+| `notes` | `codedOrderNotes` / customer notes |
+| `missing_fields` | Last `create_order` recover plan asks, when present |
+
+Outside business hours the out-of-hours message is sent and no draft transfer is created. If the draft cannot be saved, Transfer falls back to the generic queue transfer so the customer still reaches a person. Staff Create Order in tiqr.store prefills from this handoff; the order is not placed automatically.
+
 ### 7. Order status
 
 `LookupOrder` calls TiQR MCP `lookup_order_status` for this WhatsApp number. It does not ask for an order id. Found orders are formatted by `formatDirectOrderStatus` (`Order {display_uid} is {status}.`). Missing or failed lookups say `tiqrEcommerceOrderMissing` and end. No payment link is attached. Payment retry stays on the separate commerce path.

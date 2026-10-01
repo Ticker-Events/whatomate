@@ -276,6 +276,7 @@ func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *m
 			return err
 		}
 
+		applySessionHandoffCart(&draft, session)
 		metadata := commerceHandoffMetadata(&draft, category)
 		var agentID *uuid.UUID
 		if settings != nil && settings.AgentAssignment.AssignToSameAgent && contact.AssignedUserID != nil {
@@ -309,10 +310,17 @@ func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *m
 		}
 		draft.TransferID = &transfer.ID
 		draft.Status = "transferred"
-		if err := tx.Model(&draft).Updates(map[string]any{
+		updates := map[string]any{
 			"transfer_id": transfer.ID, "status": draft.Status, "active_owner_key": nil,
 			"version": gorm.Expr("version + 1"),
-		}).Error; err != nil {
+		}
+		if asString(draft.Cart["source"]) == tiqrEcommerceCartSource {
+			updates["cart"] = map[string]any(draft.Cart)
+		}
+		if strings.TrimSpace(draft.StoreID) != "" {
+			updates["store_id"] = draft.StoreID
+		}
+		if err := tx.Model(&draft).Updates(updates).Error; err != nil {
 			return err
 		}
 		if err := applyCommerceTags(tx, contact, append(category.Tags, category.VisualTags...)); err != nil {
@@ -351,13 +359,43 @@ func commerceHandoffMetadata(draft *models.CommerceDraft, category tickermcp.Cat
 			"url": "/api/media/" + messageID,
 		})
 	}
-	return models.JSONB{
+	fulfillment := map[string]any{}
+	if draft.FulfillmentMode != "" {
+		fulfillment["delivery_mode"] = draft.FulfillmentMode
+		fulfillment["fulfillment_mode"] = draft.FulfillmentMode
+	}
+	if draft.RequestedFulfillmentAt != nil {
+		fulfillment["requested_fulfillment_at"] = draft.RequestedFulfillmentAt
+	}
+	if draft.Latitude != nil {
+		fulfillment["latitude"] = *draft.Latitude
+	}
+	if draft.Longitude != nil {
+		fulfillment["longitude"] = *draft.Longitude
+	}
+	meta := models.JSONB{
 		"kind": "commerce_handoff", "draft_id": draft.ID.String(), "store_id": draft.StoreID,
 		"collection":      map[string]any{"id": category.ID, "name": category.Name},
 		"captured_fields": draft.CapturedFields, "cart": draft.Cart, "addons": draft.Addons,
 		"fulfillment_mode": draft.FulfillmentMode, "requested_fulfillment_at": draft.RequestedFulfillmentAt,
 		"address": draft.AddressSnapshot, "media": media,
+		"contact": commerceHandoffContact(draft),
+		"notes":   commerceHandoffNotesText(draft),
 	}
+	if len(fulfillment) > 0 {
+		meta["fulfillment"] = fulfillment
+	}
+	if missing := commerceHandoffMissingFields(draft); len(missing) > 0 {
+		values := make([]any, 0, len(missing))
+		for _, field := range missing {
+			values = append(values, field)
+		}
+		meta["missing_fields"] = values
+	}
+	if draft.Notes != nil {
+		meta["draft_notes"] = draft.Notes
+	}
+	return meta
 }
 
 func commerceHandoffSummary(draft *models.CommerceDraft, category tickermcp.Category) string {
