@@ -1575,6 +1575,10 @@ func TestTiqrEcommerce_HandoffSnapshotsCartAndAddress(t *testing.T) {
 	session.SessionData["country"] = "India"
 	session.SessionData["pincode"] = "682042"
 	session.SessionData["customer_notes"] = "Leave at gate"
+	session.SessionData["commerce_addons"] = []any{
+		map[string]any{"addon": 9, "quantity": 2, "name": "Candles"},
+	}
+	session.SessionData["commerce_notes"] = map[string]any{"addon_requests": "Gold candles"}
 	session.SessionData["collection_id"] = "57"
 	session.SessionData["collection_name"] = "Cakes"
 	session.SessionData["collections"] = []any{map[string]any{
@@ -1606,6 +1610,22 @@ func TestTiqrEcommerce_HandoffSnapshotsCartAndAddress(t *testing.T) {
 	capture, ok := line["capture_fields"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Happy Birthday", asString(capture["writing"]))
+
+	addons, ok := meta["addons"].([]any)
+	require.True(t, ok)
+	require.Len(t, addons, 1)
+	addon, ok := addons[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Candles", asString(addon["name"]))
+
+	handoff, ok := session.SessionData["commerce_handoff"].(map[string]any)
+	require.True(t, ok)
+	handoffCart, ok := handoff["cart"].(map[string]any)
+	require.True(t, ok)
+	handoffLines, ok := handoffCart["lines"].([]any)
+	require.True(t, ok)
+	require.Len(t, handoffLines, 1)
+	assert.Equal(t, "Gold candles", asString(handoff["addon_requests"]))
 
 	address, ok := meta["address"].(map[string]any)
 	require.True(t, ok)

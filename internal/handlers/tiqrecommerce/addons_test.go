@@ -8,6 +8,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestParseProductAddonChoices_JSONBArrayAndNestedOption(t *testing.T) {
+	choices := parseProductAddonChoices(models.JSONBArray{
+		map[string]any{"id": 21, "name": "Candles", "price": 50, "is_active": true},
+		map[string]any{"id": 22, "name": "Hidden", "is_active": false},
+	})
+	require.Len(t, choices, 1)
+	assert.Equal(t, "Candles", choices[0]["name"])
+
+	fromOption := addonChoicesFromProduct(map[string]any{
+		"id": "101",
+		"options": []any{
+			map[string]any{
+				"id": "9",
+				"addons": []any{
+					map[string]any{"id": 21, "name": "Candles", "is_active": true},
+				},
+			},
+			map[string]any{
+				"id": "10",
+				"addons": []any{
+					map[string]any{"id": 30, "name": "Other", "is_active": true},
+				},
+			},
+		},
+	}, "9")
+	require.Len(t, fromOption, 1)
+	assert.Equal(t, 21, fromOption[0]["id"])
+
+	wrapped := addonChoicesFromProduct(map[string]any{
+		"data": map[string]any{
+			"addons": []any{
+				map[string]any{"id": 21, "name": "Candles", "is_active": true},
+			},
+		},
+	}, "")
+	require.Len(t, wrapped, 1)
+	assert.Equal(t, "Candles", wrapped[0]["name"])
+}
+
 func TestGroundAddonParse_SelectWithQuantities(t *testing.T) {
 	qty2 := 2
 	qty1 := 1

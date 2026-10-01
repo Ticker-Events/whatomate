@@ -1,9 +1,9 @@
 package tiqrecommerce
 
 import (
-	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"encoding/json"
 	"fmt"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"regexp"
 	"strconv"
 	"strings"
@@ -98,22 +98,154 @@ func askCatalogAddons(c *Conv, productID, prefix string) bool {
 	return askStructuredCatalogAddons(c, choices, prefix)
 }
 
+// loadCatalogAddonChoices loads active add-ons for one product. Product-level
+// add-ons and the selected option's add-ons both count. A failed detail fetch
+// still keeps add-ons already present on the product in session.
 func loadCatalogAddonChoices(c *Conv, productID, prefix string) []map[string]any {
-	if productID == "" {
+	productID = resolveCatalogProductID(c, productID)
+	if productID == "" || c == nil {
 		return nil
 	}
+	optionID := sessionOptionID(c)
+	var choices []map[string]any
 	raw, ok := c.Store(prefix+"_product", "get_product", map[string]string{"product_id": productID})
-	if !ok || raw == nil {
+	if c.Stop {
 		return nil
 	}
-	return parseProductAddonChoices(raw["addons"])
+	if ok && raw != nil {
+		choices = addonChoicesFromProduct(raw, optionID)
+	}
+	return mergeAddonChoices(choices, addonChoicesFromKnownProducts(c, productID, optionID))
+}
+
+func resolveCatalogProductID(c *Conv, productID string) string {
+	if id := strings.TrimSpace(productID); id != "" {
+		return id
+	}
+	if c == nil || c.Session() == nil || c.Session().SessionData == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(asString(c.Session().SessionData["early_handoff_product_id"])); id != "" {
+		return id
+	}
+	return strings.TrimSpace(asString(c.Session().SessionData["product_id"]))
+}
+
+func sessionOptionID(c *Conv) string {
+	if c == nil || c.Session() == nil || c.Session().SessionData == nil {
+		return ""
+	}
+	return strings.TrimSpace(asString(c.Session().SessionData["option_id"]))
+}
+
+func addonChoicesFromKnownProducts(c *Conv, productID, optionID string) []map[string]any {
+	if c == nil || c.Session() == nil || c.Session().SessionData == nil || productID == "" {
+		return nil
+	}
+	var choices []map[string]any
+	for _, key := range []string{"products", "early_handoff_products"} {
+		items, ok := anySlice(c.Session().SessionData[key])
+		if !ok {
+			continue
+		}
+		for _, entry := range items {
+			item, ok := asStringMap(entry)
+			if !ok || fieldString(item, "id") != productID {
+				continue
+			}
+			choices = mergeAddonChoices(choices, addonChoicesFromProduct(item, optionID))
+		}
+	}
+	return choices
+}
+
+func addonChoicesFromProduct(raw map[string]any, optionID string) []map[string]any {
+	raw = unwrapProductPayload(raw)
+	if raw == nil {
+		return nil
+	}
+	choices := parseProductAddonChoices(raw["addons"])
+	options, ok := anySlice(raw["options"])
+	if !ok {
+		options, ok = anySlice(raw["active_options"])
+	}
+	if !ok {
+		return choices
+	}
+	optionID = strings.TrimSpace(optionID)
+	for _, entry := range options {
+		option, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if optionID != "" && fieldString(option, "id") != optionID {
+			continue
+		}
+		choices = mergeAddonChoices(choices, parseProductAddonChoices(option["addons"]))
+	}
+	return choices
+}
+
+func unwrapProductPayload(raw map[string]any) map[string]any {
+	if raw == nil {
+		return nil
+	}
+	if _, ok := raw["addons"]; ok {
+		return raw
+	}
+	if _, ok := raw["options"]; ok {
+		return raw
+	}
+	if _, ok := raw["active_options"]; ok {
+		return raw
+	}
+	for _, key := range []string{"product", "data", "result"} {
+		if nested, ok := asStringMap(raw[key]); ok {
+			if found := unwrapProductPayload(nested); found != nil {
+				return found
+			}
+		}
+		items, ok := anySlice(raw[key])
+		if !ok || len(items) == 0 {
+			continue
+		}
+		nested, ok := asStringMap(items[0])
+		if !ok {
+			continue
+		}
+		if found := unwrapProductPayload(nested); found != nil {
+			return found
+		}
+	}
+	return raw
+}
+
+func mergeAddonChoices(base, extra []map[string]any) []map[string]any {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := map[int]bool{}
+	for _, choice := range base {
+		if id := anyToInt(choice["id"]); id > 0 {
+			seen[id] = true
+		}
+	}
+	for _, choice := range extra {
+		id := anyToInt(choice["id"])
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		base = append(base, choice)
+	}
+	return base
 }
 
 func askStructuredCatalogAddons(c *Conv, choices []map[string]any, prefix string) bool {
 	step := prefix
 	prompt := catalogAddonPrompt(c.Session(), choices)
 
-		for attempt := 1; ; attempt++ {
+	for attempt := 1; ; attempt++ {
 		askName := fmt.Sprintf("%s_%d", prefix, attempt)
 		body := prompt
 		if pending := pendingAddonMissing(c.Session(), step); len(pending) > 0 {

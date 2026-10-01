@@ -64,24 +64,22 @@ const (
 )
 
 func parseProductAddonChoices(raw any) []map[string]any {
-	var rows []any
-	switch v := raw.(type) {
-	case []any:
-		rows = v
-	case []map[string]any:
-		out := make([]map[string]any, 0, len(v))
-		for _, item := range v {
-			if choice := normalizeAddonChoice(item); choice != nil {
-				out = append(out, choice)
-			}
+	if item, ok := asStringMap(raw); ok {
+		if choice := normalizeAddonChoice(item); choice != nil {
+			return []map[string]any{choice}
 		}
-		return out
-	default:
+		return nil
+	}
+	rows, ok := anySlice(raw)
+	if !ok {
 		return nil
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		item, _ := row.(map[string]any)
+		item, ok := asStringMap(row)
+		if !ok {
+			continue
+		}
 		if choice := normalizeAddonChoice(item); choice != nil {
 			out = append(out, choice)
 		}
@@ -150,8 +148,6 @@ func appendCommerceAddon(session *models.ChatbotSession, addonID, qty int, name 
 	session.SessionData["commerce_addons"] = next
 }
 
-
-
 func asToolFloat(v any) float64 {
 	f, ok := anyToFloat64(v)
 	if !ok {
@@ -178,7 +174,6 @@ func formatMoney(amount float64, currency string) string {
 		return fmt.Sprintf("%s %.2f", currency, amount)
 	}
 }
-
 
 func cloneJSONMap(source map[string]any) models.JSONB {
 	if source == nil {

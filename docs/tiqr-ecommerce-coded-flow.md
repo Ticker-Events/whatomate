@@ -162,7 +162,7 @@ Quantity uses `AskNumber` with pattern `^[1-9][0-9]*$`. Digits of 1 or more are 
 
 ### Catalog add-ons
 
-After capture fields and before the cart line is written, the flow loads the product with `get_product` and reads active catalog add-ons. The same step runs in early handoff (`askCatalogAddons` with prefixes `product_addons` and `early_handoff_addons`).
+After capture fields and before the cart line is written, the flow loads the product with `get_product` and reads active catalog add-ons from the product and from the chosen option. The same numbered step runs in early handoff (`early_handoff_addons_1`). When that handoff already knows the product, only that product is loaded. When the collection has several products and none was selected, each listed product is loaded and the numbered list is shown if any of them have active catalog add-ons.
 
 When the product has catalog add-ons, the customer sees a numbered list with prices when present:
 
@@ -186,7 +186,7 @@ Go then grounds that JSON against the loaded choices:
 | Unclear, low confidence, or out-of-range index | Ask a short clarifying question (up to 3 turns) |
 | Still unclear after 3 clarify turns | Transfer to an agent |
 
-Products with no catalog add-ons skip this step on the buy path. Early handoff without catalog add-ons still asks the free-text Skip question (`early_handoff_addons_free`).
+Products with no catalog add-ons skip this step on the buy path. Early handoff asks the free-text Skip question (`early_handoff_addons_free`) only when none of the loaded products have catalog add-ons.
 
 ### Collection capture fields
 

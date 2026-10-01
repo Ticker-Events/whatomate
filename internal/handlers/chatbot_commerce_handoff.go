@@ -236,11 +236,23 @@ func (a *App) stageCommerceHandoffSessionData(session *models.ChatbotSession, ca
 	summary := commerceHandoffSummary(&draft, category)
 	session.SessionData["commerce_media_references"] = media
 	session.SessionData["commerce_handoff_summary"] = summary
-	session.SessionData["commerce_handoff"] = map[string]any{
+	cart := map[string]any{}
+	if display := tiqrecommerce.HandoffDisplayCart(session); len(display) > 0 {
+		cart = map[string]any(display)
+	} else if len(draft.Cart) > 0 {
+		cart = map[string]any(draft.Cart)
+	}
+	addons := tiqrecommerce.HandoffDisplayAddons(session, draft.Addons)
+	handoff := map[string]any{
 		"draft_id": draft.ID.String(), "captured_fields": jsonMapFromSession(session, "commerce_captured_fields"),
 		"media_references": media, "summary": summary,
-		"addons": draft.Addons,
+		"cart":   cart,
+		"addons": addons,
 	}
+	if requests := strings.TrimSpace(asString(jsonMapFromSession(session, "commerce_notes")["addon_requests"])); requests != "" {
+		handoff["addon_requests"] = requests
+	}
+	session.SessionData["commerce_handoff"] = handoff
 }
 
 func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, category tickermcp.Category) (*models.AgentTransfer, bool, error) {
@@ -318,6 +330,9 @@ func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *m
 		}
 		if asString(draft.Cart["source"]) == tiqrecommerce.CartSource {
 			updates["cart"] = map[string]any(draft.Cart)
+		}
+		if len(draft.Addons) > 0 {
+			updates["addons"] = []any(draft.Addons)
 		}
 		if strings.TrimSpace(draft.StoreID) != "" {
 			updates["store_id"] = draft.StoreID

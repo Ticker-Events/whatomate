@@ -91,7 +91,7 @@ func TestTiqrEcommerce_AddonMissingQuantityThenSave(t *testing.T) {
 		return tiqrecommerce.AddonParseResult{
 			Intent:     tiqrecommerce.AddonIntentSelect,
 			Confidence: 0.95,
-			Items:       []tiqrecommerce.AddonParseItem{{Index: 1, Quantity: &qty}},
+			Items:      []tiqrecommerce.AddonParseItem{{Index: 1, Quantity: &qty}},
 		}, nil
 	})
 	app, account, contact, session := startEcommerce(t, productWithAddons(), nil)
@@ -150,4 +150,107 @@ func TestTiqrEcommerce_AddonUnclearTransfersAfterGuides(t *testing.T) {
 	reloadSession(t, app, session)
 	assert.Equal(t, models.SessionStatusCancelled, session.Status)
 	assert.Empty(t, checkoutAddons(session))
+}
+
+func TestTiqrEcommerce_BuyFlowUsesOptionAddons(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	products := []any{
+		map[string]any{
+			"id": "101", "name": "Themed Cake", "min_price": "500",
+			"description": "Celebration cake",
+			"images":      []any{map[string]any{"original_url": "https://example.com/cake.jpg"}},
+			"options": []any{
+				map[string]any{
+					"id": "9", "name": "Regular", "price": "500",
+					"addons": []any{
+						map[string]any{"id": 21, "name": "Candles", "price": 50, "is_active": true},
+					},
+				},
+			},
+		},
+	}
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Cakes", "58", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "product_addons_1", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "1. Candles")
+}
+
+func earlyHandoffAddonStore() map[string]any {
+	return map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":             "57",
+				"name":           "Custom Cakes",
+				"description":    "Made to order",
+				"handoff_policy": "after_capture",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "writing", "label": "Cake writing", "type": "text", "required": true,
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestTiqrEcommerce_EarlyHandoffUsesCatalogAddons(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	app, account, contact, session := startEcommerceWithStore(t, productWithAddons(), nil, earlyHandoffAddonStore(), nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Custom Cakes", "57", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_0_writing", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happy Birthday", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "early_handoff_addons_1", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "1. Candles")
+	assert.NotContains(t, outgoingBlob(t, app, session), "Any add-ons")
+	_ = contact
+}
+
+func TestTiqrEcommerce_EarlyHandoffManyProductsUsesCatalogAddons(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	products := []any{
+		map[string]any{
+			"id": "101", "name": "Themed Cake", "min_price": "500",
+			"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "500"}},
+			"addons": []any{
+				map[string]any{"id": 21, "name": "Candles", "price": 50, "is_active": true},
+			},
+		},
+		map[string]any{
+			"id": "102", "name": "Plain Cake", "min_price": "400",
+			"options": []any{map[string]any{"id": "10", "name": "Regular", "price": "400"}},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, earlyHandoffAddonStore(), nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Custom Cakes", "57", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_0_writing", session.CurrentStep)
+	assert.NotEqual(t, "product", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happy Birthday", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "early_handoff_addons_1", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "1. Candles")
+	_ = contact
 }

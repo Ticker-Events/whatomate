@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	draftrepo "github.com/shridarpatil/whatomate/internal/commerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/gorm"
 )
@@ -50,8 +51,8 @@ func (a *App) ensureCommerceDraft(contact *models.Contact, session *models.Chatb
 		ContactID:       contact.ID,
 		WhatsAppAccount: session.WhatsAppAccount,
 		StoreID:         storeID,
-		Cart:            cartJSON(session),
-		Addons:          jsonArrayFromSession(session, "commerce_addons"),
+		Cart:            commerceDraftCart(session),
+		Addons:          tiqrecommerce.HandoffDisplayAddons(session, nil),
 		CapturedFields:  jsonMapFromSession(session, "commerce_captured_fields"),
 		Notes:           jsonMapFromSession(session, "commerce_notes"),
 	}
@@ -114,8 +115,8 @@ func (a *App) syncReferencedCommerceDraft(session *models.ChatbotSession) error 
 		return nil
 	}
 	expected := draft.Version
-	draft.Cart = cartJSON(session)
-	draft.Addons = jsonArrayFromSession(session, "commerce_addons")
+	draft.Cart = commerceDraftCart(session)
+	draft.Addons = tiqrecommerce.HandoffDisplayAddons(session, draft.Addons)
 	draft.CapturedFields = jsonMapFromSession(session, "commerce_captured_fields")
 	draft.Notes = jsonMapFromSession(session, "commerce_notes")
 	if categoryID, parseErr := strconv.Atoi(selectedCategoryID(session)); parseErr == nil && categoryID > 0 {
@@ -190,6 +191,13 @@ func cloneJSONMap(source map[string]any) models.JSONB {
 		out[key] = value
 	}
 	return out
+}
+
+func commerceDraftCart(session *models.ChatbotSession) models.JSONB {
+	if cart := tiqrecommerce.HandoffDisplayCart(session); len(cart) > 0 {
+		return cart
+	}
+	return cartJSON(session)
 }
 
 func cartJSON(session *models.ChatbotSession) models.JSONB {

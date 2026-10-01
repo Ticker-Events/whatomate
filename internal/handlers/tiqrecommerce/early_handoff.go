@@ -1,8 +1,8 @@
 package tiqrecommerce
 
 import (
-	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"fmt"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"strings"
 	"time"
 
@@ -116,33 +116,37 @@ func soleCategoryProductID(c *Conv, categoryID string) string {
 		return ""
 	}
 	withOptions := make([]map[string]any, 0, len(products))
+	listed := make([]map[string]any, 0, len(products))
 	for _, entry := range products {
 		item, ok := asStringMap(entry)
 		if !ok {
 			continue
 		}
+		listed = append(listed, item)
 		if n := productOptionCount(item); n > 0 {
 			withOptions = append(withOptions, item)
 		}
 	}
-	if len(withOptions) != 1 {
-		return ""
+	if len(withOptions) == 1 {
+		return fieldString(withOptions[0], "id")
 	}
-	return fieldString(withOptions[0], "id")
+	if len(withOptions) == 0 && len(listed) == 1 {
+		return fieldString(listed[0], "id")
+	}
+	return ""
 }
 
 func productOptionCount(product map[string]any) int {
 	if product == nil {
 		return 0
 	}
-	switch opts := product["options"].(type) {
-	case []any:
+	if opts, ok := anySlice(product["options"]); ok {
 		return len(opts)
-	case []map[string]any:
-		return len(opts)
-	default:
-		return 0
 	}
+	if opts, ok := anySlice(product["active_options"]); ok {
+		return len(opts)
+	}
+	return 0
 }
 
 func earlyHandoffCollectionForProduct(c *Conv, product map[string]any) map[string]any {
@@ -270,14 +274,39 @@ func (c *Conv) askCaptureFieldNoCheckout(name string, field map[string]any) (any
 }
 
 func askEarlyHandoffAddons(c *Conv, productID string) bool {
-	productID = strings.TrimSpace(productID)
-	if !askCatalogAddons(c, productID, "early_handoff_addons") {
+	// A session already waiting on the free-text step must keep that call in
+	// place. Inserting get_product records in front of it would consume the
+	// saved reply as a product fetch.
+	if earlyHandoffFreeTextAlreadyRecorded(c) {
+		return askEarlyHandoffFreeTextAddons(c)
+	}
+	choices := collectEarlyHandoffAddonChoices(c, productID)
+	if c.Stop {
 		return false
 	}
-	choices := loadCatalogAddonChoicesReplay(c, "early_handoff_addons")
 	if len(choices) > 0 {
-		return true
+		return askStructuredCatalogAddons(c, choices, "early_handoff_addons")
 	}
+	return askEarlyHandoffFreeTextAddons(c)
+}
+
+func earlyHandoffFreeTextAlreadyRecorded(c *Conv) bool {
+	if c == nil {
+		return false
+	}
+	records := c.CallRecords()
+	if c.Seq() >= len(records) {
+		return false
+	}
+	switch asString(records[c.Seq()]["name"]) {
+	case "early_handoff_addons_free", "themed_addons_free", "after_capture_addons_free":
+		return true
+	default:
+		return false
+	}
+}
+
+func askEarlyHandoffFreeTextAddons(c *Conv) bool {
 	text, ok := c.AskText("early_handoff_addons_free",
 		"Any add-ons (candles, flowers, etc.)? Reply with details, or say Skip.",
 		codedflow.StepNote{
@@ -300,16 +329,55 @@ func askEarlyHandoffAddons(c *Conv, productID string) bool {
 	return true
 }
 
-// loadCatalogAddonChoicesReplay reads choices already fetched by askCatalogAddons.
-func loadCatalogAddonChoicesReplay(c *Conv, prefix string) []map[string]any {
-	if c == nil || c.Session() == nil {
+// collectEarlyHandoffAddonChoices loads catalog add-ons for the handoff product.
+// When the collection was not narrowed to one product, each listed product is
+// loaded so the numbered catalog step can run instead of the free-text prompt.
+func collectEarlyHandoffAddonChoices(c *Conv, productID string) []map[string]any {
+	ids := earlyHandoffAddonProductIDs(c, productID)
+	var choices []map[string]any
+	for i, id := range ids {
+		prefix := "early_handoff_addons"
+		if len(ids) > 1 {
+			prefix = fmt.Sprintf("early_handoff_addons_%d", i)
+		}
+		choices = mergeAddonChoices(choices, loadCatalogAddonChoices(c, id, prefix))
+		if c != nil && c.Stop {
+			return nil
+		}
+	}
+	return choices
+}
+
+func earlyHandoffAddonProductIDs(c *Conv, productID string) []string {
+	productID = strings.TrimSpace(productID)
+	if productID == "" && c != nil && c.Session() != nil && c.Session().SessionData != nil {
+		productID = strings.TrimSpace(asString(c.Session().SessionData["early_handoff_product_id"]))
+	}
+	if productID != "" {
+		return []string{productID}
+	}
+	if c == nil || c.Session() == nil || c.Session().SessionData == nil {
 		return nil
 	}
-	raw, ok := asStringMap(c.Session().SessionData[prefix+"_product"])
-	if !ok || raw == nil {
+	items, ok := anySlice(c.Session().SessionData["early_handoff_products"])
+	if !ok {
 		return nil
 	}
-	return parseProductAddonChoices(raw["addons"])
+	ids := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		id := fieldString(item, "id")
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func askEarlyHandoffFulfillmentTime(c *Conv) bool {
@@ -446,7 +514,6 @@ func finishCodedEarlyHandoff(c *Conv, collection map[string]any) error {
 	c.Ended = true
 	return nil
 }
-
 
 // earlyHandoffAddressFromFlow builds the draft address snapshot from WhatsApp Flow fields.
 func earlyHandoffAddressFromFlow(data map[string]any) map[string]any {

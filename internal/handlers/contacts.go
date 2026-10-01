@@ -1231,6 +1231,7 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 		for _, key := range []string{
 			"commerce_draft_id", "commerce_captured_fields", "commerce_media_references",
 			"commerce_handoff_summary", "commerce_handoff", "backend_order_id", "commerce_order_id",
+			"tiqr_cart", "commerce_addons", "commerce_notes", "commerce_handoff_cart",
 		} {
 			if value, ok := session.SessionData[key]; ok {
 				response.SessionData[key] = value

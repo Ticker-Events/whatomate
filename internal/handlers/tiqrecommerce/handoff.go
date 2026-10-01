@@ -82,6 +82,11 @@ func (c *Conv) transferTiqrEcommerce(message string) error {
 		return fmt.Errorf("create commerce transfer for ecommerce handoff: %w", err)
 	}
 	c.App().StageCommerceHandoffSessionData(session, category)
+	// Stage runs after the transfer snapshot. Persist it so Chat > Summary can
+	// read cart lines and add-ons from the session when transfer metadata is empty.
+	if err := c.App().PersistSessionData(session); err != nil {
+		c.App().LogWarn("persist ecommerce handoff display session failed", "error", err)
+	}
 	if created {
 		c.App().LogInfo("tiqr ecommerce handoff active",
 			"transfer_id", transfer.ID, "draft_id", transfer.CommerceDraftID)
@@ -387,10 +392,83 @@ func ApplySessionHandoffCart(draft *models.CommerceDraft, session *models.Chatbo
 	if draft == nil {
 		return
 	}
-	if cart := sessionHandoffCart(session); len(cart) > 0 {
+	if cart := HandoffDisplayCart(session); len(cart) > 0 {
 		draft.Cart = cart
 	}
+	if len(draft.Addons) == 0 {
+		if addons := HandoffDisplayAddons(session, nil); len(addons) > 0 {
+			draft.Addons = addons
+		}
+	}
 	ensureDraftStoreID(draft, session)
+}
+
+// HandoffDisplayCart is the cart the agent summary should show. It prefers the
+// staged handoff snapshot, then the coded tiqr_cart lines.
+func HandoffDisplayCart(session *models.ChatbotSession) models.JSONB {
+	if cart := sessionHandoffCart(session); handoffCartLineCount(cart) > 0 {
+		return cart
+	}
+	snap := tiqrEcommerceCartSnapshot(session)
+	if handoffCartLineCount(snap) > 0 {
+		return snap
+	}
+	return nil
+}
+
+// HandoffDisplayAddons returns coded-flow add-ons stored on the session.
+// draftAddons is used when the session list is empty.
+func HandoffDisplayAddons(session *models.ChatbotSession, draftAddons models.JSONBArray) models.JSONBArray {
+	if session != nil && session.SessionData != nil {
+		switch value := session.SessionData["commerce_addons"].(type) {
+		case []any:
+			if len(value) > 0 {
+				out := make(models.JSONBArray, len(value))
+				copy(out, value)
+				return out
+			}
+		case models.JSONBArray:
+			if len(value) > 0 {
+				out := make(models.JSONBArray, len(value))
+				copy(out, value)
+				return out
+			}
+		}
+	}
+	if len(draftAddons) > 0 {
+		out := make(models.JSONBArray, len(draftAddons))
+		copy(out, draftAddons)
+		return out
+	}
+	return models.JSONBArray{}
+}
+
+func handoffCartLineCount(cart map[string]any) int {
+	if len(cart) == 0 {
+		return 0
+	}
+	if lines, ok := anySlice(cart["lines"]); ok {
+		n := 0
+		for _, entry := range lines {
+			item, ok := asStringMap(entry)
+			if ok && strings.TrimSpace(asString(item["product_option"])) != "" {
+				n++
+			}
+		}
+		if n > 0 {
+			return n
+		}
+	}
+	n := 0
+	for key, entry := range cart {
+		if key == "source" || key == "lines" {
+			continue
+		}
+		if _, ok := asStringMap(entry); ok {
+			n++
+		}
+	}
+	return n
 }
 
 func categoryFromCollectionMapLocal(raw map[string]any) tickermcp.Category {
