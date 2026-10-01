@@ -905,6 +905,57 @@ func TestTiqrEcommerce_OptionBranches(t *testing.T) {
 	}
 }
 
+// Regression: ticker product/option payloads decode ids as float64.
+// Browse → pick product → pick option → quantity must still resolve.
+func TestTiqrEcommerce_NumericProductAndOptionIDs(t *testing.T) {
+	products := []any{
+		map[string]any{
+			"id": float64(2970), "name": "Normal Cakes", "min_price": float64(1),
+			"options": []any{
+				map[string]any{"id": float64(3319), "name": "Vancho", "price": float64(1)},
+				map[string]any{"id": float64(3320), "name": "Chocolate", "price": float64(1)},
+			},
+		},
+	}
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{"id": float64(71), "name": "Normal Cakes", "description": "Cakes"},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Normal Cakes", "71", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "product", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "2970", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "option", session.CurrentStep)
+	assert.Equal(t, "2970", asString(session.SessionData["product_id"]))
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Vancho", "3319", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "quantity", session.CurrentStep)
+	assert.Equal(t, "3319", asString(session.SessionData["option_id"]))
+	assert.Equal(t, "Vancho", asString(session.SessionData["option_name"]))
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	cart, ok := session.SessionData["tiqr_cart"].([]any)
+	require.True(t, ok)
+	require.Len(t, cart, 1)
+	line, ok := cart[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "3319", asString(line["product_option"]))
+	assert.Equal(t, "Vancho", asString(line["option_name"]))
+	_ = contact
+}
+
 func TestTiqrEcommerce_AppendsCartAndAddMoreSkipsCollections(t *testing.T) {
 	useCodedIntent(t, func(string, codedflow.IntentContext) (codedflow.IntentResult, error) {
 		return codedflow.IntentResult{Language: "en", Route: codedflow.RouteUnclear, Confidence: 0.4}, nil
@@ -1095,6 +1146,47 @@ func TestTiqrEcommerce_EarlyHandoffSkipsProductsAndOrders(t *testing.T) {
 	assert.NotContains(t, blob, "Add to cart")
 	assert.NotEqual(t, "product", session.CurrentStep)
 	assert.NotEqual(t, "quantity", session.CurrentStep)
+	_, hasCart := session.SessionData["tiqr_cart"]
+	assert.False(t, hasCart)
+	_ = contact
+}
+
+// Regression: ticker list_collections returns numeric ids (JSON float64).
+// collectionByID must still resolve handoff_policy after_capture.
+func TestTiqrEcommerce_EarlyHandoffWithNumericCollectionID(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":              float64(70),
+				"name":            "Themed Cakes",
+				"description":     "Custom themed",
+				"handoff_policy":  "after_capture",
+				"handoff_message": "We will assign to our agent now. Please wait.",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "writing_on_cake", "label": "Writing on cake", "type": "text", "required": true,
+					},
+				},
+			},
+			map[string]any{"id": float64(71), "name": "Normal Cakes", "description": "Standard"},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Themed Cakes", "70", nil))
+	reloadSession(t, app, session)
+
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "custom Themed Cakes request")
+	assert.Contains(t, blob, "Writing on cake")
+	assert.NotContains(t, blob, "Add to cart")
+	assert.NotEqual(t, "product", session.CurrentStep)
 	_, hasCart := session.SessionData["tiqr_cart"]
 	assert.False(t, hasCart)
 	_ = contact

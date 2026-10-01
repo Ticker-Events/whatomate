@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	draftrepo "github.com/shridarpatil/whatomate/internal/commerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
@@ -218,10 +219,8 @@ func clearCheckoutState(session *models.ChatbotSession) {
 	}
 }
 
-func asString(v any) string {
-	s, _ := v.(string)
-	return strings.TrimSpace(s)
-}
+// asString coerces JSON scalars (including numeric ids) the same way codedflow does.
+func asString(v any) string { return codedflow.AsString(v) }
 
 func anyToFloat64(v any) (float64, bool) {
 	switch n := v.(type) {

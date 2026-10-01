@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1778,22 +1777,8 @@ func itemID(template string, item map[string]any, session models.JSONB) string {
 }
 
 func fieldString(obj map[string]any, key string) string {
-	if key == "" {
+	if key == "" || obj == nil {
 		return ""
 	}
-	v, ok := obj[key]
-	if !ok || v == nil {
-		return ""
-	}
-	switch t := v.(type) {
-	case string:
-		return strings.TrimSpace(t)
-	case float64:
-		if t == float64(int64(t)) {
-			return strconv.FormatInt(int64(t), 10)
-		}
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	default:
-		return strings.TrimSpace(fmt.Sprint(t))
-	}
+	return codedflow.FieldString(obj, key)
 }
