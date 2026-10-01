@@ -45,13 +45,21 @@ watch(
 
 const lastButtonMessage = computed(() => {
   if (!props.waiting || props.inputType !== 'button') return null
-  return [...props.messages].reverse().find(m => m.type === 'bot' && (Array.isArray(m.buttons) || Array.isArray(m.cards))) || null
+  return [...props.messages].reverse().find(m =>
+    m.type === 'bot'
+    && m.interactive !== 'cta_url'
+    && (Array.isArray(m.buttons) || Array.isArray(m.cards))
+  ) || null
 })
 
 const showReplyButtons = computed(() => {
   const message = lastButtonMessage.value
   if (!message?.buttons) return false
-  return message.interactive !== 'list' && message.interactive !== 'carousel' && message.buttons.length > 0 && message.buttons.length <= 3
+  return message.interactive !== 'list'
+    && message.interactive !== 'carousel'
+    && message.interactive !== 'cta_url'
+    && message.buttons.length > 0
+    && message.buttons.length <= 3
 })
 
 const showCarousel = computed(() => lastButtonMessage.value?.interactive === 'carousel')

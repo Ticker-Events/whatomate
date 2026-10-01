@@ -24,6 +24,32 @@ type DraftRepository struct {
 
 func NewDraftRepository(db *gorm.DB) *DraftRepository { return &DraftRepository{db: db} }
 
+// normalizeDraftJSON keeps not-null jsonb columns off SQL NULL. A nil slice's
+// Value() is NULL, and Postgres rejects that on commerce_drafts.
+func normalizeDraftJSON(draft *models.CommerceDraft) {
+	if draft == nil {
+		return
+	}
+	if draft.Cart == nil {
+		draft.Cart = models.JSONB{}
+	}
+	if draft.Addons == nil {
+		draft.Addons = models.JSONBArray{}
+	}
+	if draft.CapturedFields == nil {
+		draft.CapturedFields = models.JSONB{}
+	}
+	if draft.Attachments == nil {
+		draft.Attachments = models.JSONBArray{}
+	}
+	if draft.Notes == nil {
+		draft.Notes = models.JSONB{}
+	}
+	if draft.AddressSnapshot == nil {
+		draft.AddressSnapshot = models.JSONB{}
+	}
+}
+
 func activeOwnerKey(draft *models.CommerceDraft) *string {
 	if draft == nil {
 		return nil
@@ -52,24 +78,7 @@ func (r *DraftRepository) Create(draft *models.CommerceDraft) error {
 	if draft.Status == "" {
 		draft.Status = "active"
 	}
-	if draft.Cart == nil {
-		draft.Cart = models.JSONB{}
-	}
-	if draft.Addons == nil {
-		draft.Addons = models.JSONBArray{}
-	}
-	if draft.CapturedFields == nil {
-		draft.CapturedFields = models.JSONB{}
-	}
-	if draft.Attachments == nil {
-		draft.Attachments = models.JSONBArray{}
-	}
-	if draft.Notes == nil {
-		draft.Notes = models.JSONB{}
-	}
-	if draft.AddressSnapshot == nil {
-		draft.AddressSnapshot = models.JSONB{}
-	}
+	normalizeDraftJSON(draft)
 	draft.ActiveOwnerKey = activeOwnerKey(draft)
 	if err := r.db.Create(draft).Error; err != nil {
 		// A concurrent creator may have won the unique active-owner key.
@@ -108,6 +117,7 @@ func (r *DraftRepository) Save(draft *models.CommerceDraft, expectedVersion int6
 	if draft == nil || expectedVersion < 1 {
 		return ErrDraftConflict
 	}
+	normalizeDraftJSON(draft)
 	draft.ActiveOwnerKey = activeOwnerKey(draft)
 	draft.Version = expectedVersion + 1
 	result := r.db.Model(&models.CommerceDraft{}).

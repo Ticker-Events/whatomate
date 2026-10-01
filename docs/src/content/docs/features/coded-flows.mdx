@@ -232,9 +232,10 @@ Buying is a loop. The customer can add more than one item before checkout. Store
 2. **Collection.** The customer gets a list titled "Our collections". The button is "Browse". Each row uses the collection `name` as the title and `description` as the description. The chosen row saves `collection_id` from `id` and `collection_name` from `title`. Free text on this step can also route to a loaded collection id, or to `search_products` with a product query. An empty search result tells the customer the item is not in the store and returns to the collection list. The model never invents product rows.
 3. **Products.** `list_products` is called with `category_id` set to that collection id, or `search_products` with the validated query. Two or more products are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". One product cannot use a carousel (WhatsApp needs at least two cards), so it is an image reply instead: the product image as the header, `*{name}* (₹{min_price})` plus the product description as the body, and an "Add to cart" button. Either tap saves `product_id` and the product `options` array, and also `product_selected`.
 4. **Option.** What happens next depends on how many options the product has.
-5. **Quantity.** The customer replies with a whole number. The pattern is `^[0-9]+$`.
-6. **Cart line.** The option and quantity are appended once. A replay does not add the line again.
-7. **Next.** The customer chooses "Add more items" or "Checkout".
+5. **Quantity.** The customer replies with a whole number of 1 or more. The pattern is `^[1-9][0-9]*$`.
+6. **Collection fields.** Required fields on that collection are asked one at a time before the line is added. See below.
+7. **Cart line.** The option, quantity, and any collection answers are saved once. A replay does not add the line again.
+8. **Next.** The customer chooses "Add more items", "Edit cart", or "Checkout".
 
 </Steps>
 
@@ -246,15 +247,29 @@ Option handling:
 | One | That option is selected. No extra list. The flow asks for a quantity. `option_id` and `option_name` are set from that option. |
 | More than one | A list titled "Choose an option". Each row is `{name} (₹{price})`. The choice saves `option_id` and `option_name`. Then the flow asks for a quantity. |
 
-The quantity prompt is: "How many *{option name}* would you like?" A reply of digits that match `^[0-9]+$` is accepted immediately. A reply such as "Two" is scored by the intent role; when it returns `route: answer` with `answer: "2"` at or above the confidence threshold, the cart uses `2` in the same turn. A reply that stays unclear is guided on this step and the cart is not changed.
+The quantity prompt is: "How many *{option name}* would you like?" A reply of digits that match `^[1-9][0-9]*$` is accepted immediately. A reply such as "Two" is scored by the intent role; when it returns `route: answer` with `answer: "2"` at or above the confidence threshold, the cart uses `2` in the same turn. A reply that stays unclear is guided on this step and the cart is not changed.
 
-A valid quantity appends one line:
+A valid quantity does not add the line yet when the collection has required capture fields. Those fields come from `required_capture_fields` on the collection. The product's category is used when it matches a loaded collection. Otherwise the selected collection is used.
+
+Each required field is a separate question. The question is the field label, then its help text, then the allowed options when it has any. A number field must be numeric. A single-select or multi-select answer must be one of the options (multi-select is comma-separated). Any other required field accepts a non-empty reply. An answer that does not match is asked again, and nothing is added. Optional fields are not asked.
+
+The answers are saved on the cart line and on the session. The same option with the same answers increases the quantity. The same option with a different answer is a second line. The cart summary shows each answer under its label.
+
+A collection with no required fields skips the questions. The saved line includes the answers when any were asked:
 
 ```json
-{ "product_option": "9", "quantity": "2" }
+{
+  "product_option": "9",
+  "quantity": "2",
+  "product_name": "Normal Cake",
+  "option_name": "Vancho",
+  "capture_fields": { "writing": "Happy Birthday Aswin" },
+  "capture_labels": { "writing": "Writing on Cake" },
+  "capture_order": ["writing"]
+}
 ```
 
-`tiqr_cart` is the list of those lines. `cart_count` is how many lines are in the cart, not the sum of quantities. The customer then sees: "*{option name}* has been added to your cart. You now have *{cart count}* in your cart."
+`capture_fields` is omitted when the collection did not ask anything. `tiqr_cart` is the list of those lines. `cart_count` is the sum of quantities. The customer then sees the option name, the cart summary (including collection answers), and how many units are in the cart.
 
 "Add more items" returns to the collection list. "Checkout" leaves the loop. Free text such as “checkout” or “place my order” on any buy step also enters checkout when the cart has lines. An empty cart gets a short message and the collection list again.
 
@@ -270,10 +285,10 @@ The order is placed with `create_order` only after that form is submitted. Each 
 | --- | --- |
 | `email` | `customer_email`, or `email` when that value contains an `@`. A phone number in either field is not sent as the email. |
 | `items` | `tiqr_cart` |
-| `notes` | `customer_notes` |
+| `notes` | `customer_notes` when no collection answers were captured. Otherwise plain text per cart line: `{product_name}({option_name})` then `- {label}: {value}`, with an optional trailing `Note: {customer note}` |
 | `delivery_mode` | Session `delivery_mode` from fulfillment (`PICKUP_FROM_STORE` or `DELIVERY_TO_LOCATION`). Empty defaults to pickup. |
 | `new_address` | The address object below. Delivery also includes `latitude` and `longitude` from the pin, rounded to 6 decimal places |
-| `buyer_meta_data` | For delivery: `latitude` / `longitude` from the pin (`delivery_latitude` / `delivery_longitude`) |
+| `buyer_meta_data` | `name`, `email`, `phone`, `phone_number`, and `notes` when set. Delivery also includes `latitude` / `longitude` from the pin (`delivery_latitude` / `delivery_longitude`) |
 | `phone_number` | The WhatsApp number on the session. The form's phone is stored on the address, not copied into `email`. |
 
 `product_option` and `quantity` are stored as text and sent to TiQR as integers.
@@ -297,12 +312,12 @@ The order is placed with `create_order` only after that form is submitted. Each 
 
 The WhatsApp Flow has to submit those field names. The Email input must be an email address. `email` is required to create the order. Guest checkout also needs `email` on the address. If the address omits it, the order email is copied onto the address. For delivery, `latitude` and `longitude` on the address are the stored pin, rounded to 6 decimal places. Location-based stores require that pin on the address to confirm the order.
 
-There is no second confirmation step. A successful create tells the customer the order is confirmed for pickup or delivery, matching the stored mode. If create fails because customer details are missing, the recover role asks for every missing field from the error, one reply at a time, in this order: name, phone, email, address line 1, address line 2, city, state, country, pincode, notes. `create_order` is retried only after all of those replies are saved on the session, with the same cart. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details. The thank-you message is sent and the flow ends:
+There is no second confirmation step. A successful create sends an order-placed message (order number, delivery fee, and total when present). When the response includes a payment URL, that message is a WhatsApp **Pay now** CTA URL button so the shopper can complete payment. The flow then ends. If create fails because customer details are missing, the recover role asks for every missing field from the error, one reply at a time, in this order: name, phone, email, address line 1, address line 2, city, state, country, pincode, notes. `create_order` is retried only after all of those replies are saved on the session, with the same cart. The number of retries after the first attempt is `[codedflow] order_retries` (default 2). Other failures get a short apology with no API details.
 
 ```text
-Thank you for shopping with us.
-
-Message us anytime if you need help.
+Order placed! Your order number is TQ-1.
+Total: ₹40.00
+[Pay now]
 ```
 
 ### Order status
@@ -337,10 +352,11 @@ These are the values later messages and the order payload read back.
 | `delivery_zone`, `shipping_fee_paise` | Delivery eligibility succeeds |
 | `collection_id`, `collection_name` | A collection row is chosen |
 | `products` | `list_products` returns rows |
-| `product_id`, `options`, `product_selected` | A product card is chosen |
+| `product_id`, `product_name`, `options`, `product_selected` | A product card is chosen |
 | `option_id`, `option_name` | An option is selected |
 | `quantity` | A whole number is accepted |
-| `tiqr_cart`, `cart_count` | A line is appended |
+| `commerce_captured_fields`, `commerce_capture_labels` | A required collection field is answered while adding an option |
+| `tiqr_cart`, `cart_count` | A line is appended. The line can include `product_name`, `option_name`, `capture_fields`, `capture_labels`, and `capture_order` |
 | `customer_name`, `customer_email`, `customer_phone`, address fields, `customer_notes` | The WhatsApp Flow is submitted, using the form's own field names. A failed `create_order` can also fill any of these that the error said were missing |
 | `order` | `create_order` succeeds |
 
@@ -348,12 +364,12 @@ These are the values later messages and the order payload read back.
 
 | File | Role |
 | --- | --- |
-| `internal/handlers/codedflow.go` | Registration, session marker, replay entry, keyword match |
-| `internal/handlers/codedflow_conv.go` | `Conv` calls: prompts, store, cart-once, transfer, end |
-| `internal/handlers/codedflow_ai.go` | Language detection, translation, off-script answers, order lookup |
+| `internal/handlers/codedflow/` | Engine package (`Host`/`Chat`, `Conv`, AI, intent, recover, preview sink, `Register`/`Run`) |
+| `internal/handlers/codedflow_host.go` | Handlers adapter: `*App` as `Host`, `codedChat` as `Chat` |
+| `internal/handlers/codedflow_run.go` | Resume / trigger wrappers calling `codedflow.Run` |
 | `internal/handlers/codedflow_api.go` | List and keyword binding |
-| `internal/handlers/codedflow_preview.go` | In-memory preview |
-| `internal/handlers/codedflow_tiqr_ecommerce.go` | TiQR Ecommerce |
+| `internal/handlers/codedflow_preview.go` | HTTP preview + Redis/DB preview helpers |
+| `internal/handlers/tiqrecommerce/` | TiQR Ecommerce coded flow (`codedflow.Register` in `init`) |
 | `internal/handlers/chatbot_processor.go` | Resume and trigger, ahead of visual flows |
 
-A new flow is a `CodedFlow` value passed to `registerCodedFlow` from `init`. It needs a unique `Key`, a `Name`, a `Description`, the outline `Steps`, and a `run` function. The admin UI picks it up from the binary. There is no API to create or delete the definition.
+A new flow is a `CodedFlow` value passed to `codedflow.Register` from `init`. It needs a unique `Key`, a `Name`, a `Description`, the outline `Steps`, and a `run` function. The admin UI picks it up from the binary. There is no API to create or delete the definition.

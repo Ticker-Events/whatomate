@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
@@ -70,10 +71,10 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	sessionData["phone_number"] = ctx.session.PhoneNumber
 
 	operation := stringFromConfig(node.Config, "operation")
-	if ctx.capturing() && ctx.preview.mock {
-		payload, ok := ctx.preview.mockFor(operation)
+	if ctx.capturing() && ctx.preview.Mock {
+		payload, ok := ctx.preview.MockFor(operation)
 		if !ok {
-			return nodeOutcome{}, errCodedPreviewNeedsMock
+			return nodeOutcome{}, codedflow.ErrPreviewNeedsMock
 		}
 		aliasBuyerListResults(payload)
 		ctx.lastTiqr = payload
@@ -92,20 +93,20 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	if err != nil || settings == nil {
 		a.Log.Error("tiqr_store_api node missing commerce settings",
 			"node", node.ID, "session", ctx.session.ID, "api_type", apiType, "error", err)
-		noteTiqrFailure(ctx, 0, "commerce settings unavailable")
+		codedflow.NoteTiqrFailure(newCodedChat(ctx), 0, "commerce settings unavailable")
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 	if apiType == "rest" {
 		if !commerceRESTConfigured(settings.AI) {
 			a.Log.Error("tiqr_store_api node missing REST commerce settings",
 				"node", node.ID, "session", ctx.session.ID)
-			noteTiqrFailure(ctx, 0, "commerce settings unavailable")
+			codedflow.NoteTiqrFailure(newCodedChat(ctx), 0, "commerce settings unavailable")
 			return nodeOutcome{outcome: "http:non2xx"}, nil
 		}
 	} else if !commerceConfigured(settings.AI) {
 		a.Log.Error("tiqr_store_api node missing MCP commerce settings",
 			"node", node.ID, "session", ctx.session.ID)
-		noteTiqrFailure(ctx, 0, "commerce settings unavailable")
+		codedflow.NoteTiqrFailure(newCodedChat(ctx), 0, "commerce settings unavailable")
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 
@@ -121,14 +122,14 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	var raw any
 	if apiType == "rest" {
 		client := newTiqrStoreRESTClient(settings.AI.CommerceRESTURL)
-		if a.shouldTraceCodedFlow(ctx.session) && !ctx.capturing() {
+		if a.ShouldTraceCodedFlow(ctx.session) && !ctx.capturing() {
 			client.OnHTTP = func(method, rawURL string, reqBody []byte, status int, respBody []byte, callErr error) {
 				headers := map[string]string{"Accept": "application/json"}
 				if strings.EqualFold(method, http.MethodPost) {
 					headers["Content-Type"] = "application/json"
 				}
-				curl := formatHTTPCurl(method, rawURL, headers, string(reqBody))
-				a.logCodedFlowTiqrRequest(ctx.session, apiType, operation, curl, params)
+				curl := codedflow.FormatHTTPCurl(method, rawURL, headers, string(reqBody))
+				a.LogCodedFlowTiqrRequest(ctx.session, apiType, operation, curl, params)
 				errMsg := ""
 				if callErr != nil {
 					errMsg = callErr.Error()
@@ -140,12 +141,12 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 						parsed = string(respBody)
 					}
 				}
-				a.logCodedFlowTiqrResponse(ctx.session, apiType, operation, status, parsed, errMsg)
+				a.LogCodedFlowTiqrResponse(ctx.session, apiType, operation, status, parsed, errMsg)
 			}
 		}
 		raw, err = invokeTiqrStoreRESTOperation(callCtx, client, operation, storeID, ctx.session.PhoneNumber, params)
 	} else {
-		a.logCodedFlowTiqrRequest(ctx.session, apiType, operation, "", params)
+		a.LogCodedFlowTiqrRequest(ctx.session, apiType, operation, "", params)
 		invoker := newTiqrStoreInvoker(settings.AI.CommerceMCPURL, settings.AI.CommerceMCPAPIKey)
 		defer func() { _ = invoker.Close() }()
 		raw, err = invokeTiqrStoreOperation(callCtx, invoker, operation, storeID, ctx.session.PhoneNumber, params)
@@ -153,12 +154,12 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 		if err != nil {
 			errMsg = err.Error()
 		}
-		a.logCodedFlowTiqrResponse(ctx.session, apiType, operation, 0, raw, errMsg)
+		a.LogCodedFlowTiqrResponse(ctx.session, apiType, operation, 0, raw, errMsg)
 	}
 	if err != nil {
 		a.Log.Error("tiqr_store_api node request failed",
 			"node", node.ID, "session", ctx.session.ID, "api_type", apiType, "operation", operation, "error", err)
-		noteTiqrFailure(ctx, 0, err.Error())
+		codedflow.NoteTiqrFailure(newCodedChat(ctx), 0, err.Error())
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 
@@ -276,11 +277,61 @@ func invokeTiqrStoreRESTOperation(
 			return nil, fmt.Errorf("order_uuid is required")
 		}
 		return client.GetOrder(ctx, uuid)
+	case "list_fulfillment_slots":
+		return syntheticFulfillmentSlots(params["delivery_mode"]), nil
+	case "propose_fulfillment_time":
+		return syntheticProposeFulfillment(params)
 	case "check_delivery", "lookup_order_status", "retry_payment":
 		return nil, fmt.Errorf("operation %q is not available over REST (use MCP)", operation)
 	default:
 		return nil, fmt.Errorf("unknown tiqr store operation %q", operation)
 	}
+}
+
+// syntheticFulfillmentSlots is a REST-only stand-in so coded flows can ask for a
+// time without MCP. Production stores with MCP should call list_fulfillment_slots
+// over MCP for signed slots; handoff drafts only need the buyer's requested time.
+func syntheticFulfillmentSlots(deliveryMode string) map[string]any {
+	earliest := time.Now().UTC().Add(45 * time.Minute).Truncate(time.Minute)
+	mode := strings.TrimSpace(deliveryMode)
+	if mode == "" {
+		mode = "PICKUP_FROM_STORE"
+	}
+	stamp := earliest.Format(time.RFC3339)
+	return map[string]any{
+		"store_id": 0,
+		"slots": []any{
+			map[string]any{
+				"requested_fulfillment_at": stamp,
+				"promised_ready_at":        stamp,
+				"timezone":                 "UTC",
+				"delivery_mode":            mode,
+				"preparation_time_minutes": 45,
+				"token":                    "synthetic",
+			},
+		},
+	}
+}
+
+func syntheticProposeFulfillment(params map[string]string) (map[string]any, error) {
+	requested := strings.TrimSpace(params["requested_fulfillment_at"])
+	if requested == "" {
+		return nil, fmt.Errorf("requested_fulfillment_at is required")
+	}
+	if _, err := time.Parse(time.RFC3339, requested); err != nil {
+		return nil, fmt.Errorf("invalid requested_fulfillment_at")
+	}
+	mode := strings.TrimSpace(params["delivery_mode"])
+	if mode == "" {
+		mode = "PICKUP_FROM_STORE"
+	}
+	return map[string]any{
+		"requested_fulfillment_at": requested,
+		"promised_ready_at":        requested,
+		"timezone":                 "UTC",
+		"delivery_mode":            mode,
+		"token":                    "synthetic:" + requested,
+	}, nil
 }
 
 func orderMapToCreateRequest(order map[string]any) (ticker.CreateOrderRequest, error) {
@@ -399,6 +450,33 @@ func buildTiqrStoreToolArgs(operation string, storeID int, phone string, params 
 			return "", nil, fmt.Errorf("order_uuid is required")
 		}
 		return "retry_payment", map[string]any{"order_uuid": uuid}, nil
+	case "list_fulfillment_slots":
+		args := map[string]any{
+			"store_id":      storeID,
+			"delivery_mode": strings.TrimSpace(params["delivery_mode"]),
+		}
+		if ids, err := parseIntListParam(params["product_option_ids"]); err != nil {
+			return "", nil, err
+		} else if len(ids) > 0 {
+			args["product_option_ids"] = ids
+		}
+		return "list_fulfillment_slots", args, nil
+	case "propose_fulfillment_time":
+		requested := strings.TrimSpace(params["requested_fulfillment_at"])
+		if requested == "" {
+			return "", nil, fmt.Errorf("requested_fulfillment_at is required")
+		}
+		args := map[string]any{
+			"store_id":                 storeID,
+			"delivery_mode":            strings.TrimSpace(params["delivery_mode"]),
+			"requested_fulfillment_at": requested,
+		}
+		if ids, err := parseIntListParam(params["product_option_ids"]); err != nil {
+			return "", nil, err
+		} else if len(ids) > 0 {
+			args["product_option_ids"] = ids
+		}
+		return "propose_fulfillment_time", args, nil
 	default:
 		return "", nil, fmt.Errorf("unknown tiqr store operation %q", operation)
 	}
@@ -507,7 +585,50 @@ func buildGuestOrderPayload(storeID int, phone string, params map[string]string)
 		}
 		order["buyer_meta_data"] = parsed
 	}
+	if addonsRaw := strings.TrimSpace(params["addons"]); addonsRaw != "" {
+		parsed, err := parseJSONParam(addonsRaw)
+		if err != nil {
+			return nil, fmt.Errorf("addons must be JSON: %w", err)
+		}
+		order["addons"] = coerceOrderAddonNumbers(parsed)
+	}
 	return order, nil
+}
+
+// coerceOrderAddonNumbers turns numeric strings on addons into ints and drops names.
+func coerceOrderAddonNumbers(addons any) any {
+	arr, ok := addons.([]any)
+	if !ok {
+		return addons
+	}
+	out := make([]any, 0, len(arr))
+	for _, raw := range arr {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := anyToInt(item["addon"])
+		qty := anyToInt(item["quantity"])
+		if id <= 0 {
+			if text, ok := item["addon"].(string); ok {
+				if n, err := strconv.Atoi(strings.TrimSpace(text)); err == nil {
+					id = n
+				}
+			}
+		}
+		if qty <= 0 {
+			if text, ok := item["quantity"].(string); ok {
+				if n, err := strconv.Atoi(strings.TrimSpace(text)); err == nil {
+					qty = n
+				}
+			}
+		}
+		if id <= 0 || qty < 1 {
+			continue
+		}
+		out = append(out, map[string]any{"addon": id, "quantity": qty})
+	}
+	return out
 }
 
 // coerceOrderItemNumbers turns numeric strings on line items into ints.

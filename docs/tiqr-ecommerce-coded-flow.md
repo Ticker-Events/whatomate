@@ -1,6 +1,6 @@
 # TiQR Ecommerce coded flow
 
-Code: `internal/handlers/codedflow_tiqr_ecommerce.go`. Key: `tiqr_ecommerce`.
+Code: `internal/handlers/tiqrecommerce/`. Key: `tiqr_ecommerce`. Engine: `internal/handlers/codedflow/`.
 
 This is the code-level map of that function: the customer path, where AI actually runs, and the gaps. The admin-facing page is `docs/src/content/docs/features/coded-flows.mdx`. AI role settings are in `docs/coded-flow-ai.md`.
 
@@ -8,7 +8,7 @@ The function is a script. It does not let a model browse the catalog or place th
 
 ## How a turn runs
 
-`runCodedFlow` in `codedflow.go` starts the function from the top on every inbound message. Finished calls are replayed from `SessionData._coded_calls` in order. Call order is the identity of a step. Names can repeat inside the buy loop (`products`, `cart`, `quantity`) because the next unread record is what matters, not the name.
+`runCodedFlow` in handlers (via `codedflow.Run`) starts the function from the top on every inbound message. Finished calls are replayed from `SessionData._coded_calls` in order. Call order is the identity of a step. Names can repeat inside the buy loop (`products`, `cart`, `quantity`) because the next unread record is what matters, not the name.
 
 The keyword that started the flow is not an answer. `CurrentStep` is empty on that first turn, so the trigger text is cleared before `tiqrEcommerce` runs.
 
@@ -29,16 +29,24 @@ flowchart TD
   menu -->|Talk to staff| xfer
   look --> endStatus[Say status and end]
   ful --> list[Collection list]
-  list -->|row or collection id| prod[list_products]
+  list -->|row or collection id| policy{handoff_policy after_capture}
+  policy -->|yes| earlyHandoff[Capture add-ons Meta Flow]
+  earlyHandoff --> commerceXfer[Commerce draft and agent transfer]
+  policy -->|no| prod[list_products]
   list -->|product query| search[search_products]
-  prod --> show[Carousel or one image]
-  search --> show
+  search --> show[Carousel or one image]
+  prod --> show
+  show -->|picked product collection after_capture| earlyHandoff
   show --> opt{How many options}
   opt -->|none| skip[Say unavailable]
   opt -->|one| qty[Ask quantity]
   opt -->|many| olist[Option list]
   olist --> qty
-  qty --> cart[Append tiqr_cart]
+  qty --> capture[Capture fields]
+  capture --> addons{Product has catalog add-ons}
+  addons -->|yes| addonAsk[Numbered add-on list]
+  addonAsk --> cart[Append tiqr_cart]
+  addons -->|no| cart
   skip --> next[Add more or Checkout]
   cart --> next
   next -->|Add more| list
@@ -51,7 +59,7 @@ flowchart TD
   create -->|give up or retries used| xfer
 ```
 
-Checkout said in free text on the menu, the collection list, a product card, an option list, the quantity prompt, or the add-more prompt jumps to the same checkout, after an empty-cart message if `tiqr_cart` has no lines. That divert is not applied during fulfillment. See Gaps.
+Checkout said in free text on the menu, the collection list, a product card, an option list, the quantity prompt, or the add-more prompt jumps to the same checkout, after an empty-cart message if `tiqr_cart` has no lines. That divert is not applied during fulfillment or during an early handoff. See Gaps.
 
 ### 1. Load the store
 
@@ -94,7 +102,7 @@ The body is `Welcome to {store name}.` plus `What would you like to do?` when th
 | Both | Store pickup or Delivery |
 | Only `DELIVERY_TO_LOCATION` | No mode buttons. Goes straight to a location pin. `delivery_mode` is set inside `Once` |
 
-Delivery asks for a WhatsApp location pin (`AskLocation`). Distance is computed in `evaluateStoreDelivery` (`codedflow_delivery.go`) from the store latitude, longitude, `free_delivery_radius`, and `delivery_radius`. There is no MCP call.
+Delivery asks for a WhatsApp location pin (`AskLocation`). Distance is computed in `evaluateStoreDelivery` (`internal/handlers/tiqrecommerce/delivery.go`) from the store latitude, longitude, `free_delivery_radius`, and `delivery_radius`. There is no MCP call.
 
 | Zone | Next step |
 | --- | --- |
@@ -111,6 +119,22 @@ A deliverable pin stores `delivery_mode`, `delivery_zone`, `delivery_distance_km
 The collection list uses header `Our collections`, button `Browse`, row title `{{name}}`, description `{{description}}`. A chosen row saves `collection_id` from `id` and `collection_name` from the rendered title.
 
 `askRouteList` also has `AllowCatalog: true`, so free text on this step can name another loaded collection or a product.
+
+#### Early-handoff collections (`handoff_policy: after_capture`)
+
+When the chosen collection has `handoff_policy: after_capture` (or a named product belongs to such a collection), the flow does not show product cards, does not ask quantity, and does not write `tiqr_cart` or call `create_order`. Catalog value stays `after_capture`; session keys and coded-call names use `early_handoff_*`.
+
+Code: `runEarlyHandoff` in `internal/handlers/tiqrecommerce/early_handoff.go`.
+
+1. Intro: `This is a custom {name} request — I’ll collect a few details and connect you with our team.`
+2. Required capture fields from that collection (same prompts as the cart path). Checkout phrases do not divert away from these questions.
+3. Add-ons: shared `askCatalogAddons` when the product has catalog add-ons (numbered list + AI parse). Otherwise free-text add-ons or Skip.
+4. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup flow `1484028330223507` (name, email, phone) or delivery flow `1557965846018132` (name, phone, address). Flow fields are copied onto the commerce draft address snapshot and notes.
+5. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. The cart and order paths are skipped.
+
+Fulfillment time (`list_fulfillment_slots` / `propose_fulfillment_time`) is skipped for now. Pickup vs delivery and the location pin already ran earlier in the buy flow.
+
+Image and file capture fields are asked as text; the coded runner does not attach WhatsApp media the way the commerce chatbot does.
 
 `productsForRoute`:
 
@@ -134,11 +158,54 @@ One product is an image reply with Add to cart, because a carousel needs two car
 | 1 | That option is taken. No list |
 | 2 or more | Option list. Title is `{{name}} (₹{{price}})` |
 
-Quantity uses `AskNumber` with pattern `^[0-9]+$`. Digits are accepted in code, including `0`. A number word is accepted only when intent returns route `answer` with a value that matches the pattern.
+Quantity uses `AskNumber` with pattern `^[1-9][0-9]*$`. Digits of 1 or more are accepted in code. A number word is accepted only when intent returns route `answer` with a value that matches the pattern.
 
-`Once("cart")` appends `{product_option, quantity, option_name}` onto `tiqr_cart`. `cart_count` is the number of lines, not the sum of quantities. The same option added twice is two lines. Replay of that same call does not append again.
+### Catalog add-ons
 
-Then buttons `add_more` and `checkout`. Add more returns to the collection list. Checkout breaks the loop.
+After capture fields and before the cart line is written, the flow loads the product with `get_product` and reads active catalog add-ons. The same step runs in early handoff (`askCatalogAddons` with prefixes `product_addons` and `early_handoff_addons`).
+
+When the product has catalog add-ons, the customer sees a numbered list with prices when present:
+
+```
+This product has the following add-ons:
+1. Candles — ₹50
+2. Flowers — ₹100
+
+Reply with the item number and how many you want, for example item 1 - 2.
+You can list more than one item. Say Skip if you don't want any.
+```
+
+Exact `skip`, `no`, `none`, or `done` continues with nothing stored. Every other reply is parsed by the guide AI role into JSON (`intent`, `confidence`, `items` with list indexes and quantities, `missing_quantity`, `question`). The model is told to use list indexes only and never invent addon ids.
+
+Go then grounds that JSON against the loaded choices:
+
+| Outcome | Next step |
+| --- | --- |
+| Grounded `select` at confidence ≥ 0.75 | Save `{addon, quantity, name}` onto `commerce_addons`, confirm, continue |
+| Missing quantity for a named item | Ask specifically for that item's quantity (up to 3 clarify turns) |
+| Unclear, low confidence, or out-of-range index | Ask a short clarifying question (up to 3 turns) |
+| Still unclear after 3 clarify turns | Transfer to an agent |
+
+Products with no catalog add-ons skip this step on the buy path. Early handoff without catalog add-ons still asks the free-text Skip question (`early_handoff_addons_free`).
+
+### Collection capture fields
+
+After a valid quantity, and before the cart line is written, the flow reads `required_capture_fields` for the collection this product belongs to. The product's `category_id` (or embedded `category`) wins when it matches a loaded collection. Otherwise the selected `collection_id` is used.
+
+Each field with `required: true` and a non-empty `key`, `label`, and `type` is its own question. Optional and incomplete fields are skipped. The prompt is the same text the commerce chatbot uses: label, then help text, then `Options:` when the field has options. A `number` must parse as a number. `single_select` and `multi_select` must match the options (`multi_select` is comma-separated). Any other non-empty reply is accepted. A value that fails that check is not stored; the customer is asked again with `Please provide a valid value.` A checkout phrase that is not a valid answer for that field leaves the question and follows the normal checkout divert.
+
+Answers are stored on the session as `commerce_captured_fields` (latest value per key) and `commerce_capture_labels`. The cart line also stores `product_name`, `option_name`, `capture_fields`, `capture_labels`, and `capture_order` (keys in the order asked) for the answers given on that add. The same option added again with the same answers increases quantity. A different answer for the same option is a separate line, so two cakes can carry two messages. The cart summary and the failed-order handoff list each answer under its label.
+
+`create_order` still sends items as `product_option` and `quantity` only. The answers go in `notes`. With no capture answers, `notes` stays the plain `customer_notes` string. With answers, `notes` is plain text per cart line:
+
+```
+{product_name}({option_name})
+- {field label}: {answer}
+```
+
+A blank line separates products. When the customer also typed a form note, a final `Note: {customer note}` line is appended.
+
+Then buttons `add_more`, `edit_cart`, and `checkout`. Add more returns to the collection list. Checkout reviews the cart, then breaks the loop.
 
 ### 6. Checkout
 
@@ -156,18 +223,35 @@ Then buttons `add_more` and `checkout`. Add more returns to the collection list.
 | `email` | `customer_email` or `email` if it matches a simple email. Phone fields are skipped. Other session values are scanned for an email |
 | `phone_number` | `customer_phone`, `phone`, or `phone_number` when present |
 | `items` | `tiqr_cart` lines reduced to `product_option` and `quantity`. The TiQR client turns those strings into integers |
-| `notes` | `customer_notes` or `notes` |
+| `addons` | `commerce_addons` reduced to `addon` and `quantity` when any were selected. Display names are not sent |
+| `notes` | `customer_notes` or `notes` when the cart has no collection answers. Otherwise plain text: `{product_name}({option_name})` then `- {label}: {value}` per capture field, with a blank line between products and `Note: {customer note}` when a form note exists |
 | `new_address` | Delivery only: name, address lines, city, state, country, pincode, email, phone, plus latitude and longitude to 6 decimal places. Omitted for pickup |
 | `delivery_mode` | session value, or `PICKUP_FROM_STORE` if empty |
-| `buyer_meta_data` | Pickup: `{name}` when a customer name exists. Delivery: latitude and longitude |
+| `buyer_meta_data` | `name`, `email`, `phone`, `phone_number`, and `notes` when set (same notes string as the order). Delivery also includes latitude and longitude |
 
 `shipping_fee_paise` is not sent.
 
-Success sends the pickup or delivery confirmation, then `tiqrEcommerceThanks`, then `End`. There is no second confirmation.
+Success sends an order-placed message (display uid, delivery fee, total when present). When the create_order response includes a payment URL (`payment.meta_data.url_to_redirect`, or a top-level `payment_url` in preview mocks), that message is a WhatsApp CTA URL button labeled **Pay now**. The flow then `End`s. It does not tell the customer the order is already confirmed.
 
 Failure calls `createRecoverPlan`. If the plan is `missing_field` and retries remain, `collectRecoverFields` asks for every missing field in a fixed order, stores each reply on the session, and `create_order` runs again. Otherwise the customer is transferred with `formatFailedOrderHandoff`, which lists cart lines and the address. The recover model's own sentence is not sent on that path.
 
 Retries come from `[codedflow] order_retries`, default 2. The loop is `attempt := 0; attempt <= retries`, so the default is one try plus two retries. Missing fields are collected only while `attempt < retries`.
+
+### Agent handoff snapshot
+
+Every `Transfer` from this flow (talk to staff, failed order, ungrounded intent, store or product load failure) snapshots the session onto a `CommerceDraft` and creates an agent transfer with `source: commerce` and `metadata.kind: commerce_handoff`, the same shape as early handoffs.
+
+| Draft / metadata field | Source |
+| --- | --- |
+| `cart` | `{ "source": "tiqr_ecommerce", "lines": [...] }` from `tiqr_cart` (option id, quantity, names, capture fields). Empty cart still transfers with `lines: []` |
+| `addons` | `commerce_addons` as `{addon, quantity, name}` when selected. Shown on the owner handoff API and chat panel; Create order prefills quantities |
+| `address` / `AddressSnapshot` | WhatsApp Flow contact and address fields, plus delivery pin |
+| `fulfillment` | `delivery_mode`, latitude, longitude |
+| `captured_fields` | `commerce_captured_fields` |
+| `notes` | `codedOrderNotes` / customer notes |
+| `missing_fields` | Last `create_order` recover plan asks, when present |
+
+Outside business hours the out-of-hours message is sent and no draft transfer is created. If the draft cannot be saved, Transfer falls back to the generic queue transfer so the customer still reaches a person. Staff Create Order in tiqr.store prefills from this handoff; the order is not placed automatically.
 
 ### 7. Order status
 
@@ -181,7 +265,7 @@ This file never calls a model itself. The calls are inside `Conv`.
 
 ### Intent
 
-`resolveFreeText` in `codedflow_intent.go`. It runs when the reply is not an offered button id or title.
+`resolveFreeText` in `internal/handlers/codedflow/intent.go`. It runs when the reply is not an offered button id or title.
 
 Steps in this flow that can reach it:
 
@@ -216,9 +300,11 @@ Language from the first successful intent call is stored as `customer_language` 
 
 `askGuide`. One short question, in the stored language (default `en`). Up to 3 questions per step, counted in `SessionData._coded_guide`. The 4th unclear reply transfers. An empty question or a guide error also transfers. A later confident route clears the counter.
 
+Catalog add-on selection also uses the guide role to parse free text into indexed quantities. Clarify turns for missing quantity or unclear replies share the same 3-turn cap on that add-on step before transfer.
+
 ### Translation
 
-`Conv.text` in `codedflow_ai.go` runs on every authored line before send, including button titles (then truncated to 20 characters). It does not run when `customer_language` is empty, `en`, or `en-*`. English taps therefore stay in the authored English.
+`Conv.text` in `internal/handlers/codedflow/ai.go` runs on every authored line before send, including button titles (then truncated to 20 characters). It does not run when `customer_language` is empty, `en`, or `en-*`. English taps therefore stay in the authored English.
 
 Catalog text is not translated: collection names, product names, option names, and prices stay as the store sent them. Placeholders, asterisks, numbers, prices, and line breaks are supposed to be kept. Results are cached on the session under `_translations`. A translation error sends the English source.
 
@@ -248,7 +334,7 @@ Fetch failures in this flow do not call `recoverFetchMessage`. Store, collection
 - Exact taps on an offered id or title
 - The decision to transfer after an ungrounded route
 
-Collection `AIInstructions` and required capture fields used by the commerce chatbot are not read here.
+Collection `AIInstructions` are not read aloud. Required capture fields on the loaded collection are asked one at a time when an option is added. See Collection capture fields.
 
 ## Session values this flow writes
 
@@ -260,9 +346,11 @@ Collection `AIInstructions` and required capture fields used by the commerce cha
 | `delivery_latitude`, `delivery_longitude` | Accepted pin |
 | `delivery_zone`, `delivery_distance_km`, `shipping_fee_paise` | Deliverable pin. Fee stays unset while the calculator returns 0 |
 | `collection_id`, `collection_name` | Collection choice, or the search query for a product route |
-| `products`, `product_id`, `options`, `product_selected` | Product choice |
+| `products`, `product_id`, `product_name`, `options`, `product_selected` | Product choice |
 | `option_id`, `option_name`, `quantity` | Option and quantity |
-| `tiqr_cart`, `cart_count` | Each append |
+| `commerce_captured_fields`, `commerce_capture_labels` | Each required collection field answered while adding an option |
+| `commerce_addons` | Catalog add-ons chosen for this session (`addon`, `quantity`, `name`) |
+| `tiqr_cart`, `cart_count` | Each append. A line may also include `product_name`, `option_name`, `capture_fields`, `capture_labels`, and `capture_order` |
 | `customer_language` | First free-text intent, if unset |
 | form fields | WhatsApp Flow submission, plus any field recover asks for |
 | `order` | Successful `create_order` |
@@ -291,10 +379,10 @@ Collection `AIInstructions` and required capture fields used by the commerce cha
 
 10. **Empty store data is a transfer, not a retry inside the session.** `get_store` or `list_collections` failure completes the session. A later keyword can start a new session and call TiQR again. Within one session those calls are not retried, because the flow has already ended.
 
-11. **Hardcoded Meta flow ids and fallback image.** Pickup uses `tiqrEcommercePickupFlowID` (`1484028330223507`). Delivery uses `tiqrEcommerceFlowID` (`1557965846018132`). The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
+11. **Hardcoded Meta flow ids and fallback image.** Pickup uses `tiqrEcommercePickupFlowID` (`1484028330223507`). Delivery uses `tiqrEcommerceFlowID` (`1557965846018132`). Both checkout and early handoff use these. The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
 
 12. **Language is sticky.** The first non-empty intent language wins for the session. A later message in another language does not replace it, so translation keeps using the first label.
 
 13. **Order status is thinner than commerce checkout.** No payment link, no retry payment, no order id prompt. A failed lookup and a customer with no orders share one sentence.
 
-14. **Collection AI instructions are ignored.** The commerce chatbot loads per-collection instructions and required capture fields. This flow never reads them, so a collection that needs an extra question (for example a cake message) is not asked before the cart line.
+14. **Collection AI instructions are not read aloud.** Required capture fields are asked as their own questions before the cart line. The store-authored `ai_instructions` text is still not added to the prompt. File fields accept a text reply, because this flow does not collect a WhatsApp attachment.

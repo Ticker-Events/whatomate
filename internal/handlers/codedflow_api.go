@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -19,7 +20,7 @@ type CodedFlowBindingResponse struct {
 	Key             string      `json:"key"`
 	Name            string      `json:"name"`
 	Description     string      `json:"description"`
-	Steps           []CodedStep `json:"steps"`
+	Steps           []codedflow.CodedStep `json:"steps"`
 	Keywords        []string    `json:"keywords"`
 	IsEnabled       bool        `json:"is_enabled"`
 	WhatsAppAccount string      `json:"whatsapp_account"`
@@ -50,7 +51,7 @@ func (a *App) ListCodedFlows(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list coded flows", nil, "")
 	}
 
-	flows := codedFlows()
+	flows := codedflow.Flows()
 	response := make([]CodedFlowBindingResponse, 0, len(flows))
 	for _, flow := range flows {
 		item := CodedFlowBindingResponse{
@@ -89,7 +90,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 
 	key, _ := r.RequestCtx.UserValue("key").(string)
 	key = strings.TrimSpace(key)
-	flow := codedFlowByKey(key)
+	flow := codedflow.ByKey(key)
 	if flow == nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Coded flow not found", nil, "")
 	}
@@ -175,7 +176,7 @@ func (a *App) codedFlowBindings(orgID uuid.UUID, accountName string) (map[string
 	}
 	out := make(map[string]models.CodedFlowBinding, len(rows))
 	for _, row := range rows {
-		if codedFlowByKey(row.FlowKey) == nil {
+		if codedflow.ByKey(row.FlowKey) == nil {
 			continue
 		}
 		out[row.FlowKey] = row

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	draftrepo "github.com/shridarpatil/whatomate/internal/commerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
@@ -37,7 +38,7 @@ const (
 	cartPendingOptionKey         = "cart_pending_option_id"
 	checkoutFlowCheckout         = "checkout"
 	checkoutFlowPostCart         = "post_cart"
-	checkoutFlowThemed           = "themed"
+	checkoutFlowEarlyHandoff     = "early_handoff"
 	checkoutLocationPrompt       = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
 	checkoutAddressPrompt        = "Please provide your full delivery address, including your name, phone number, street address, city, state, country, and pincode."
 	checkoutAddressMessageBody   = "Thanks for your order! Tell us what address you'd like this order delivered to."
@@ -97,6 +98,11 @@ func getCheckoutState(session *models.ChatbotSession) *checkoutState {
 		Email:            asString(raw["email"]),
 		DeliveryMode:     asString(raw["delivery_mode"]),
 		PendingProductID: asString(raw["pending_product_id"]),
+	}
+	if st.Flow == "themed" {
+		st.Flow = checkoutFlowEarlyHandoff
+		raw["flow"] = checkoutFlowEarlyHandoff
+		session.SessionData[checkoutSessionKey] = raw
 	}
 	if addr, ok := raw["new_address"].(map[string]any); ok {
 		st.NewAddress = addr
@@ -450,8 +456,10 @@ func (a *App) beginPostCartLineFlow(account *models.WhatsAppAccount, contact *mo
 	a.beginAddonStep(account, contact, session, settings, st)
 }
 
-// beginThemedIntake starts capture → addons → fulfillment → handoff for after_capture collections.
-func (a *App) beginThemedIntake(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, category tickermcp.Category, productID string) {
+// beginEarlyHandoffIntake starts capture → addons → fulfillment → handoff for
+// collections with catalog handoff_policy after_capture.
+func (a *App) beginEarlyHandoffIntake(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, category tickermcp.Category, productID string) {
+	tiqrecommerce.MigrateEarlyHandoffSessionKeys(session)
 	fields := make([]map[string]any, 0, len(category.RequiredCaptureFields))
 	captured := jsonMapFromSession(session, "commerce_captured_fields")
 	for _, field := range category.RequiredCaptureFields {
@@ -463,7 +471,7 @@ func (a *App) beginThemedIntake(account *models.WhatsAppAccount, contact *models
 		})
 	}
 	st := &checkoutState{
-		Flow:             checkoutFlowThemed,
+		Flow:             checkoutFlowEarlyHandoff,
 		NewAddress:       map[string]any{},
 		PendingProductID: strings.TrimSpace(productID),
 		CaptureFields:    fields,
@@ -475,7 +483,7 @@ func (a *App) beginThemedIntake(account *models.WhatsAppAccount, contact *models
 	}
 	setCheckoutState(session, st)
 	if _, err := a.ensureCommerceDraft(contact, session, settings); err != nil {
-		a.Log.Error("themed draft create failed", "error", err)
+		a.Log.Error("early_handoff draft create failed", "error", err)
 		_ = a.sendAndSaveTextMessage(account, contact, "I couldn’t start this request right now. Please try again.")
 		clearCheckoutState(session)
 		_ = a.persistSessionData(session)
@@ -602,7 +610,7 @@ func (a *App) promptFreeTextAddonsOrContinue(account *models.WhatsAppAccount, co
 		a.finishPostCartLineFlow(account, contact, session, settings)
 		return
 	}
-	// Themed without catalog addons: optional free-text extras, then fulfillment.
+	// After-capture without catalog addons: optional free-text extras, then fulfillment.
 	st.Step = "addons"
 	st.AddonChoices = nil
 	setCheckoutState(session, st)
@@ -640,7 +648,14 @@ func (a *App) handleCheckoutAddonChoice(account *models.WhatsAppAccount, contact
 		if err != nil || id <= 0 {
 			return
 		}
-		appendCommerceAddon(session, id, 1)
+		name := ""
+		for _, choice := range st.AddonChoices {
+			if anyToInt(choice["id"]) == id {
+				name = asString(choice["name"])
+				break
+			}
+		}
+		appendCommerceAddon(session, id, 1, name)
 		_ = a.persistSessionData(session)
 		a.promptAddonContinue(account, contact, st)
 	}
@@ -659,7 +674,7 @@ func (a *App) handleCheckoutAddonText(account *models.WhatsAppAccount, contact *
 		if n := parsePositiveInt(text); n >= 1 && n <= len(st.AddonChoices) {
 			id := anyToInt(st.AddonChoices[n-1]["id"])
 			if id > 0 {
-				appendCommerceAddon(session, id, 1)
+				appendCommerceAddon(session, id, 1, asString(st.AddonChoices[n-1]["name"]))
 				setCheckoutState(session, st)
 				_ = a.persistSessionData(session)
 				_ = a.sendAndSaveTextMessage(account, contact, "Added "+asString(st.AddonChoices[n-1]["name"])+".")
@@ -671,7 +686,7 @@ func (a *App) handleCheckoutAddonText(account *models.WhatsAppAccount, contact *
 		a.promptStructuredAddons(account, contact, session, st)
 		return true
 	}
-	// Free-text themed extras → notes.
+	// Free-text after-capture extras → notes.
 	notes := jsonMapFromSession(session, "commerce_notes")
 	notes["addon_requests"] = strings.TrimSpace(text)
 	session.SessionData["commerce_notes"] = map[string]any(notes)
@@ -680,7 +695,7 @@ func (a *App) handleCheckoutAddonText(account *models.WhatsAppAccount, contact *
 	return true
 }
 
-func appendCommerceAddon(session *models.ChatbotSession, addonID, qty int) {
+func appendCommerceAddon(session *models.ChatbotSession, addonID, qty int, name string) {
 	if session == nil || addonID <= 0 {
 		return
 	}
@@ -697,6 +712,9 @@ func appendCommerceAddon(session *models.ChatbotSession, addonID, qty int) {
 		addon, _ := value.(map[string]any)
 		if anyToInt(addon["addon"]) == addonID {
 			addon["quantity"] = anyToInt(addon["quantity"]) + qty
+			if name != "" && strings.TrimSpace(asString(addon["name"])) == "" {
+				addon["name"] = name
+			}
 			next = append(next, addon)
 			found = true
 			continue
@@ -704,7 +722,11 @@ func appendCommerceAddon(session *models.ChatbotSession, addonID, qty int) {
 		next = append(next, value)
 	}
 	if !found {
-		next = append(next, map[string]any{"addon": addonID, "quantity": qty})
+		item := map[string]any{"addon": addonID, "quantity": qty}
+		if strings.TrimSpace(name) != "" {
+			item["name"] = strings.TrimSpace(name)
+		}
+		next = append(next, item)
 	}
 	session.SessionData["commerce_addons"] = next
 }
@@ -716,7 +738,7 @@ func (a *App) finishAddonStep(account *models.WhatsAppAccount, contact *models.C
 	switch st.Flow {
 	case checkoutFlowPostCart:
 		a.finishPostCartLineFlow(account, contact, session, settings)
-	case checkoutFlowThemed:
+	case checkoutFlowEarlyHandoff:
 		st.Step = "delivery_mode"
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
@@ -739,14 +761,14 @@ func (a *App) finishPostCartLineFlow(account *models.WhatsAppAccount, contact *m
 
 func (a *App) placeCheckoutOrderOrHandoff(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
 	st := getCheckoutState(session)
-	if st != nil && st.Flow == checkoutFlowThemed {
-		a.finishThemedHandoff(account, contact, session, settings, st)
+	if st != nil && st.Flow == checkoutFlowEarlyHandoff {
+		a.finishEarlyHandoff(account, contact, session, settings, st)
 		return
 	}
 	a.placeCheckoutOrder(account, contact, session, settings)
 }
 
-func (a *App) finishThemedHandoff(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
+func (a *App) finishEarlyHandoff(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
 	if st == nil {
 		st = getCheckoutState(session)
 	}
@@ -770,8 +792,8 @@ func (a *App) advanceToConfirmOrHandoff(account *models.WhatsAppAccount, contact
 	st.Step = "confirm"
 	setCheckoutState(session, st)
 	_ = a.persistSessionData(session)
-	if st.Flow == checkoutFlowThemed {
-		a.finishThemedHandoff(account, contact, session, settings, st)
+	if st.Flow == checkoutFlowEarlyHandoff {
+		a.finishEarlyHandoff(account, contact, session, settings, st)
 		return
 	}
 	a.sendOrderConfirmPrompt(account, contact, session)
@@ -1215,7 +1237,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 
 	// Qty / edit intents take priority over step validation so users can fix the cart mid-checkout.
 	// Skip during slot entry — times like "in 45 minutes" / "today 5pm" must reach the parser.
-	if st.Step != "slot" && st.Flow != checkoutFlowThemed && a.handleCheckoutCartEditIntent(account, contact, session, settings, st, text) {
+	if st.Step != "slot" && st.Flow != checkoutFlowEarlyHandoff && a.handleCheckoutCartEditIntent(account, contact, session, settings, st, text) {
 		return true
 	}
 
@@ -1234,7 +1256,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		return true
 	case "capture":
 		if st.CaptureIndex < 0 || st.CaptureIndex >= len(st.CaptureFields) {
-			a.continueAfterCaptureComplete(account, contact, session, settings, st)
+			a.continueEarlyHandoffComplete(account, contact, session, settings, st)
 			return true
 		}
 		field := st.CaptureFields[st.CaptureIndex]
@@ -1250,7 +1272,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 			a.appendDraftAttachments(session, attachments)
 			st.CaptureIndex++
 			if st.CaptureIndex >= len(st.CaptureFields) {
-				a.continueAfterCaptureComplete(account, contact, session, settings, st)
+				a.continueEarlyHandoffComplete(account, contact, session, settings, st)
 				return true
 			}
 			setCheckoutState(session, st)
@@ -1267,7 +1289,7 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		session.SessionData["commerce_captured_fields"] = map[string]any(captured)
 		st.CaptureIndex++
 		if st.CaptureIndex >= len(st.CaptureFields) {
-			a.continueAfterCaptureComplete(account, contact, session, settings, st)
+			a.continueEarlyHandoffComplete(account, contact, session, settings, st)
 			return true
 		}
 		setCheckoutState(session, st)
@@ -1331,12 +1353,12 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 	}
 }
 
-func (a *App) continueAfterCaptureComplete(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
+func (a *App) continueEarlyHandoffComplete(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings, st *checkoutState) {
 	if st == nil {
 		return
 	}
 	switch st.Flow {
-	case checkoutFlowPostCart, checkoutFlowThemed:
+	case checkoutFlowPostCart, checkoutFlowEarlyHandoff:
 		setCheckoutState(session, st)
 		_ = a.persistSessionData(session)
 		a.advanceAfterLineCapture(account, contact, session, settings, st)

@@ -126,6 +126,9 @@ func (a *App) syncReferencedCommerceDraft(session *models.ChatbotSession) error 
 		draft.FulfillmentSlotToken = state.SlotToken
 		draft.SavedAddressID = state.SavedAddressID
 		draft.AddressSnapshot = models.JSONB(state.NewAddress)
+		if draft.AddressSnapshot == nil {
+			draft.AddressSnapshot = models.JSONB{}
+		}
 		if state.HasLocation {
 			draft.Latitude, draft.Longitude = &state.Latitude, &state.Longitude
 		}
@@ -164,10 +167,21 @@ func jsonMapFromSession(session *models.ChatbotSession, key string) models.JSONB
 }
 
 func jsonArrayFromSession(session *models.ChatbotSession, key string) models.JSONBArray {
-	if value, ok := session.SessionData[key].([]any); ok {
-		return append(models.JSONBArray(nil), value...)
+	if session == nil || session.SessionData == nil {
+		return models.JSONBArray{}
 	}
-	return models.JSONBArray{}
+	switch value := session.SessionData[key].(type) {
+	case []any:
+		out := make(models.JSONBArray, len(value))
+		copy(out, value)
+		return out
+	case models.JSONBArray:
+		out := make(models.JSONBArray, len(value))
+		copy(out, value)
+		return out
+	default:
+		return models.JSONBArray{}
+	}
 }
 
 func cloneJSONMap(source map[string]any) models.JSONB {

@@ -15,6 +15,8 @@ export type TiqrStoreOperation =
   | 'get_order'
   | 'lookup_order_status'
   | 'retry_payment'
+  | 'list_fulfillment_slots'
+  | 'propose_fulfillment_time'
 
 export type TiqrStoreField = {
   key: string
@@ -149,6 +151,28 @@ export const TIQR_STORE_OPERATIONS: TiqrStoreOperationDef[] = [
     rest: false,
     fields: [
       { key: 'order_uuid', label: 'Order UUID', required: true, placeholder: '{{order_uuid}}' },
+    ],
+  },
+  {
+    value: 'list_fulfillment_slots',
+    label: 'List fulfillment slots',
+    fields: [
+      { key: 'delivery_mode', label: 'Delivery mode', required: true, placeholder: 'PICKUP_FROM_STORE' },
+      { key: 'product_option_ids', label: 'Product option IDs', placeholder: '1,2' },
+    ],
+  },
+  {
+    value: 'propose_fulfillment_time',
+    label: 'Propose fulfillment time',
+    fields: [
+      { key: 'delivery_mode', label: 'Delivery mode', required: true, placeholder: 'PICKUP_FROM_STORE' },
+      {
+        key: 'requested_fulfillment_at',
+        label: 'Requested time (RFC3339)',
+        required: true,
+        placeholder: '{{requested_at}}',
+      },
+      { key: 'product_option_ids', label: 'Product option IDs', placeholder: '1,2' },
     ],
   },
 ]

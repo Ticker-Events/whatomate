@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
@@ -515,7 +516,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		session.CurrentStep = ""
 		session.StepRetries = 0
 		session.SessionData = models.JSONB{
-			codedFlowDataKey: flow.Key,
+			codedflow.DataKey: flow.Key,
 		}
 		if err := a.runCodedFlow(account, contact, session, flow, messageText, buttonID, flowResponseData); err != nil {
 			a.Log.Error("Coded flow failed at start", "error", err, "session", session.ID, "flow", flow.Key)

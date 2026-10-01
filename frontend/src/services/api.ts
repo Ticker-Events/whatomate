@@ -392,7 +392,7 @@ export type CodedPreviewMessage = {
   type: string
   content: string
   step?: string
-  interactive?: 'buttons' | 'list' | 'carousel'
+  interactive?: 'buttons' | 'list' | 'carousel' | 'cta_url'
   buttons?: CodedPreviewButton[]
   cards?: CodedPreviewCard[]
   header?: string

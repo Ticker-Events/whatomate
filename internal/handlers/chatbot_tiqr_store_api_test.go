@@ -395,3 +395,51 @@ func TestInvokeTiqrStoreRESTOperation_MCPOnlyOps(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not available over REST")
 }
+
+func TestInvokeTiqrStoreRESTOperation_FulfillmentSlots(t *testing.T) {
+	client := ticker.NewClient("http://example.com", nil)
+	raw, err := invokeTiqrStoreRESTOperation(context.Background(), client, "list_fulfillment_slots", "42", "", map[string]string{
+		"delivery_mode": "PICKUP_FROM_STORE",
+	})
+	require.NoError(t, err)
+	payload, ok := raw.(map[string]any)
+	require.True(t, ok)
+	slots, ok := payload["slots"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, slots)
+
+	first, ok := slots[0].(map[string]any)
+	require.True(t, ok)
+	requested := asString(first["requested_fulfillment_at"])
+	require.NotEmpty(t, requested)
+
+	proposed, err := invokeTiqrStoreRESTOperation(context.Background(), client, "propose_fulfillment_time", "42", "", map[string]string{
+		"delivery_mode":            "PICKUP_FROM_STORE",
+		"requested_fulfillment_at": requested,
+	})
+	require.NoError(t, err)
+	slot, ok := proposed.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, requested, asString(slot["requested_fulfillment_at"]))
+	assert.NotEmpty(t, asString(slot["token"]))
+}
+
+func TestBuildTiqrStoreToolArgs_FulfillmentSlots(t *testing.T) {
+	name, args, err := buildTiqrStoreToolArgs("list_fulfillment_slots", 42, "", map[string]string{
+		"delivery_mode":       "DELIVERY_TO_LOCATION",
+		"product_option_ids":  "9,10",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "list_fulfillment_slots", name)
+	assert.Equal(t, 42, args["store_id"])
+	assert.Equal(t, "DELIVERY_TO_LOCATION", args["delivery_mode"])
+	assert.Equal(t, []int{9, 10}, args["product_option_ids"])
+
+	name, args, err = buildTiqrStoreToolArgs("propose_fulfillment_time", 42, "", map[string]string{
+		"delivery_mode":            "PICKUP_FROM_STORE",
+		"requested_fulfillment_at": "2026-10-01T12:00:00Z",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "propose_fulfillment_time", name)
+	assert.Equal(t, "2026-10-01T12:00:00Z", args["requested_fulfillment_at"])
+}
