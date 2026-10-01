@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
@@ -978,22 +979,9 @@ func compactOrderCreateResult(raw map[string]any, currency string) map[string]an
 // anyIDString stringifies order/payment identifiers that may arrive as string,
 // int, or JSON float from MCP/JSON decoding.
 func anyIDString(v any) string {
-	switch n := v.(type) {
-	case string:
-		return strings.TrimSpace(n)
-	case float64:
-		if n == float64(int64(n)) {
-			return strconv.FormatInt(int64(n), 10)
-		}
-		return strconv.FormatFloat(n, 'f', -1, 64)
-	case float32:
-		return anyIDString(float64(n))
-	case int:
-		return strconv.Itoa(n)
-	case int64:
-		return strconv.FormatInt(n, 10)
-	case json.Number:
-		return strings.TrimSpace(n.String())
+	switch v.(type) {
+	case string, float64, float32, int, int64, json.Number:
+		return codedflow.AsString(v)
 	default:
 		return ""
 	}

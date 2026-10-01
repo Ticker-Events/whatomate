@@ -2,6 +2,7 @@ package codedflow
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -9,9 +10,36 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 )
 
+// asString coerces common JSON scalar types to a trimmed string.
+// API payloads often decode numeric ids as float64; string-only casting
+// broke collectionByID / early-handoff matching after the package split.
 func asString(v any) string {
-	s, _ := v.(string)
-	return strings.TrimSpace(s)
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case float64:
+		if t == float64(int64(t)) {
+			return strconv.FormatInt(int64(t), 10)
+		}
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case float32:
+		f := float64(t)
+		if f == float64(int64(f)) {
+			return strconv.FormatInt(int64(f), 10)
+		}
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(t)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	case json.Number:
+		return strings.TrimSpace(t.String())
+	default:
+		return strings.TrimSpace(fmt.Sprint(t))
+	}
 }
 
 // AsString exports asString for sibling packages.
