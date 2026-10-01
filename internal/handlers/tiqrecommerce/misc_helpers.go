@@ -17,7 +17,6 @@ func isCheckoutStartIntent(text string) bool {
 	}
 }
 
-// handleBrowsingCartEdit applies remove/qty edits while the shopper is browsing (no checkout in progress).
 func parsePositiveInt(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" {
