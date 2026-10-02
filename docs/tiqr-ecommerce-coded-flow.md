@@ -143,13 +143,17 @@ Image and file capture fields are asked as text; the coded runner does not attac
 
 | Route | Store call |
 | --- | --- |
-| `collection` or `choice` with an id | `list_products` with `category_id`. No limit or offset is passed |
+| `collection` or `choice` with an id | `list_products` with `category_id`. The first call does not pass limit or offset. A later Show more follows `next`, or repeats the call with `offset` |
 | `product` with a query | `search_products` with `search` and `limit` 20. `collection_name` is overwritten with the query |
 | empty query or empty id | "I couldn't find that" and the buy loop shows collections again |
 | API error (`lastTiqrErr` set) | transfer with `tiqrEcommerceFailProducts` |
 | any other kind | transfer |
 
-WhatsApp shows at most 10 list rows and 10 carousel cards (`chatbot_graph_runner.go`). Collections were fetched with limit 20, so free text can still name a collection that is not on the list, as long as it was in that first page. Products past the first 10 cards cannot be tapped, and this step does not allow a catalog route (see AI).
+WhatsApp list messages and carousels hold at most 10 rows (`chatbot_graph_runner.go`). When `count` is greater than 10, or more than 10 rows are already loaded, the message shows 9 rows and a **Show more** row. Show more repeats until the last page, which lists the remaining rows and omits Show more. A page of 10 or fewer is sent whole. Collections, the product carousel, the option list, and the order list all use this.
+
+If the API page is shorter than `count` (limit 50, 50 rows loaded, count 100), Show more calls that response's `next` URL before rendering the next WhatsApp page. When `next` is absent, the same list operation is called again with `offset` set to how many rows are already loaded. Rows already stored are not added twice. This covers `list_collections`, `search_collections`, `list_products`, `search_products`, `list_product_options`, `list_faqs`, and `list_orders_by_phone`.
+
+Free text on the collection list can name a collection that has been loaded, including rows fetched by a later Show more, even when that row is not on the current page. The product step still does not take a catalog route (see AI).
 
 One product is an image reply with Add to cart, because a carousel needs two cards. Two or more products are a carousel. A missing image uses the hardcoded fallback URL `tiqrEcommerceFallbackMedia`.
 
@@ -386,16 +390,14 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 
 7. **No cart management.** Lines are append-only. There is no view, edit, remove, or merge of the same option. `cart_count` is the line count, and the added-to-cart sentence reads as if it were a unit count. Quantity `0` matches `^[0-9]+$`. Stock is not checked before add.
 
-8. **Catalog window is one page.** Collections: 20 from the API, 10 on the WhatsApp list. Products: whatever the API default page is, then 10 cards. No offset, no "more" button. A product the model was not allowed to search for on the card step cannot be reached except by going back to collections and searching again, and only if search returns it in the first 20.
+8. **Search labels the carousel with the query.** `productsForRoute` sets `collection_name` to the search string, and the carousel body says the items are available in that name.
 
-9. **Search labels the carousel with the query.** `productsForRoute` sets `collection_name` to the search string, and the carousel body says the items are available in that name.
+9. **Empty store data is a transfer, not a retry inside the session.** `get_store` or `list_collections` failure completes the session. A later keyword can start a new session and call TiQR again. Within one session those calls are not retried, because the flow has already ended.
 
-10. **Empty store data is a transfer, not a retry inside the session.** `get_store` or `list_collections` failure completes the session. A later keyword can start a new session and call TiQR again. Within one session those calls are not retried, because the flow has already ended.
+10. **Hardcoded Meta flow ids and fallback image.** Pickup uses `tiqrEcommercePickupFlowID` (`1484028330223507`). Delivery uses `tiqrEcommerceFlowID` (`1557965846018132`). Both checkout and early handoff use these. The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
 
-11. **Hardcoded Meta flow ids and fallback image.** Pickup uses `tiqrEcommercePickupFlowID` (`1484028330223507`). Delivery uses `tiqrEcommerceFlowID` (`1557965846018132`). Both checkout and early handoff use these. The fallback product photo is one DigitalOcean Spaces URL. A store whose form id differs, or a dead image URL, fails open at checkout or shows the wrong photo.
+11. **Language is sticky.** The first non-empty intent language wins for the session. A later message in another language does not replace it, so translation keeps using the first label.
 
-12. **Language is sticky.** The first non-empty intent language wins for the session. A later message in another language does not replace it, so translation keeps using the first label.
+12. **Order status is thinner than commerce checkout.** No payment link, no retry payment, no order id prompt. A failed lookup and a customer with no orders share one sentence.
 
-13. **Order status is thinner than commerce checkout.** No payment link, no retry payment, no order id prompt. A failed lookup and a customer with no orders share one sentence.
-
-14. **Collection AI instructions are not read aloud.** Required capture fields are asked as their own questions before the cart line. The store-authored `ai_instructions` text is still not added to the prompt. File fields accept a text reply, because this flow does not collect a WhatsApp attachment.
+13. **Collection AI instructions are not read aloud.** Required capture fields are asked as their own questions before the cart line. The store-authored `ai_instructions` text is still not added to the prompt. File fields accept a text reply, because this flow does not collect a WhatsApp attachment.

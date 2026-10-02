@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1861,6 +1863,35 @@ func TestCarouselCardsForNode_BodyAndButtonTemplates(t *testing.T) {
 	assert.Equal(t, "Buy Aloe", cards[0]["title"])
 	assert.Equal(t, "https://shop/aloe", cards[0]["url"])
 	assert.Equal(t, "Buy Fern", cards[1]["title"])
+}
+
+func TestDynamicButtonsFromSession_ShowMoreAfterNine(t *testing.T) {
+	items := make([]map[string]any, 11)
+	for i := range items {
+		items[i] = map[string]any{"id": strconv.Itoa(i + 1), "name": fmt.Sprintf("Row %02d", i+1)}
+	}
+	session := models.JSONB{"rows": items}
+	cfg := map[string]any{
+		"source":      "dynamic",
+		"mode":        "list",
+		"items_var":   "rows",
+		"id_field":    "id",
+		"title_field": "name",
+	}
+	buttons, err := dynamicButtonsFromSession(cfg, session, "list")
+	require.NoError(t, err)
+	require.Len(t, buttons, 10)
+	assert.Equal(t, "1", buttons[0]["id"])
+	assert.Equal(t, "9", buttons[8]["id"])
+	assert.Equal(t, codedflow.ShowMoreID, buttons[9]["id"])
+	assert.Equal(t, codedflow.ShowMoreTitle, buttons[9]["title"])
+
+	codedflow.AdvanceCursor(session, "rows")
+	buttons, err = dynamicButtonsFromSession(cfg, session, "list")
+	require.NoError(t, err)
+	require.Len(t, buttons, 2)
+	assert.Equal(t, "10", buttons[0]["id"])
+	assert.Equal(t, "11", buttons[1]["id"])
 }
 
 func TestApplyButtonSelection_MapsFields(t *testing.T) {

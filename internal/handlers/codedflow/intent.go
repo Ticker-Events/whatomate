@@ -19,6 +19,7 @@ const (
 	RouteCheckout   = "checkout"
 	RouteHandoff    = "handoff"
 	RouteUnclear    = "unclear"
+	RouteShowMore   = "show_more"
 
 	codedRouteChoice     = RouteChoice
 	codedRouteCollection = RouteCollection
@@ -149,6 +150,9 @@ func (c *Conv) askRoute(name string, cfg map[string]any, opts RouteOptions) (Rou
 	if c.Stop {
 		return Route{}, false
 	}
+	if c.resendShowMore(name, cfg, false) {
+		return Route{}, false
+	}
 	if id := c.offeredButtonID(cfg); id != "" {
 		c.chat.SetButtonID(id)
 		choice, ok := c.acceptButton(name, cfg)
@@ -180,7 +184,12 @@ func (c *Conv) askRoute(name string, cfg map[string]any, opts RouteOptions) (Rou
 		}
 		return Route{}, false
 	}
-	return c.resolveFreeText(name, cfg, opts)
+	route, ok := c.resolveFreeText(name, cfg, opts)
+	if ok && route.Kind == RouteShowMore {
+		c.resendShowMore(name, cfg, true)
+		return Route{}, false
+	}
+	return route, ok
 }
 
 func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOptions) (Route, bool) {
@@ -246,6 +255,9 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		switch result.Route {
 		case codedRouteChoice:
 			c.clearGuide()
+			if IsShowMoreID(result.ChoiceID) {
+				return Route{Kind: RouteShowMore, ID: result.ChoiceID, Title: ShowMoreTitle}, true
+			}
 			route := Route{Kind: codedRouteChoice, ID: result.ChoiceID, Title: ctx.ChoiceIDs[result.ChoiceID]}
 			c.applyRouteSelection(cfg, route)
 			c.appendRouteCall(name, route, cfg)
@@ -752,12 +764,10 @@ func parseCodedIntent(raw string) (IntentResult, error) {
 	return body, nil
 }
 
-
 // MaxGuideTurns is the guide-attempt limit before handoff.
-func MaxGuideTurns() int { return IntentSettings.MaxGuideTurns }
+func MaxGuideTurns() int       { return IntentSettings.MaxGuideTurns }
 func IntentThreshold() float64 { return IntentSettings.IntentThreshold }
 func DefaultOrderRetries() int { return IntentSettings.OrderRetries }
-
 
 type codedIntentContext = IntentContext
 type codedIntentResult = IntentResult

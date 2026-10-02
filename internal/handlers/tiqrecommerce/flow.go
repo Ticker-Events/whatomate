@@ -1,9 +1,9 @@
 package tiqrecommerce
 
 import (
-	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"encoding/json"
 	"fmt"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"regexp"
 	"sort"
 	"strconv"
@@ -38,7 +38,7 @@ const (
 
 	tiqrEcommerceCartEmpty = "Your cart is empty.\n\nPlease choose a collection below to add items, then you can check out."
 
-	HandoffConnect = "So, I'm connecting you with a team member who can help."
+	HandoffConnect              = "So, I'm connecting you with a team member who can help."
 	tiqrEcommerceHandoffConnect = HandoffConnect
 
 	tiqrEcommerceFailBusiness = "I was unable to fetch the business information.\n\n" + tiqrEcommerceHandoffConnect
@@ -47,17 +47,17 @@ const (
 
 	tiqrEcommerceFailProducts = "I was unable to fetch those products.\n\n" + tiqrEcommerceHandoffConnect
 
-	BuyProducts         = "buy_products"
+	BuyProducts          = "buy_products"
 	tiqrBuyProducts      = BuyProducts
-	CheckOrderStatus    = "check_order_status"
+	CheckOrderStatus     = "check_order_status"
 	tiqrCheckOrderStatus = CheckOrderStatus
-	TalkToAgent         = "talk_to_agent"
+	TalkToAgent          = "talk_to_agent"
 	tiqrTalkToAgent      = TalkToAgent
-	AddMore             = "add_more"
+	AddMore              = "add_more"
 	tiqrAddMore          = AddMore
-	Checkout            = "checkout"
+	Checkout             = "checkout"
 	tiqrCheckout         = Checkout
-	EditCart            = "edit_cart"
+	EditCart             = "edit_cart"
 	tiqrEditCart         = EditCart
 	ConfirmItems         = "confirm_items"
 	tiqrConfirmItems     = ConfirmItems
@@ -812,7 +812,7 @@ func productsForRoute(c *Conv, route codedflow.Route) ([]any, bool) {
 			return nil, false
 		}
 		c.Session().SessionData["collection_name"] = query
-		payload, ok := c.Store("products", "search_products", map[string]string{
+		products, ok := c.StoreList("products", "search_products", map[string]string{
 			"search": query,
 			"limit":  "20",
 		})
@@ -824,13 +824,7 @@ func productsForRoute(c *Conv, route codedflow.Route) ([]any, bool) {
 			}
 			return nil, false
 		}
-		items, _ := anySlice(payload["results"])
-		if len(items) == 0 {
-			c.Say(tiqrEcommerceSearchEmpty)
-			return nil, false
-		}
-		c.Session().SessionData["products"] = items
-		return items, true
+		return products, true
 	case codedflow.RouteChoice, codedflow.RouteCollection:
 		id := strings.TrimSpace(route.ID)
 		if id == "" {
@@ -2359,9 +2353,15 @@ func orderStatus(c *Conv) error {
 		rawOrders, _ = anySlice(page["orders"])
 	}
 	orders := reshapeOrdersForList(rawOrders)
+	if existing, exists := anySlice(c.Session().SessionData["orders"]); exists && len(existing) > len(orders) {
+		orders = existing
+	}
 	if len(orders) == 0 {
 		c.Say(tiqrEcommerceOrderMissing)
 		return c.End()
+	}
+	if !codedflow.HasListPage(c.Session().SessionData, "orders") {
+		codedflow.CopyListPage(c.Session().SessionData, "orders_page", "orders")
 	}
 	_, ok = c.AskList("pick_order", orders, codedflow.ListPrompt{
 		Body:        "Here are your recent orders. Pick one to see its status and summary.",

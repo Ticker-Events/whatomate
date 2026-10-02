@@ -222,6 +222,16 @@ func invokeTiqrStoreRESTOperation(
 	limit, _ := optionalPositiveInt(params["limit"])
 	offset, _ := optionalNonNegativeInt(params["offset"])
 
+	if next := strings.TrimSpace(params["next_url"]); next != "" && codedflow.IsListOperation(operation) {
+		page, err := client.FollowNext(ctx, next)
+		if err == nil {
+			return page, nil
+		}
+		if !strings.Contains(err.Error(), "outside the store api") && !strings.Contains(err.Error(), "invalid next url") {
+			return nil, err
+		}
+	}
+
 	switch strings.TrimSpace(operation) {
 	case "list_collections":
 		return client.ListCategories(ctx, storeID, ticker.ListCategoriesParams{
@@ -270,7 +280,7 @@ func invokeTiqrStoreRESTOperation(
 		if err != nil {
 			return nil, err
 		}
-		return client.ListProductOptions(ctx, storeID, ids)
+		return client.ListProductOptions(ctx, storeID, ids, limit, offset)
 	case "get_store":
 		return client.GetStore(ctx, storeID)
 	case "get_store_info":
@@ -415,6 +425,7 @@ func buildTiqrStoreToolArgs(operation string, storeID int, phone string, params 
 		} else if len(ids) > 0 {
 			args["ids"] = ids
 		}
+		applyLimitOffset(args, params)
 		return "list_product_options", args, nil
 	case "get_store":
 		return "get_store", map[string]any{"store_id": storeID}, nil
@@ -480,6 +491,9 @@ func buildTiqrStoreToolArgs(operation string, storeID int, phone string, params 
 			args["limit"] = limit
 		} else {
 			args["limit"] = 10
+		}
+		if offset, ok := optionalNonNegativeInt(params["offset"]); ok {
+			args["offset"] = offset
 		}
 		return "list_orders_by_phone", args, nil
 	case "retry_payment":
@@ -735,7 +749,7 @@ func aliasBuyerListResults(payload map[string]any) {
 	if _, ok := payload["results"]; ok {
 		return
 	}
-	for _, key := range []string{"categories", "products", "orders"} {
+	for _, key := range []string{"categories", "products", "orders", "options", "faqs"} {
 		if list, ok := payload[key]; ok {
 			payload["results"] = list
 			return
