@@ -60,6 +60,16 @@ type CodedPreviewAICall struct {
 	Reasoning  string         `json:"reasoning,omitempty"`
 }
 
+// CodedPreviewAPICall is one TiQR REST request made during a preview turn.
+type CodedPreviewAPICall struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Curl       string `json:"curl"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	Response   any    `json:"response,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
 // CodedPreviewResponse is one turn of a coded-flow preview.
 // Status needs_mock means the next TiQR call is waiting for JSON.
 type CodedPreviewResponse struct {
@@ -72,6 +82,7 @@ type CodedPreviewResponse struct {
 	Messages      []CodedPreviewMessage `json:"messages"`
 	Context       map[string]any        `json:"context,omitempty"`
 	AICalls       []CodedPreviewAICall  `json:"ai_calls,omitempty"`
+	APICalls      []CodedPreviewAPICall `json:"api_calls,omitempty"`
 }
 
 // codedPreviewSink collects messages a coded flow would have sent.
@@ -86,6 +97,7 @@ type PreviewSink struct {
 	Session   *models.ChatbotSession
 	AICalls   []CodedPreviewAICall
 	PendingAI []CodedPreviewAICall
+	APICalls  []CodedPreviewAPICall
 }
 
 // ErrPreviewNeedsMock stops a preview turn so the client can supply JSON.
@@ -115,6 +127,13 @@ func (s *PreviewSink) NoteAI(call CodedPreviewAICall) {
 	}
 	s.AICalls = append(s.AICalls, call)
 	s.PendingAI = append(s.PendingAI, call)
+}
+
+func (s *PreviewSink) NoteAPI(call CodedPreviewAPICall) {
+	if s == nil {
+		return
+	}
+	s.APICalls = append(s.APICalls, call)
 }
 
 func (s *PreviewSink) takePendingAI() []CodedPreviewAICall {

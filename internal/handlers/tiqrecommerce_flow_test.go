@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -355,6 +356,22 @@ func TestCodedOrderNotesIncludesCaptureAnswers(t *testing.T) {
 		}},
 	})
 	assert.Equal(t, "Vancho\n- writing: Happy birthday", notes)
+
+	notes = tiqrecommerce.CodedOrderNotes(map[string]any{
+		"customer_notes": "Leave at gate",
+		tiqrecommerce.HandoffCartKey: map[string]any{
+			"source": "tiqr_cart",
+			"lines": []any{map[string]any{
+				"product_option": "9",
+				"product_name":   "Themed Cake",
+				"option_name":    "Regular",
+				"capture_fields": map[string]any{"writing": "Happy Birthday"},
+				"capture_labels": map[string]any{"writing": "Cake writing"},
+				"capture_order":  []any{"writing"},
+			}},
+		},
+	})
+	assert.Equal(t, "Themed Cake(Regular)\n- Cake writing: Happy Birthday\n\nNote: Leave at gate", notes)
 }
 
 func TestTiqrCartKeepsDistinctCaptureAnswers(t *testing.T) {
@@ -664,7 +681,7 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 			}
 			payload := map[string]any{}
 			for key, value := range store {
-				if key == "test_collections" {
+				if key == "test_collections" || key == "test_orders" {
 					continue
 				}
 				payload[key] = value
@@ -705,6 +722,12 @@ func startEcommerceWithStore(
 		}
 		if extraAI.CommerceMCPAPIKey != "" {
 			ai.CommerceMCPAPIKey = extraAI.CommerceMCPAPIKey
+		}
+		if extraAI.CommerceRESTURL != "" {
+			ai.CommerceRESTURL = extraAI.CommerceRESTURL
+		}
+		if extraAI.CommerceStoreID != "" {
+			ai.CommerceStoreID = extraAI.CommerceStoreID
 		}
 	}
 	createChatbotSettings(t, app, org.ID, account.Name, ai)
@@ -1228,10 +1251,6 @@ func TestTiqrEcommerce_EarlyHandoffCompletes(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happy Birthday", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "early_handoff_addons_free", session.CurrentStep)
-
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Skip", "", nil))
-	reloadSession(t, app, session)
 	assert.Equal(t, "early_handoff_details", session.CurrentStep)
 	blob := outgoingBlob(t, app, session)
 	assert.Contains(t, blob, tiqrecommerce.TiqrEcommercePickupFlowID)
@@ -1266,6 +1285,12 @@ func TestTiqrEcommerce_EarlyHandoffCompletes(t *testing.T) {
 	assert.Equal(t, "Ada", draft.AddressSnapshot["name"])
 	assert.Equal(t, "ada@example.com", draft.AddressSnapshot["email"])
 	assert.Equal(t, "Please call on arrival", draft.Notes["customer_notes"])
+	orderNotes := asString(draft.Notes["order_notes"])
+	assert.Contains(t, orderNotes, "Cake writing")
+	assert.Contains(t, orderNotes, "Happy Birthday")
+	assert.Contains(t, orderNotes, "Themed Cake")
+	assert.Contains(t, orderNotes, "Regular")
+	assert.Equal(t, orderNotes, tiqrecommerce.CommerceHandoffNotesText(&draft))
 	lines, ok := draft.Cart["lines"].([]any)
 	require.True(t, ok)
 	require.Len(t, lines, 1)
@@ -1314,7 +1339,7 @@ func TestMigrateEarlyHandoffSessionKeys(t *testing.T) {
 		},
 	}
 	tiqrecommerce.MigrateEarlyHandoffSessionKeys(session)
-	assert.Equal(t, "early_handoff_addons_free", session.CurrentStep)
+	assert.Empty(t, session.CurrentStep)
 	assert.Equal(t, "101", session.SessionData["early_handoff_product_id"])
 	assert.Equal(t, "Asia/Kolkata", session.SessionData["early_handoff_timezone"])
 	_, hasOld := session.SessionData["themed_product_id"]
@@ -1351,7 +1376,7 @@ func TestMigrateEarlyHandoffSessionKeysFromAfterCapture(t *testing.T) {
 		},
 	}
 	tiqrecommerce.MigrateEarlyHandoffSessionKeys(session)
-	assert.Equal(t, "early_handoff_addons_free", session.CurrentStep)
+	assert.Empty(t, session.CurrentStep)
 	assert.Equal(t, "101", session.SessionData["early_handoff_product_id"])
 	assert.Equal(t, "Asia/Kolkata", session.SessionData["early_handoff_timezone"])
 	_, hasOld := session.SessionData["after_capture_product_id"]
@@ -1414,16 +1439,12 @@ func TestTiqrEcommerce_EarlyHandoffManyFieldsThenSkip(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "2", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "early_handoff_addons_free", session.CurrentStep)
+	assert.Equal(t, "early_handoff_details", session.CurrentStep)
 	captured, ok := session.SessionData["commerce_captured_fields"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Happye", captured["writing_on_cake"])
 	assert.Equal(t, "October 02, 04 pm", captured["delivery_date"])
 	assert.Equal(t, "2", captured["number_of_layers"])
-
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "skip", "", nil))
-	reloadSession(t, app, session)
-	assert.Equal(t, "early_handoff_details", session.CurrentStep)
 	blob := outgoingBlob(t, app, session)
 	assert.Contains(t, blob, tiqrecommerce.TiqrEcommercePickupFlowID)
 	assert.NotContains(t, blob, "When would you like")
@@ -1706,19 +1727,15 @@ func TestTiqrEcommerce_IntentPaddedButtonIDSelectsBuy(t *testing.T) {
 
 func TestTiqrEcommerce_IntentTitleOnlyOrderStatus(t *testing.T) {
 	useCodedIntent(t, nil, nil)
-	prev := lookupLatestOrder
-	lookupLatestOrder = func(*App, *models.WhatsAppAccount, *models.ChatbotSession) (map[string]any, error) {
-		return map[string]any{"display_uid": "ST-1", "status": "CONFIRMED"}, nil
-	}
-	t.Cleanup(func() { lookupLatestOrder = prev })
-
-	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	withOrderStatusMCP(t, orderStatusStoreFixture()["test_orders"].([]any), orderStatusDetailByUID())
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, orderStatusAI())
 	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Equal(t, "pick_order", session.CurrentStep)
 	blob := outgoingBlob(t, app, session)
-	assert.Contains(t, blob, "Order ST-1 is confirmed.")
+	assert.Contains(t, blob, "ORD-1")
+	assert.Contains(t, blob, "ORD-2")
 	assert.NotContains(t, blob, codedflow.AgentHandoff)
 }
 
@@ -1734,34 +1751,167 @@ func TestTiqrEcommerce_UnknownButtonRepromptsIntent(t *testing.T) {
 	assert.NotContains(t, blob, codedflow.AgentHandoff)
 }
 
-func TestTiqrEcommerce_OrderStatus(t *testing.T) {
-	prev := lookupLatestOrder
-	lookupLatestOrder = func(*App, *models.WhatsAppAccount, *models.ChatbotSession) (map[string]any, error) {
-		return map[string]any{"display_uid": "ST-1", "status": "CONFIRMED"}, nil
+func orderStatusStoreFixture() map[string]any {
+	return map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_orders": []any{
+			map[string]any{
+				"id": 1, "display_uid": "ORD-1", "created_at": "2026-10-01T10:00:00Z", "status": "CONFIRMED",
+			},
+			map[string]any{
+				"id": 2, "display_uid": "ORD-2", "created_at": "2026-09-15T08:00:00Z", "status": "PENDING_PAYMENT",
+			},
+		},
 	}
-	t.Cleanup(func() { lookupLatestOrder = prev })
+}
 
-	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+func orderStatusDetailByUID() map[string]any {
+	return map[string]any{
+		"ORD-1": map[string]any{
+			"id": 1, "display_uid": "ORD-1", "status": "CONFIRMED",
+			"total_amount": 25000, "delivery_mode": "DELIVERY_TO_LOCATION",
+			"items": []any{
+				map[string]any{
+					"quantity": 1, "amount": 25000,
+					"product_option_snapshot": map[string]any{
+						"name": "Regular",
+						"product": map[string]any{
+							"name": "Kunafa",
+						},
+					},
+				},
+			},
+			"address": map[string]any{
+				"name": "Asha", "address_line_1": "12 MG Road",
+				"city": "Bengaluru", "state": "KA", "pincode": "560001", "country": "India",
+			},
+		},
+		"ORD-2": map[string]any{
+			"id": 2, "display_uid": "ORD-2", "status": "PENDING_PAYMENT",
+			"total_amount": 5000, "delivery_mode": "PICKUP_FROM_STORE",
+			"items": []any{
+				map[string]any{
+					"quantity": 1, "amount": 5000,
+					"product_option_snapshot": map[string]any{
+						"name": "Default",
+						"product": map[string]any{
+							"name": "Tea",
+						},
+					},
+				},
+			},
+			"address": map[string]any{"address_line_1": "hidden for pickup"},
+		},
+	}
+}
+
+type orderStatusLookupStub struct {
+	lastName string
+	lastArgs map[string]any
+	orders   []any
+	byUID    map[string]any
+}
+
+func (s *orderStatusLookupStub) CallTool(_ context.Context, name string, args map[string]any) (any, error) {
+	s.lastName = name
+	s.lastArgs = args
+	switch name {
+	case "list_orders_by_phone":
+		orders := s.orders
+		if orders == nil {
+			orders = []any{}
+		}
+		return map[string]any{"orders": orders, "count": len(orders)}, nil
+	case "lookup_order_status":
+		uid := strings.TrimSpace(asString(args["order_display_id"]))
+		if detail, ok := s.byUID[uid]; ok {
+			return detail, nil
+		}
+		return nil, fmt.Errorf("order not found")
+	default:
+		return nil, fmt.Errorf("unexpected tool %s", name)
+	}
+}
+
+func (s *orderStatusLookupStub) Close() error { return nil }
+
+func withOrderStatusMCP(t *testing.T, orders []any, byUID map[string]any) *orderStatusLookupStub {
+	t.Helper()
+	stub := &orderStatusLookupStub{orders: orders, byUID: byUID}
+	prev := newTiqrStoreInvoker
+	newTiqrStoreInvoker = func(_, _ string) tiqrStoreInvoker { return stub }
+	t.Cleanup(func() { newTiqrStoreInvoker = prev })
+	return stub
+}
+
+func orderStatusAI() *models.AIConfig {
+	return &models.AIConfig{
+		CommerceEnabled: true,
+		CommerceMCPURL:  "http://mcp.test/mcp",
+	}
+}
+
+func TestTiqrEcommerce_OrderStatus(t *testing.T) {
+	stub := withOrderStatusMCP(t, orderStatusStoreFixture()["test_orders"].([]any), orderStatusDetailByUID())
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, orderStatusAI())
 	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", tiqrecommerce.CheckOrderStatus, nil))
 	reloadSession(t, app, session)
+	assert.Equal(t, "pick_order", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "ORD-1")
+	assert.Contains(t, blob, "ORD-2")
+	assert.Contains(t, blob, "1 Oct 2026")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "ORD-1", "1", nil))
+	reloadSession(t, app, session)
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
-	assert.Contains(t, outgoingBlob(t, app, session), "Order ST-1 is confirmed.")
+	assert.Equal(t, "lookup_order_status", stub.lastName)
+	assert.Equal(t, "ORD-1", stub.lastArgs["order_display_id"])
+	blob = outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Order *ORD-1*")
+	assert.Contains(t, blob, "confirmed")
+	assert.Contains(t, blob, "Kunafa (Regular)")
+	assert.Contains(t, blob, "₹250.00")
+	assert.Contains(t, blob, "Fulfillment: Delivery")
+	assert.Contains(t, blob, "12 MG Road")
+}
+
+func TestTiqrEcommerce_OrderStatusPickupOmitsAddress(t *testing.T) {
+	withOrderStatusMCP(t, orderStatusStoreFixture()["test_orders"].([]any), orderStatusDetailByUID())
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, orderStatusAI())
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", tiqrecommerce.CheckOrderStatus, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "ORD-2", "2", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Order *ORD-2*")
+	assert.Contains(t, blob, "Fulfillment: Store pickup")
+	assert.NotContains(t, blob, "hidden for pickup")
 }
 
 func TestTiqrEcommerce_OrderStatusMissing(t *testing.T) {
-	prev := lookupLatestOrder
-	lookupLatestOrder = func(*App, *models.WhatsAppAccount, *models.ChatbotSession) (map[string]any, error) {
-		return nil, assert.AnError
-	}
-	t.Cleanup(func() { lookupLatestOrder = prev })
-
-	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	withOrderStatusMCP(t, []any{}, orderStatusDetailByUID())
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, orderStatusAI())
 	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", tiqrecommerce.CheckOrderStatus, nil))
 	reloadSession(t, app, session)
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	assert.Contains(t, outgoingBlob(t, app, session), "couldn't find a recent order")
+}
+
+func TestTiqrEcommerce_OrderStatusUnavailableWithoutMCP(t *testing.T) {
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, &models.AIConfig{
+		CommerceEnabled: false,
+	})
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", tiqrecommerce.CheckOrderStatus, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Contains(t, outgoingBlob(t, app, session), "couldn't look up your orders")
 }
 
 func TestTiqrEcommerce_PreferredLanguageFromIntent(t *testing.T) {

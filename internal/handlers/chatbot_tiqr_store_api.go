@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -122,14 +123,15 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	var raw any
 	if apiType == "rest" {
 		client := newTiqrStoreRESTClient(settings.AI.CommerceRESTURL)
-		if a.ShouldTraceCodedFlow(ctx.session) && !ctx.capturing() {
+		trace := a.ShouldTraceCodedFlow(ctx.session) && !ctx.capturing()
+		preview := ctx.capturing() && ctx.preview != nil
+		if trace || preview {
 			client.OnHTTP = func(method, rawURL string, reqBody []byte, status int, respBody []byte, callErr error) {
 				headers := map[string]string{"Accept": "application/json"}
 				if strings.EqualFold(method, http.MethodPost) {
 					headers["Content-Type"] = "application/json"
 				}
 				curl := codedflow.FormatHTTPCurl(method, rawURL, headers, string(reqBody))
-				a.LogCodedFlowTiqrRequest(ctx.session, apiType, operation, curl, params)
 				errMsg := ""
 				if callErr != nil {
 					errMsg = callErr.Error()
@@ -141,6 +143,24 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 						parsed = string(respBody)
 					}
 				}
+				if preview {
+					path := rawURL
+					if u, err := url.Parse(rawURL); err == nil {
+						path = u.RequestURI()
+					}
+					ctx.preview.NoteAPI(codedflow.CodedPreviewAPICall{
+						Name:       operation,
+						Path:       path,
+						Curl:       curl,
+						HTTPStatus: status,
+						Response:   parsed,
+						Error:      errMsg,
+					})
+				}
+				if !trace {
+					return
+				}
+				a.LogCodedFlowTiqrRequest(ctx.session, apiType, operation, curl, params)
 				a.LogCodedFlowTiqrResponse(ctx.session, apiType, operation, status, parsed, errMsg)
 			}
 		}
@@ -244,7 +264,7 @@ func invokeTiqrStoreRESTOperation(
 		if productID == "" {
 			return nil, fmt.Errorf("product_id is required")
 		}
-		return client.GetProduct(ctx, productID)
+		return client.GetProduct(ctx, storeID, productID)
 	case "list_product_options":
 		ids, err := parseIntListParam(params["ids"])
 		if err != nil {
@@ -281,7 +301,7 @@ func invokeTiqrStoreRESTOperation(
 		return syntheticFulfillmentSlots(params["delivery_mode"]), nil
 	case "propose_fulfillment_time":
 		return syntheticProposeFulfillment(params)
-	case "check_delivery", "lookup_order_status", "retry_payment":
+	case "check_delivery", "lookup_order_status", "list_orders_by_phone", "retry_payment":
 		return nil, fmt.Errorf("operation %q is not available over REST (use MCP)", operation)
 	default:
 		return nil, fmt.Errorf("unknown tiqr store operation %q", operation)
@@ -444,6 +464,24 @@ func buildTiqrStoreToolArgs(operation string, storeID int, phone string, params 
 			args["order_display_id"] = orderID
 		}
 		return "lookup_order_status", args, nil
+	case "list_orders_by_phone":
+		phoneNumber := strings.TrimSpace(params["phone_number"])
+		if phoneNumber == "" {
+			phoneNumber = strings.TrimSpace(phone)
+		}
+		if phoneNumber == "" {
+			return "", nil, fmt.Errorf("phone_number is required")
+		}
+		args := map[string]any{
+			"store_id":     storeID,
+			"phone_number": phoneNumber,
+		}
+		if limit, ok := optionalPositiveInt(params["limit"]); ok {
+			args["limit"] = limit
+		} else {
+			args["limit"] = 10
+		}
+		return "list_orders_by_phone", args, nil
 	case "retry_payment":
 		uuid := strings.TrimSpace(params["order_uuid"])
 		if uuid == "" {
@@ -697,7 +735,7 @@ func aliasBuyerListResults(payload map[string]any) {
 	if _, ok := payload["results"]; ok {
 		return
 	}
-	for _, key := range []string{"categories", "products"} {
+	for _, key := range []string{"categories", "products", "orders"} {
 		if list, ok := payload[key]; ok {
 			payload["results"] = list
 			return
@@ -737,10 +775,24 @@ func normalizeTiqrStoreMoney(operation string, payload map[string]any) {
 		if data, ok := payload["data"].([]any); ok {
 			ticker.NormalizeProductListMoney(data)
 		}
-	case "create_order", "get_order", "lookup_order_status":
+	case "create_order", "get_order", "lookup_order_status", "list_orders_by_phone":
 		ticker.NormalizeOrderMoney(payload)
 		if data, ok := payload["data"].(map[string]any); ok {
 			ticker.NormalizeOrderMoney(data)
+		}
+		for _, key := range []string{"results", "orders"} {
+			switch list := payload[key].(type) {
+			case []any:
+				for _, item := range list {
+					if m, ok := item.(map[string]any); ok {
+						ticker.NormalizeOrderMoney(m)
+					}
+				}
+			case []map[string]any:
+				for _, item := range list {
+					ticker.NormalizeOrderMoney(item)
+				}
+			}
 		}
 	case "check_delivery":
 		ticker.NormalizeDeliveryMoney(payload)
@@ -756,6 +808,8 @@ func tiqrStoreResultMap(operation string, raw any) map[string]any {
 		return map[string]any{"faqs": raw}
 	case "list_product_options":
 		return map[string]any{"options": raw}
+	case "list_orders_by_phone":
+		return map[string]any{"orders": raw}
 	default:
 		return map[string]any{"data": raw}
 	}

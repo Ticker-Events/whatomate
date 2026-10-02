@@ -173,7 +173,7 @@ keyword
   → list_collections (limit 20)
   → menu
        ├─ Buy products → fulfillment → collection → products → cart → checkout → end
-       ├─ Check order status → latest order for this phone → end
+       ├─ Check order status → order list → selected order summary → end
        ├─ Talk to staff → transfer
        ├─ free text → collection id → products → …
        └─ free text → product search → products → …
@@ -322,7 +322,9 @@ Total: ₹40.00
 
 ### Order status
 
-**Check order status** calls TiQR MCP `lookup_order_status` for the WhatsApp number. It does not ask for an order id.
+**Check order status** lists recent orders for the WhatsApp number via MCP
+`list_orders_by_phone`, shows a pick list, then loads the selected order with
+`lookup_order_status` and sends a summary (items, total, fulfillment, address when delivery).
 
 | Result | Message |
 | --- | --- |

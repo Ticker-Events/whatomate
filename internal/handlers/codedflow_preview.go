@@ -146,6 +146,10 @@ func previewResponse(hold *codedPreviewHold, sink *codedflow.PreviewSink, runErr
 	if aiCalls == nil {
 		aiCalls = []codedflow.CodedPreviewAICall{}
 	}
+	apiCalls := sink.APICalls
+	if apiCalls == nil {
+		apiCalls = []codedflow.CodedPreviewAPICall{}
+	}
 	return codedflow.CodedPreviewResponse{
 		SessionID:     hold.session.ID.String(),
 		Status:        status,
@@ -156,6 +160,7 @@ func previewResponse(hold *codedPreviewHold, sink *codedflow.PreviewSink, runErr
 		Messages:      messages,
 		Context:       codedflow.PreviewSessionContext(session),
 		AICalls:       aiCalls,
+		APICalls:      apiCalls,
 	}
 }
 

@@ -670,8 +670,8 @@
     "semantic_hash": ""
   },
   "frontend/src/components/chatbot/flow-preview/CodedFlowPreview.vue": {
-    "mtime": 1790751592.1855352,
-    "ast_hash": "a446a5574fcd91dbd8275bbdd9b2fc08",
+    "mtime": 1790921251.6527197,
+    "ast_hash": "d9fff4077a39b5c3f05c1ee6ce5d1749",
     "semantic_hash": ""
   },
   "frontend/src/components/chatbot/flow-preview/DebugPanel.vue": {
@@ -720,12 +720,12 @@
     "semantic_hash": ""
   },
   "frontend/src/components/chatbot/flow-preview/PreviewMessage.vue": {
-    "mtime": 1790839308.0175726,
+    "mtime": 1790866920.643765,
     "ast_hash": "e0207f06ef79803465ee8b9ff53f2b3c",
     "semantic_hash": ""
   },
   "frontend/src/components/chatbot/flow-preview/PreviewPhone.vue": {
-    "mtime": 1790839168.7347832,
+    "mtime": 1790866920.64424,
     "ast_hash": "908fc787e1dea230ee96f63284cab1ac",
     "semantic_hash": ""
   },
@@ -790,8 +790,8 @@
     "semantic_hash": ""
   },
   "frontend/src/components/chatbot/tiqrStoreApiCatalog.ts": {
-    "mtime": 1790848769.5855033,
-    "ast_hash": "d54daf22e419d50f9344bf13629f8fdb",
+    "mtime": 1790925103.7134485,
+    "ast_hash": "5298be282f80a6f99d9950761b989b12",
     "semantic_hash": ""
   },
   "frontend/src/components/flow-builder/FlowBuilder.vue": {
@@ -2400,8 +2400,8 @@
     "semantic_hash": ""
   },
   "frontend/src/i18n/locales/en.json": {
-    "mtime": 1790835385.6181984,
-    "ast_hash": "d974a983ff3e34f02c1710935dcc65de",
+    "mtime": 1790925086.369899,
+    "ast_hash": "6fd5febf19a70a4a67bc13609bbccdcf",
     "semantic_hash": ""
   },
   "frontend/src/i18n/locales/es.json": {
@@ -2460,8 +2460,8 @@
     "semantic_hash": ""
   },
   "frontend/src/services/api.ts": {
-    "mtime": 1790839235.7499602,
-    "ast_hash": "77ca31e682100e5af35a99501bcf2525",
+    "mtime": 1790921250.9909008,
+    "ast_hash": "d774d1a99d0a4de9cc2e0f42148f761a",
     "semantic_hash": ""
   },
   "frontend/src/services/firestore.ts": {
@@ -2530,7 +2530,7 @@
     "semantic_hash": ""
   },
   "frontend/src/types/flow-preview.ts": {
-    "mtime": 1790839165.1872728,
+    "mtime": 1790866920.6453223,
     "ast_hash": "ffa07bed399c1214a70ac458a3c8808d",
     "semantic_hash": ""
   },
@@ -2620,7 +2620,7 @@
     "semantic_hash": ""
   },
   "frontend/src/views/chatbot/CodedFlowsView.vue": {
-    "mtime": 1790837049.5926518,
+    "mtime": 1790866920.64561,
     "ast_hash": "cb8f802d0fdca67cde603f199ada6898",
     "semantic_hash": ""
   },
@@ -2705,7 +2705,7 @@
     "semantic_hash": ""
   },
   "frontend/src/views/settings/ChatbotSettingsView.vue": {
-    "mtime": 1790835385.614977,
+    "mtime": 1790925046.3038864,
     "ast_hash": "04a5593c1de348cccc342489a09b1421",
     "semantic_hash": ""
   },
@@ -2815,7 +2815,7 @@
     "semantic_hash": ""
   },
   "go.mod": {
-    "mtime": 1790836197.4612172,
+    "mtime": 1790866920.6458633,
     "ast_hash": "5865c6ef03c4f4c2d7aa73baec0874b4",
     "semantic_hash": ""
   },
@@ -2905,13 +2905,13 @@
     "semantic_hash": ""
   },
   "internal/commerce/drafts.go": {
-    "mtime": 1789046243.044615,
-    "ast_hash": "7ad5760775a5b086a60cdc44032adf3d",
+    "mtime": 1790866920.7719367,
+    "ast_hash": "aa078c58c0802b6c84e80db147ef8ff4",
     "semantic_hash": ""
   },
   "internal/commerce/drafts_test.go": {
-    "mtime": 1789046243.0450459,
-    "ast_hash": "188040fb85b8a1707140dfa0af35633f",
+    "mtime": 1790866920.7724032,
+    "ast_hash": "3027428582e1f43672a24c6d8a5211ee",
     "semantic_hash": ""
   },
   "internal/config/config.go": {
@@ -2960,7 +2960,7 @@
     "semantic_hash": ""
   },
   "internal/database/postgres.go": {
-    "mtime": 1790751592.1883595,
+    "mtime": 1790925005.8320723,
     "ast_hash": "36f9acb130e7000f5895c870d6ebd31f",
     "semantic_hash": ""
   },
@@ -3150,33 +3150,33 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot.go": {
-    "mtime": 1790835385.6178558,
-    "ast_hash": "921528582ce73d1b0ca11c09e80e9dd2",
+    "mtime": 1790925003.3805447,
+    "ast_hash": "a14e7a0f49d1d120190be9a4e5d48e1b",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce.go": {
-    "mtime": 1790765676.3920677,
-    "ast_hash": "4b565917f7ad8bfe475dc1c6ec8c0391",
+    "mtime": 1790866920.77293,
+    "ast_hash": "dd22910d99264a83e78963b7b1578b25",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_actions.go": {
-    "mtime": 1790760970.1463914,
-    "ast_hash": "e9f082ea383d7d3bb06a6d5e2833963f",
+    "mtime": 1790866920.7733734,
+    "ast_hash": "bff4fb2f88c71ad291356004020e7467",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_checkout.go": {
-    "mtime": 1790765597.2706883,
-    "ast_hash": "47284a7ddd5a8e3b26f66644fb4b7528",
+    "mtime": 1790866920.7741036,
+    "ast_hash": "7912a061e6d03412e31975fcb73bd08b",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_checkout_test.go": {
-    "mtime": 1790765634.2621503,
-    "ast_hash": "3ca1e0a844bf8d4ffa06fa3e5fe53500",
+    "mtime": 1790866920.7746537,
+    "ast_hash": "1cea30dadc80051491523e20c83826a4",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_draft.go": {
-    "mtime": 1789046243.0543208,
-    "ast_hash": "054d32560c3bb23d6974375bd91e4c93",
+    "mtime": 1790869339.2987695,
+    "ast_hash": "88012aafa3c9278db8cb64f681164965",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_fulfillment_time_test.go": {
@@ -3185,8 +3185,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_handoff.go": {
-    "mtime": 1790850933.2365708,
-    "ast_hash": "6136de3bbc3d20368072c2f98744e9d9",
+    "mtime": 1790921773.1451693,
+    "ast_hash": "4e678fb8aedab8f3b6c79121cd62ae69",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_llm.go": {
@@ -3220,13 +3220,13 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_graph_runner.go": {
-    "mtime": 1790737921.3262973,
-    "ast_hash": "e5aeab0c2ee7cfbe4bdd141cfbe4b1cd",
+    "mtime": 1790866920.77634,
+    "ast_hash": "0b0956bbc882b5316046ff349775811d",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_graph_runner_test.go": {
-    "mtime": 1790737921.326929,
-    "ast_hash": "8d78d7a1ce1de6c8c3e5231245062cc8",
+    "mtime": 1790866920.7773707,
+    "ast_hash": "4f228d5a48b525fd4406b02d04b90afd",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_graph_types.go": {
@@ -3235,12 +3235,12 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_processor.go": {
-    "mtime": 1790751695.5801141,
-    "ast_hash": "75d45010ab30e1b07b0afeb1aeb7eb9e",
+    "mtime": 1790866920.7780392,
+    "ast_hash": "607bbaf7e732c25730a674fc908d06ee",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_processor_test.go": {
-    "mtime": 1790835401.1403844,
+    "mtime": 1790866920.778398,
     "ast_hash": "a773129c64518dfb935db47816ed6e00",
     "semantic_hash": ""
   },
@@ -3250,108 +3250,38 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_tiqr_store_api.go": {
-    "mtime": 1790848745.575422,
-    "ast_hash": "f929679e07d7ea6991191fcad5ed1450",
+    "mtime": 1790924962.5701683,
+    "ast_hash": "a4405ba94ccfc697b87267994cd4f518",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_tiqr_store_api_test.go": {
-    "mtime": 1790849226.9664102,
+    "mtime": 1790924978.9010336,
     "ast_hash": "61934661d7322de290c1143b5accc13e",
     "semantic_hash": ""
   },
-  "internal/handlers/codedflow.go": {
-    "mtime": 1790737921.3275716,
-    "ast_hash": "4e9b6ebf5c50c164f3cceb33057e96e9",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_ai.go": {
-    "mtime": 1790760970.1460383,
-    "ast_hash": "71043c91a3c33df472f3258d480ca4b0",
-    "semantic_hash": ""
-  },
   "internal/handlers/codedflow_api.go": {
-    "mtime": 1790678788.4665067,
-    "ast_hash": "f2d994860333b45703506a8572b65146",
+    "mtime": 1790866920.7825756,
+    "ast_hash": "d628d13411d1a6626d301288200ee88f",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_binding_test.go": {
-    "mtime": 1790680751.8681142,
+    "mtime": 1790861149.1217735,
     "ast_hash": "d88403ff752d9d32975193abdc2c8eab",
     "semantic_hash": ""
   },
-  "internal/handlers/codedflow_conv.go": {
-    "mtime": 1790851003.9995399,
-    "ast_hash": "d5a5181c70a6462dee5ba60725d0da7f",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_delivery.go": {
-    "mtime": 1790751592.1931422,
-    "ast_hash": "13975ecf3a06bcb4e3d82dd6a738c059",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_delivery_test.go": {
-    "mtime": 1790751592.1934185,
-    "ast_hash": "d7c31606d9257612a4eb8b7434e70490",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_intent.go": {
-    "mtime": 1790751592.1939168,
-    "ast_hash": "64bd40e0047f49e05c29de2d10286d26",
-    "semantic_hash": ""
-  },
   "internal/handlers/codedflow_intent_settings_test.go": {
-    "mtime": 1790751592.1943676,
+    "mtime": 1790861149.12408,
     "ast_hash": "b32ec8e655fbf629b7b2525a3bec1ab9",
     "semantic_hash": ""
   },
-  "internal/handlers/codedflow_jev.go": {
-    "mtime": 1790751592.1946764,
-    "ast_hash": "935d1809851074e171a116b68bf8b815",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_jev_test.go": {
-    "mtime": 1790751592.1949832,
-    "ast_hash": "70b9af674ead513717534a839611401b",
-    "semantic_hash": ""
-  },
   "internal/handlers/codedflow_preview.go": {
-    "mtime": 1790839158.897172,
-    "ast_hash": "e59adbd2e32a6ca20c890bbbeffd1697",
+    "mtime": 1790921087.791628,
+    "ast_hash": "98fafb8ed3ea5f56656a4748600af597",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_preview_test.go": {
-    "mtime": 1790845496.632313,
-    "ast_hash": "411f581d855d59ccbd081c7f112f53e8",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_recover.go": {
-    "mtime": 1790751592.1959364,
-    "ast_hash": "713351f473bbc5ce40f624bc1bcb5ac1",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_test.go": {
-    "mtime": 1790851018.114946,
-    "ast_hash": "5589c9aae97e81ca586a9fd6ab8cf16e",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_tiqr_ecommerce.go": {
-    "mtime": 1790849621.7525542,
-    "ast_hash": "4d2133c80cc6a502d52920b31b25102d",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_tiqr_themed.go": {
-    "mtime": 1790849475.2537034,
-    "ast_hash": "aaaa10635be20f7f8309f4f8615419f5",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_trace.go": {
-    "mtime": 1790737921.3305948,
-    "ast_hash": "f62082b8547e7a969033b45c0cf8b5db",
-    "semantic_hash": ""
-  },
-  "internal/handlers/codedflow_trace_test.go": {
-    "mtime": 1790737921.3308165,
-    "ast_hash": "7fef867fbc3fe6839dbc161593e30942",
+    "mtime": 1790921252.2410157,
+    "ast_hash": "88dd8c27871036d465f4035eb2eecae6",
     "semantic_hash": ""
   },
   "internal/handlers/commerce_lifecycle.go": {
@@ -3370,8 +3300,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/contacts.go": {
-    "mtime": 1789046243.0582938,
-    "ast_hash": "1c4d9473ba34df872e3800552a3f8256",
+    "mtime": 1790869359.622734,
+    "ast_hash": "666ea8ae4481304c63bac1447c429849",
     "semantic_hash": ""
   },
   "internal/handlers/contacts_test.go": {
@@ -3690,7 +3620,7 @@
     "semantic_hash": ""
   },
   "internal/models/chatbot.go": {
-    "mtime": 1790835385.6177716,
+    "mtime": 1790924985.5424063,
     "ast_hash": "a807d40d17dd50ab98e56f4562b16564",
     "semantic_hash": ""
   },
@@ -3940,13 +3870,13 @@
     "semantic_hash": ""
   },
   "pkg/ticker/client.go": {
-    "mtime": 1790835796.2478647,
-    "ast_hash": "42099fde2c35981c504364be19ec0f1a",
+    "mtime": 1790925015.0495555,
+    "ast_hash": "8b952e244164d0b8f484a6c97f8ea7e4",
     "semantic_hash": ""
   },
   "pkg/ticker/client_test.go": {
-    "mtime": 1790835825.28431,
-    "ast_hash": "d5d564d85cc92b5e2b5aa573ed5c08c6",
+    "mtime": 1790925032.14074,
+    "ast_hash": "0bd9c7572edf057606edab67e0ea1f34",
     "semantic_hash": ""
   },
   "pkg/ticker/money.go": {
@@ -3960,8 +3890,8 @@
     "semantic_hash": ""
   },
   "pkg/tickermcp/client.go": {
-    "mtime": 1790765683.7578387,
-    "ast_hash": "61fbf268e86da588b2d536243e233975",
+    "mtime": 1790925103.1879814,
+    "ast_hash": "410ce883f262e732c15f1b0d21fdb734",
     "semantic_hash": ""
   },
   "pkg/tickermcp/client_test.go": {
@@ -4290,8 +4220,8 @@
     "semantic_hash": ""
   },
   "docs/src/content/docs/api-reference/chatbot.mdx": {
-    "mtime": 1790737921.3181694,
-    "ast_hash": "ae5cd7b7237ecb71c2cfeb7b2cbab058",
+    "mtime": 1790925133.0877147,
+    "ast_hash": "a5d36449783e80224decf91766ab1e0e",
     "semantic_hash": ""
   },
   "docs/src/content/docs/api-reference/contacts.mdx": {
@@ -4375,8 +4305,8 @@
     "semantic_hash": ""
   },
   "docs/src/content/docs/features/coded-flows.mdx": {
-    "mtime": 1790845538.127058,
-    "ast_hash": "1736c03c6af8db2a5649c2a5889a7135",
+    "mtime": 1790925120.3649995,
+    "ast_hash": "2a38bac770db735e42f2f4b7f6df5270",
     "semantic_hash": ""
   },
   "docs/src/content/docs/features/custom-actions.mdx": {
@@ -4435,8 +4365,8 @@
     "semantic_hash": ""
   },
   "docs/tiqr-ecommerce-coded-flow.md": {
-    "mtime": 1790850994.5082088,
-    "ast_hash": "0c3d78242c0b2ed769feb5687a86542e",
+    "mtime": 1790924935.5976877,
+    "ast_hash": "f5a830909aadbfb270be07ab945fae66",
     "semantic_hash": ""
   },
   "frontend/crowdin.yml": {
@@ -4579,9 +4509,169 @@
     "ast_hash": "41bcd6b84430e92d9a06aa20e9db5970",
     "semantic_hash": ""
   },
-  "internal/handlers/codedflow_tiqr_ecommerce_handoff.go": {
-    "mtime": 1790850899.1439734,
-    "ast_hash": "ff388332742c60b5d2b618e8a5c01802",
+  "internal/handlers/chatbot_commerce_draft_test.go": {
+    "mtime": 1790866920.7752662,
+    "ast_hash": "f94ec3ed11aedc77555d23a08e35e913",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/ai.go": {
+    "mtime": 1790866920.779435,
+    "ast_hash": "eee3b6d1e22ad9acff6c3ea327d07655",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/conv.go": {
+    "mtime": 1790866920.7796018,
+    "ast_hash": "7964e22f9a5916c9374eb6805e04e850",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/flow.go": {
+    "mtime": 1790866920.7797546,
+    "ast_hash": "4fb0eaac8364b443009de793cbb702af",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/host.go": {
+    "mtime": 1790866920.779897,
+    "ast_hash": "7cbfa54da22cc7877fb2309975fa166b",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/intent.go": {
+    "mtime": 1790866920.78007,
+    "ast_hash": "d9a9d39e997a7e71b723a122f87ab78a",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/jev.go": {
+    "mtime": 1790866920.7802687,
+    "ast_hash": "39bdb8e5eeb3f974d69f1bb5e661f80c",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/jev_test.go": {
+    "mtime": 1790866920.7804363,
+    "ast_hash": "a25ba7177fbead11ee2fafd600299054",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/jsonutil.go": {
+    "mtime": 1790866920.7806149,
+    "ast_hash": "ef9d3839ae633ded8e84a94b472c2256",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/jsonutil_test.go": {
+    "mtime": 1790866920.780796,
+    "ast_hash": "8ac753f8ea09f96bd438ad2504622c18",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/payment.go": {
+    "mtime": 1790866920.7809677,
+    "ast_hash": "c701f7cef7b980a046028195efa8e0ab",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/preview.go": {
+    "mtime": 1790921250.0367806,
+    "ast_hash": "f81d9f4f56e62984f19b2a08f89df372",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/recover.go": {
+    "mtime": 1790866920.7814229,
+    "ast_hash": "d577f5e7f0d07f665b2174d30cb5783a",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/trace.go": {
+    "mtime": 1790866920.7816458,
+    "ast_hash": "8e910b6fc7dc6f216d0649f55718d525",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow/trace_test.go": {
+    "mtime": 1790866920.7821422,
+    "ast_hash": "4ed96cec445a61120d2c149e718d5228",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow_deliver.go": {
+    "mtime": 1790866920.7827337,
+    "ast_hash": "ac295e56afdf5639cef23ca93b8c76c2",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow_early_handoff_host.go": {
+    "mtime": 1790866920.7828934,
+    "ast_hash": "ae75b35bc953b1bf55ed54f0c8eda068",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow_host.go": {
+    "mtime": 1790921786.3674169,
+    "ast_hash": "e38483f5b674990766382a34f3a8f1a4",
+    "semantic_hash": ""
+  },
+  "internal/handlers/codedflow_run.go": {
+    "mtime": 1790866920.7847195,
+    "ast_hash": "1cbd785a74366b7d018beea292db5bcd",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/addons.go": {
+    "mtime": 1790870697.5479257,
+    "ast_hash": "d518c1e2fd494e8d0b09561c8abab7c0",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/addons_test.go": {
+    "mtime": 1790870673.2306294,
+    "ast_hash": "e13a9ac8e8cc13cf2429045e2d354600",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/capture_helpers.go": {
+    "mtime": 1790866920.7851923,
+    "ast_hash": "f62a882e3ccf1804cbf91d32b96d855d",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/conv.go": {
+    "mtime": 1790866920.7853057,
+    "ast_hash": "1b50696756110b1b5855090004148a26",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/delivery.go": {
+    "mtime": 1790866920.7854114,
+    "ast_hash": "88f8d85f2ddd952dbc179ea3866cbd00",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/delivery_test.go": {
+    "mtime": 1790866920.7855198,
+    "ast_hash": "c7ac8d3324b8590f7739c284fd4196c3",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/early_handoff.go": {
+    "mtime": 1790921754.9867065,
+    "ast_hash": "65eb57bbb258e7b01c51da24241a8671",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/flow.go": {
+    "mtime": 1790924924.8564343,
+    "ast_hash": "82eea7a50af9bff778c09e8508d0aeaf",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/handoff.go": {
+    "mtime": 1790921728.746175,
+    "ast_hash": "42c6409037fc247e0db85970ccdbdcfc",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/helpers.go": {
+    "mtime": 1790870697.5472124,
+    "ast_hash": "98774b049e86e22f0d04c693c3a2f92c",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/misc_helpers.go": {
+    "mtime": 1790923911.756549,
+    "ast_hash": "e0936cc2d361a430cab589dbf76e1e16",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce_addons_test.go": {
+    "mtime": 1790870697.547599,
+    "ast_hash": "a284adcc4b2c5107ab1b9aef6a360187",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce_flow_test.go": {
+    "mtime": 1790925156.6991878,
+    "ast_hash": "cd3196b1a616cd056d92f15012e2d388",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/order_status_test.go": {
+    "mtime": 1790923953.3807995,
+    "ast_hash": "7541bfad3647681f6f4decebc09320f4",
     "semantic_hash": ""
   }
 }

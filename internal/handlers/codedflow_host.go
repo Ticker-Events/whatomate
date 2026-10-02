@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
 )
@@ -231,6 +232,8 @@ func (a *App) CompleteCodedEarlyHandoff(chat codedflow.Chat, collection map[stri
 	st := earlyHandoffCheckoutStateFromSession(ctx.session)
 	setCheckoutState(ctx.session, st)
 	setSelectedCategoryID(ctx.session, fieldString(collection, "id"))
+	tiqrecommerce.StageEarlyHandoffProductOptionCart(ctx.session)
+	tiqrecommerce.StageCommerceOrderNotes(ctx.session)
 	if _, err := a.ensureCommerceDraft(ctx.contact, ctx.session, settings); err != nil {
 		a.Log.Error("early_handoff draft create failed", "error", err)
 		return false

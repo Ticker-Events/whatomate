@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
+
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/pkg/ticker"
 )
 
 func isCheckoutStartIntent(text string) bool {
@@ -105,6 +108,187 @@ func formatDirectOrderStatus(order map[string]any) string {
 		return "Your latest order status is " + status + "."
 	}
 	return fmt.Sprintf("Order %s is %s.", id, status)
+}
+
+// reshapeOrdersForList prepares owner-list rows for a WhatsApp list message.
+// Title is display_uid (falling back to numeric id). Description is placed_on.
+func reshapeOrdersForList(raw []any) []any {
+	out := make([]any, 0, len(raw))
+	for _, entry := range raw {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(asString(item["id"]))
+		if id == "" {
+			continue
+		}
+		uid := strings.TrimSpace(asString(item["display_uid"]))
+		if uid == "" {
+			uid = id
+		}
+		out = append(out, map[string]any{
+			"id":          id,
+			"display_uid": uid,
+			"placed_on":   formatOrderPlacedDate(asString(item["created_at"])),
+			"status":      item["status"],
+		})
+	}
+	return out
+}
+
+func formatOrderPlacedDate(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.000000Z",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.Format("2 Jan 2006")
+		}
+	}
+	// Truncate ISO timestamps with timezone offsets the layouts above miss.
+	if len(raw) >= 10 && raw[4] == '-' && raw[7] == '-' {
+		if t, err := time.Parse("2006-01-02", raw[:10]); err == nil {
+			return t.Format("2 Jan 2006")
+		}
+	}
+	return raw
+}
+
+// formatOrderStatusSummary builds the WhatsApp body for a selected store order.
+// Amounts on the owner API are minor units and are converted once here.
+func formatOrderStatusSummary(order map[string]any, currency string) string {
+	if order == nil {
+		return tiqrEcommerceOrderUnavailable
+	}
+	id := strings.TrimSpace(asString(order["display_uid"]))
+	if id == "" {
+		id = strings.TrimSpace(asString(order["id"]))
+	}
+	status := strings.ReplaceAll(strings.ToLower(asString(order["status"])), "_", " ")
+	if status == "" {
+		status = "unknown"
+	}
+
+	var b strings.Builder
+	if id != "" {
+		fmt.Fprintf(&b, "Order *%s*\nStatus: %s", id, status)
+	} else {
+		fmt.Fprintf(&b, "Status: %s", status)
+	}
+
+	if lines := formatOrderStatusItems(order["items"], currency); lines != "" {
+		b.WriteString("\n\nItems\n")
+		b.WriteString(lines)
+	}
+
+	totalMinor, ok := anyToFloat64(order["total_amount"])
+	if !ok {
+		totalMinor, ok = anyToFloat64(order["amount"])
+	}
+	if ok {
+		fmt.Fprintf(&b, "\n\nTotal: %s", formatMoney(ticker.PaiseToRupees(totalMinor), currency))
+	}
+
+	mode := strings.TrimSpace(asString(order["delivery_mode"]))
+	switch mode {
+	case tiqrModePickup:
+		b.WriteString("\nFulfillment: Store pickup")
+	case tiqrModeDelivery:
+		b.WriteString("\nFulfillment: Delivery")
+		if addr := formatOrderAddress(order["address"]); addr != "" {
+			b.WriteString("\n\nAddress\n")
+			b.WriteString(addr)
+		}
+	}
+
+	return b.String()
+}
+
+func formatOrderStatusItems(raw any, currency string) string {
+	items, ok := anySlice(raw)
+	if !ok || len(items) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(items))
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		name := orderItemDisplayName(item)
+		qty := anyToInt(item["quantity"])
+		if qty < 1 {
+			qty = 1
+		}
+		amountMinor, _ := anyToFloat64(item["amount"])
+		lines = append(lines, fmt.Sprintf("• %s × %d — %s", name, qty, formatMoney(ticker.PaiseToRupees(amountMinor), currency)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func orderItemDisplayName(item map[string]any) string {
+	snap, ok := asStringMap(item["product_option_snapshot"])
+	if !ok {
+		return "Item"
+	}
+	optionName := strings.TrimSpace(asString(snap["name"]))
+	productName := ""
+	if product, ok := asStringMap(snap["product"]); ok {
+		productName = strings.TrimSpace(asString(product["name"]))
+	}
+	switch {
+	case productName != "" && optionName != "" && !strings.EqualFold(productName, optionName):
+		return productName + " (" + optionName + ")"
+	case productName != "":
+		return productName
+	case optionName != "":
+		return optionName
+	default:
+		return "Item"
+	}
+}
+
+func formatOrderAddress(raw any) string {
+	addr, ok := asStringMap(raw)
+	if !ok || addr == nil {
+		return ""
+	}
+	name := strings.TrimSpace(asString(addr["name"]))
+	line1 := strings.TrimSpace(firstNonEmpty(asString(addr["address_line_1"]), asString(addr["address_line_one"])))
+	line2 := strings.TrimSpace(firstNonEmpty(asString(addr["address_line_2"]), asString(addr["address_line_two"])))
+	city := strings.TrimSpace(asString(addr["city"]))
+	state := strings.TrimSpace(asString(addr["state"]))
+	country := strings.TrimSpace(asString(addr["country"]))
+	pincode := strings.TrimSpace(asString(addr["pincode"]))
+	if name == "" && line1 == "" && line2 == "" && city == "" && state == "" && country == "" && pincode == "" {
+		return ""
+	}
+	var lines []string
+	if name != "" {
+		lines = append(lines, name)
+	}
+	street := strings.TrimSpace(strings.Join(nonEmpty(line1, line2), ", "))
+	if street != "" {
+		lines = append(lines, street)
+	}
+	cityState := strings.TrimSpace(strings.Join(nonEmpty(city, state), ", "))
+	if cityState != "" {
+		lines = append(lines, cityState)
+	}
+	countryPin := strings.TrimSpace(strings.Join(nonEmpty(country, pincode), " "))
+	if countryPin != "" {
+		lines = append(lines, countryPin)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func sessionCollectionByID(session *models.ChatbotSession, id string) map[string]any {
