@@ -1,140 +1,140 @@
-# Graph Report - whatomate  (2026-10-01)
+# Graph Report - whatomate  (2026-10-02)
 
 ## Corpus Check
-- 870 files · ~828,217 words
+- 888 files · ~842,564 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 11019 nodes · 29183 edges · 395 communities (352 shown, 43 thin omitted)
-- Extraction: 74% EXTRACTED · 26% INFERRED · 0% AMBIGUOUS · INFERRED: 7624 edges (avg confidence: 0.8)
+- 11286 nodes · 29916 edges · 407 communities (361 shown, 46 thin omitted)
+- Extraction: 74% EXTRACTED · 26% INFERRED · 0% AMBIGUOUS · INFERRED: 7865 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `07ad88ce`
+- Built from commit: `6c720c22`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- cn
+- TemplatesView.vue
 - ChatView.vue
 - getErrorMessage
 - stores/auth.ts
-- newTestApp
+- NewGETRequest
 - pages/index.ts
 - page
-- ContactsView.vue
+- GetResponseStatusCode
 - services/api.ts
+- NewJSONRequest
 - button/index.ts
-- card/index.ts
 - TemplateDetailView.vue
-- asString
+- AccountDetailView.vue
 - CampaignDetailView.vue
 - websocket_test.go
-- CreateTestOrganization
-- ContactDetailView.vue
+- CreateTestUser
+- UsersView.vue
 - template_engine_test.go
-- chatbot_commerce_checkout.go
+- asString
 - chatbot_graph_runner_test.go
 - SLAProcessor
 - AgentTransfersView.vue
-- AgentAnalyticsView.vue
+- SetAuthContext
 - ChatPage
-- RolesView.vue
-- codedflow_preview.go
-- GetResponseBody
+- ContactsView.vue
+- PreviewSink
+- CreateTestOrganization
 - worker_test.go
 - ai_product_response.go
 - ChatbotSession
 - WebhookDetailView.vue
-- SetPathParam
+- newAppForProfile
 - SetupTestDB
 - App
 - CreateTestWhatsAppAccount
 - chatbot_commerce_test.go
-- TeamDetailView.vue
+- select/index.ts
 - ChatbotFlowBuilderView.vue
-- CreateTestUser
+- newTestApp
 - NopLogger
-- scroll-area/index.ts
-- SettingsView.vue
+- users.go
+- tabs/index.ts
 - parsePagination
-- TestContext
+- CreateTestContactWith
 - BasePage
-- ButtonVariants
-- SetAuthContext
-- GetResponseStatusCode
-- NewGETRequest
+- menubar/index.ts
+- accounts_validation_test.go
+- CannedResponseDetailView.vue
+- SetPathParam
 - newAssigner
 - BaseModel
 - ChatNodeProperties.vue
-- LogAudit
-- FlowsPage
 - parsePathUUID
-- select/index.ts
+- FlowsPage
+- flowToResponse
+- calendar/index.ts
 - chatbot_commerce.go
-- AccountsView.vue
+- auditLogsRole
 - BaseNode.vue
 - DashboardView.vue
-- withQueue
+- UniqueEmail
 - CodedFlowPreview.vue
-- newTestRequest
+- range-calendar/index.ts
 - App
-- NewWithTimeout
+- TestContext
 - IVRFlowEditorView.vue
 - whatsapp/analytics.go
-- CreateTestRole
+- tiqrecommerce/flow.go
 - ChatbotSettingsView.vue
 - App
 - App
-- SetQueryParam
+- ContactDetailView.vue
 - testAccount
 - CampaignsPage
-- IVRNodeProperties.vue
+- ButtonVariants
 - command/index.ts
-- codedflow_test.go
+- tiqrecommerce_flow_test.go
 - whatsapp/types.go
 - devDependencies
 - queue-pickup.spec.ts
 - context-menu/index.ts
-- App
+- cacheTestApp
 - App
 - CustomActionsView.vue
-- constants.go
+- .UpdateChatbotSettings
 - templateutil_test.go
-- codedflow_recover.go
+- recover.go
 - TableSettingsPage
 - SetupTestRedis
 - dependencies
-- Conv
+- tiqrecommerce/helpers.go
 - JSONB
 - useFlowGraphSimulation.ts
 - whatsapp/webhook_test.go
 - FlowBuilder.vue
 - newProcessorTestApp
-- CommerceDraft
+- Category
 - composeJevIntent
-- .execChatTiqrStoreAPI
+- chatbot_tiqr_store_api.go
 - stepsToGraph
-- NewRequest
+- SetQueryParam
 - MockWhatsAppClient
 - Client
-- DebugPanel.vue
+- AIContextsView.vue
 - custom_actions.go
 - models/chatbot.go
-- handlers/webhook_test.go
-- UsersView.vue
+- ChatbotFlowsView.vue
+- utils.ts
 - App
 - Sections in detail
-- .syncContactFromMessage
+- MaskIfPhoneNumber
 - CallSession
 - Permission Keys
 - calling.mdx
-- users.go
+- intent.go
 - AgentTransfersPage
 - App
-- stringFromConfig
-- CodedFlow
-- useStoreREST
+- chatNodeCtx
+- CommerceDraft
+- createChatbotSettings
 - organizations.mdx
 - E2E Test Architecture
 - InteractivePreview.vue
@@ -146,11 +146,11 @@
 - users.mdx
 - TablePage
 - compilerOptions
-- runServer
+- asStringMap
 - api-reference/canned-responses.mdx
 - use-toast.ts
 - .advance
-- createChatbotSettings
+- chatbot_tiqr_store_api_test.go
 - CustomRole
 - Manager
 - .negotiateWebRTC
@@ -158,13 +158,13 @@
 - api-reference/campaigns.mdx
 - messages.mdx
 - teams.mdx
-- label/index.ts
-- .UpdateTemplate
-- accounts_validation_test.go
-- UUID
+- TeamDetailView.vue
+- useAuthStore
+- addons.go
+- MessageBuilder
 - tickermcp/client_test.go
 - .sendMessage
-- RateLimit
+- Worker
 - flows.mdx
 - api-reference/templates.mdx
 - GeneralSettingsPage
@@ -173,41 +173,41 @@
 - ContactsPage
 - .UpdateIVRFlow
 - App
-- newCallTestClient
+- earlyHandoffCheckoutStateFromSession
 - Client
 - Customer path
 - Init
-- flow-preview.ts
+- PreviewPhone.vue
 - App
 - OutgoingMessageRequest
-- App
+- constants.go
 - .DownloadAndSaveMedia
-- codedflow_conv.go
-- .resolveFreeText
+- Conv
+- asString
 - stubCommerceBackend
-- cacheTestApp
+- sheet/index.ts
 - CallLog
 - buildTemplateComponents
-- utils.ts
+- .UpdateTemplate
 - postgres.go
 - roles-permissions.mdx
-- composables/index.ts
+- flow-preview.ts
 - ToggleGroup.vue
-- JSONBArray
+- .UpdateCannedResponse
 - webhook_dispatch.go
 - MessageStatus
-- AccountDetailView.vue
-- tickermcp/client.go
+- card/index.ts
+- DrawerContent.vue
 - features/canned-responses.mdx
 - CardGridPage
 - .UpdateRole
-- CreateTestRoleWithKeys
+- .UpdateWebhook
 - NewS3Client
 - startFreshSession
 - features/templates.mdx
 - webhooks.spec.ts
 - MessageButtonsEditor.vue
-- FormLabel.vue
+- APIKeysView.vue
 - App
 - tagToResponse
 - Client
@@ -215,7 +215,7 @@
 - TiQR Ecommerce
 - sso.mdx
 - MetadataSection.vue
-- codedflow_intent.go
+- scroll-area/index.ts
 - OrganizationBuilder
 - MetaTemplate
 - AudioPlayer
@@ -223,10 +223,10 @@
 - authentication.mdx
 - Manual Installation
 - PanelConfigEditor.vue
-- sheet/index.ts
-- menubar/index.ts
+- NewPublisher
+- newCallTestClient
 - Load
-- CannedResponseDetailView.vue
+- JSONBArray
 - session.go
 - analytics.mdx
 - webhooks.mdx
@@ -238,13 +238,13 @@
 - GetOrCreateContact
 - NormalizeProductMoney
 - Account
-- range-calendar/index.ts
+- asString
 - Whatomate
 - KeyValueRows.vue
 - Internationalization (i18n)
 - App
-- .createChatbotFlowFromPayload
-- ticker/client.go
+- tickermcp/client.go
+- early_handoff.go
 - clearWebhookCache
 - newTemplateTestClient
 - Manager
@@ -252,9 +252,9 @@
 - api-keys.mdx
 - Conversation Flows
 - PermissionMatrix.vue
-- evaluateStoreDelivery
-- calendar/index.ts
-- CarouselMessageInteractive
+- ticker/client.go
+- FormLabel.vue
+- RedisConsumer
 - Account
 - navigation-menu/index.ts
 - NewRedis
@@ -270,29 +270,29 @@
 - account-tabs.spec.ts
 - tiqrStoreApiCatalog.ts
 - HoverCardContent.vue
-- ChatGraph
-- .completeCodedRoleText
-- flows.go
+- App
+- NumberField.vue
+- piper_test.go
 - ApplyConversationWait
 - TemplateBuilder
 - UserBuilder
 - WhatsAppAccountBuilder
-- setupRoutes
+- .ListConversationNotes
 - overview.mdx
 - Teams
 - ProfilePage
 - PreviewInputBar.vue
 - compilerOptions
-- App
+- dropdown-menu/index.ts
 - TeamBuilder
 - NewClient
 - Features
 - ChatbotButtonsNode.vue
 - codedPreviewHold
-- DrawerContent.vue
+- PinInput.vue
 - models_test.go
 - WebhookPayload
-- middleware.go
+- runServer
 - TiQR Agent on DOKS
 - cleanup-registry.sh
 - AI Contexts
@@ -302,9 +302,9 @@
 - index.mdx
 - global-setup.ts
 - frontend/package.json
-- Encrypt
+- TeamResponse
 - App
-- .GetDashboardStats
+- ApiMockDialog.vue
 - ConversationNote
 - Build with TypeSafe
 - TeamConfig
@@ -314,8 +314,8 @@
 - audit.ts
 - ChatbotSetVariableNode.vue
 - BulkMessageCampaign
-- useConditionEvaluator.ts
-- RedisConsumer
+- composables/index.ts
+- testutil.go
 - .setAuthCookies
 - fakeMetaServer
 - parseFulfillmentTimeText
@@ -326,17 +326,17 @@
 - Template Syntax
 - campaign-templates.spec.ts
 - i18n-validation.spec.ts
-- NumberField.vue
+- whatsapp/client.go
 - env.d.ts
 - App
 - .RoundTrip
 - Sessions
 - .CreateCustomToken
-- PinInput.vue
-- template_engine.go
-- .shouldTraceCodedFlow
-- dropdown-menu/index.ts
-- fakeProfileServer
+- TestTiqrEcommerce_BuyFlowStoresCatalogAddons
+- evaluateStoreDelivery
+- App
+- NewWithBaseURL
+- RadioGroup.vue
 - .UploadProfilePicture
 - Agent Transfers
 - docs/tsconfig.json
@@ -344,48 +344,59 @@
 - .syncContactToFirestore
 - meta_analytics.go
 - Recipient
-- axios
+- CarouselMessageInteractive
 - cachedOrgSettings
 - 01-add-agent-node-pool.sh
 - 02-setup-registry-ns.sh
 - deploy.sh
 - content.config.ts
-- eslint
+- ChatGraph
 - firebase
 - grid-layout-plus
-- lucide-vue-next
+- alert/index.ts
 - pinia
 - @radix-icons/vue
 - vee-validate
 - vue3-emoji-picker
 - @vue-flow/background
-- @vue-flow/controls
+- S3Client
 - @vue-flow/core
 - happy-dom
 - @vue/eslint-config-typescript
 - ContextMenuPortal.vue
-- testutil.go
-- App
+- UUID
+- factories.go
 - tailwind.config.cjs
-- .codedOrderRetries
+- ContactBuilder
 - github.com/shridarpatil/whatomate
-- .UpdateCodedFlowBinding
-- ApiMockDialog.vue
+- newCodedChat
+- axios
+- .createChatbotFlowFromPayload
+- .GetMetaAnalytics
+- .GetBusinessProfile
+- fetchWidgetData
 - ResizableHandle.vue
-- .UpdateChatbotSettings
-- processTemplate
-- whatsapp/analytics_test.go
-- RadioGroup.vue
-- codedflow_trace.go
-- alert/index.ts
-- Catalog
-- Slider.vue
-- executeHTTPCallback
-- AlertDialogContent.vue
+- .UpdateCodedFlowBinding
+- ItemTextHint.vue
 - DialogContent.vue
-- DialogScrollContent.vue
 - PopoverContent.vue
-- .deliverCodedCTAURL
+- executeHTTPCallback
+- SelectContent.vue
+- Spinner.vue
+- orderStatusLookupStub
+- lucide-vue-next
+- jsonutil_test.go
+- TooltipContent.vue
+- Time
+- HTTPCallbackNode.vue
+- ChatbotApiNode.vue
+- ChatbotConditionNode.vue
+- ChatbotTimingNode.vue
+- isNumberWidget
+- class-variance-authority
+- @tsconfig/node20
+- useAppToast.ts
+- onLayoutUpdate
 
 ## God Nodes (most connected - your core abstractions)
 1. `CreateTestOrganization()` - 677 edges
@@ -414,11 +425,11 @@
 ## Import Cycles
 - 2-file cycle: `frontend/src/components/ui/toast/index.ts -> frontend/src/components/ui/toast/use-toast.ts -> frontend/src/components/ui/toast/index.ts`
 
-## Communities (395 total, 43 thin omitted)
+## Communities (407 total, 46 thin omitted)
 
-### Community 0 - "cn"
-Cohesion: 0.03
-Nodes (44): delegatedProps, props, props, props, delegatedProps, props, props, props (+36 more)
+### Community 0 - "TemplatesView.vue"
+Cohesion: 0.08
+Nodes (25): getQualityBadgeClass(), getQualityRatingLabel(), accounts, columns, confirmDeleteTemplate(), deleteDialogOpen, error, fetchAccounts() (+17 more)
 
 ### Community 1 - "ChatView.vue"
 Cohesion: 0.02
@@ -426,15 +437,15 @@ Nodes (103): getCookie(), getRequestHeaders(), actionIconMap, activeTransfer, ac
 
 ### Community 2 - "getErrorMessage"
 Cohesion: 0.02
-Nodes (121): activeTab, allColumns, closeDialog(), defaultColumns, downloadSampleCsv(), emit, exportColumns, handleExport() (+113 more)
+Nodes (103): activeTab, allColumns, closeDialog(), defaultColumns, downloadSampleCsv(), emit, exportColumns, handleExport() (+95 more)
 
 ### Community 3 - "stores/auth.ts"
 Cohesion: 0.02
-Nodes (96): callingStore, props, summary, appStore, authStore, bottomSections, isCollapsed, isMobileMenuOpen (+88 more)
+Nodes (91): currentLocale, currentLocaleName, { locale }, authStore, awayWarningTransferCount, breakDuration, confirmGoAway(), contactsStore (+83 more)
 
-### Community 4 - "newTestApp"
-Cohesion: 0.05
-Nodes (156): APIKey, createAnalyticsTestCampaign(), createTestAgentTransfer(), createTestChatbotSession(), createTestMessage(), createTestTeamWithAgent(), AgentTransfer, App (+148 more)
+### Community 4 - "NewGETRequest"
+Cohesion: 0.07
+Nodes (98): APIKey, createAnalyticsTestCampaign(), createTestAgentTransfer(), createTestChatbotSession(), createTestMessage(), createTestTeamWithAgent(), AgentTransfer, App (+90 more)
 
 ### Community 5 - "pages/index.ts"
 Cohesion: 0.03
@@ -444,104 +455,101 @@ Nodes (55): SUPER_ADMIN, createTestScope(), TestScope, CreateUserOptions, create
 Cohesion: 0.02
 Nodes (20): expectSaveButtonOnChange(), AccountsPage, CallLogsPage, CallTransfersPage, ChatbotHubPage, ChatbotSettingsPage, ChatbotFlowBuilderPage, IVRFlowsPage (+12 more)
 
-### Community 7 - "ContactsView.vue"
-Cohesion: 0.04
-Nodes (42): CrudState, useCrudState(), breadcrumbs, cannedResponses, columns, confirmDelete(), {
-  deleteDialogOpen, itemToDelete: responseToDelete,
-  openDeleteDialog, closeDeleteDialog,
-}, error (+34 more)
+### Community 7 - "GetResponseStatusCode"
+Cohesion: 0.07
+Nodes (81): T, TestApp_CreateAccount_Success(), TestApp_CreateAccount_Unauthorized(), TestApp_CreateAccount_ValidationErrors(), TestApp_CreateAccount_WithOptionalFields(), TestApp_DeleteAccount_CrossOrgIsolation(), TestApp_DeleteAccount_InvalidID(), TestApp_DeleteAccount_NotFound() (+73 more)
 
 ### Community 8 - "services/api.ts"
 Cohesion: 0.02
-Nodes (125): isInitiating, permission, props, store, { t }, tooltipText, props, Step (+117 more)
+Nodes (131): isInitiating, permission, props, store, { t }, tooltipText, props, Step (+123 more)
 
-### Community 9 - "button/index.ts"
-Cohesion: 0.04
-Nodes (48): emit, handleCancel(), handleConfirm(), open, props, computedDescription, computedSubmitLabel, computedTitle (+40 more)
+### Community 9 - "NewJSONRequest"
+Cohesion: 0.09
+Nodes (63): createTestChatbotFlowWithGraph(), App, ChatbotFlow, T, UUID, sampleChatFlowGraph(), TestApp_DuplicateChatbotFlow(), TestApp_ExportChatbotFlow() (+55 more)
 
-### Community 10 - "card/index.ts"
+### Community 10 - "button/index.ts"
 Cohesion: 0.02
-Nodes (112): actionConfig, isLoading, loadLogs(), loadMore(), logs, props, total, badgeVariants (+104 more)
+Nodes (87): { colorMode }, { colorMode, setColorMode }, emit, handleCancel(), handleConfirm(), open, props, displayItems (+79 more)
 
 ### Community 11 - "TemplateDetailView.vue"
 Cohesion: 0.03
 Nodes (53): accounts, allVariables, auditRefreshKey, authOtpType, authStore, bodyVariables, breadcrumbs, buttonTypes (+45 more)
 
-### Community 12 - "asString"
-Cohesion: 0.06
-Nodes (114): divertResult, tiqrCartEditIntent, tiqrCartLine, formatDirectOrderStatus(), anyToFloat64(), asString(), isCheckoutStartIntent(), normalizedCaptureValue() (+106 more)
+### Community 12 - "AccountDetailView.vue"
+Cohesion: 0.02
+Nodes (106): emit, emits, forwarded, props, props, useUnsavedChangesGuard(), formatLimitTier(), getVerificationBadgeClass() (+98 more)
 
 ### Community 13 - "CampaignDetailView.vue"
-Cohesion: 0.02
-Nodes (82): categoryLabels, emit, extractParamNames(), filteredTemplates, getBodyContent(), groupedTemplates, isLoading, isOpen (+74 more)
+Cohesion: 0.03
+Nodes (67): clear(), useHeaderMedia(), Account, accounts, addRecipients(), addRecipientsFromCSV(), addRecipientsTab, auditRefreshKey (+59 more)
 
 ### Community 14 - "websocket_test.go"
-Cohesion: 0.06
-Nodes (79): Conn, UUID, NewUnauthenticatedClient(), ClientAuthenticated(), ClientHandleAuthMessage(), ClientOrgID(), ClientSendChan(), ClientUserID() (+71 more)
+Cohesion: 0.05
+Nodes (82): App, Request, Conn, UUID, NewClient(), NewUnauthenticatedClient(), ClientAuthenticated(), ClientHandleAuthMessage() (+74 more)
 
-### Community 15 - "CreateTestOrganization"
-Cohesion: 0.06
-Nodes (105): generateRefreshTokenWithJTI(), Duration, T, User, TestApp_GetWSToken_MissingOrgID(), TestApp_GetWSToken_MissingUserID(), TestApp_GetWSToken_Success(), TestApp_Logout_ClearsCookiesAndReturnsOK() (+97 more)
+### Community 15 - "CreateTestUser"
+Cohesion: 0.08
+Nodes (77): T, TestApp_GeneratedTokensAreValid(), TestApp_Login_InactiveUser(), TestApp_Login_InvalidRequestBody(), TestApp_Login_Success(), TestApp_Login_UserNotFound(), TestApp_Login_UserWithRole(), TestApp_Login_WrongPassword() (+69 more)
 
-### Community 16 - "ContactDetailView.vue"
-Cohesion: 0.02
-Nodes (98): authStore, canEditTags, collapsedSections, contactTags, emit, hasMetadata, isResizing, isUpdatingTags (+90 more)
+### Community 16 - "UsersView.vue"
+Cohesion: 0.03
+Nodes (65): CreateUserData, FetchUsersParams, FetchUsersResponse, UpdateUserData, User, UserRole, useUsersStore, authStore (+57 more)
 
 ### Community 17 - "template_engine_test.go"
-Cohesion: 0.07
-Nodes (71): compareEqual(), evaluateCondition(), extractResponseMapping(), getNestedValue(), isTruthy(), nestedMap(), processConditionals(), processForLoops() (+63 more)
+Cohesion: 0.06
+Nodes (96): valueFormatter, applyChatResponseMapping(), compareEqual(), compareNumeric(), copyMap(), evaluateCondition(), extractResponseMapping(), formatValue() (+88 more)
 
-### Community 18 - "chatbot_commerce_checkout.go"
+### Community 18 - "asString"
 Cohesion: 0.05
-Nodes (86): addOptionToCart(), anyToInt(), cartLineOptionName(), cartLinePrice(), cartMapToAny(), formatCartSummary(), normalizeCartMap(), setCartLineQty() (+78 more)
+Nodes (102): addOptionToCart(), anyToInt(), cartLineOptionName(), cartLinePrice(), cartMapToAny(), formatCartSummary(), normalizeCartMap(), setCartLineQty() (+94 more)
 
 ### Community 19 - "chatbot_graph_runner_test.go"
-Cohesion: 0.07
-Nodes (97): applyButtonSelection(), carouselCardsForNode(), dynamicButtonsFromSession(), chatGraphPath(), App, ChatbotFlow, Contact, Organization (+89 more)
+Cohesion: 0.08
+Nodes (94): dynamicButtonsFromSession(), chatGraphPath(), App, ChatbotFlow, Contact, Organization, T, WhatsAppAccount (+86 more)
 
 ### Community 20 - "SLAProcessor"
 Cohesion: 0.10
 Nodes (28): SLAProcessor, SLASendOptions(), AgentTransfer, App, ChatbotSettings, Contact, Context, Duration (+20 more)
 
 ### Community 21 - "AgentTransfersView.vue"
-Cohesion: 0.05
-Nodes (43): chatbotService, AgentTransfer, getSLAStatus(), SLAStatus, activeTab, agents, allActiveTransfers, allowQueuePickup (+35 more)
+Cohesion: 0.03
+Nodes (73): props, SkeletonProps, chatbotService, CodedFlowBinding, AgentTransfer, getSLAStatus(), SLAStatus, activeTab (+65 more)
 
-### Community 22 - "AgentAnalyticsView.vue"
-Cohesion: 0.04
-Nodes (54): emit, props, { t }, DateRangeResult, TimeRangePreset, useDateRange(), UseDateRangeOptions, agentAnalyticsService (+46 more)
+### Community 22 - "SetAuthContext"
+Cohesion: 0.13
+Nodes (54): mockCatalogServer, createCatalogTestAccount(), createTestCatalog(), createTestCatalogProduct(), App, Server, T, UUID (+46 more)
 
-### Community 24 - "RolesView.vue"
-Cohesion: 0.04
-Nodes (59): useSearchPagination(), UseSearchPaginationOptions, formatDate(), apiKeysService, closeDeleteDialog(), columns, confirmDeleteRule(), deleteDialogOpen (+51 more)
+### Community 24 - "ContactsView.vue"
+Cohesion: 0.03
+Nodes (63): useSearchPagination(), UseSearchPaginationOptions, getLabelFromValue(), ImportResult, closeDeleteDialog(), columns, confirmDeleteRule(), deleteDialogOpen (+55 more)
 
-### Community 25 - "codedflow_preview.go"
-Cohesion: 0.18
-Nodes (12): CodedPreviewAICall, CodedPreviewButton, CodedPreviewCard, CodedPreviewMessage, CodedPreviewResponse, codedPreviewSink, codedCallNames(), CodedPreviewAICall (+4 more)
+### Community 25 - "PreviewSink"
+Cohesion: 0.14
+Nodes (15): CodedPreviewAICall, CodedPreviewAPICall, CodedPreviewButton, CodedPreviewCard, CodedPreviewMessage, CodedPreviewResponse, PreviewSink, CodedPreviewResponse (+7 more)
 
-### Community 26 - "GetResponseBody"
-Cohesion: 0.07
-Nodes (75): createTestChatbotFlowWithGraph(), App, ChatbotFlow, T, UUID, sampleChatFlowGraph(), TestApp_DuplicateChatbotFlow(), TestApp_ExportChatbotFlow() (+67 more)
+### Community 26 - "CreateTestOrganization"
+Cohesion: 0.08
+Nodes (91): createTestCannedResponse(), App, CannedResponse, T, UUID, TestApp_CannedResponse_FullLifecycle(), TestApp_CreateCannedResponse(), TestApp_CreateCannedResponse_DuplicateShortcut() (+83 more)
 
 ### Community 27 - "worker_test.go"
-Cohesion: 0.08
-Nodes (55): ResolveParams(), Client, Context, DB, Logger, Template, UUID, WhatsAppAccount (+47 more)
+Cohesion: 0.14
+Nodes (41): ResolveParams(), createMinimalCampaignData(), createTestCampaignData(), Organization, T, Template, User, WhatsAppAccount (+33 more)
 
 ### Community 28 - "ai_product_response.go"
-Cohesion: 0.07
-Nodes (60): AIResponseSegment, AIResponseSegmentType, WhatsAppProduct, clearPendingPickerProduct(), currencySymbol(), enrichProductDescription(), enrichProductDescriptionWithCurrency(), formatAddToCartAck() (+52 more)
+Cohesion: 0.06
+Nodes (65): AIResponseSegment, AIResponseSegmentType, WhatsAppProduct, cartMetaFromProductSummary(), clearPendingPickerProduct(), currencySymbol(), enrichProductDescription(), enrichProductDescriptionWithCurrency() (+57 more)
 
 ### Community 29 - "ChatbotSession"
-Cohesion: 0.12
-Nodes (35): checkoutState, cartOptionName(), sessionCurrencyCode(), addressMessagePrefill(), cartIsEmpty(), cartProductOptionIDs(), checkoutAddons(), checkoutBuyerMeta() (+27 more)
+Cohesion: 0.16
+Nodes (19): checkoutState, cartOptionName(), cartIsEmpty(), cartOrderItems(), cartProductOptionIDs(), checkoutNotes(), clearCart(), clearCartPendingOption() (+11 more)
 
 ### Community 30 - "WebhookDetailView.vue"
 Cohesion: 0.04
 Nodes (59): Webhook, WebhookEvent, webhooksService, authStore, availableEvents, breadcrumbs, canDelete, canWrite (+51 more)
 
-### Community 31 - "SetPathParam"
-Cohesion: 0.09
-Nodes (66): fakeOAuthProvider, App, DB, T, UUID, WhatsAppAccount, mkAccountForProfile(), newAppForProfile() (+58 more)
+### Community 31 - "newAppForProfile"
+Cohesion: 0.25
+Nodes (22): fakeProfileServer, App, DB, Request, ResponseWriter, Server, T, UUID (+14 more)
 
 ### Community 32 - "SetupTestDB"
 Cohesion: 0.06
@@ -549,179 +557,179 @@ Nodes (57): Decoder, commerceLifecycleEnvelope, lifecycleConversation, absDurati
 
 ### Community 33 - "App"
 Cohesion: 0.06
-Nodes (40): AIAttachment, AIConversationMessage, ApiResponse, IncomingTextMessage, MediaInfo, Reaction, attachmentFromMessage(), attachmentsFromJSON() (+32 more)
+Nodes (43): AIAttachment, AIConversationMessage, ApiResponse, IncomingTextMessage, KeywordResponse, MediaInfo, Reaction, attachmentFromMessage() (+35 more)
 
 ### Community 34 - "CreateTestWhatsAppAccount"
-Cohesion: 0.13
-Nodes (67): createTestAgent(), createTestTeam(), createTestTransfer(), AgentTransfer, App, T, Team, User (+59 more)
+Cohesion: 0.09
+Nodes (80): createTestAgent(), createTestTeam(), createTestTransfer(), AgentTransfer, App, T, Team, User (+72 more)
 
 ### Community 35 - "chatbot_commerce_test.go"
 Cohesion: 0.07
-Nodes (61): categoryProductPresentation, commerceAction, cartMetaFromProductSummary(), buildCategoryProductPresentation(), collectCommerceCategories(), collectValidCategoryProducts(), commerceCategoryChoiceButtons(), defaultCommerceGreetingButtons() (+53 more)
+Nodes (61): categoryProductPresentation, commerceAction, buildCategoryProductPresentation(), collectCommerceCategories(), collectValidCategoryProducts(), commerceCategoryChoiceButtons(), defaultCommerceGreetingButtons(), formatDirectOrderStatus() (+53 more)
 
-### Community 36 - "TeamDetailView.vue"
-Cohesion: 0.02
-Nodes (84): acceptingId, displayName, firstWaiting, formattedDuration, showPanel, showTransferPicker, statusText, store (+76 more)
+### Community 36 - "select/index.ts"
+Cohesion: 0.03
+Nodes (59): emit, props, { t }, emits, forwarded, props, props, props (+51 more)
 
 ### Community 37 - "ChatbotFlowBuilderView.vue"
 Cohesion: 0.03
 Nodes (51): ChatEdge, ChatNodeType, activityOpen, addNodeFromPalette(), auditRefreshKey, availableFlows, availableVariables, cancelDialogOpen (+43 more)
 
-### Community 38 - "CreateTestUser"
-Cohesion: 0.08
-Nodes (63): appOption, createTestCustomAction(), ActionType, App, CustomAction, T, UUID, TestApp_CreateCustomAction() (+55 more)
+### Community 38 - "newTestApp"
+Cohesion: 0.05
+Nodes (97): appOption, generateRefreshTokenWithJTI(), Duration, T, User, TestApp_GetWSToken_MissingOrgID(), TestApp_GetWSToken_MissingUserID(), TestApp_GetWSToken_Success() (+89 more)
 
 ### Community 39 - "NopLogger"
 Cohesion: 0.19
-Nodes (41): cleanStream(), Client, Mutex, T, makeRecipientJob(), skipIfNoRedis(), TestConsume_EmptyQueue(), TestConsume_MultipleJobs() (+33 more)
+Nodes (40): cleanStream(), Client, Mutex, T, makeRecipientJob(), skipIfNoRedis(), TestConsume_EmptyQueue(), TestConsume_MultipleJobs() (+32 more)
 
-### Community 40 - "scroll-area/index.ts"
-Cohesion: 0.05
-Nodes (38): addNote(), authStore, editingContent, editingNoteId, emit, isSaving, newNoteContent, notesEndRef (+30 more)
+### Community 40 - "users.go"
+Cohesion: 0.14
+Nodes (16): AvailabilityRequest, ChangePasswordRequest, MyOrganizationResponse, PermissionInfo, RoleInfo, superAdminField, UserRequest, UserResponse (+8 more)
 
-### Community 41 - "SettingsView.vue"
-Cohesion: 0.03
-Nodes (54): currentLocale, currentLocaleName, { locale }, authStore, awayWarningTransferCount, breakDuration, confirmGoAway(), contactsStore (+46 more)
+### Community 41 - "tabs/index.ts"
+Cohesion: 0.13
+Nodes (10): emits, forwarded, props, delegatedProps, props, delegatedProps, props, delegatedProps (+2 more)
 
 ### Community 42 - "parsePagination"
-Cohesion: 0.09
-Nodes (40): Pagination, App, Request, App, Request, endOfDay(), DB, Request (+32 more)
+Cohesion: 0.10
+Nodes (38): Pagination, App, Request, endOfDay(), DB, Request, Time, parseDateParam() (+30 more)
 
-### Community 43 - "TestContext"
-Cohesion: 0.15
-Nodes (51): mockWhatsAppServer, testServerTransport, ChatbotSendOptions(), createTestAccount(), App, Request, Response, ResponseWriter (+43 more)
+### Community 43 - "CreateTestContactWith"
+Cohesion: 0.14
+Nodes (51): mockWhatsAppServer, testServerTransport, ChatbotSendOptions(), DefaultSendOptions(), createTestAccount(), App, Request, Response (+43 more)
 
 ### Community 44 - "BasePage"
 Cohesion: 0.05
 Nodes (7): BasePage, AIContextsPage, KeywordsPage, DialogPage, escapeCssSelector(), escapeRegex(), LoginPage
 
-### Community 45 - "ButtonVariants"
-Cohesion: 0.04
-Nodes (43): delegatedProps, props, delegatedProps, props, Props, ButtonVariants, delegatedProps, forwardedProps (+35 more)
+### Community 45 - "menubar/index.ts"
+Cohesion: 0.03
+Nodes (43): delegatedProps, emits, forwarded, props, delegatedProps, emits, forwarded, props (+35 more)
 
-### Community 46 - "SetAuthContext"
-Cohesion: 0.10
-Nodes (57): createTestCannedResponse(), App, CannedResponse, T, UUID, TestApp_CannedResponse_FullLifecycle(), TestApp_CreateCannedResponse(), TestApp_CreateCannedResponse_DuplicateShortcut() (+49 more)
+### Community 46 - "accounts_validation_test.go"
+Cohesion: 0.26
+Nodes (23): createTestAccountForValidation(), App, DB, T, UUID, WhatsAppAccount, newAppWithMeta(), newFakeMetaServer() (+15 more)
 
-### Community 47 - "GetResponseStatusCode"
-Cohesion: 0.10
-Nodes (56): T, TestApp_CreateAccount_Success(), TestApp_CreateAccount_Unauthorized(), TestApp_CreateAccount_ValidationErrors(), TestApp_CreateAccount_WithOptionalFields(), TestApp_DeleteAccount_CrossOrgIsolation(), TestApp_DeleteAccount_InvalidID(), TestApp_DeleteAccount_NotFound() (+48 more)
+### Community 47 - "CannedResponseDetailView.vue"
+Cohesion: 0.03
+Nodes (56): categoryLabels, emit, filteredResponses, groupedResponses, internalOpen, isLoading, isOpen, props (+48 more)
 
-### Community 48 - "NewGETRequest"
-Cohesion: 0.12
-Nodes (54): mockCatalogServer, createCatalogTestAccount(), createTestCatalog(), createTestCatalogProduct(), App, Server, T, UUID (+46 more)
+### Community 48 - "SetPathParam"
+Cohesion: 0.09
+Nodes (67): fakeOAuthProvider, chatRWRole(), DB, T, UUID, TestApp_CreateConversationNote_EmptyContentRejected(), TestApp_CreateConversationNote_PermissionDenied(), TestApp_CreateConversationNote_Success() (+59 more)
 
 ### Community 49 - "newAssigner"
-Cohesion: 0.11
-Nodes (46): agentLoad, LoadCounter, Assigner, Client, DB, Logger, UUID, New() (+38 more)
+Cohesion: 0.10
+Nodes (47): agentLoad, LoadCounter, Assigner, Client, DB, Logger, UUID, New() (+39 more)
 
 ### Community 50 - "BaseModel"
-Cohesion: 0.09
-Nodes (30): DeletedAt, Account, ActionType, AssignmentStrategy, Message, MessageType, TeamMember, Time (+22 more)
+Cohesion: 0.08
+Nodes (32): DeletedAt, Organization, UUID, Account, ActionType, AssignmentStrategy, Message, MessageType (+24 more)
 
 ### Community 51 - "ChatNodeProperties.vue"
 Cohesion: 0.05
-Nodes (52): addAssignment(), addCarouselCard(), addListRow(), addPhoneButton(), addReplyButton(), addUrlButton(), buttonMode, buttonSource (+44 more)
+Nodes (51): addAssignment(), addCarouselCard(), addListRow(), addPhoneButton(), addReplyButton(), addUrlButton(), buttonMode, buttonSource (+43 more)
 
-### Community 52 - "LogAudit"
+### Community 52 - "parsePathUUID"
 Cohesion: 0.07
-Nodes (25): AccountRequest, AccountResponse, ChatbotStatsResponse, WebhookRequest, WebhookResponse, GetUserName(), DB, UUID (+17 more)
+Nodes (24): GetUserName(), DB, UUID, LogAudit(), accountToResponse(), App, Request, WhatsAppAccount (+16 more)
 
-### Community 54 - "parsePathUUID"
-Cohesion: 0.10
-Nodes (20): ConversationNote, ConversationNoteRequest, ConversationNoteResponse, App, Request, App, Request, App (+12 more)
+### Community 54 - "flowToResponse"
+Cohesion: 0.18
+Nodes (14): FlowRequest, FlowResponse, collectFormFieldNames(), collectFormFieldsPerScreen(), flowToResponse(), App, Request, UUID (+6 more)
 
-### Community 55 - "select/index.ts"
+### Community 55 - "calendar/index.ts"
 Cohesion: 0.04
-Nodes (40): emits, forwarded, props, props, props, emit, modelValue, props (+32 more)
+Nodes (33): delegatedProps, emits, forwarded, props, delegatedProps, forwardedProps, props, delegatedProps (+25 more)
 
 ### Community 56 - "chatbot_commerce.go"
 Cohesion: 0.07
-Nodes (44): commerceBackend, commerceRuntime, createOrderArgs, augmentAIContextWithProducts(), anthropicToolDefs(), anyIDString(), appendCommerceWelcomeCategories(), asToolFloat() (+36 more)
+Nodes (46): commerceBackend, commerceRuntime, createOrderArgs, augmentAIContextWithProducts(), anthropicToolDefs(), anyIDString(), appendCommerceWelcomeCategories(), asToolFloat() (+38 more)
 
-### Community 57 - "AccountsView.vue"
-Cohesion: 0.06
-Nodes (30): { colorMode }, { colorMode, setColorMode }, emits, forwarded, props, props, props, ColorMode (+22 more)
+### Community 57 - "auditLogsRole"
+Cohesion: 0.35
+Nodes (15): auditLogsRole(), DB, T, Time, UUID, makeAuditLog(), TestApp_GetAuditLog_CrossOrgIsolation(), TestApp_GetAuditLog_NotFound() (+7 more)
 
 ### Community 58 - "BaseNode.vue"
-Cohesion: 0.04
-Nodes (33): gradientMap, headerGradient, props, outputHandles, props, summary, options, outputHandles (+25 more)
+Cohesion: 0.05
+Nodes (27): gradientMap, headerGradient, props, outputHandles, props, summary, outputHandles, props (+19 more)
 
 ### Community 59 - "DashboardView.vue"
 Cohesion: 0.04
-Nodes (52): useAppToast(), DashboardWidget, LayoutItem, WidgetData, widgetsService, applyCustomRange(), authStore, availableFields (+44 more)
+Nodes (38): DashboardWidget, LayoutItem, WidgetData, widgetsService, authStore, availableFields, canCreateWidget, canDeleteWidget (+30 more)
 
-### Community 60 - "withQueue"
-Cohesion: 0.23
-Nodes (49): createTestCampaign(), createTestRecipient(), App, T, UUID, TestApp_Campaign_CrossOrgIsolation(), TestApp_CancelCampaign_AlreadyFinished(), TestApp_CancelCampaign_Success() (+41 more)
+### Community 60 - "UniqueEmail"
+Cohesion: 0.13
+Nodes (77): createTestCampaign(), createTestRecipient(), App, T, UUID, TestApp_Campaign_CrossOrgIsolation(), TestApp_CancelCampaign_AlreadyFinished(), TestApp_CancelCampaign_Success() (+69 more)
 
 ### Community 61 - "CodedFlowPreview.vue"
 Cohesion: 0.05
-Nodes (45): aiExpanded, busy, buyAsks, contextExpanded, copyAI(), copyContext(), copyJSON(), detailFields (+37 more)
+Nodes (48): aiExpanded, apiExpanded, busy, buyAsks, contextExpanded, copyAI(), copyContext(), copyJSON() (+40 more)
 
-### Community 62 - "newTestRequest"
-Cohesion: 0.21
-Nodes (25): Auth(), CORS(), RequirePermission(), generateTestToken(), generateTokenWithSecret(), Duration, Request, T (+17 more)
+### Community 62 - "range-calendar/index.ts"
+Cohesion: 0.04
+Nodes (33): delegatedProps, emits, forwarded, props, delegatedProps, forwardedProps, props, delegatedProps (+25 more)
 
 ### Community 63 - "App"
-Cohesion: 0.07
-Nodes (30): AssignContactRequest, ButtonContent, ContactResponse, ContactSessionDataResponse, CreateContactRequest, InteractiveContent, MessageResponse, MutateContactTagRequest (+22 more)
-
-### Community 64 - "NewWithTimeout"
 Cohesion: 0.09
-Nodes (44): Duration, NewWithTimeout(), Request, Response, T, TestClient_DownloadMedia(), TestClient_GetMediaURL(), TestClient_MarkMessageRead() (+36 more)
+Nodes (25): AssignContactRequest, ButtonContent, ContactResponse, ContactSessionDataResponse, CreateContactRequest, InteractiveContent, MessageResponse, MutateContactTagRequest (+17 more)
+
+### Community 64 - "TestContext"
+Cohesion: 0.10
+Nodes (45): Duration, NewWithTimeout(), Request, Response, T, TestClient_DownloadMedia(), TestClient_GetMediaURL(), TestClient_MarkMessageRead() (+37 more)
 
 ### Community 65 - "IVRFlowEditorView.vue"
-Cohesion: 0.04
-Nodes (39): outputHandles, props, summary, outputHandles, props, summary, IVREdge, auditRefreshKey (+31 more)
+Cohesion: 0.03
+Nodes (78): addCallbackHeader(), addHeader(), addMenuOption(), audioElement, audioFileInput, audioNodeTypes, CallbackEvent, callbackEvents (+70 more)
 
 ### Community 66 - "whatsapp/analytics.go"
-Cohesion: 0.09
-Nodes (37): Duration, App, Request, UUID, Account, Context, RawMessage, Client (+29 more)
+Cohesion: 0.15
+Nodes (25): RawMessage, CallAnalytics, CallAnalyticsDataPoint, CallAnalyticsEntry, CallAnalyticsRaw, MessagingAnalytics, MessagingAnalyticsDataPoint, MessagingAnalyticsEntry (+17 more)
 
-### Community 67 - "CreateTestRole"
-Cohesion: 0.10
-Nodes (45): T, TestApp_AddOrganizationMember_AlreadyMember(), TestApp_AddOrganizationMember_MissingUserID(), TestApp_AddOrganizationMember_Success(), TestApp_AddOrganizationMember_Unauthorized(), TestApp_AddOrganizationMember_UserNotFound(), TestApp_AddOrganizationMember_WithRole(), TestApp_CreateOrganization_EmptyName() (+37 more)
+### Community 67 - "tiqrecommerce/flow.go"
+Cohesion: 0.12
+Nodes (43): attachEarlyHandoffCaptureToLine(), earlyHandoffAddressFromFlow(), StageEarlyHandoffProductOptionCart(), askProducts(), attachTiqrCartTarget(), captureDiffers(), captureOrderFrom(), checkout() (+35 more)
 
 ### Community 68 - "ChatbotSettingsView.vue"
 Cohesion: 0.04
 Nodes (42): accountAILabel, agentsLogKey, aiLogKey, aiProviders, aiSettings, authStore, availableModels, availableUsers (+34 more)
 
 ### Community 69 - "App"
-Cohesion: 0.15
-Nodes (22): ChartPoint, DataPoint, FilterInput, GroupedSeriesData, GroupedSeriesDataset, TableRow, WidgetDataResponse, WidgetRequest (+14 more)
+Cohesion: 0.14
+Nodes (23): ChartPoint, DataPoint, FilterInput, GroupedSeriesData, GroupedSeriesDataset, TableRow, WidgetDataResponse, WidgetRequest (+15 more)
 
 ### Community 70 - "App"
 Cohesion: 0.09
 Nodes (15): chatbotSettingsCache, UserPermissions, whatsAppAccountCache, AIContext, ChatbotFlow, ChatbotSettings, Context, DB (+7 more)
 
-### Community 71 - "SetQueryParam"
-Cohesion: 0.15
-Nodes (43): fakeAnalyticsServer, auditLogsRole(), DB, T, Time, UUID, makeAuditLog(), TestApp_GetAuditLog_CrossOrgIsolation() (+35 more)
+### Community 71 - "ContactDetailView.vue"
+Cohesion: 0.02
+Nodes (101): authStore, canEditTags, collapsedSections, contactTags, emit, hasMetadata, isResizing, isUpdatingTags (+93 more)
 
 ### Community 72 - "testAccount"
 Cohesion: 0.14
 Nodes (42): T, TestClient_CreateCatalog_APIError(), TestClient_CreateCatalog_Success(), TestClient_CreateProduct_Success(), TestClient_DeleteCatalog_Success(), TestClient_DeleteProduct_APIError(), TestClient_DeleteProduct_Success(), TestClient_ListCatalogProducts_Empty() (+34 more)
 
-### Community 74 - "IVRNodeProperties.vue"
-Cohesion: 0.07
-Nodes (42): addCallbackHeader(), addHeader(), addMenuOption(), audioElement, audioFileInput, audioNodeTypes, CallbackEvent, callbackEvents (+34 more)
+### Community 74 - "ButtonVariants"
+Cohesion: 0.06
+Nodes (28): delegatedProps, props, delegatedProps, props, Props, ButtonVariants, delegatedProps, emits (+20 more)
 
 ### Community 75 - "command/index.ts"
 Cohesion: 0.04
 Nodes (42): allGroups, allItems, { contains }, delegatedProps, emits, filterState, forwarded, props (+34 more)
 
-### Community 76 - "codedflow_test.go"
-Cohesion: 0.10
-Nodes (83): storeCounts, codedFlowByKey(), enableTiqrEcommerce(), AIConfig, App, Contact, T, UUID (+75 more)
+### Community 76 - "tiqrecommerce_flow_test.go"
+Cohesion: 0.11
+Nodes (86): storeCounts, ByKey(), TestTiqrEcommerce_BuyFlowUsesOptionAddons(), enableTiqrEcommerce(), AIConfig, App, Contact, T (+78 more)
 
 ### Community 77 - "whatsapp/types.go"
-Cohesion: 0.07
-Nodes (43): AddressMessageInteractive(), compactStringMap(), EncodeAddressMessageParameters(), Number, WebhookStatus, WebhookPayload, ParseMetaAPIError(), WebhookStatusError (+35 more)
+Cohesion: 0.08
+Nodes (37): Number, WebhookStatus, WebhookPayload, ParseMetaAPIError(), WebhookStatusError, Account, BusinessProfile, Button (+29 more)
 
 ### Community 78 - "devDependencies"
 Cohesion: 0.05
-Nodes (43): autoprefixer, eslint-plugin-vue, devDependencies, autoprefixer, eslint-plugin-vue, pg, @playwright/test, postcss (+35 more)
+Nodes (43): autoprefixer, eslint, eslint-plugin-vue, devDependencies, autoprefixer, eslint, eslint-plugin-vue, pg (+35 more)
 
 ### Community 79 - "queue-pickup.spec.ts"
 Cohesion: 0.07
@@ -731,49 +739,49 @@ Nodes (26): Credentials, loginAs(), loginAsSuperAdmin(), BaseOpts, createFlowBod
 Cohesion: 0.04
 Nodes (40): emits, forwarded, props, delegatedProps, emits, forwarded, props, delegatedProps (+32 more)
 
-### Community 81 - "App"
-Cohesion: 0.16
-Nodes (12): SSOProviderPublic, SSOProviderRequest, SSOProviderResponse, SSOState, UserInfo, generateRandomString(), getString(), App (+4 more)
+### Community 81 - "cacheTestApp"
+Cohesion: 0.06
+Nodes (46): SSOProviderPublic, SSOProviderRequest, SSOProviderResponse, SSOState, UserInfo, Decrypt(), DecryptFields(), deriveKey() (+38 more)
 
 ### Community 82 - "App"
-Cohesion: 0.09
-Nodes (25): Assigner, CancelFunc, Client, DB, App, Logger, Request, UUID (+17 more)
+Cohesion: 0.11
+Nodes (12): Assigner, CancelFunc, Client, DB, App, Logger, Request, UUID (+4 more)
 
 ### Community 83 - "CustomActionsView.vue"
-Cohesion: 0.06
-Nodes (34): CustomAction, customActionsService, actions, actionToDelete, actionToToggle, columns, confirmDisableAction(), currentPage (+26 more)
+Cohesion: 0.04
+Nodes (47): computedDescription, computedSubmitLabel, computedTitle, emit, handleCancel(), handleSubmit(), open, props (+39 more)
 
-### Community 84 - "constants.go"
-Cohesion: 0.07
-Nodes (31): AIContextResponse, AuditLogResponse, ChatbotSettingsResponse, KeywordResponse, KeywordRuleResponse, TeamMemberRequest, TeamMemberResponse, TeamRequest (+23 more)
+### Community 84 - ".UpdateChatbotSettings"
+Cohesion: 0.26
+Nodes (11): ChatbotFlowResponse, ChatbotStatsResponse, applyCodedFlowProvider(), chatbotAgentsSnapshot(), chatbotAISnapshot(), chatbotHoursSnapshot(), chatbotMessagesSnapshot(), chatbotSLASnapshot() (+3 more)
 
 ### Community 85 - "templateutil_test.go"
 Cohesion: 0.13
 Nodes (37): ExtParamNames(), isPositionalParam(), ReplaceWithJSONBParams(), ReplaceWithStringParams(), ResolveParamsFromMap(), T, TestExtParamNames_DuplicateParams(), TestExtParamNames_MixedParams() (+29 more)
 
-### Community 86 - "codedflow_recover.go"
+### Community 86 - "recover.go"
 Cohesion: 0.12
-Nodes (34): codedRecoverAsk, codedRecoverContext, codedRecoverResult, appendUnique(), buildRecoverPrompt(), canonicalFieldsFromHint(), canonicalizeRecoverField(), collectValidationFields() (+26 more)
+Nodes (34): RecoverAsk, RecoverContext, RecoverResult, truncateRunes(), appendUnique(), BuildRecoverPrompt(), CanonicalFieldsFromHint(), canonicalizeRecoverField() (+26 more)
 
 ### Community 87 - "TableSettingsPage"
 Cohesion: 0.07
 Nodes (3): ApiKeysPage, CustomActionsPage, TableSettingsPage
 
 ### Community 88 - "SetupTestRedis"
-Cohesion: 0.18
-Nodes (17): Client, Context, Logger, UUID, NewPublisher(), NewSubscriber(), T, TestPublisher_PublishCampaignStats_NoSubscribersIsNotAnError() (+9 more)
+Cohesion: 0.16
+Nodes (20): withRateLimit(), FastRequestHandler, extractClientIP(), Client, Duration, FastMiddleware, Logger, Request (+12 more)
 
 ### Community 89 - "dependencies"
 Cohesion: 0.05
-Nodes (39): chart.js, class-variance-authority, clsx, dompurify, dependencies, chart.js, class-variance-authority, clsx (+31 more)
+Nodes (39): chart.js, clsx, dompurify, dependencies, chart.js, clsx, dompurify, reka-ui (+31 more)
 
-### Community 90 - "Conv"
-Cohesion: 0.20
-Nodes (5): callOK(), App, chatNodeCtx, Conv, finishCodedSession()
+### Community 90 - "tiqrecommerce/helpers.go"
+Cohesion: 0.10
+Nodes (29): applyLineCapture(), formatDeliveryEligibilityMessage(), Conv, menuButtons(), orderStatus(), resolveDeliveryLocation(), runTiqrEcommerce(), tiqrEcommerce() (+21 more)
 
 ### Community 91 - "JSONB"
 Cohesion: 0.12
-Nodes (34): scheduleLogger, setAssignment, applySetAssignment(), assignmentFromRow(), assignmentFromValue(), assignmentRows(), buttonsForNode(), buttonsFromConfig() (+26 more)
+Nodes (36): scheduleLogger, setAssignment, applyButtonSelection(), applySetAssignment(), assignmentFromRow(), assignmentFromValue(), assignmentRows(), buttonsForNode() (+28 more)
 
 ### Community 92 - "useFlowGraphSimulation.ts"
 Cohesion: 0.11
@@ -791,65 +799,65 @@ Nodes (23): addComponent(), addOption(), addScreen(), clearScreenDrag(), compone
 Cohesion: 0.18
 Nodes (36): createProcessorTestOrg(), App, Organization, T, WhatsAppAccount, newProcessorTestApp(), TestExitFlow_UpdatesSession(), TestGetOrCreateSession_ExistingSession() (+28 more)
 
-### Community 96 - "CommerceDraft"
-Cohesion: 0.05
-Nodes (59): DraftRepository, activeOwnerKey(), DB, UUID, NewDraftRepository(), DB, T, newDraft() (+51 more)
+### Community 96 - "Category"
+Cohesion: 0.09
+Nodes (33): NewDraftRepository(), TestRequiredCaptureMissingIncludesMedia(), cartJSON(), cloneJSONMap(), commerceDraftCart(), commerceDraftID(), ChatbotSettings, Contact (+25 more)
 
 ### Community 97 - "composeJevIntent"
-Cohesion: 0.13
-Nodes (32): jevChoiceAnswer, jevEndpoint, jevNoulAnswer, jevSystemOneResponse, buildJevIntentRequest(), choiceConfidenceUsable(), codedIntentProvider(), composeJevIntent() (+24 more)
+Cohesion: 0.14
+Nodes (31): jevChoiceAnswer, JevEndpoint, jevNoulAnswer, JevSystemOneResponse, codedIntentContext, codedIntentResult, buildJevIntentRequest(), choiceConfidenceUsable() (+23 more)
 
-### Community 98 - ".execChatTiqrStoreAPI"
-Cohesion: 0.20
-Nodes (9): aliasBuyerListResults(), applyChatResponseMapping(), commerceRESTConfigured(), AIConfig, ChatNode, chatNodeCtx, App, tiqrStoreAPIType() (+1 more)
+### Community 98 - "chatbot_tiqr_store_api.go"
+Cohesion: 0.12
+Nodes (32): tiqrStoreInvoker, aliasBuyerListResults(), applyLimitOffset(), buildGuestOrderPayload(), buildTiqrStoreToolArgs(), categoryToolArgs(), coerceOrderAddonNumbers(), coerceOrderItemNumbers() (+24 more)
 
 ### Community 99 - "stepsToGraph"
-Cohesion: 0.14
-Nodes (34): legacyFlowMeta, BackfillChatbotFlowGraph(), branchEdges(), buildEdges(), buildNodeConfig(), buttonsEdges(), extractCanvasPositions(), getStringFromJSONB() (+26 more)
+Cohesion: 0.15
+Nodes (32): legacyFlowMeta, BackfillChatbotFlowGraph(), branchEdges(), buildEdges(), buildNodeConfig(), buttonsEdges(), extractCanvasPositions(), getStringFromJSONB() (+24 more)
 
-### Community 100 - "NewRequest"
-Cohesion: 0.16
-Nodes (33): contactsExportRole(), DB, T, UUID, TestApp_ExportData_Contacts_OnlyOwnOrg(), TestApp_ExportData_CSVInjectionEscaped(), TestApp_ExportData_DefaultColumnsWhenEmpty(), TestApp_ExportData_InvalidJSONBody() (+25 more)
+### Community 100 - "SetQueryParam"
+Cohesion: 0.09
+Nodes (69): fakeAnalyticsServer, contactsExportRole(), DB, T, UUID, TestApp_ExportData_Contacts_OnlyOwnOrg(), TestApp_ExportData_CSVInjectionEscaped(), TestApp_ExportData_DefaultColumnsWhenEmpty() (+61 more)
 
 ### Community 101 - "MockWhatsAppClient"
 Cohesion: 0.12
 Nodes (15): Time, UUID, Context, RecipientJob, Account, Button, Context, Mutex (+7 more)
 
 ### Community 102 - "Client"
-Cohesion: 0.12
-Nodes (16): CallToolResult, ClientSession, decodeInto(), Context, Mutex, Time, isReadOnlyTool(), NewClient() (+8 more)
+Cohesion: 0.13
+Nodes (15): CallToolResult, ClientSession, decodeInto(), Context, Mutex, isReadOnlyTool(), NewClient(), normalizeEndpoint() (+7 more)
 
-### Community 103 - "DebugPanel.vue"
-Cohesion: 0.15
-Nodes (12): emit, handlePlayPause(), props, statusColor, statusLabel, stepsExpanded, timelineExpanded, variableEntries (+4 more)
+### Community 103 - "AIContextsView.vue"
+Cohesion: 0.12
+Nodes (20): AIContext, closeDeleteDialog(), columns, confirmDeleteContext(), contexts, contextToDelete, currentPage, debouncedSearch (+12 more)
 
 ### Community 104 - "custom_actions.go"
 Cohesion: 0.11
 Nodes (21): ActionResult, CustomActionRequest, CustomActionResponse, ExecuteActionRequest, redirectToken, ToastConfig, ValidationError, boolToToastType() (+13 more)
 
 ### Community 105 - "models/chatbot.go"
-Cohesion: 0.12
-Nodes (23): Contact, Organization, Team, Template, Time, User, UUID, AgentAssignmentConfig (+15 more)
+Cohesion: 0.10
+Nodes (29): KeywordRuleResponse, v2SupportedMessageType(), RawMessage, Contact, Organization, Team, Template, Time (+21 more)
 
-### Community 106 - "handlers/webhook_test.go"
-Cohesion: 0.26
-Nodes (17): App, Message, Organization, T, TestUpdateMessageStatus_DeliveredPersistsStatus(), TestUpdateMessageStatus_DeliveredUpdatesRecipient(), TestUpdateMessageStatus_FailedPersistsErrorMessage(), TestUpdateMessageStatus_FailedUpdatesMessage() (+9 more)
+### Community 106 - "ChatbotFlowsView.vue"
+Cohesion: 0.08
+Nodes (28): ChatbotFlow, columns, confirmDeleteFlow(), currentPage, debouncedSearch, deleteDialogOpen, duplicateFlow(), duplicatingFlowId (+20 more)
 
-### Community 107 - "UsersView.vue"
-Cohesion: 0.03
-Nodes (76): RESOURCE_LABELS, Permission, permissionsService, Role, rolesService, CreateRoleData, FetchRolesParams, FetchRolesResponse (+68 more)
+### Community 107 - "utils.ts"
+Cohesion: 0.02
+Nodes (76): delegatedProps, emits, forwarded, props, delegatedProps, props, props, props (+68 more)
 
 ### Community 108 - "App"
-Cohesion: 0.14
-Nodes (14): AgentTransferResponse, agentTransferRow, AssignTransferRequest, CreateAgentTransferRequest, AgentTransfer, ChatbotSettings, Contact, App (+6 more)
+Cohesion: 0.24
+Nodes (7): AgentTransfer, ChatbotSettings, Contact, App, Request, UUID, WhatsAppAccount
 
 ### Community 109 - "Sections in detail"
 Cohesion: 0.07
 Nodes (29): All-in-One, `[app]`, Building, `[calling]`, CLI Reference, Configuration File, `[cookie]`, `[database]` (+21 more)
 
-### Community 110 - ".syncContactFromMessage"
-Cohesion: 0.18
-Nodes (21): applyAssignedUserField(), applyChatbotPausedFields(), applyConversationWaitFields(), buildMessageData(), Contact, Context, Client, Message (+13 more)
+### Community 110 - "MaskIfPhoneNumber"
+Cohesion: 0.09
+Nodes (28): App, Request, App, Request, LooksLikePhoneNumber(), MaskIfPhoneNumber(), MaskPhoneNumber(), applyAssignedUserField() (+20 more)
 
 ### Community 111 - "CallSession"
 Cohesion: 0.21
@@ -863,25 +871,25 @@ Nodes (28): Analytics, Campaigns, Chatbot, Contacts, Create Role, Delete Role, G
 Cohesion: 0.07
 Nodes (28): Building a Flow, Call Hold, Call Logs, Call Recording, Call Transfers, Configuration, Configure TTS, Creating a Flow (+20 more)
 
-### Community 114 - "users.go"
-Cohesion: 0.14
-Nodes (18): AvailabilityRequest, ChangePasswordRequest, MyOrganizationResponse, PermissionInfo, RoleInfo, superAdminField, UserRequest, UserResponse (+10 more)
+### Community 114 - "intent.go"
+Cohesion: 0.12
+Nodes (30): codedAIRoleConfig, codedIntentConfig, Host, IntentContext, IntentResult, ChatbotSettingsResponse, Time, codedAISettings() (+22 more)
 
 ### Community 116 - "App"
 Cohesion: 0.12
 Nodes (13): AddMemberRequest, CreateOrganizationRequest, MemberResponse, OrganizationResponse, OrganizationSettings, UpdateMemberRoleRequest, callingConfigDefault(), callingSettingsSnapshot() (+5 more)
 
-### Community 117 - "stringFromConfig"
-Cohesion: 0.30
-Nodes (9): nodeOutcome, appendChatPath(), ChatbotFlow, ChatNode, Contact, App, chatNodeCtx, WhatsAppAccount (+1 more)
+### Community 117 - "chatNodeCtx"
+Cohesion: 0.22
+Nodes (11): chatNodeCtx, nodeOutcome, appendChatPath(), ChatbotFlow, ChatNode, Contact, App, WhatsAppAccount (+3 more)
 
-### Community 118 - "CodedFlow"
-Cohesion: 0.23
-Nodes (11): CodedFlow, CodedStep, codedFlows(), Contact, Conv, App, UUID, WhatsAppAccount (+3 more)
+### Community 118 - "CommerceDraft"
+Cohesion: 0.12
+Nodes (22): DraftRepository, activeOwnerKey(), DB, UUID, normalizeDraftJSON(), DB, T, newDraft() (+14 more)
 
-### Community 119 - "useStoreREST"
-Cohesion: 0.30
-Nodes (18): CodedPreviewMessage, countRows(), App, T, UUID, previewLive(), previewMessageText(), TestPreviewCodedFlow_ButtonAdvances() (+10 more)
+### Community 119 - "createChatbotSettings"
+Cohesion: 0.19
+Nodes (27): CodedPreviewMessage, anySlice(), asStringMap(), createChatbotSettings(), AIConfig, UUID, countRows(), App (+19 more)
 
 ### Community 120 - "organizations.mdx"
 Cohesion: 0.07
@@ -893,7 +901,7 @@ Nodes (26): Adding a new spec, Anti-pattern — DO NOT do this, API-only (`{ req
 
 ### Community 122 - "InteractivePreview.vue"
 Cohesion: 0.08
-Nodes (14): controlNodeInfo, controlNodeMeta, emit, localListPickerOpen, mode, props, currentApiStep, debugSteps (+6 more)
+Nodes (15): controlNodeInfo, controlNodeMeta, emit, localListPickerOpen, mode, props, currentApiStep, debugSteps (+7 more)
 
 ### Community 123 - "createAdminUser"
 Cohesion: 0.23
@@ -904,8 +912,8 @@ Cohesion: 0.12
 Nodes (10): AudioBridge, CallRecorder, File, TrackLocalStaticRTP, TrackRemote, WaitGroup, NewAudioBridge(), Mutex (+2 more)
 
 ### Community 125 - "Manager"
-Cohesion: 0.21
-Nodes (9): CallTransfer, ResolvePerAgentTimeout(), NewAudioPlayer(), safeClose(), buildTransferVars(), Manager, Context, TrackRemote (+1 more)
+Cohesion: 0.23
+Nodes (7): CallTransfer, safeClose(), buildTransferVars(), Manager, Context, TrackRemote, UUID
 
 ### Community 126 - "contacts.mdx"
 Cohesion: 0.08
@@ -927,9 +935,9 @@ Nodes (5): TablePage, gotoCreateApiKey(), nameInput(), saveButton(), scope
 Cohesion: 0.08
 Nodes (25): compilerOptions, allowImportingTsExtensions, isolatedModules, jsx, lib, module, moduleResolution, noEmit (+17 more)
 
-### Community 131 - "runServer"
-Cohesion: 0.12
-Nodes (19): corsWrapper(), RequestHandler, main(), printUsage(), runMigrate(), runServer(), runWorker(), FastHTTPUpgrader (+11 more)
+### Community 131 - "asStringMap"
+Cohesion: 0.20
+Nodes (30): addPickedProduct(), askAfterCartAdd(), askCollectionCaptureFields(), askQuantityAndAdd(), buyProducts(), CartLen(), CartUnitCount(), collectionByID() (+22 more)
 
 ### Community 132 - "api-reference/canned-responses.mdx"
 Cohesion: 0.08
@@ -939,17 +947,17 @@ Nodes (24): 400 Bad Request, 404 Not Found, 409 Conflict, Categories, Create Can
 Cohesion: 0.07
 Nodes (30): ToastProps, toastVariants, delegatedProps, emits, forwarded, props, delegatedProps, props (+22 more)
 
-### Community 135 - "createChatbotSettings"
-Cohesion: 0.09
-Nodes (51): stubTiqrInvoker, tiqrStoreInvoker, createChatbotSettings(), AIConfig, UUID, applyLimitOffset(), buildGuestOrderPayload(), buildTiqrStoreToolArgs() (+43 more)
+### Community 135 - "chatbot_tiqr_store_api_test.go"
+Cohesion: 0.16
+Nodes (25): stubTiqrInvoker, App, ChatbotFlow, Context, Organization, T, WhatsAppAccount, newTiqrStoreFlow() (+17 more)
 
 ### Community 136 - "CustomRole"
-Cohesion: 0.18
-Nodes (23): cleanAll(), DB, T, TestCreateDefaultAdmin_CreatesOrgAndUser(), TestCreateDefaultAdmin_Idempotent(), TestCreateDefaultAdmin_UsesExistingOrg(), TestSeedPermissionsAndRoles_CreatesAllDefaultPermissions(), TestSeedPermissionsAndRoles_Idempotent() (+15 more)
+Cohesion: 0.28
+Nodes (5): Organization, UUID, CustomRole, Permission, RolePermission
 
 ### Community 137 - "Manager"
-Cohesion: 0.14
-Nodes (12): Account, Assigner, Manager, CallLog, Client, Contact, DB, Logger (+4 more)
+Cohesion: 0.13
+Nodes (13): Account, Assigner, Manager, CallLog, Client, Contact, DB, Logger (+5 more)
 
 ### Community 138 - ".negotiateWebRTC"
 Cohesion: 0.12
@@ -971,33 +979,33 @@ Nodes (23): Button Message, CTA URL Button, Examples, Get Messages, Mark Message
 Cohesion: 0.08
 Nodes (23): Add Team Member, Assignment Strategies, Create Team, Delete Team, Get Team, List Team Members, List Teams, Member Roles (+15 more)
 
-### Community 143 - "label/index.ts"
-Cohesion: 0.03
-Nodes (54): emits, forwarded, props, props, props, delegatedProps, props, CodedFlowBinding (+46 more)
+### Community 143 - "TeamDetailView.vue"
+Cohesion: 0.02
+Nodes (81): acceptingId, displayName, firstWaiting, formattedDuration, showPanel, showTransferPicker, statusText, store (+73 more)
 
-### Community 144 - ".UpdateTemplate"
+### Community 144 - "useAuthStore"
+Cohesion: 0.04
+Nodes (62): appStore, authStore, bottomSections, isCollapsed, isMobileMenuOpen, mainSections, navSections, route (+54 more)
+
+### Community 145 - "addons.go"
+Cohesion: 0.09
+Nodes (51): IntentThreshold(), addonChoicesFromKnownProducts(), addonChoicesFromProduct(), addonParseFromRecord(), addonParseRecord(), askCatalogAddons(), askStructuredCatalogAddons(), buildAddonParsePrompt() (+43 more)
+
+### Community 146 - "MessageBuilder"
 Cohesion: 0.17
-Nodes (12): TemplateRequest, TemplateResponse, convertFromJSONBArray(), convertToJSONBArray(), diffButtons(), App, Request, Template (+4 more)
-
-### Community 145 - "accounts_validation_test.go"
-Cohesion: 0.26
-Nodes (23): createTestAccountForValidation(), App, DB, T, UUID, WhatsAppAccount, newAppWithMeta(), newFakeMetaServer() (+15 more)
-
-### Community 146 - "UUID"
-Cohesion: 0.07
-Nodes (15): AgentTransferBuilder, ContactBuilder, MessageBuilder, defaultPasswordHash(), AgentTransfer, Contact, Message, MessageType (+7 more)
+Nodes (4): MessageBuilder, Message, MessageType, NewMessage()
 
 ### Community 147 - "tickermcp/client_test.go"
-Cohesion: 0.16
-Nodes (23): asObjectList(), cloneMap(), CompactStore(), normalizeJSON(), parseToolResult(), T, TestAsObjectListEmpty(), TestAsObjectListSingleProductObject() (+15 more)
+Cohesion: 0.18
+Nodes (21): asObjectList(), looksLikeProductObject(), normalizeJSON(), parseToolResult(), T, TestAsObjectListEmpty(), TestAsObjectListSingleProductObject(), TestAsObjectListWrapped() (+13 more)
 
 ### Community 148 - ".sendMessage"
 Cohesion: 0.32
 Nodes (6): Account, Client, Button, Context, Recipient, mediaRef()
 
-### Community 149 - "RateLimit"
+### Community 149 - "Worker"
 Cohesion: 0.16
-Nodes (18): withRateLimit(), FastRequestHandler, extractClientIP(), Client, Duration, FastMiddleware, Logger, Request (+10 more)
+Nodes (13): Client, Context, DB, Logger, Template, UUID, WhatsAppAccount, New() (+5 more)
 
 ### Community 150 - "flows.mdx"
 Cohesion: 0.09
@@ -1023,105 +1031,105 @@ Nodes (18): CampaignRequest, CampaignResponse, IVRFlowRequest, RecipientRequest,
 Cohesion: 0.17
 Nodes (12): CookieAuthResponse, LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest, SwitchOrgRequest, generateSlug(), App (+4 more)
 
-### Community 158 - "newCallTestClient"
-Cohesion: 0.25
-Nodes (21): Client, Mutex, Request, ResponseWriter, Server, T, newCallServer(), newCallTestClient() (+13 more)
+### Community 158 - "earlyHandoffCheckoutStateFromSession"
+Cohesion: 0.62
+Nodes (5): anyToFloat64(), contextEmail(), contextValue(), earlyHandoffAddressFromFlowHandlers(), earlyHandoffCheckoutStateFromSession()
 
 ### Community 159 - "Client"
-Cohesion: 0.12
-Nodes (20): Account, Account, Client, BusinessProfile, Context, Account, BusinessProfile, Context (+12 more)
+Cohesion: 0.29
+Nodes (6): Account, Context, Logger, Recipient, Client, New()
 
 ### Community 160 - "Customer path"
 Cohesion: 0.09
-Nodes (21): 1. Load the store, 2. Welcome menu, 3. Fulfillment, 4. Collections and products, 5. Option, quantity, cart, 6. Checkout, 7. Order status, After-capture collections (+13 more)
+Nodes (22): 1. Load the store, 2. Welcome menu, 3. Fulfillment, 4. Collections and products, 5. Option, quantity, cart, 6. Checkout, 7. Order status, Agent handoff snapshot (+14 more)
 
 ### Community 161 - "Init"
 Cohesion: 0.18
 Nodes (16): Context, Client, Logger, Init(), T, TestNormalizeCredentialsJSON_EmptyReturnsNil(), TestNormalizeCredentialsJSON_FixesEscapedPEMNewlines(), normalizeCredentialsJSON() (+8 more)
 
-### Community 162 - "flow-preview.ts"
-Cohesion: 0.08
-Nodes (32): emit, handleClick(), emit, emit, handleSelect(), isOpen, chatScrollRef, emit (+24 more)
+### Community 162 - "PreviewPhone.vue"
+Cohesion: 0.12
+Nodes (17): emit, handleClick(), emit, emit, handleSelect(), isOpen, chatScrollRef, emit (+9 more)
 
 ### Community 163 - "App"
 Cohesion: 0.18
 Nodes (10): CallPermissionReplyData, CallLog, Contact, Context, App, Time, UUID, WebhookStatus (+2 more)
 
 ### Community 164 - "OutgoingMessageRequest"
-Cohesion: 0.16
-Nodes (16): MessageSendOptions, OutgoingMessageRequest, SendTemplateMessageRequest, APISendOptions(), DefaultSendOptions(), Account, Button, Contact (+8 more)
+Cohesion: 0.15
+Nodes (16): MessageSendOptions, OutgoingMessageRequest, SendTemplateMessageRequest, APISendOptions(), Account, Button, Contact, Context (+8 more)
 
-### Community 165 - "App"
-Cohesion: 0.20
-Nodes (10): CatalogProductRequest, CatalogProductResponse, CatalogRequest, CatalogResponse, SyncCatalogsRequest, catalogToResponse(), App, Request (+2 more)
+### Community 165 - "constants.go"
+Cohesion: 0.10
+Nodes (19): AgentTransferResponse, agentTransferRow, AIContextResponse, AssignTransferRequest, CreateAgentTransferRequest, TransferEventData, Time, ActionType (+11 more)
 
 ### Community 166 - ".DownloadAndSaveMedia"
 Cohesion: 0.26
 Nodes (6): getExtensionFromMimeType(), Account, Context, App, Request, WhatsAppAccount
 
-### Community 167 - "codedflow_conv.go"
-Cohesion: 0.18
-Nodes (15): Button, ButtonPrompt, CarouselPrompt, Choice, FlowPrompt, ImageButtonPrompt, ListPrompt, LocationPin (+7 more)
+### Community 167 - "Conv"
+Cohesion: 0.07
+Nodes (19): Button, ButtonPrompt, CarouselPrompt, Choice, FlowPrompt, ImageButtonPrompt, ListPrompt, LocationPin (+11 more)
 
-### Community 168 - ".resolveFreeText"
-Cohesion: 0.27
-Nodes (5): Route, RouteOptions, snapshotFields(), CodedPreviewAICall, Conv
+### Community 168 - "asString"
+Cohesion: 0.11
+Nodes (14): Route, RouteOptions, Conv, snapshotFields(), Conv, CodedPreviewAICall, anyToFloat64(), asString() (+6 more)
 
 ### Community 169 - "stubCommerceBackend"
-Cohesion: 0.21
-Nodes (4): stubCommerceBackend, Context, CustomerAddress, PaymentRetry
+Cohesion: 0.20
+Nodes (5): stubCommerceBackend, Context, CustomerAddress, PaymentRetry, ProductPage
 
-### Community 170 - "cacheTestApp"
-Cohesion: 0.25
-Nodes (20): cacheTestApp(), App, T, UUID, WhatsAppAccount, makeAccount(), TestDecryptAccountSecrets_DecryptsEncryptedValues(), TestDecryptAccountSecrets_LeavesLegacyPlaintextUnchanged() (+12 more)
+### Community 170 - "sheet/index.ts"
+Cohesion: 0.08
+Nodes (17): SheetVariants, emits, forwarded, props, props, delegatedProps, emits, forwarded (+9 more)
 
 ### Community 171 - "CallLog"
 Cohesion: 0.17
 Nodes (16): Contact, IVRFlow, Organization, Team, Time, User, UUID, CallDirection (+8 more)
 
 ### Community 172 - "buildTemplateComponents"
-Cohesion: 0.20
+Cohesion: 0.19
 Nodes (16): buildTemplateComponents(), T, TestBuildTemplateComponents_IncludesBodySampleText(), TestBuildTemplateComponents_IncludesHeaderSampleText(), TestBuildTemplateComponents_MissingSamplesReturnsError(), TestBuildTemplateComponents_NamedParams(), BuildAuthComponents(), BuildStandardComponents() (+8 more)
 
-### Community 173 - "utils.ts"
-Cohesion: 0.03
-Nodes (39): props, props, props, delegatedProps, forwardedProps, props, props, EmptyStateProps (+31 more)
+### Community 173 - ".UpdateTemplate"
+Cohesion: 0.17
+Nodes (12): TemplateRequest, TemplateResponse, convertFromJSONBArray(), convertToJSONBArray(), diffButtons(), App, Request, Template (+4 more)
 
 ### Community 174 - "postgres.go"
-Cohesion: 0.26
-Nodes (19): MigrationModel, AutoMigrate(), BackfillLastInboundAt(), CreateIndexes(), discardSchemaCachedPlans(), EncryptLegacyChatbotSecrets(), EnforceCommerceDraftOwnership(), FixSystemRolePermissions() (+11 more)
+Cohesion: 0.16
+Nodes (37): MigrationModel, cleanAll(), DB, T, TestCreateDefaultAdmin_CreatesOrgAndUser(), TestCreateDefaultAdmin_Idempotent(), TestCreateDefaultAdmin_UsesExistingOrg(), TestSeedPermissionsAndRoles_CreatesAllDefaultPermissions() (+29 more)
 
 ### Community 175 - "roles-permissions.mdx"
 Cohesion: 0.10
 Nodes (19): Action Buttons, API Authorization, Assigning Roles to Users, Available Resources, Best Practices, Creating a Custom Role, Cross-Organization Members, Custom Roles (+11 more)
 
-### Community 176 - "composables/index.ts"
-Cohesion: 0.26
-Nodes (10): emit, goToPage(), pageNumbers, paginationInfo, props, getPageNumbers(), PaginationInfo, PaginationOptions (+2 more)
+### Community 176 - "flow-preview.ts"
+Cohesion: 0.09
+Nodes (23): emit, handlePlayPause(), props, statusColor, statusLabel, stepsExpanded, timelineExpanded, variableEntries (+15 more)
 
 ### Community 177 - "ToggleGroup.vue"
 Cohesion: 0.12
 Nodes (15): delegatedProps, emits, forwarded, props, ToggleGroupVariants, context, delegatedProps, forwardedProps (+7 more)
 
-### Community 178 - "JSONBArray"
-Cohesion: 0.11
-Nodes (19): CannedResponseButton, CannedResponseRequest, CannedResponseResponse, buttonsToAuditString(), buttonsToJSONBArray(), cannedResponseAuditSnapshot(), cannedResponseToResponse(), CannedResponse (+11 more)
+### Community 178 - ".UpdateCannedResponse"
+Cohesion: 0.23
+Nodes (13): CannedResponseButton, CannedResponseRequest, CannedResponseResponse, buttonsToAuditString(), buttonsToJSONBArray(), cannedResponseAuditSnapshot(), cannedResponseToResponse(), CannedResponse (+5 more)
 
 ### Community 179 - "webhook_dispatch.go"
-Cohesion: 0.14
-Nodes (14): ContactEventData, MessageEventData, OutboundWebhookPayload, TransferEventData, WebhookError, computeHMACSignature(), containsEvent(), Context (+6 more)
+Cohesion: 0.15
+Nodes (13): ContactEventData, MessageEventData, OutboundWebhookPayload, WebhookError, computeHMACSignature(), containsEvent(), Context, App (+5 more)
 
 ### Community 180 - "MessageStatus"
-Cohesion: 0.16
-Nodes (10): TemplateStatusUpdate, WebhookPayload, WebhookStatus, WebhookStatusError, App, Number, RawMessage, Request (+2 more)
+Cohesion: 0.06
+Nodes (38): DashboardStats, RecentMessageResponse, TemplateStatusUpdate, WebhookPayload, WebhookStatus, WebhookStatusError, calculatePercentageChange(), App (+30 more)
 
-### Community 181 - "AccountDetailView.vue"
+### Community 181 - "card/index.ts"
 Cohesion: 0.03
-Nodes (58): formatLimitTier(), getQualityBadgeClass(), getQualityRatingLabel(), getVerificationBadgeClass(), getVerificationStatusLabel(), account, accountId, authStore (+50 more)
+Nodes (67): actionConfig, isLoading, loadLogs(), loadMore(), logs, props, total, badgeVariants (+59 more)
 
-### Community 182 - "tickermcp/client.go"
-Cohesion: 0.22
-Nodes (14): asInt(), asObjectPage(), categoryImageURL(), categoryListArgs(), categoryMap(), CompactCategory(), decodeCategory(), defaultInt() (+6 more)
+### Community 182 - "DrawerContent.vue"
+Cohesion: 0.09
+Nodes (15): emits, forwarded, props, delegatedProps, emits, forwardedProps, props, delegatedProps (+7 more)
 
 ### Community 183 - "features/canned-responses.mdx"
 Cohesion: 0.11
@@ -1131,13 +1139,13 @@ Nodes (18): Access Control, Auto-Filled Placeholders, Best Practices, Call butto
 Cohesion: 0.22
 Nodes (10): PermissionResponse, RoleRequest, RoleResponse, App, Permission, Request, UUID, roleAuditSnapshot() (+2 more)
 
-### Community 186 - "CreateTestRoleWithKeys"
-Cohesion: 0.29
-Nodes (18): App, Message, T, UUID, makeMediaMessage(), TestApp_ServeMedia_AgentCanReadAssignedContactMedia(), TestApp_ServeMedia_AgentViaTeamTransfer(), TestApp_ServeMedia_AgentWithoutAssignmentDenied() (+10 more)
+### Community 186 - ".UpdateWebhook"
+Cohesion: 0.17
+Nodes (13): AccountRequest, AccountResponse, WebhookRequest, WebhookResponse, generateVerifyToken(), UUID, App, Request (+5 more)
 
 ### Community 187 - "NewS3Client"
-Cohesion: 0.20
-Nodes (13): Client, Context, Duration, Reader, NewS3Client(), normalizeS3Bucket(), T, TestNewS3Client_AcceptsStaticCredentials() (+5 more)
+Cohesion: 0.40
+Nodes (8): NewS3Client(), normalizeS3Bucket(), T, TestNewS3Client_AcceptsStaticCredentials(), TestNewS3Client_ParsesDigitalOceanSpacesHostname(), TestNewS3Client_RequiresBucket(), TestNewS3Client_RequiresRegion(), TestNewS3Client_Succeeds_WithBucketAndRegion()
 
 ### Community 188 - "startFreshSession"
 Cohesion: 0.23
@@ -1155,9 +1163,9 @@ Nodes (16): ContactFixtures, createRoleFixture(), createTeamFixture(), createUse
 Cohesion: 0.14
 Nodes (14): addButton(), ButtonType, ctaCount, ctaLimitReached, effectiveMax, emit, emitButtons(), hasCtaButtons (+6 more)
 
-### Community 192 - "FormLabel.vue"
-Cohesion: 0.19
-Nodes (10): { error, formItemId, formDescriptionId, formMessageId }, { formDescriptionId }, props, id, props, { error, formItemId }, props, { name, formMessageId } (+2 more)
+### Community 192 - "APIKeysView.vue"
+Cohesion: 0.11
+Nodes (21): formatDate(), apiKeysService, APIKey, apiKeys, authStore, canDelete, canWrite, columns (+13 more)
 
 ### Community 193 - "App"
 Cohesion: 0.31
@@ -1187,21 +1195,21 @@ Nodes (16): Auto-create (`allow_auto_create = true`), Auto-create vs. Invite-onl
 Cohesion: 0.13
 Nodes (10): isArrayOfObjects(), isArrayOfPrimitives(), isObject(), isOpen, props, emits, forwarded, props (+2 more)
 
-### Community 200 - "codedflow_intent.go"
-Cohesion: 0.24
-Nodes (17): codedAIRoleConfig, codedIntentConfig, codedIntentContext, codedIntentResult, buildGuidePrompt(), buildIntentPrompt(), codedRoleSettings(), defaultGuideCodedIntent() (+9 more)
+### Community 200 - "scroll-area/index.ts"
+Cohesion: 0.05
+Nodes (32): addNote(), authStore, editingContent, editingNoteId, emit, isSaving, newNoteContent, notesEndRef (+24 more)
 
 ### Community 201 - "OrganizationBuilder"
 Cohesion: 0.29
 Nodes (3): OrganizationBuilder, Organization, NewOrganization()
 
 ### Community 202 - "MetaTemplate"
-Cohesion: 0.27
+Cohesion: 0.28
 Nodes (7): templateListPage, Account, Client, Context, parseTemplateListPage(), MetaQualityScore, MetaTemplate
 
 ### Community 203 - "AudioPlayer"
 Cohesion: 0.19
-Nodes (5): AudioPlayer, Duration, Reader, TrackLocalStaticRTP, readOpusPackets()
+Nodes (6): AudioPlayer, Duration, Reader, TrackLocalStaticRTP, NewAudioPlayer(), readOpusPackets()
 
 ### Community 204 - "accounts.mdx"
 Cohesion: 0.12
@@ -1219,25 +1227,25 @@ Nodes (15): 3rd Party Hosting, Manual Installation, Next Steps, Prerequisites, P
 Cohesion: 0.18
 Nodes (15): addField(), addSection(), assignedKeys, AvailableVariable, emit, PanelConfig, PanelField, PanelSection (+7 more)
 
-### Community 208 - "sheet/index.ts"
-Cohesion: 0.08
-Nodes (17): SheetVariants, emits, forwarded, props, props, delegatedProps, emits, forwarded (+9 more)
+### Community 208 - "NewPublisher"
+Cohesion: 0.19
+Nodes (15): Client, Context, Logger, UUID, NewPublisher(), NewSubscriber(), T, TestPublisher_PublishCampaignStats_NoSubscribersIsNotAnError() (+7 more)
 
-### Community 209 - "menubar/index.ts"
-Cohesion: 0.03
-Nodes (43): delegatedProps, emits, forwarded, props, delegatedProps, emits, forwarded, props (+35 more)
+### Community 209 - "newCallTestClient"
+Cohesion: 0.25
+Nodes (21): Client, Mutex, Request, ResponseWriter, Server, T, newCallServer(), newCallTestClient() (+13 more)
 
 ### Community 210 - "Load"
 Cohesion: 0.33
 Nodes (15): Load(), T, TestLoad_AppliesDefaultsForMissingFields(), TestLoad_DevelopmentDoesNotForceSecureCookie(), TestLoad_EmptyConfigPathStillLoadsDefaults(), TestLoad_EnvVarsOverrideFile(), TestLoad_FileValuesOverrideDefaults(), TestLoad_MissingFileReturnsError() (+7 more)
 
-### Community 211 - "CannedResponseDetailView.vue"
-Cohesion: 0.05
-Nodes (37): categoryLabels, emit, filteredResponses, groupedResponses, internalOpen, isLoading, isOpen, props (+29 more)
+### Community 211 - "JSONBArray"
+Cohesion: 0.10
+Nodes (11): AuditLogResponse, Time, UUID, Organization, User, UUID, AuditAction, AuditLog (+3 more)
 
 ### Community 212 - "session.go"
-Cohesion: 0.21
-Nodes (10): IVREdge, IVRFlowGraph, IVRNode, IVRNodePosition, IVRNodeType, TransferCallbacks, TransferHTTPCallback, mergeRecordings() (+2 more)
+Cohesion: 0.23
+Nodes (9): IVREdge, IVRFlowGraph, IVRNode, IVRNodePosition, IVRNodeType, TransferCallbacks, TransferHTTPCallback, parseOneCallback() (+1 more)
 
 ### Community 213 - "analytics.mdx"
 Cohesion: 0.13
@@ -1268,16 +1276,16 @@ Cohesion: 0.29
 Nodes (13): finalizeContact(), findExistingContact(), GetOrCreateContact(), Contact, DB, UUID, normalizePhone(), T (+5 more)
 
 ### Community 221 - "NormalizeProductMoney"
-Cohesion: 0.28
-Nodes (12): normalizeTiqrStoreMoney(), normalizePageProducts(), divideMoneyKeys(), NormalizeDeliveryMoney(), normalizeMoneyList(), NormalizeOrderMoney(), NormalizeProductListMoney(), NormalizeProductMoney() (+4 more)
+Cohesion: 0.20
+Nodes (13): normalizeTiqrStoreMoney(), asFloat(), normalizePageProducts(), divideMoneyKeys(), NormalizeDeliveryMoney(), normalizeMoneyList(), NormalizeOrderMoney(), NormalizeProductListMoney() (+5 more)
 
 ### Community 222 - "Account"
-Cohesion: 0.39
-Nodes (5): Account, Button, Context, Recipient, Client
+Cohesion: 0.28
+Nodes (9): Account, Button, Context, Recipient, Client, AddressMessageInteractive(), compactStringMap(), EncodeAddressMessageParameters() (+1 more)
 
-### Community 223 - "range-calendar/index.ts"
-Cohesion: 0.05
-Nodes (27): delegatedProps, emits, forwarded, props, delegatedProps, forwardedProps, props, delegatedProps (+19 more)
+### Community 223 - "asString"
+Cohesion: 0.11
+Nodes (31): CallOK(), FinishSession(), checkoutSlotLabel(), Location, Time, normalizedCaptureValue(), parseFulfillmentTimeText(), promptCaptureField() (+23 more)
 
 ### Community 224 - "Whatomate"
 Cohesion: 0.14
@@ -1295,13 +1303,13 @@ Nodes (13): Adding New Languages, Adding New Strings, Changing Locale Programmat
 Cohesion: 0.21
 Nodes (8): APIKeyCreateResponse, APIKeyRequest, APIKeyResponse, generateAPIKey(), App, Request, Time, UUID
 
-### Community 228 - ".createChatbotFlowFromPayload"
-Cohesion: 0.29
-Nodes (9): ChatbotFlowExportEnvelope, ChatbotFlowExportPayload, chatbotFlowExportFilename(), chatbotFlowToExportPayload(), ChatbotFlow, App, Request, UUID (+1 more)
+### Community 228 - "tickermcp/client.go"
+Cohesion: 0.18
+Nodes (16): asInt(), asObjectPage(), categoryImageURL(), categoryListArgs(), categoryMap(), cloneMap(), CompactCategory(), CompactStore() (+8 more)
 
-### Community 229 - "ticker/client.go"
-Cohesion: 0.24
-Nodes (11): attachProductCurrency(), asFloat(), asInt(), asString(), CompactProduct(), ExtractProductImageURL(), firstHTTPURL(), CreateOrderRequest (+3 more)
+### Community 229 - "early_handoff.go"
+Cohesion: 0.16
+Nodes (27): askEarlyHandoffAddons(), askEarlyHandoffCaptureFields(), askEarlyHandoffCustomerDetails(), clearCodedEarlyHandoffSession(), collectEarlyHandoffAddonChoices(), collectionHandoffEarly(), deprecatedEarlyHandoffAddonsFreeName(), earlyHandoffAddonProductIDs() (+19 more)
 
 ### Community 230 - "clearWebhookCache"
 Cohesion: 0.33
@@ -1331,17 +1339,17 @@ Nodes (13): Conversation Flows, Create Flow, Duplicate Flow, Edge resolution, Ex
 Cohesion: 0.06
 Nodes (23): actionLabels, emit, groupsWithSelections, isSelected(), openGroups, props, sortedPermissionGroups, toggleGroup() (+15 more)
 
-### Community 237 - "evaluateStoreDelivery"
-Cohesion: 0.31
-Nodes (11): storeDeliveryEligibility, evaluateStoreDelivery(), haversineKm(), storeGeoConfigured(), storeLocationBasedDelivery(), T, TestEvaluateStoreDelivery_NullFreeRadiusIsPaidInsideDoable(), TestEvaluateStoreDelivery_UnconfiguredAllows() (+3 more)
+### Community 237 - "ticker/client.go"
+Cohesion: 0.26
+Nodes (10): asInt(), asString(), CompactProduct(), ExtractProductImageURL(), firstHTTPURL(), CreateOrderRequest, ListCategoriesParams, ListProductsParams (+2 more)
 
-### Community 238 - "calendar/index.ts"
-Cohesion: 0.06
-Nodes (24): delegatedProps, emits, forwarded, props, delegatedProps, forwardedProps, props, delegatedProps (+16 more)
+### Community 238 - "FormLabel.vue"
+Cohesion: 0.19
+Nodes (10): { error, formItemId, formDescriptionId, formMessageId }, { formDescriptionId }, props, id, props, { error, formItemId }, props, { name, formMessageId } (+2 more)
 
-### Community 239 - "CarouselMessageInteractive"
-Cohesion: 0.23
-Nodes (11): T, TestCarouselMessageInteractiveQuickReply(), TestCarouselMessageInteractiveRequiresTwoMatchingCards(), TestCarouselMessageInteractiveURL(), T, TestListMessageInteractive(), TestListMessageInteractiveRequiresBodyAndRow(), CarouselMessageInteractive() (+3 more)
+### Community 239 - "RedisConsumer"
+Cohesion: 0.18
+Nodes (10): Client, Context, Logger, Consumer, JobHandler, JobType, Queue, RedisConsumer (+2 more)
 
 ### Community 240 - "Account"
 Cohesion: 0.42
@@ -1403,17 +1411,17 @@ Nodes (9): outputHandles, props, summary, TIQR_STORE_OPERATIONS, tiqrStoreApiTyp
 Cohesion: 0.18
 Nodes (7): emits, forwarded, props, delegatedProps, forwardedProps, props, props
 
-### Community 255 - "ChatGraph"
+### Community 255 - "App"
+Cohesion: 0.20
+Nodes (10): CatalogProductRequest, CatalogProductResponse, CatalogRequest, CatalogResponse, SyncCatalogsRequest, catalogToResponse(), App, Request (+2 more)
+
+### Community 256 - "NumberField.vue"
+Cohesion: 0.11
+Nodes (12): delegatedProps, emits, forwarded, props, props, delegatedProps, forwarded, props (+4 more)
+
+### Community 257 - "piper_test.go"
 Cohesion: 0.36
-Nodes (6): ChatEdge, ChatGraph, ChatNode, ChatNodePosition, ChatNodeType, parseChatGraph()
-
-### Community 256 - ".completeCodedRoleText"
-Cohesion: 0.16
-Nodes (13): codedAISettings(), codedFlowRoleProvider(), defaultLookupLatestOrder(), defaultTranslateCodedLine(), englishLanguage(), App, ChatbotSettings, App (+5 more)
-
-### Community 257 - "flows.go"
-Cohesion: 0.35
-Nodes (10): FlowRequest, FlowResponse, collectFormFieldNames(), collectFormFieldsPerScreen(), UUID, hasCompleteAction(), sanitizeComponentsWithPayload(), sanitizeID() (+2 more)
+Nodes (13): fileExists(), sha256Short(), fakeBin(), fakeOpusenc(), fakePiper(), T, TestPiperTTS_Generate_CachesExistingFile(), TestPiperTTS_Generate_CreatesFile() (+5 more)
 
 ### Community 258 - "ApplyConversationWait"
 Cohesion: 0.33
@@ -1427,9 +1435,9 @@ Nodes (3): TemplateBuilder, Template, NewTemplate()
 Cohesion: 0.20
 Nodes (3): WhatsAppAccountBuilder, WhatsAppAccount, NewWhatsAppAccount()
 
-### Community 262 - "setupRoutes"
-Cohesion: 0.27
-Nodes (9): App, Client, Logger, setupRoutes(), Fastglue, RequestHandler, Handler(), IsEmbedded() (+1 more)
+### Community 262 - ".ListConversationNotes"
+Cohesion: 0.25
+Nodes (8): ConversationNote, ConversationNoteRequest, ConversationNoteResponse, App, Request, Time, UUID, noteToResponse()
 
 ### Community 263 - "overview.mdx"
 Cohesion: 0.20
@@ -1447,9 +1455,9 @@ Nodes (9): emit, handleKeydown(), handleSubmit(), inputPlaceholder, inputString,
 Cohesion: 0.20
 Nodes (9): compilerOptions, allowSyntheticDefaultImports, composite, module, moduleResolution, skipLibCheck, strict, include (+1 more)
 
-### Community 268 - "App"
-Cohesion: 0.31
-Nodes (5): AgentTransfer, Contact, App, Message, UUID
+### Community 268 - "dropdown-menu/index.ts"
+Cohesion: 0.15
+Nodes (6): emit, props, props, props, props, props
 
 ### Community 269 - "TeamBuilder"
 Cohesion: 0.22
@@ -1468,12 +1476,12 @@ Cohesion: 0.22
 Nodes (8): buttons, cardAction, dynamicLabel, isCarousel, isDynamic, isList, outputHandles, props
 
 ### Community 273 - "codedPreviewHold"
-Cohesion: 0.18
+Cohesion: 0.20
 Nodes (16): codedPreviewContact, codedPreviewHold, codedPreviewInput, codedPreviewSession, codedPreviewState, codedPreviewRedisKey(), codedPreviewStateFrom(), Contact (+8 more)
 
-### Community 274 - "DrawerContent.vue"
-Cohesion: 0.09
-Nodes (15): emits, forwarded, props, delegatedProps, emits, forwardedProps, props, delegatedProps (+7 more)
+### Community 274 - "PinInput.vue"
+Cohesion: 0.12
+Nodes (12): delegatedProps, emits, forwarded, props, delegatedProps, forwardedProps, props, forwardedProps (+4 more)
 
 ### Community 275 - "models_test.go"
 Cohesion: 0.39
@@ -1483,9 +1491,9 @@ Nodes (8): T, TestJSONB_GormParsesAsColumn(), TestJSONB_Scan(), TestJSONB_Value(
 Cohesion: 0.25
 Nodes (4): Time, WebhookPayload, ParsedMessage, ParsedStatus
 
-### Community 277 - "middleware.go"
-Cohesion: 0.15
-Nodes (22): AuthWithDB(), GetOrganization(), GetOrganizationID(), GetUser(), GetUserID(), DB, FastMiddleware, Logger (+14 more)
+### Community 277 - "runServer"
+Cohesion: 0.05
+Nodes (73): corsWrapper(), App, Client, Logger, RequestHandler, main(), printUsage(), runMigrate() (+65 more)
 
 ### Community 278 - "TiQR Agent on DOKS"
 Cohesion: 0.25
@@ -1523,13 +1531,13 @@ Nodes (5): CLEANUP_STATEMENTS, cleanupE2EData(), CreateUser, extractCSRFToken(),
 Cohesion: 0.29
 Nodes (6): name, overrides, minimatch, private, type, version
 
-### Community 287 - "Encrypt"
-Cohesion: 0.16
-Nodes (14): Decrypt(), DecryptFields(), deriveKey(), Encrypt(), IsEncrypted(), T, TestDecrypt_LegacyUnencrypted(), TestDecrypt_WrongKey() (+6 more)
+### Community 287 - "TeamResponse"
+Cohesion: 0.36
+Nodes (8): TeamMemberRequest, TeamMemberResponse, TeamRequest, TeamResponse, AssignmentStrategy, Time, UUID, TeamRole
 
-### Community 289 - ".GetDashboardStats"
-Cohesion: 0.29
-Nodes (5): DashboardStats, RecentMessageResponse, calculatePercentageChange(), App, Request
+### Community 289 - "ApiMockDialog.vue"
+Cohesion: 0.22
+Nodes (10): delay, emit, handleClose(), handleSubmit(), parsedResponse, parseError, props, responseBody (+2 more)
 
 ### Community 290 - "ConversationNote"
 Cohesion: 0.29
@@ -1564,16 +1572,16 @@ Cohesion: 0.40
 Nodes (5): Assignment, assignmentRows(), assignmentValue(), props, summary
 
 ### Community 298 - "BulkMessageCampaign"
-Cohesion: 0.14
-Nodes (11): Message, Organization, Template, Time, User, UUID, BulkMessageCampaign, BulkMessageRecipient (+3 more)
+Cohesion: 0.23
+Nodes (9): Message, Organization, Template, Time, User, UUID, BulkMessageCampaign, BulkMessageRecipient (+1 more)
 
-### Community 299 - "useConditionEvaluator.ts"
-Cohesion: 0.27
-Nodes (4): ASTNode, Evaluator, Token, TokenType
+### Community 299 - "composables/index.ts"
+Cohesion: 0.16
+Nodes (12): ASTNode, Evaluator, Token, TokenType, useConditionEvaluator(), useFlowHistory(), useFlowSimulation(), getPageNumbers() (+4 more)
 
-### Community 300 - "RedisConsumer"
-Cohesion: 0.18
-Nodes (10): Client, Context, Logger, Consumer, JobHandler, JobType, Queue, RedisConsumer (+2 more)
+### Community 300 - "testutil.go"
+Cohesion: 0.19
+Nodes (9): Logger, Time, UUID, MustParseUUID(), NewTestUUID(), RandomUUID(), TestLogger(), TimePtr() (+1 more)
 
 ### Community 301 - ".setAuthCookies"
 Cohesion: 0.40
@@ -1585,7 +1593,7 @@ Nodes (5): fakeMetaServer, Mutex, Request, ResponseWriter, Server
 
 ### Community 303 - "parseFulfillmentTimeText"
 Cohesion: 0.33
-Nodes (5): Time, parseFulfillmentTimeText(), T, TestParseFulfillmentTimeText(), Location
+Nodes (5): Location, Time, parseFulfillmentTimeText(), T, TestParseFulfillmentTimeText()
 
 ### Community 304 - "createTestTemplate"
 Cohesion: 0.33
@@ -1611,9 +1619,9 @@ Nodes (5): Conditionals, Example: Portfolio Message, Loops, Template Syntax, Var
 Cohesion: 0.40
 Nodes (3): MOCK_ACCOUNTS, TEMPLATES_ALPHA, TEMPLATES_BETA
 
-### Community 311 - "NumberField.vue"
-Cohesion: 0.11
-Nodes (12): delegatedProps, emits, forwarded, props, props, delegatedProps, forwarded, props (+4 more)
+### Community 311 - "whatsapp/client.go"
+Cohesion: 0.18
+Nodes (9): Account, BusinessProfile, BusinessProfileResponse, CredentialsValidationResult, MediaURLResponse, ResumableUploadFinishResponse, ResumableUploadResponse, SubscribeAppResponse (+1 more)
 
 ### Community 312 - "env.d.ts"
 Cohesion: 0.40
@@ -1631,25 +1639,25 @@ Nodes (4): Get Session, List Sessions, Response, Sessions
 Cohesion: 0.50
 Nodes (3): Context, Client, UUID
 
-### Community 317 - "PinInput.vue"
-Cohesion: 0.12
-Nodes (12): delegatedProps, emits, forwarded, props, delegatedProps, forwardedProps, props, forwardedProps (+4 more)
+### Community 317 - "TestTiqrEcommerce_BuyFlowStoresCatalogAddons"
+Cohesion: 0.38
+Nodes (11): AddonParseResult, MaxGuideTurns(), earlyHandoffAddonStore(), T, productWithAddons(), TestTiqrEcommerce_AddonMissingQuantityThenSave(), TestTiqrEcommerce_AddonUnclearTransfersAfterGuides(), TestTiqrEcommerce_BuyFlowStoresCatalogAddons() (+3 more)
 
-### Community 318 - "template_engine.go"
-Cohesion: 0.15
-Nodes (15): valueFormatter, templateTiqrParams(), compareNumeric(), copyMap(), formatTiqrParamValue(), formatValue(), processForLoopsFormatted(), processTiqrParamTemplate() (+7 more)
+### Community 318 - "evaluateStoreDelivery"
+Cohesion: 0.31
+Nodes (11): evaluateStoreDelivery(), haversineKm(), storeGeoConfigured(), storeLocationBasedDelivery(), T, TestEvaluateStoreDelivery_NullFreeRadiusIsPaidInsideDoable(), TestEvaluateStoreDelivery_UnconfiguredAllows(), TestEvaluateStoreDelivery_Zones() (+3 more)
 
-### Community 319 - ".shouldTraceCodedFlow"
-Cohesion: 0.40
-Nodes (5): codedFlowSessionKey(), chatNodeCtx, App, mustJSON(), truncateTrace()
+### Community 319 - "App"
+Cohesion: 0.04
+Nodes (27): Chat, NodeResult, codedChat, SessionKey(), defaultLookupLatestOrder(), AgentTransfer, ChatbotSettings, Client (+19 more)
 
-### Community 320 - "dropdown-menu/index.ts"
-Cohesion: 0.15
-Nodes (6): emit, props, props, props, props, props
+### Community 320 - "NewWithBaseURL"
+Cohesion: 0.36
+Nodes (11): T, TestClient_GetAnalytics_APIErrorWrapped(), TestClient_GetAnalytics_CallIncludesDimensionsAndMetricTypes(), TestClient_GetAnalytics_MessagingFlattensPhoneEntries(), TestClient_GetAnalytics_MessagingNestedData(), TestClient_GetAnalytics_PricingIncludesDimensions(), TestClient_GetAnalytics_TemplatePaginatesAndFlattens(), TestNormalizeGranularity() (+3 more)
 
-### Community 321 - "fakeProfileServer"
-Cohesion: 0.50
-Nodes (4): fakeProfileServer, Request, ResponseWriter, Server
+### Community 321 - "RadioGroup.vue"
+Cohesion: 0.20
+Nodes (7): delegatedProps, emits, forwarded, props, delegatedProps, forwardedProps, props
 
 ### Community 322 - ".UploadProfilePicture"
 Cohesion: 0.50
@@ -1659,92 +1667,124 @@ Nodes (3): Account, Context, Client
 Cohesion: 0.67
 Nodes (3): Agent Transfers, How Transfers Work, Transfer Triggers
 
-### Community 349 - "testutil.go"
-Cohesion: 0.19
-Nodes (9): Logger, Time, UUID, MustParseUUID(), NewTestUUID(), RandomUUID(), TestLogger(), TimePtr() (+1 more)
-
-### Community 350 - "App"
-Cohesion: 0.32
-Nodes (4): buildTeamResponse(), App, Request, Team
-
-### Community 378 - ".UpdateCodedFlowBinding"
-Cohesion: 0.27
-Nodes (6): CodedFlowBinding, CodedFlowBindingResponse, App, Request, UUID, normalizeCodedFlowKeywords()
-
-### Community 379 - "ApiMockDialog.vue"
-Cohesion: 0.22
-Nodes (10): delay, emit, handleClose(), handleSubmit(), parsedResponse, parseError, props, responseBody (+2 more)
-
-### Community 380 - "ResizableHandle.vue"
+### Community 329 - "CarouselMessageInteractive"
 Cohesion: 0.18
-Nodes (8): delegatedProps, emits, forwarded, props, delegatedProps, emits, forwarded, props
+Nodes (13): T, TestCarouselMessageInteractiveQuickReply(), TestCarouselMessageInteractiveRequiresTwoMatchingCards(), TestCarouselMessageInteractiveURL(), T, TestListMessageInteractive(), TestListMessageInteractiveRequiresBodyAndRow(), CarouselMessageInteractive() (+5 more)
 
-### Community 381 - ".UpdateChatbotSettings"
-Cohesion: 0.38
-Nodes (9): ChatbotFlowResponse, applyCodedFlowProvider(), chatbotAgentsSnapshot(), chatbotAISnapshot(), chatbotHoursSnapshot(), chatbotMessagesSnapshot(), chatbotSLASnapshot(), ChatbotSettings (+1 more)
+### Community 335 - "ChatGraph"
+Cohesion: 0.36
+Nodes (6): ChatEdge, ChatGraph, ChatNode, ChatNodePosition, ChatNodeType, parseChatGraph()
 
-### Community 382 - "processTemplate"
-Cohesion: 0.18
-Nodes (11): processTemplate(), TestProcessTemplate_CollectionNameLoop(), TestProcessTemplate_ConditionalsOnly(), TestProcessTemplate_EmptyTemplate(), TestProcessTemplate_ForLoopAllowsSpacesInsideBraces(), TestProcessTemplate_LoopsOnly(), TestProcessTemplate_Mixed(), TestProcessTemplate_NestedLoopsWithConditionals() (+3 more)
-
-### Community 383 - "whatsapp/analytics_test.go"
-Cohesion: 0.33
-Nodes (10): T, TestClient_GetAnalytics_APIErrorWrapped(), TestClient_GetAnalytics_CallIncludesDimensionsAndMetricTypes(), TestClient_GetAnalytics_MessagingFlattensPhoneEntries(), TestClient_GetAnalytics_MessagingNestedData(), TestClient_GetAnalytics_PricingIncludesDimensions(), TestClient_GetAnalytics_TemplatePaginatesAndFlattens(), TestNormalizeGranularity() (+2 more)
-
-### Community 384 - "RadioGroup.vue"
-Cohesion: 0.20
-Nodes (7): delegatedProps, emits, forwarded, props, delegatedProps, forwardedProps, props
-
-### Community 385 - "codedflow_trace.go"
-Cohesion: 0.31
-Nodes (8): formatHTTPCurl(), parseTruthyEnv(), shellQuote(), T, TestCodedFlowTraceEnabled_EnvDefaultOn(), TestCodedFlowTraceEnabled_EnvOff(), TestFormatHTTPCurl(), TestParseTruthyEnv()
-
-### Community 386 - "alert/index.ts"
+### Community 338 - "alert/index.ts"
 Cohesion: 0.25
 Nodes (4): props, props, props, AlertVariants
 
-### Community 387 - "Catalog"
-Cohesion: 0.43
-Nodes (4): Organization, UUID, Catalog, CatalogProduct
+### Community 344 - "S3Client"
+Cohesion: 0.39
+Nodes (5): Client, Context, Duration, Reader, S3Client
 
-### Community 388 - "Slider.vue"
+### Community 349 - "UUID"
 Cohesion: 0.33
+Nodes (4): AgentTransferBuilder, AgentTransfer, UUID, NewAgentTransfer()
+
+### Community 350 - "factories.go"
+Cohesion: 0.28
+Nodes (4): CampaignBuilder, defaultPasswordHash(), NewCampaign(), NewUser()
+
+### Community 352 - "ContactBuilder"
+Cohesion: 0.22
+Nodes (3): ContactBuilder, Contact, NewContact()
+
+### Community 378 - "newCodedChat"
+Cohesion: 0.11
+Nodes (28): CodedFlow, CodedStep, codedFlowSessionKey(), Flows(), CodedFlowBinding, Conv, MatchTrigger(), NewConv() (+20 more)
+
+### Community 380 - ".createChatbotFlowFromPayload"
+Cohesion: 0.29
+Nodes (9): ChatbotFlowExportEnvelope, ChatbotFlowExportPayload, chatbotFlowExportFilename(), chatbotFlowToExportPayload(), ChatbotFlow, App, Request, UUID (+1 more)
+
+### Community 381 - ".GetMetaAnalytics"
+Cohesion: 0.17
+Nodes (12): Duration, App, Request, UUID, Account, Context, Client, NormalizeGranularity() (+4 more)
+
+### Community 382 - ".GetBusinessProfile"
+Cohesion: 0.39
+Nodes (5): Account, Client, BusinessProfile, Context, BusinessProfileInput
+
+### Community 383 - "fetchWidgetData"
+Cohesion: 0.38
+Nodes (7): applyCustomRange(), confirmDeleteWidget(), fetchDashboardData(), fetchDataSources(), fetchWidgetData(), fetchWidgets(), saveWidget()
+
+### Community 384 - "ResizableHandle.vue"
+Cohesion: 0.18
+Nodes (8): delegatedProps, emits, forwarded, props, delegatedProps, emits, forwarded, props
+
+### Community 385 - ".UpdateCodedFlowBinding"
+Cohesion: 0.27
+Nodes (6): CodedFlowBindingResponse, CodedFlowBinding, App, Request, UUID, normalizeCodedFlowKeywords()
+
+### Community 387 - "DialogContent.vue"
+Cohesion: 0.40
+Nodes (4): delegatedProps, emits, forwarded, props
+
+### Community 388 - "PopoverContent.vue"
+Cohesion: 0.40
 Nodes (4): delegatedProps, emits, forwarded, props
 
 ### Community 389 - "executeHTTPCallback"
 Cohesion: 0.50
 Nodes (4): HTTPCallbackResult, executeHTTPCallback(), Duration, interpolateTemplate()
 
-### Community 390 - "AlertDialogContent.vue"
+### Community 390 - "SelectContent.vue"
 Cohesion: 0.40
 Nodes (4): delegatedProps, emits, forwarded, props
 
-### Community 391 - "DialogContent.vue"
+### Community 391 - "Spinner.vue"
+Cohesion: 0.40
+Nodes (3): props, sizeClass, SpinnerProps
+
+### Community 394 - "jsonutil_test.go"
+Cohesion: 0.67
+Nodes (3): T, TestAsString_CoercesJSONNumberTypes(), TestFieldString_MatchesNumericIDsLikeGraphRunner()
+
+### Community 395 - "TooltipContent.vue"
 Cohesion: 0.40
 Nodes (4): delegatedProps, emits, forwarded, props
 
-### Community 392 - "DialogScrollContent.vue"
-Cohesion: 0.40
-Nodes (4): delegatedProps, emits, forwarded, props
+### Community 397 - "HTTPCallbackNode.vue"
+Cohesion: 0.50
+Nodes (3): outputHandles, props, summary
 
-### Community 393 - "PopoverContent.vue"
-Cohesion: 0.40
-Nodes (4): delegatedProps, emits, forwarded, props
+### Community 398 - "ChatbotApiNode.vue"
+Cohesion: 0.50
+Nodes (3): props, summary, urlTitle
+
+### Community 400 - "ChatbotConditionNode.vue"
+Cohesion: 0.50
+Nodes (3): outputHandles, props, summary
+
+### Community 401 - "ChatbotTimingNode.vue"
+Cohesion: 0.50
+Nodes (3): outputHandles, props, summary
+
+### Community 402 - "isNumberWidget"
+Cohesion: 0.50
+Nodes (4): isChartWidget(), isNumberWidget(), isShortcutsWidget(), isTableWidget()
 
 ## Knowledge Gaps
-- **2924 isolated node(s):** `01-add-agent-node-pool.sh script`, `02-setup-registry-ns.sh script`, `deploy.sh script`, `lib-ui-firebase-build.sh script`, `name` (+2919 more)
+- **2925 isolated node(s):** `01-add-agent-node-pool.sh script`, `02-setup-registry-ns.sh script`, `deploy.sh script`, `lib-ui-firebase-build.sh script`, `name` (+2920 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **43 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **46 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `page` connect `page` to `TablePage`, `pages/index.ts`, `CampaignsPage`, `ProfilePage`, `card/index.ts`, `BasePage`, `webhooks.spec.ts`, `queue-pickup.spec.ts`, `AgentTransfersPage`, `FlowsPage`, `TableSettingsPage`, `ChatPage`, `GeneralSettingsPage`, `CannedResponsesPage`, `ContactsPage`, `account-tabs.spec.ts`, `CardGridPage`?**
-  _High betweenness centrality (0.059) - this node is a cross-community bridge._
-- **Why does `ChatbotSession` connect `ChatbotSession` to `.completeCodedRoleText`, `newTestApp`, `asString`, `codedPreviewHold`, `chatbot_commerce_checkout.go`, `chatbot_graph_runner_test.go`, `codedflow_preview.go`, `GetResponseBody`, `ai_product_response.go`, `App`, `chatbot_commerce_test.go`, `BaseModel`, `chatbot_commerce.go`, `startFreshSession`, `template_engine.go`, `.shouldTraceCodedFlow`, `codedflow_intent.go`, `codedflow_test.go`, `constants.go`, `codedflow_recover.go`, `Conv`, `JSONB`, `CommerceDraft`, `models/chatbot.go`, `stringFromConfig`, `CodedFlow`?**
-  _High betweenness centrality (0.045) - this node is a cross-community bridge._
-- **Why does `JSONB` connect `JSONB` to `asString`, `codedPreviewHold`, `UUID`, `chatbot_graph_runner_test.go`, `GetResponseBody`, `.UpdateIVRFlow`, `ChatbotSession`, `SetupTestDB`, `App`, `OutgoingMessageRequest`, `CreateTestUser`, `.resolveFreeText`, `BulkMessageCampaign`, `CallLog`, `BaseModel`, `JSONBArray`, `LogAudit`, `parsePathUUID`, `template_engine.go`, `App`, `App`, `OrganizationBuilder`, `constants.go`, `CommerceDraft`, `.execChatTiqrStoreAPI`, `stepsToGraph`, `.createChatbotFlowFromPayload`, `MockWhatsAppClient`, `custom_actions.go`, `models/chatbot.go`, `App`, `users.go`, `App`, `stringFromConfig`, `ChatGraph`?**
-  _High betweenness centrality (0.038) - this node is a cross-community bridge._
+- **Why does `ChatbotSession` connect `ChatbotSession` to `asStringMap`, `NewGETRequest`, `codedPreviewHold`, `asString`, `chatbot_graph_runner_test.go`, `addons.go`, `PreviewSink`, `CreateTestOrganization`, `ai_product_response.go`, `earlyHandoffCheckoutStateFromSession`, `App`, `chatbot_commerce_test.go`, `constants.go`, `Conv`, `BaseModel`, `chatbot_commerce.go`, `startFreshSession`, `App`, `tiqrecommerce/flow.go`, `tiqrecommerce_flow_test.go`, `recover.go`, `tiqrecommerce/helpers.go`, `JSONB`, `asString`, `Category`, `early_handoff.go`, `models/chatbot.go`, `intent.go`, `chatNodeCtx`, `newCodedChat`?**
+  _High betweenness centrality (0.063) - this node is a cross-community bridge._
+- **Why does `page` connect `page` to `TablePage`, `pages/index.ts`, `CampaignsPage`, `ProfilePage`, `BasePage`, `webhooks.spec.ts`, `queue-pickup.spec.ts`, `AgentTransfersPage`, `FlowsPage`, `TableSettingsPage`, `ChatPage`, `GeneralSettingsPage`, `CannedResponsesPage`, `card/index.ts`, `ContactsPage`, `account-tabs.spec.ts`, `CardGridPage`?**
+  _High betweenness centrality (0.056) - this node is a cross-community bridge._
+- **Why does `JSONB` connect `JSONB` to `asStringMap`, `GetResponseStatusCode`, `NewJSONRequest`, `codedPreviewHold`, `template_engine_test.go`, `chatbot_graph_runner_test.go`, `MessageBuilder`, `.UpdateIVRFlow`, `ChatbotSession`, `SetupTestDB`, `App`, `OutgoingMessageRequest`, `constants.go`, `Conv`, `users.go`, `asString`, `BulkMessageCampaign`, `CallLog`, `BaseModel`, `parsePathUUID`, `flowToResponse`, `App`, `App`, `OrganizationBuilder`, `ChatGraph`, `JSONBArray`, `tiqrecommerce/helpers.go`, `asString`, `Category`, `stepsToGraph`, `MockWhatsAppClient`, `custom_actions.go`, `models/chatbot.go`, `App`, `chatNodeCtx`, `CommerceDraft`, `.createChatbotFlowFromPayload`?**
+  _High betweenness centrality (0.042) - this node is a cross-community bridge._
 - **Are the 673 inferred relationships involving `CreateTestOrganization()` (e.g. with `TestAssignToTeam_LoadBalanced_AllUnavailableReturnsNil()` and `TestAssignToTeam_LoadBalanced_PicksLowestLoad()`) actually correct?**
   _`CreateTestOrganization()` has 673 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 616 inferred relationships involving `newTestApp()` (e.g. with `TestApp_CreateAccount_Success()` and `TestApp_CreateAccount_Unauthorized()`) actually correct?**

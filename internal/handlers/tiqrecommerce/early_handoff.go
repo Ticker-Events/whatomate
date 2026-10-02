@@ -2,10 +2,11 @@ package tiqrecommerce
 
 import (
 	"fmt"
-	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
 
@@ -67,6 +68,9 @@ func MigrateEarlyHandoffSessionKeys(session *models.ChatbotSession) {
 		session.CurrentStep = "early_handoff_" + strings.TrimPrefix(session.CurrentStep, "themed_")
 	case strings.HasPrefix(session.CurrentStep, "after_capture_"):
 		session.CurrentStep = "early_handoff_" + strings.TrimPrefix(session.CurrentStep, "after_capture_")
+	}
+	if strings.HasSuffix(session.CurrentStep, "_addons_free") {
+		session.CurrentStep = ""
 	}
 
 	records, ok := anySlice(data[codedflow.CallsKey])
@@ -274,11 +278,10 @@ func (c *Conv) askCaptureFieldNoCheckout(name string, field map[string]any) (any
 }
 
 func askEarlyHandoffAddons(c *Conv, productID string) bool {
-	// A session already waiting on the free-text step must keep that call in
-	// place. Inserting get_product records in front of it would consume the
-	// saved reply as a product fetch.
-	if earlyHandoffFreeTextAlreadyRecorded(c) {
-		return askEarlyHandoffFreeTextAddons(c)
+	if rec, done := c.DoneCall(); done {
+		if deprecatedEarlyHandoffAddonsFreeName(asString(rec["name"])) {
+			return codedflow.CallOK(rec)
+		}
 	}
 	choices := collectEarlyHandoffAddonChoices(c, productID)
 	if c.Stop {
@@ -287,46 +290,16 @@ func askEarlyHandoffAddons(c *Conv, productID string) bool {
 	if len(choices) > 0 {
 		return askStructuredCatalogAddons(c, choices, "early_handoff_addons")
 	}
-	return askEarlyHandoffFreeTextAddons(c)
+	return true
 }
 
-func earlyHandoffFreeTextAlreadyRecorded(c *Conv) bool {
-	if c == nil {
-		return false
-	}
-	records := c.CallRecords()
-	if c.Seq() >= len(records) {
-		return false
-	}
-	switch asString(records[c.Seq()]["name"]) {
+func deprecatedEarlyHandoffAddonsFreeName(name string) bool {
+	switch name {
 	case "early_handoff_addons_free", "themed_addons_free", "after_capture_addons_free":
 		return true
 	default:
 		return false
 	}
-}
-
-func askEarlyHandoffFreeTextAddons(c *Conv) bool {
-	text, ok := c.AskText("early_handoff_addons_free",
-		"Any add-ons (candles, flowers, etc.)? Reply with details, or say Skip.",
-		codedflow.StepNote{
-			Doing:  "Collecting optional add-on notes for a custom request.",
-			Expect: "Add-on details, or Skip.",
-		},
-	)
-	if !ok {
-		return false
-	}
-	lower := strings.ToLower(strings.TrimSpace(text))
-	if lower == "skip" || lower == "no" || lower == "none" || lower == "done" || lower == "continue" {
-		return true
-	}
-	c.Once("early_handoff_addons_free_save", func() {
-		notes := jsonMapFromSession(c.Session(), "commerce_notes")
-		notes["addon_requests"] = strings.TrimSpace(text)
-		c.Session().SessionData["commerce_notes"] = map[string]any(notes)
-	})
-	return true
 }
 
 // collectEarlyHandoffAddonChoices loads catalog add-ons for the handoff product.
@@ -551,9 +524,14 @@ func earlyHandoffAddressFromFlow(data map[string]any) map[string]any {
 	return addr
 }
 
-// stageEarlyHandoffProductOptionCart copies the product's option onto the
+// StageEarlyHandoffProductOptionCart copies the product's option onto the
 // handoff cart. A custom request never builds tiqr_cart, so without this the
-// order form has no product option to select.
+// order form has no product option to select. Capture answers are copied onto
+// the line so CodedOrderNotes can format them like a normal cart checkout.
+func StageEarlyHandoffProductOptionCart(session *models.ChatbotSession) {
+	stageEarlyHandoffProductOptionCart(session)
+}
+
 func stageEarlyHandoffProductOptionCart(session *models.ChatbotSession) {
 	if session == nil {
 		return
@@ -569,10 +547,101 @@ func stageEarlyHandoffProductOptionCart(session *models.ChatbotSession) {
 	if !ok {
 		return
 	}
+	attachEarlyHandoffCaptureToLine(session.SessionData, line)
 	session.SessionData[HandoffCartKey] = map[string]any{
 		"source": CartSource,
 		"lines":  []any{line},
 	}
+}
+
+func attachEarlyHandoffCaptureToLine(data map[string]any, line map[string]any) {
+	if data == nil || line == nil {
+		return
+	}
+	captured := lineCaptureMap(data["commerce_captured_fields"])
+	if len(captured) == 0 {
+		return
+	}
+	line["capture_fields"] = map[string]any(cloneJSONMap(captured))
+	labels := lineLabelMap(data["commerce_capture_labels"])
+	if len(labels) > 0 {
+		labelMap := make(map[string]any, len(labels))
+		for key, value := range labels {
+			labelMap[key] = value
+		}
+		line["capture_labels"] = labelMap
+	}
+	order := earlyHandoffCaptureOrder(data, captured)
+	if len(order) > 0 {
+		values := make([]any, 0, len(order))
+		for _, key := range order {
+			values = append(values, key)
+		}
+		line["capture_order"] = values
+	}
+}
+
+func earlyHandoffCaptureOrder(data map[string]any, captured map[string]any) []string {
+	if len(captured) == 0 {
+		return nil
+	}
+	order := make([]string, 0, len(captured))
+	seen := map[string]bool{}
+	for _, key := range []string{"collection_id", "selected_category_id"} {
+		id := strings.TrimSpace(asString(data[key]))
+		if id == "" {
+			continue
+		}
+		col := sessionCollectionByIDFromData(data, id)
+		if col == nil {
+			continue
+		}
+		for _, field := range RequiredCaptureFieldsFrom(col) {
+			fieldKey := strings.TrimSpace(asString(field["key"]))
+			if fieldKey == "" || seen[fieldKey] {
+				continue
+			}
+			if _, ok := captured[fieldKey]; !ok {
+				continue
+			}
+			seen[fieldKey] = true
+			order = append(order, fieldKey)
+		}
+		break
+	}
+	if len(order) < len(captured) {
+		rest := make([]string, 0, len(captured)-len(order))
+		for key := range captured {
+			if seen[key] {
+				continue
+			}
+			rest = append(rest, key)
+		}
+		sort.Strings(rest)
+		order = append(order, rest...)
+	}
+	return order
+}
+
+func sessionCollectionByIDFromData(data map[string]any, id string) map[string]any {
+	id = strings.TrimSpace(id)
+	if id == "" || data == nil {
+		return nil
+	}
+	items, ok := anySlice(data["collections"])
+	if !ok {
+		return nil
+	}
+	for _, entry := range items {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		if fieldString(item, "id") == id {
+			return item
+		}
+	}
+	return nil
 }
 
 func EarlyHandoffProductOptionLine(data map[string]any) (map[string]any, bool) {

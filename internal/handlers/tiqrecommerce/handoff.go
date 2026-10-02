@@ -118,6 +118,26 @@ func stageTiqrEcommerceHandoffSession(h codedflow.Host, session *models.ChatbotS
 		}
 	}
 
+	StageCommerceOrderNotes(session)
+	session.SessionData[HandoffCartKey] = map[string]any(tiqrEcommerceCartSnapshot(session))
+
+	if storeID := tiqrEcommerceStoreID(session); storeID != "" {
+		if store, ok := asStringMap(session.SessionData["store"]); ok {
+			store["id"] = storeID
+			session.SessionData["store"] = store
+		}
+	}
+}
+
+// StageCommerceOrderNotes writes CodedOrderNotes into commerce_notes.order_notes
+// so drafts and agent handoff metadata match create_order notes.
+func StageCommerceOrderNotes(session *models.ChatbotSession) {
+	if session == nil {
+		return
+	}
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
 	notes := jsonMapFromSession(session, "commerce_notes")
 	if orderNotes := strings.TrimSpace(CodedOrderNotes(session.SessionData)); orderNotes != "" {
 		notes[commerceNotesOrderNotesKey] = orderNotes
@@ -135,14 +155,6 @@ func stageTiqrEcommerceHandoffSession(h codedflow.Host, session *models.ChatbotS
 		notes[commerceNotesMissingKey] = values
 	}
 	session.SessionData["commerce_notes"] = map[string]any(notes)
-	session.SessionData[HandoffCartKey] = map[string]any(tiqrEcommerceCartSnapshot(session))
-
-	if storeID := tiqrEcommerceStoreID(session); storeID != "" {
-		if store, ok := asStringMap(session.SessionData["store"]); ok {
-			store["id"] = storeID
-			session.SessionData["store"] = store
-		}
-	}
 }
 
 func tiqrEcommerceHandoffCategory(session *models.ChatbotSession) tickermcp.Category {

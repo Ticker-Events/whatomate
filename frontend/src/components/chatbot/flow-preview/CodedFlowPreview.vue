@@ -2,11 +2,12 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { Play, RotateCcw, Braces, ChevronDown, ChevronRight, Sparkles, Copy } from 'lucide-vue-next'
+import { Play, RotateCcw, Braces, ChevronDown, ChevronRight, Sparkles, Copy, Globe } from 'lucide-vue-next'
 import {
   chatbotService,
   type CodedFlowBinding,
   type CodedPreviewAICall,
+  type CodedPreviewAPICall,
   type CodedPreviewMessage,
   type CodedPreviewRequest,
   type CodedPreviewResponse,
@@ -65,8 +66,10 @@ const busy = ref(false)
 const messages = ref<SimulationMessage[]>([])
 const sessionContext = ref<Record<string, unknown>>({})
 const turnAICalls = ref<CodedPreviewAICall[]>([])
+const previewAPICalls = ref<CodedPreviewAPICall[]>([])
 const contextExpanded = ref(false)
 const aiExpanded = ref(true)
+const apiExpanded = ref(true)
 const locationLat = ref('12.9716')
 const locationLng = ref('77.5946')
 const details = reactive<Record<DetailKey, string>>({
@@ -115,6 +118,19 @@ function copyAI(event: Event) {
   event.preventDefault()
   event.stopPropagation()
   copyJSON(turnAICalls.value, t('codedFlows.previewAIEmpty'))
+}
+
+async function copyCurl(curl: string) {
+  if (!curl) {
+    toast.error(t('codedFlows.previewAPIEmpty'))
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(curl)
+    toast.success(t('common.copiedToClipboard'))
+  } catch {
+    toast.error(t('common.clipboardFailed'))
+  }
 }
 
 const statusLabel = computed(() => {
@@ -205,6 +221,9 @@ async function turn(extra: Partial<CodedPreviewRequest>, userText?: string) {
     flowCta.value = body.flow_cta || ''
     sessionContext.value = body.context || {}
     turnAICalls.value = body.ai_calls || []
+    if (body.api_calls?.length) {
+      previewAPICalls.value = [...previewAPICalls.value, ...body.api_calls]
+    }
     messages.value.push(...(body.messages || []).map(toMessage))
     if (body.status === 'needs_mock') {
       needsMock.value = true
@@ -243,6 +262,7 @@ function reset() {
   messages.value = []
   sessionContext.value = {}
   turnAICalls.value = []
+  previewAPICalls.value = []
   needsMock.value = false
   mockOperation.value = ''
   mockBody.value = '{\n  \n}'
@@ -456,6 +476,54 @@ function submitLocation() {
                     <summary class="cursor-pointer text-muted-foreground">parsed</summary>
                     <pre class="mt-1 whitespace-pre-wrap break-all">{{ formatDebugValue(call.parsed) }}</pre>
                   </details>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          <Collapsible v-model:open="apiExpanded">
+            <CollapsibleTrigger class="flex items-center gap-2 w-full text-xs font-medium text-muted-foreground hover:text-foreground">
+              <ChevronDown v-if="apiExpanded" class="h-3.5 w-3.5" />
+              <ChevronRight v-else class="h-3.5 w-3.5" />
+              <Globe class="h-3.5 w-3.5" />
+              {{ $t('codedFlows.previewAPI') }}
+              <span class="ml-auto text-[10px]">{{ previewAPICalls.length }}</span>
+            </CollapsibleTrigger>
+            <CollapsibleContent class="mt-2">
+              <div v-if="previewAPICalls.length === 0" class="text-[11px] text-muted-foreground">
+                {{ $t('codedFlows.previewAPIEmpty') }}
+              </div>
+              <div v-else class="space-y-2 max-h-72 overflow-auto">
+                <div
+                  v-for="(call, idx) in previewAPICalls"
+                  :key="`${call.name}-${idx}`"
+                  class="rounded-md border bg-muted/30 p-2 text-[11px] space-y-1"
+                >
+                  <div class="flex items-start gap-1">
+                    <div class="min-w-0 flex-1 space-y-0.5">
+                      <p class="font-medium truncate">
+                        {{ call.name }}
+                        <span v-if="call.http_status" class="text-muted-foreground font-normal">{{ call.http_status }}</span>
+                      </p>
+                      <p class="font-mono text-muted-foreground break-all">{{ call.path }}</p>
+                      <p v-if="call.error" class="text-destructive break-all">{{ call.error }}</p>
+                      <details v-if="call.response != null">
+                        <summary class="cursor-pointer text-muted-foreground">response</summary>
+                        <pre class="mt-1 whitespace-pre-wrap break-all">{{ formatDebugValue(call.response) }}</pre>
+                      </details>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="h-7 w-7 shrink-0"
+                      :disabled="!call.curl"
+                      :title="$t('codedFlows.previewAPICopy')"
+                      @click="copyCurl(call.curl)"
+                    >
+                      <Copy class="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CollapsibleContent>

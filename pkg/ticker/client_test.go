@@ -127,6 +127,7 @@ func TestClientListProductsPage(t *testing.T) {
 func TestClientGetProduct(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/service/buyer/product/9/", r.URL.Path)
+		assert.Equal(t, "5", r.URL.Query().Get("store_id"))
 		assert.Equal(t, "true", r.URL.Query().Get("include_custom_pricing"))
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": 9, "name": "Custom Cake", "min_price": 0, "custom_pricing": true,
@@ -135,7 +136,7 @@ func TestClientGetProduct(t *testing.T) {
 	defer srv.Close()
 
 	c := ticker.NewClient(srv.URL, srv.Client())
-	raw, err := c.GetProduct(context.Background(), "9")
+	raw, err := c.GetProduct(context.Background(), "5", "9")
 	require.NoError(t, err)
 	assert.Equal(t, "Custom Cake", raw["name"])
 	assert.Equal(t, true, raw["custom_pricing"])

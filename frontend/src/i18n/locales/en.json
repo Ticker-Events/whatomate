@@ -2105,7 +2105,10 @@
     "previewContextCopy": "Copy context",
     "previewAI": "AI this turn",
     "previewAIEmpty": "No AI calls on the last turn.",
-    "previewAICopy": "Copy AI context"
+    "previewAICopy": "Copy AI context",
+    "previewAPI": "API calls",
+    "previewAPIEmpty": "No store API calls yet. Turn off mock responses to capture live requests.",
+    "previewAPICopy": "Copy curl"
   },
   "chatbotFlows": {
     "title": "Conversation Flows",

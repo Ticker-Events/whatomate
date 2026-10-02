@@ -14,6 +14,7 @@ export type TiqrStoreOperation =
   | 'create_order'
   | 'get_order'
   | 'lookup_order_status'
+  | 'list_orders_by_phone'
   | 'retry_payment'
   | 'list_fulfillment_slots'
   | 'propose_fulfillment_time'
@@ -143,6 +144,14 @@ export const TIQR_STORE_OPERATIONS: TiqrStoreOperationDef[] = [
     rest: false,
     fields: [
       { key: 'order_id', label: 'Order number', placeholder: '{{order_id}}' },
+    ],
+  },
+  {
+    value: 'list_orders_by_phone',
+    label: 'List orders by phone',
+    rest: false,
+    fields: [
+      { key: 'limit', label: 'Limit', placeholder: '10' },
     ],
   },
   {

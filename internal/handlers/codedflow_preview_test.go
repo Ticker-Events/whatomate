@@ -81,6 +81,20 @@ func TestPreviewCodedFlow_MenuDoesNotSend(t *testing.T) {
 	assert.NotNil(t, resp.Context)
 	assert.Equal(t, "intent", resp.Context["_current_step"])
 	assert.NotNil(t, resp.AICalls)
+	require.Len(t, resp.APICalls, 2)
+	assert.Equal(t, "get_store", resp.APICalls[0].Name)
+	assert.Equal(t, "/service/buyer/store/42/", resp.APICalls[0].Path)
+	assert.Contains(t, resp.APICalls[0].Curl, "curl -sS -X GET")
+	assert.Contains(t, resp.APICalls[0].Curl, "/service/buyer/store/42/")
+	assert.Equal(t, 200, resp.APICalls[0].HTTPStatus)
+	require.NotNil(t, resp.APICalls[0].Response)
+	storeResp, ok := resp.APICalls[0].Response.(map[string]any)
+	require.True(t, ok)
+	assert.NotEmpty(t, storeResp["name"])
+	assert.Equal(t, "list_collections", resp.APICalls[1].Name)
+	assert.Contains(t, resp.APICalls[1].Path, "/service/buyer/store/42/category/")
+	assert.Contains(t, resp.APICalls[1].Curl, "curl -sS -X GET")
+	assert.Contains(t, resp.APICalls[1].Curl, resp.APICalls[1].Path)
 
 	var stored models.ChatbotSession
 	err = app.DB.First(&stored, "id = ?", resp.SessionID).Error
@@ -108,6 +122,7 @@ func TestPreviewCodedFlow_ButtonAdvances(t *testing.T) {
 	require.NoError(t, err)
 	sessionID, err := uuid.Parse(first.SessionID)
 	require.NoError(t, err)
+	require.Len(t, first.APICalls, 2)
 
 	next, err := app.previewCodedTurn(org.ID, userID, account.Name, tiqrecommerce.FlowKey, codedPreviewInput{
 		SessionID: sessionID,
@@ -121,6 +136,7 @@ func TestPreviewCodedFlow_ButtonAdvances(t *testing.T) {
 	assert.Equal(t, "button", next.Input)
 	assert.Equal(t, "list", next.Messages[0].Interactive)
 	assert.Contains(t, previewMessageText(next.Messages), "Sweets")
+	assert.Empty(t, next.APICalls)
 }
 
 func TestCodedPreviewRedisRoundTripIgnoresProcessMemory(t *testing.T) {

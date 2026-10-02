@@ -472,7 +472,8 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil ||
 		req.AICommerceEnabled != nil || req.AICommerceMCPURL != nil ||
 		req.AICommerceMCPAPIKey != nil || req.AICommerceRESTURL != nil ||
-		req.AICommerceStoreID != nil || req.AIIntentProvider != nil ||
+		req.AICommerceStoreID != nil ||
+		req.AIIntentProvider != nil ||
 		req.AITranslateProvider != nil || req.AIGuideProvider != nil ||
 		req.AIRecoverProvider != nil ||
 		req.AITypeSafeAPIKey != nil || req.AIGatewayAPIKey != nil ||

@@ -92,12 +92,16 @@ func (c *Client) SearchProducts(ctx context.Context, storeID, search string, lim
 	return out, nil
 }
 
-// GetProduct fetches a single product by ID.
-func (c *Client) GetProduct(ctx context.Context, productID string) (map[string]any, error) {
+// GetProduct fetches a single product by ID for a store.
+func (c *Client) GetProduct(ctx context.Context, storeID, productID string) (map[string]any, error) {
+	if storeID == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
 	if productID == "" {
 		return nil, fmt.Errorf("product_id is required")
 	}
 	q := url.Values{}
+	q.Set("store_id", storeID)
 	q.Set("include_custom_pricing", "true")
 	var raw map[string]any
 	if err := c.getJSON(ctx, "/service/buyer/product/"+url.PathEscape(productID)+"/?"+q.Encode(), &raw); err != nil {

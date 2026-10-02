@@ -32,6 +32,8 @@ const (
 
 	tiqrEcommerceOrderMissing = "I couldn't find a recent order for this phone number."
 
+	tiqrEcommerceOrderUnavailable = "I couldn't look up your orders just now. Please try again in a moment."
+
 	tiqrEcommerceSearchEmpty = "I couldn't find that in our store.\n\nPlease choose a collection below, or tell me another item."
 
 	tiqrEcommerceCartEmpty = "Your cart is empty.\n\nPlease choose a collection below to add items, then you can check out."
@@ -1960,6 +1962,11 @@ func CodedOrderNotes(data map[string]any) string {
 	customerNote := contextValue(data, "customer_notes", "notes")
 	blocks := codedCaptureNoteBlocks(data["tiqr_cart"])
 	if len(blocks) == 0 {
+		if cart, ok := asStringMap(data[HandoffCartKey]); ok {
+			blocks = codedCaptureNoteBlocks(cart["lines"])
+		}
+	}
+	if len(blocks) == 0 {
 		captured := lineCaptureMap(data["commerce_captured_fields"])
 		if len(captured) == 0 {
 			return customerNote
@@ -2342,11 +2349,56 @@ func collectRecoverFields(c *Conv, name string, asks []codedflow.RecoverAsk) boo
 }
 
 func orderStatus(c *Conv) error {
-	order, ok := c.LookupOrder("order_status")
+	page, ok := c.StoreMCP("orders_page", "list_orders_by_phone", nil)
 	if !ok {
+		c.Say(tiqrEcommerceOrderUnavailable)
+		return c.End()
+	}
+	rawOrders, _ := anySlice(page["results"])
+	if len(rawOrders) == 0 {
+		rawOrders, _ = anySlice(page["orders"])
+	}
+	orders := reshapeOrdersForList(rawOrders)
+	if len(orders) == 0 {
 		c.Say(tiqrEcommerceOrderMissing)
 		return c.End()
 	}
-	c.Say(formatDirectOrderStatus(order))
+	_, ok = c.AskList("pick_order", orders, codedflow.ListPrompt{
+		Body:        "Here are your recent orders. Pick one to see its status and summary.",
+		Header:      "Your orders",
+		Button:      "Orders",
+		Section:     "Orders",
+		ItemsKey:    "orders",
+		IDField:     "id",
+		Title:       "{{display_uid}}",
+		Description: "{{placed_on}}",
+		Select: map[string]string{
+			"order_id":          "id",
+			"order_display_uid": "display_uid",
+		},
+		Step: codedflow.StepNote{
+			Doing:  "The customer is choosing which order to check.",
+			Expect: "They pick one of the listed orders.",
+		},
+	})
+	if !ok {
+		return nil
+	}
+	displayUID := strings.TrimSpace(asString(c.Session().SessionData["order_display_uid"]))
+	if displayUID == "" {
+		displayUID = strings.TrimSpace(asString(c.Session().SessionData["order_id"]))
+	}
+	if displayUID == "" {
+		c.Say(tiqrEcommerceOrderUnavailable)
+		return c.End()
+	}
+	order, ok := c.StoreMCP("selected_order", "lookup_order_status", map[string]string{
+		"order_id": displayUID,
+	})
+	if !ok {
+		c.Say(tiqrEcommerceOrderUnavailable)
+		return c.End()
+	}
+	c.Say(formatOrderStatusSummary(order, sessionCurrencyCode(c.Session())))
 	return c.End()
 }

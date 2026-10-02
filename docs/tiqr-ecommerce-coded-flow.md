@@ -25,9 +25,12 @@ flowchart TD
   cols --> menu[Welcome menu]
   menu -->|Buy products| ful[Fulfillment]
   menu -->|named collection or product| ful
-  menu -->|Check order status| look[MCP lookup_order_status]
+  menu -->|Check order status| look[MCP list_orders_by_phone]
   menu -->|Talk to staff| xfer
-  look --> endStatus[Say status and end]
+  look -->|empty| miss[Say no orders and end]
+  look -->|orders| pick[WhatsApp order list]
+  pick --> detail[MCP lookup_order_status]
+  detail --> endStatus[Say summary and end]
   ful --> list[Collection list]
   list -->|row or collection id| policy{handoff_policy after_capture}
   policy -->|yes| earlyHandoff[Capture add-ons Meta Flow]
@@ -128,9 +131,9 @@ Code: `runEarlyHandoff` in `internal/handlers/tiqrecommerce/early_handoff.go`.
 
 1. Intro: `This is a custom {name} request — I’ll collect a few details and connect you with our team.`
 2. Required capture fields from that collection (same prompts as the cart path). Checkout phrases do not divert away from these questions.
-3. Add-ons: shared `askCatalogAddons` when the product has catalog add-ons (numbered list + AI parse). Otherwise free-text add-ons or Skip.
+3. Add-ons: shared numbered catalog add-on step when the product has catalog add-ons. Products with no catalog add-ons skip this step.
 4. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup flow `1484028330223507` (name, email, phone) or delivery flow `1557965846018132` (name, phone, address). Flow fields are copied onto the commerce draft address snapshot and notes.
-5. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. The cart and order paths are skipped.
+5. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. Before the draft sync, capture answers are formatted with `CodedOrderNotes` into `commerce_notes.order_notes` (same string as checkout orders), including product/option headers from the staged early-handoff cart line. The cart and order paths are skipped.
 
 Fulfillment time (`list_fulfillment_slots` / `propose_fulfillment_time`) is skipped for now. Pickup vs delivery and the location pin already ran earlier in the buy flow.
 
@@ -186,7 +189,7 @@ Go then grounds that JSON against the loaded choices:
 | Unclear, low confidence, or out-of-range index | Ask a short clarifying question (up to 3 turns) |
 | Still unclear after 3 clarify turns | Transfer to an agent |
 
-Products with no catalog add-ons skip this step on the buy path. Early handoff asks the free-text Skip question (`early_handoff_addons_free`) only when none of the loaded products have catalog add-ons.
+Products with no catalog add-ons skip this step on the buy path and on early handoff. Early handoff uses the same numbered catalog add-on step when loaded products have active catalog add-ons.
 
 ### Collection capture fields
 
@@ -255,7 +258,17 @@ Outside business hours the out-of-hours message is sent and no draft transfer is
 
 ### 7. Order status
 
-`LookupOrder` calls TiQR MCP `lookup_order_status` for this WhatsApp number. It does not ask for an order id. Found orders are formatted by `formatDirectOrderStatus` (`Order {display_uid} is {status}.`). Missing or failed lookups say `tiqrEcommerceOrderMissing` and end. No payment link is attached. Payment retry stays on the separate commerce path.
+`orderStatus` lists recent orders for this WhatsApp number over MCP:
+
+`list_orders_by_phone` with `store_id`, the session phone, and `limit` (max 10)
+
+No store-owner token is required; the tool authorizes by matching `ordered_by` / `ordered_for` phone. Commerce MCP (`ai_commerce_mcp_url` + store id) must be enabled. A tool error says order status is unavailable and ends. An empty list says `tiqrEcommerceOrderMissing` and ends.
+
+When orders exist, WhatsApp shows a list (title = `display_uid`, description = placed date). Selecting a row loads full detail over MCP:
+
+`lookup_order_status` with `store_id`, the session phone, and `order_display_id` = the selected `display_uid`
+
+The reply includes status, line items with prices (minor units converted once), total, fulfillment mode, and address when delivery. No payment link is attached. Payment retry stays on the separate commerce path.
 
 ## Where AI runs
 

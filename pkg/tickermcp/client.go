@@ -709,7 +709,7 @@ func (c *Client) closeSessionLocked() error {
 func isReadOnlyTool(name string) bool {
 	switch name {
 	case "get_store", "list_categories", "list_products", "get_product",
-		"check_delivery_eligibility", "lookup_order_status", "get_order",
+		"check_delivery_eligibility", "lookup_order_status", "list_orders_by_phone", "get_order",
 		"list_fulfillment_slots", "validate_fulfillment_slot", "list_customer_addresses",
 		"list_faqs", "get_store_info", "list_product_options":
 		return true

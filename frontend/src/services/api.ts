@@ -388,6 +388,15 @@ export type CodedPreviewAICall = {
   reasoning?: string
 }
 
+export type CodedPreviewAPICall = {
+  name: string
+  path: string
+  curl: string
+  http_status?: number
+  response?: unknown
+  error?: string
+}
+
 export type CodedPreviewMessage = {
   type: string
   content: string
@@ -413,6 +422,7 @@ export type CodedPreviewResponse = {
   messages: CodedPreviewMessage[]
   context?: Record<string, unknown>
   ai_calls?: CodedPreviewAICall[]
+  api_calls?: CodedPreviewAPICall[]
 }
 
 export type CodedPreviewRequest = {

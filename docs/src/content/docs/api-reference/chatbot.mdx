@@ -379,7 +379,7 @@ The `config` schema depends on `type`.
 | `webhook` | Fire-and-forget HTTP call; result ignored. | `url`, `method`, `headers`, `body` | `default` |
 | `end` | Optionally send a final message and terminate. | `message` | (terminal) |
 
-`tiqr_store_api` operations: `list_collections`, `search_collections`, `list_products`, `search_products`, `get_product`, `list_product_options`, `get_store`, `get_store_info`, `list_faqs`, `check_delivery`, `create_order`, `get_order`, `lookup_order_status`, `retry_payment`. Store ID is injected from AI settings; JWT cart is not supported. Example:
+`tiqr_store_api` operations: `list_collections`, `search_collections`, `list_products`, `search_products`, `get_product`, `list_product_options`, `get_store`, `get_store_info`, `list_faqs`, `check_delivery`, `create_order`, `get_order`, `lookup_order_status`, `list_orders_by_phone`, `retry_payment`. Store ID is injected from AI settings; JWT cart is not supported. Example:
 
 ```json
 {

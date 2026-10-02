@@ -186,6 +186,12 @@ func (a *App) completeCommerceCaptureWithCategory(account *models.WhatsAppAccoun
 	if category.HandoffPolicy != "after_capture" {
 		return false
 	}
+	if st != nil && st.Flow == checkoutFlowEarlyHandoff {
+		if cart := tiqrecommerce.HandoffDisplayCart(session); len(cart) == 0 {
+			tiqrecommerce.StageEarlyHandoffProductOptionCart(session)
+		}
+	}
+	tiqrecommerce.StageCommerceOrderNotes(session)
 	setCheckoutState(session, st)
 	a.stageCommerceHandoffSessionData(session, category)
 	if err := a.persistSessionData(session); err != nil {
