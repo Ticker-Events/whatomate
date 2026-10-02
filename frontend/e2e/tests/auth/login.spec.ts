@@ -67,6 +67,6 @@ test.describe('Authentication Redirect', () => {
     await loginPage.goto()
     await loginPage.login(TEST_USERS.admin.email, TEST_USERS.admin.password)
     // Should be on dashboard or chat
-    await expect(page).toHaveURL(/\/(dashboard|chat)?/)
+    await expect(page).toHaveURL(/\/(dashboard|chat)/)
   })
 })
