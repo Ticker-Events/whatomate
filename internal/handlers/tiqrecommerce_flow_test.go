@@ -315,13 +315,13 @@ func TestCodedOrderNotesIncludesCaptureAnswers(t *testing.T) {
 	notes := tiqrecommerce.CodedOrderNotes(map[string]any{
 		"customer_notes": "Leave at gate",
 		"tiqr_cart": []any{map[string]any{
-			"product_option":  "9",
-			"product_name":    "Normal Cake",
-			"option_name":     "Vancho",
-			"quantity":        "1",
-			"capture_fields":  map[string]any{"writing": "Happy Birthday Aswin", "delivery_date": "12/05/2026, 03 PM"},
-			"capture_labels":  map[string]any{"writing": "Writing on Cake", "delivery_date": "Delivery Date"},
-			"capture_order":   []any{"writing", "delivery_date"},
+			"product_option": "9",
+			"product_name":   "Normal Cake",
+			"option_name":    "Vancho",
+			"quantity":       "1",
+			"capture_fields": map[string]any{"writing": "Happy Birthday Aswin", "delivery_date": "12/05/2026, 03 PM"},
+			"capture_labels": map[string]any{"writing": "Writing on Cake", "delivery_date": "Delivery Date"},
+			"capture_order":  []any{"writing", "delivery_date"},
 		}},
 	})
 	assert.Equal(t, "Normal Cake(Vancho)\n- Writing on Cake: Happy Birthday Aswin\n- Delivery Date: 12/05/2026, 03 PM\n\nNote: Leave at gate", notes)
@@ -631,10 +631,7 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 			if extra, ok := store["test_collections"].([]any); ok && len(extra) > 0 {
 				results = extra
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"count":   len(results),
-				"results": results,
-			})
+			_ = json.NewEncoder(w).Encode(pageStoreResults(r, results, testPageSize(store)))
 		case strings.Contains(r.URL.Path, "/product/"):
 			if counts != nil {
 				counts.products++
@@ -671,17 +668,14 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 					}
 				}
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"count":   len(products),
-				"results": products,
-			})
+			_ = json.NewEncoder(w).Encode(pageStoreResults(r, products, testPageSize(store)))
 		default:
 			if counts != nil {
 				counts.store++
 			}
 			payload := map[string]any{}
 			for key, value := range store {
-				if key == "test_collections" || key == "test_orders" {
+				if key == "test_collections" || key == "test_orders" || key == "test_page_size" {
 					continue
 				}
 				payload[key] = value
@@ -691,6 +685,117 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func testPageSize(store map[string]any) int {
+	switch n := store["test_page_size"].(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+// pageStoreResults returns one REST page. pageSize caps the response the way
+// a store API limit does, and sets next when count is larger than the page.
+func pageStoreResults(r *http.Request, results []any, pageSize int) map[string]any {
+	if pageSize <= 0 {
+		return map[string]any{"count": len(results), "results": results}
+	}
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			offset = n
+		}
+	}
+	if offset > len(results) {
+		offset = len(results)
+	}
+	end := offset + pageSize
+	if end > len(results) {
+		end = len(results)
+	}
+	out := map[string]any{
+		"count":   len(results),
+		"results": results[offset:end],
+	}
+	if end < len(results) {
+		q := r.URL.Query()
+		q.Set("limit", strconv.Itoa(pageSize))
+		q.Set("offset", strconv.Itoa(end))
+		out["next"] = "http://" + r.Host + r.URL.Path
+		if encoded := q.Encode(); encoded != "" {
+			out["next"] = out["next"].(string) + "?" + encoded
+		}
+	}
+	return out
+}
+
+func lastListRowTitles(t *testing.T, app *App, session *models.ChatbotSession) []string {
+	t.Helper()
+	var msgs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ?", session.ContactID).Order("created_at asc").Find(&msgs).Error)
+	var titles []string
+	for _, msg := range msgs {
+		if msg.InteractiveData == nil {
+			continue
+		}
+		raw, err := json.Marshal(msg.InteractiveData)
+		require.NoError(t, err)
+		var parsed struct {
+			Type string `json:"type"`
+			Rows []struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"rows"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &parsed))
+		if parsed.Type != "list" || len(parsed.Rows) == 0 {
+			continue
+		}
+		titles = make([]string, 0, len(parsed.Rows))
+		for _, row := range parsed.Rows {
+			titles = append(titles, row.Title)
+		}
+	}
+	return titles
+}
+
+func lastCarouselButtonIDs(t *testing.T, app *App, session *models.ChatbotSession) []string {
+	t.Helper()
+	var msgs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ?", session.ContactID).Order("created_at asc").Find(&msgs).Error)
+	var ids []string
+	for _, msg := range msgs {
+		if msg.InteractiveData == nil {
+			continue
+		}
+		raw, err := json.Marshal(msg.InteractiveData)
+		require.NoError(t, err)
+		var parsed struct {
+			Type  string `json:"type"`
+			Cards []struct {
+				Buttons []struct {
+					ID string `json:"id"`
+				} `json:"buttons"`
+			} `json:"cards"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &parsed))
+		if parsed.Type != "carousel" || len(parsed.Cards) == 0 {
+			continue
+		}
+		ids = make([]string, 0, len(parsed.Cards))
+		for _, card := range parsed.Cards {
+			if len(card.Buttons) == 0 {
+				ids = append(ids, "")
+				continue
+			}
+			ids = append(ids, card.Buttons[0].ID)
+		}
+	}
+	return ids
 }
 
 func startEcommerce(t *testing.T, products []any, counts *storeCounts) (*App, *models.WhatsAppAccount, *models.Contact, *models.ChatbotSession) {
@@ -1141,10 +1246,10 @@ func TestTiqrEcommerce_EarlyHandoffSkipsProductsAndOrders(t *testing.T) {
 		"name": "Demo",
 		"test_collections": []any{
 			map[string]any{
-				"id":             "57",
-				"name":           "Custom Cakes",
-				"description":    "Made to order",
-				"handoff_policy": "after_capture",
+				"id":              "57",
+				"name":            "Custom Cakes",
+				"description":     "Made to order",
+				"handoff_policy":  "after_capture",
 				"handoff_message": "A baker will review this and continue with you here.",
 				"required_capture_fields": []any{
 					map[string]any{
@@ -1474,10 +1579,10 @@ func TestTiqrEcommerce_EarlyHandoffNamedProductSkipsQuantity(t *testing.T) {
 		"name": "Demo",
 		"test_collections": []any{
 			map[string]any{
-				"id":             "57",
-				"name":           "Custom Cakes",
-				"description":    "Made to order",
-				"handoff_policy": "after_capture",
+				"id":              "57",
+				"name":            "Custom Cakes",
+				"description":     "Made to order",
+				"handoff_policy":  "after_capture",
 				"handoff_message": "A baker will help next.",
 				"required_capture_fields": []any{
 					map[string]any{
@@ -2867,4 +2972,148 @@ func TestTiqrEcommerce_DeliveryOnlyOutOfRangeAsksAgain(t *testing.T) {
 	assert.Contains(t, blob, "within our delivery radius")
 	assert.NotContains(t, blob, "Store Pickup as your preferred option")
 	assert.NotContains(t, blob, `"id":"pickup"`)
+}
+
+func TestTiqrEcommerce_CollectionListPagesWithShowMore(t *testing.T) {
+	collections := make([]any, 12)
+	for i := 0; i < len(collections); i++ {
+		collections[i] = map[string]any{
+			"id":          strconv.Itoa(i + 1),
+			"name":        fmt.Sprintf("Collection %02d", i+1),
+			"description": "Group",
+		}
+	}
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{
+		"id":               42,
+		"name":             "Demo",
+		"test_collections": collections,
+	}, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "collection", session.CurrentStep)
+
+	titles := lastListRowTitles(t, app, session)
+	require.Len(t, titles, 10)
+	assert.Equal(t, "Collection 01", titles[0])
+	assert.Equal(t, "Collection 09", titles[8])
+	assert.Equal(t, codedflow.ShowMoreTitle, titles[9])
+	assert.NotContains(t, titles, "Collection 10")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, codedflow.ShowMoreTitle, codedflow.ShowMoreID, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	titles = lastListRowTitles(t, app, session)
+	require.Len(t, titles, 3)
+	assert.Equal(t, []string{"Collection 10", "Collection 11", "Collection 12"}, titles)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Collection 12", "12", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "product", session.CurrentStep)
+	assert.Equal(t, "12", session.SessionData["collection_id"])
+}
+
+func TestTiqrEcommerce_CollectionListFollowsNextPage(t *testing.T) {
+	collections := make([]any, 15)
+	for i := 0; i < len(collections); i++ {
+		collections[i] = map[string]any{
+			"id":          strconv.Itoa(i + 1),
+			"name":        fmt.Sprintf("Shelf %02d", i+1),
+			"description": "Group",
+		}
+	}
+	counts := &storeCounts{}
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), counts, map[string]any{
+		"id":               42,
+		"name":             "Demo",
+		"test_collections": collections,
+		"test_page_size":   10,
+	}, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	assert.Equal(t, 1, counts.collections)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, 1, counts.collections)
+	titles := lastListRowTitles(t, app, session)
+	require.Len(t, titles, 10)
+	assert.Equal(t, codedflow.ShowMoreTitle, titles[9])
+	assert.NotContains(t, titles, "Shelf 10")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, codedflow.ShowMoreTitle, codedflow.ShowMoreID, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, 2, counts.collections)
+	titles = lastListRowTitles(t, app, session)
+	require.Len(t, titles, 6)
+	assert.Equal(t, "Shelf 10", titles[0])
+	assert.Equal(t, "Shelf 15", titles[5])
+	assert.NotContains(t, titles, codedflow.ShowMoreTitle)
+}
+
+func TestTiqrEcommerce_ProductCarouselPagesWithShowMore(t *testing.T) {
+	products := make([]any, 12)
+	for i := 0; i < len(products); i++ {
+		products[i] = map[string]any{
+			"id":        strconv.Itoa(200 + i),
+			"name":      fmt.Sprintf("Item %02d", i+1),
+			"min_price": "10",
+			"options":   []any{map[string]any{"id": "1", "name": "Default", "price": "10"}},
+		}
+	}
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "product", session.CurrentStep)
+
+	ids := lastCarouselButtonIDs(t, app, session)
+	require.Len(t, ids, 10)
+	assert.Equal(t, "200", ids[0])
+	assert.Equal(t, "208", ids[8])
+	assert.Equal(t, codedflow.ShowMoreID, ids[9])
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, codedflow.ShowMoreTitle, codedflow.ShowMoreID, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "product", session.CurrentStep)
+	ids = lastCarouselButtonIDs(t, app, session)
+	require.Len(t, ids, 3)
+	assert.Equal(t, []string{"209", "210", "211"}, ids)
+}
+
+func TestTiqrEcommerce_OptionListPagesWithShowMore(t *testing.T) {
+	options := make([]any, 12)
+	for i := 0; i < len(options); i++ {
+		options[i] = map[string]any{
+			"id":    strconv.Itoa(i + 1),
+			"name":  fmt.Sprintf("Size %02d", i+1),
+			"price": "10",
+		}
+	}
+	app, account, contact, session := startEcommerce(t, twoProducts(options), nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "option", session.CurrentStep)
+
+	titles := lastListRowTitles(t, app, session)
+	require.Len(t, titles, 10)
+	assert.Contains(t, titles[0], "Size 01")
+	assert.Contains(t, titles[8], "Size 09")
+	assert.Equal(t, codedflow.ShowMoreTitle, titles[9])
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, codedflow.ShowMoreTitle, codedflow.ShowMoreID, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "option", session.CurrentStep)
+	titles = lastListRowTitles(t, app, session)
+	require.Len(t, titles, 3)
+	assert.Contains(t, titles[0], "Size 10")
+	assert.Contains(t, titles[2], "Size 12")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Size 12", "12", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "quantity", session.CurrentStep)
+	assert.Equal(t, "12", session.SessionData["option_id"])
 }

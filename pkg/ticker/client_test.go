@@ -122,6 +122,34 @@ func TestClientListProductsPage(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, products, 1)
 	assert.Equal(t, "Latte", products[0]["name"])
+	assert.Equal(t, false, page["has_more"])
+}
+
+func TestClientFollowNext(t *testing.T) {
+	var gotOffset string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotOffset = r.URL.Query().Get("offset")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"count":   2,
+			"results": []map[string]any{{"id": 8, "name": "Mocha", "min_price": 15000}},
+		})
+	}))
+	defer srv.Close()
+
+	c := ticker.NewClient(srv.URL, srv.Client())
+	page, err := c.FollowNext(context.Background(), srv.URL+"/service/buyer/product/?limit=50&offset=50")
+	require.NoError(t, err)
+	assert.Equal(t, "50", gotOffset)
+	assert.Equal(t, false, page["has_more"])
+	results, ok := page["results"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Mocha", results[0]["name"])
+	assert.Equal(t, 150.0, results[0]["min_price"])
+
+	_, err = c.FollowNext(context.Background(), "https://evil.example/service/buyer/product/?offset=50")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside the store api")
 }
 
 func TestClientGetProduct(t *testing.T) {

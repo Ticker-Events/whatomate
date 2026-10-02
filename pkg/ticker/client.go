@@ -230,10 +230,17 @@ func (c *Client) ListProductsPage(ctx context.Context, storeID string, params Li
 }
 
 // ListProductOptions lists options optionally filtered by store and ids.
-func (c *Client) ListProductOptions(ctx context.Context, storeID string, ids []int) (any, error) {
+// A paged response keeps count, next, and results so callers can follow next.
+func (c *Client) ListProductOptions(ctx context.Context, storeID string, ids []int, limit, offset int) (any, error) {
 	q := url.Values{}
 	if strings.TrimSpace(storeID) != "" {
 		q.Set("store_id", strings.TrimSpace(storeID))
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		q.Set("offset", strconv.Itoa(offset))
 	}
 	if len(ids) > 0 {
 		parts := make([]string, 0, len(ids))
@@ -255,16 +262,41 @@ func (c *Client) ListProductOptions(ctx context.Context, storeID string, ids []i
 		NormalizeProductListMoney(t)
 		return t, nil
 	case map[string]any:
-		if results, ok := t["results"]; ok {
-			if list, ok := results.([]any); ok {
-				NormalizeProductListMoney(list)
+		if results, ok := t["results"].([]any); ok {
+			NormalizeProductListMoney(results)
+		} else if results, ok := t["results"].([]map[string]any); ok {
+			for _, item := range results {
+				NormalizeProductMoney(item)
 			}
-			return results, nil
+		} else {
+			NormalizeProductMoney(t)
 		}
-		NormalizeProductMoney(t)
+		if _, ok := t["results"]; ok {
+			if _, hasCount := t["count"]; !hasCount {
+				if list, ok := anySliceOf(t["results"]); ok {
+					t["count"] = len(list)
+				}
+			}
+			return t, nil
+		}
 		return t, nil
 	default:
 		return raw, nil
+	}
+}
+
+func anySliceOf(raw any) ([]any, bool) {
+	switch v := raw.(type) {
+	case []any:
+		return v, true
+	case []map[string]any:
+		out := make([]any, len(v))
+		for i := range v {
+			out[i] = v[i]
+		}
+		return out, true
+	default:
+		return nil, false
 	}
 }
 
@@ -344,12 +376,67 @@ func (c *Client) getPageAs(ctx context.Context, path, listKey string, limit, off
 	if page.Count == 0 {
 		out["count"] = len(page.Results)
 	}
-	hasMore := page.Next != nil && *page.Next != ""
+	next := ""
+	if page.Next != nil {
+		next = strings.TrimSpace(*page.Next)
+	}
+	hasMore := next != ""
 	if !hasMore && page.Count > 0 {
 		hasMore = offset+len(page.Results) < page.Count
 	}
 	out["has_more"] = hasMore
+	if next != "" {
+		out["next"] = next
+	}
 	return out, nil
+}
+
+// FollowNext loads the page at a list response's next URL.
+// The URL must point at this client's store API host.
+func (c *Client) FollowNext(ctx context.Context, nextURL string) (map[string]any, error) {
+	path, limit, offset, err := c.nextPath(nextURL)
+	if err != nil {
+		return nil, err
+	}
+	page, err := c.getPageAs(ctx, path, "results", limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	if strings.Contains(path, "/product") {
+		normalizePageProducts(page)
+	}
+	return page, nil
+}
+
+func (c *Client) nextPath(nextURL string) (path string, limit, offset int, err error) {
+	nextURL = strings.TrimSpace(nextURL)
+	if nextURL == "" {
+		return "", 0, 0, fmt.Errorf("next url is required")
+	}
+	parsed, err := url.Parse(nextURL)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("invalid next url")
+	}
+	if parsed.Scheme != "" || parsed.Host != "" {
+		base, baseErr := url.Parse(c.BaseURL)
+		if baseErr != nil || !strings.EqualFold(parsed.Host, base.Host) || !strings.EqualFold(parsed.Scheme, base.Scheme) {
+			return "", 0, 0, fmt.Errorf("next url is outside the store api")
+		}
+	}
+	path = parsed.RequestURI()
+	if path == "" {
+		path = parsed.Path
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	if n, convErr := strconv.Atoi(parsed.Query().Get("limit")); convErr == nil && n > 0 {
+		limit = n
+	}
+	if n, convErr := strconv.Atoi(parsed.Query().Get("offset")); convErr == nil && n >= 0 {
+		offset = n
+	}
+	return path, limit, offset, nil
 }
 
 func normalizePageProducts(page map[string]any) {

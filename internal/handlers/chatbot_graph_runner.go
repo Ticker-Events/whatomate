@@ -12,6 +12,7 @@ import (
 	"github.com/expr-lang/expr"
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
 
@@ -260,6 +261,16 @@ func (a *App) execChatMessage(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 // next edge and advance.
 // Config: { "body": "...", "buttons": [{ "id": "...", "title": "..." }, ...] }
 func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
+	mode := stringFromConfig(node.Config, "mode")
+	if !ctx.consumed && (mode == "list" || mode == "carousel") && codedflow.IsShowMoreRequest(ctx.buttonID, ctx.userInput) {
+		buttons, err := buttonsForNode(node.Config, ctx.session.SessionData)
+		if err == nil && codedflow.IncludesShowMore(buttons) {
+			codedflow.AdvanceCursor(ctx.session.SessionData, codedflow.ItemsVar(node.Config))
+			ctx.buttonID = ""
+			ctx.userInput = ""
+			ctx.consumed = true
+		}
+	}
 	if !ctx.consumed && ctx.buttonID != "" {
 		ctx.consumed = true
 		ctx.session.SessionData = applyButtonSelection(node.Config, ctx.session.SessionData, ctx.buttonID, ctx.userInput)
@@ -271,7 +282,12 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		body = node.Label
 	}
 	body = processTemplate(body, ctx.session.SessionData)
-	if stringFromConfig(node.Config, "mode") == "carousel" {
+	if mode == "list" || mode == "carousel" {
+		if err := a.prepareListWindow(ctx, node.Config); err != nil {
+			return nodeOutcome{}, err
+		}
+	}
+	if mode == "carousel" {
 		cards, err := carouselCardsForNode(node.Config, ctx.session.SessionData)
 		if err != nil {
 			return nodeOutcome{}, fmt.Errorf("buttons node %q: %w", node.ID, err)
@@ -310,7 +326,7 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 			}
 		}
 	}
-	if stringFromConfig(node.Config, "mode") == "list" {
+	if mode == "list" {
 		header := processTemplate(stringFromConfig(node.Config, "header"), ctx.session.SessionData)
 		footer := processTemplate(stringFromConfig(node.Config, "footer"), ctx.session.SessionData)
 		listButton := processTemplate(stringFromConfig(node.Config, "list_button"), ctx.session.SessionData)
@@ -1272,13 +1288,18 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 	phoneField := stringFromConfig(cfg, "phone_field")
 
 	limit := 10
+	showMore := false
 	if kind == "url" || kind == "phone" {
 		limit = 2
+	}
+	if kind == "list" {
+		items, showMore = listPageItems(cfg, data, items)
+		limit = len(items)
 	}
 
 	out := make([]map[string]any, 0, len(items))
 	for i, item := range items {
-		if len(out) >= limit {
+		if kind != "list" && len(out) >= limit {
 			break
 		}
 		obj, ok := asStringMap(item)
@@ -1323,6 +1344,14 @@ func dynamicButtonsFromSession(cfg map[string]any, data models.JSONB, mode strin
 		}
 		btn["_item"] = obj
 		out = append(out, btn)
+	}
+	if kind == "list" && showMore {
+		out = append(out, map[string]any{
+			"id":          codedflow.ShowMoreID,
+			"title":       codedflow.ShowMoreTitle,
+			"type":        "reply",
+			"description": codedflow.ShowMoreDescription,
+		})
 	}
 	if kind == "reply" && len(out) < limit {
 		if extra := extraReplyButton(cfg); extra != nil {
@@ -1422,6 +1451,10 @@ func applyButtonSelection(cfg map[string]any, session models.JSONB, buttonID, ti
 			continue
 		}
 		session[variable] = value
+		if _, isList := anySlice(value); isList {
+			codedflow.ClearListCursor(session, variable)
+			codedflow.ClearListPage(session, variable)
+		}
 	}
 	return session
 }
@@ -1596,11 +1629,9 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string, sessio
 	mediaType := carouselMediaType(stringFromConfig(cfg, "media_type"))
 	fallbackMedia := stringFromConfig(cfg, "fallback_media_url")
 
-	out := make([]map[string]any, 0, len(items))
+	items, showMore := listPageItems(cfg, session, items)
+	out := make([]map[string]any, 0, len(items)+1)
 	for i, item := range items {
-		if len(out) >= 10 {
-			break
-		}
 		obj, ok := asStringMap(item)
 		if !ok {
 			continue
@@ -1653,7 +1684,50 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string, sessio
 		}
 		out = append(out, card)
 	}
+	if showMore {
+		if card := showMoreCarouselCard(out, action, fallbackMedia); card != nil {
+			out = append(out, card)
+		}
+	}
 	return out
+}
+
+// listPageItems keeps one WhatsApp page of a dynamic list. More than 10 rows
+// become 9 rows plus Show more. Page metadata on the session can say the API
+// still has rows that are not loaded yet.
+func listPageItems(cfg map[string]any, data models.JSONB, items []any) ([]any, bool) {
+	key := codedflow.ItemsVar(cfg)
+	page := codedflow.ReadPage(data, key)
+	cursor := codedflow.Cursor(data, key)
+	window, showMore := codedflow.Window(items, cursor, page)
+	codedflow.SetShown(data, key, len(window))
+	return window, showMore
+}
+
+func showMoreCarouselCard(cards []map[string]any, action, fallbackMedia string) map[string]any {
+	media := strings.TrimSpace(fallbackMedia)
+	if media == "" && len(cards) > 0 {
+		media = fieldString(cards[0], "media_url")
+	}
+	if media == "" {
+		media = tiqrecommerce.FallbackMedia
+	}
+	card := map[string]any{
+		"type":       action,
+		"media_type": "image",
+		"media_url":  media,
+		"body":       "There are more items.",
+		"title":      codedflow.ShowMoreTitle,
+		"id":         codedflow.ShowMoreID,
+	}
+	if len(cards) > 0 && carouselReplyCount(cards[0]) == 2 {
+		card["title_2"] = codedflow.ShowMoreTitle
+		card["id_2"] = codedflow.ShowMoreAltID
+	}
+	if !carouselCardReady(card, action) {
+		return nil
+	}
+	return card
 }
 
 func nestedFieldString(obj map[string]any, path string) string {

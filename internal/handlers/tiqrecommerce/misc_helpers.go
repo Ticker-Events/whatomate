@@ -110,6 +110,9 @@ func formatDirectOrderStatus(order map[string]any) string {
 	return fmt.Sprintf("Order %s is %s.", id, status)
 }
 
+// ReshapeOrdersForList prepares owner-list rows for a WhatsApp list message.
+func ReshapeOrdersForList(raw []any) []any { return reshapeOrdersForList(raw) }
+
 // reshapeOrdersForList prepares owner-list rows for a WhatsApp list message.
 // Title is display_uid (falling back to numeric id). Description is placed_on.
 func reshapeOrdersForList(raw []any) []any {
@@ -311,4 +314,3 @@ func sessionCollectionByID(session *models.ChatbotSession, id string) map[string
 	}
 	return nil
 }
-

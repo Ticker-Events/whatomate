@@ -9,11 +9,11 @@ import (
 )
 
 const (
-	CallsKey            = "_coded_calls"
-	codedCallsKey       = CallsKey
+	CallsKey             = "_coded_calls"
+	codedCallsKey        = CallsKey
 	codedTranslationsKey = "_translations"
-	CustomerLanguageKey = "customer_language"
-	customerLanguageKey = CustomerLanguageKey
+	CustomerLanguageKey  = "customer_language"
+	customerLanguageKey  = CustomerLanguageKey
 )
 
 // Choice is one accepted answer. ID is the button or row id, never a translated title.
@@ -150,9 +150,9 @@ func (c *Conv) ChatCtx() Chat { return c.chat }
 // Fail records the first error and stops the turn.
 func (c *Conv) Fail(err error) { c.fail(err) }
 
-func (c *Conv) Seq() int { return c.seq }
+func (c *Conv) Seq() int     { return c.seq }
 func (c *Conv) SetSeq(n int) { c.seq = n }
-func (c *Conv) AdvanceSeq() { c.seq++ }
+func (c *Conv) AdvanceSeq()  { c.seq++ }
 
 func (c *Conv) fail(err error) {
 	if err == nil || c.err != nil {
@@ -470,6 +470,7 @@ func (c *Conv) storeAPI(name, operation, apiType string, params map[string]strin
 		return nil, false
 	}
 	c.session().SessionData[name] = c.chat.LastTiqr()
+	c.rememberList(name, operation, apiType, params, c.chat.LastTiqr())
 	c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": c.chat.LastTiqr()})
 	return c.chat.LastTiqr(), true
 }
@@ -503,6 +504,7 @@ func (c *Conv) StoreList(name, operation string, params map[string]string) ([]an
 		return nil, false
 	}
 	c.session().SessionData[name] = items
+	c.rememberList(name, operation, "rest", params, c.chat.LastTiqr())
 	c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": items})
 	return items, true
 }
@@ -611,6 +613,9 @@ func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 	if c.Stop {
 		return Choice{}, false
 	}
+	if c.resendShowMore(name, cfg, false) {
+		return Choice{}, false
+	}
 	if id := c.offeredButtonID(cfg); id != "" {
 		c.chat.SetButtonID(id)
 		return c.acceptButton(name, cfg)
@@ -640,10 +645,63 @@ func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 		return Choice{}, false
 	}
 	route, ok := c.resolveFreeText(name, cfg, RouteOptions{})
+	if ok && route.Kind == RouteShowMore {
+		c.resendShowMore(name, cfg, true)
+		return Choice{}, false
+	}
 	if !ok || route.Kind != codedRouteChoice {
 		return Choice{}, false
 	}
 	return Choice{ID: route.ID, Title: route.Title}, true
+}
+
+// resendShowMore pages a list or carousel and sends the next page.
+// force is set when intent already chose Show more, after the reply was consumed.
+func (c *Conv) resendShowMore(name string, cfg map[string]any, force bool) bool {
+	mode := asString(cfg["mode"])
+	if mode != "list" && mode != "carousel" {
+		return false
+	}
+	if !force {
+		if c.chat.Consumed() || !IsShowMoreRequest(c.chat.ButtonID(), c.chat.UserInput()) {
+			return false
+		}
+		buttons, err := c.app.ButtonsForNode(cfg, c.session().SessionData)
+		if err != nil || !IncludesShowMore(buttons) {
+			return false
+		}
+	}
+	AdvanceCursor(c.session().SessionData, ItemsVar(cfg))
+	c.chat.SetButtonID("")
+	c.chat.SetUserInput("")
+	c.chat.SetConsumed(true)
+	out, err := c.app.ExecChatButtons(c.chat, name, cfg)
+	if err != nil {
+		c.fail(err)
+		return true
+	}
+	if out.Yield {
+		c.wait(name)
+	}
+	return true
+}
+
+func (c *Conv) rememberList(name, operation, apiType string, params map[string]string, payload map[string]any) {
+	if !IsListOperation(operation) || payload == nil {
+		return
+	}
+	_, page := PageFromPayload(payload)
+	page.Operation = operation
+	if apiType == "" {
+		apiType = "rest"
+	}
+	page.APIType = apiType
+	page.Params = cloneParams(params)
+	if page.Limit == 0 {
+		page.Limit = anyToInt(params["limit"])
+	}
+	WritePage(c.session().SessionData, name, page)
+	SetCursor(c.session().SessionData, name, 0)
 }
 
 const AgentHandoff = "I'm connecting you with a team member who can help."
@@ -838,7 +896,9 @@ func (c *Conv) carouselConfig(prompt CarouselPrompt) map[string]any {
 	return cfg
 }
 
-func (c *Conv) ImageButtonConfig(prompt ImageButtonPrompt) map[string]any { return c.imageButtonConfig(prompt) }
+func (c *Conv) ImageButtonConfig(prompt ImageButtonPrompt) map[string]any {
+	return c.imageButtonConfig(prompt)
+}
 
 func (c *Conv) imageButtonConfig(prompt ImageButtonPrompt) map[string]any {
 	cfg := map[string]any{
@@ -965,7 +1025,6 @@ func snapshotFields(data models.JSONB, cfg map[string]any) map[string]any {
 	}
 	return out
 }
-
 
 func stringMapAny(in map[string]string) map[string]any {
 	if len(in) == 0 {
