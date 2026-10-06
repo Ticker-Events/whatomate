@@ -71,6 +71,7 @@ func (a *App) runCodedFlowPreview(
 		contact:          contact,
 		session:          session,
 		userInput:        userInput,
+		inboundMedia:     tiqrecommerce.TakeInboundCaptureMedia(session),
 		buttonID:         buttonID,
 		flowResponseData: flowResponseData,
 		preview:          preview,

@@ -34,6 +34,7 @@ type chatNodeCtx struct {
 	contact          *models.Contact
 	session          *models.ChatbotSession
 	userInput        string
+	inboundMedia     codedflow.InboundMedia
 	buttonID         string
 	flowResponseData map[string]any // form fields from a WhatsApp Flow submission
 	consumed         bool

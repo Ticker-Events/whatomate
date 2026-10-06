@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
@@ -384,6 +385,18 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if messageText == "" && commerceConfigured(settings.AI) && persistedMessage != nil && persistedMessage.MediaURL != "" {
 		messageText = commerceMediaFallbackText(msg.Type, persistedMessage.MediaFilename)
 	}
+	if messageText == "" && inboundCaptureMediaType(msg.Type) {
+		if existing := a.findActiveSession(account.OrganizationID, contact.ID, account.Name, settings.SessionTimeoutMins); sessionExpectsCaptureAttachment(existing) {
+			filename := ""
+			if persistedMessage != nil {
+				filename = persistedMessage.MediaFilename
+			}
+			messageText = commerceMediaFallbackText(msg.Type, filename)
+			if messageText == "" {
+				messageText = "[Image attached]"
+			}
+		}
+	}
 
 	// Check business hours if enabled
 	if settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 {
@@ -422,11 +435,17 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	// Log incoming message to session
 	a.logSessionMessageWithMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check", persistedMessage, "")
 
+	if persistedMessage != nil && strings.TrimSpace(persistedMessage.MediaURL) != "" {
+		tiqrecommerce.StashInboundCaptureMedia(session, persistedMessage.ID.String(), persistedMessage.MediaURL, persistedMessage.MediaMimeType, persistedMessage.MediaFilename)
+	}
+
 	// An in-progress coded flow owns the conversation, including WhatsApp
 	// Flow submissions that commerce checkout would otherwise capture.
 	if a.resumeCodedFlow(account, contact, session, messageText, buttonID, flowResponseData) {
 		return
 	}
+	// Checkout reads the persisted message directly. Drop the stash so it is not saved.
+	tiqrecommerce.TakeInboundCaptureMedia(session)
 
 	// Commerce button taps (cart, checkout) stop further routing.
 	if a.handleCommerceButtonTap(account, contact, session, settings, buttonID) {
@@ -635,6 +654,27 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	} else if !isNewSession {
 		a.Log.Info("No fallback message configured for existing session")
 	}
+}
+
+func inboundCaptureMediaType(messageType string) bool {
+	switch messageType {
+	case "image", "document":
+		return true
+	default:
+		return false
+	}
+}
+
+func sessionExpectsCaptureAttachment(session *models.ChatbotSession) bool {
+	if session == nil {
+		return false
+	}
+	if st := getCheckoutState(session); st != nil && st.Step == "capture" &&
+		st.CaptureIndex >= 0 && st.CaptureIndex < len(st.CaptureFields) &&
+		captureFieldAcceptsAttachment(st.CaptureFields[st.CaptureIndex]) {
+		return true
+	}
+	return tiqrecommerce.SessionExpectsCaptureAttachment(session)
 }
 
 func commerceMediaFallbackText(messageType, filename string) string {
@@ -1084,6 +1124,21 @@ func (a *App) getOrCreateSession(orgID, contactID uuid.UUID, accountName, phoneN
 		a.Log.Error("Failed to create session", "error", err)
 	}
 	return &session, true // new session
+}
+
+// findActiveSession returns the open session without creating one.
+func (a *App) findActiveSession(orgID, contactID uuid.UUID, accountName string, timeoutMins int) *models.ChatbotSession {
+	if a == nil || a.DB == nil {
+		return nil
+	}
+	var session models.ChatbotSession
+	timeout := time.Now().Add(-time.Duration(timeoutMins) * time.Minute)
+	err := a.DB.Where("organization_id = ? AND contact_id = ? AND whats_app_account = ? AND status = ? AND last_activity_at > ?",
+		orgID, contactID, accountName, models.SessionStatusActive, timeout).First(&session).Error
+	if err != nil {
+		return nil
+	}
+	return &session
 }
 
 // logSessionMessage logs a message to the chatbot session

@@ -239,6 +239,8 @@ func (a *App) stageCommerceHandoffSessionData(session *models.ChatbotSession, ca
 			"url": "/api/media/" + messageID,
 		})
 	}
+	captured := jsonMapFromSession(session, "commerce_captured_fields")
+	media = tiqrecommerce.MergeMediaReferences(media, captured)
 	summary := commerceHandoffSummary(&draft, category)
 	session.SessionData["commerce_media_references"] = media
 	session.SessionData["commerce_handoff_summary"] = summary
@@ -250,8 +252,9 @@ func (a *App) stageCommerceHandoffSessionData(session *models.ChatbotSession, ca
 	}
 	addons := tiqrecommerce.HandoffDisplayAddons(session, draft.Addons)
 	handoff := map[string]any{
-		"draft_id": draft.ID.String(), "captured_fields": jsonMapFromSession(session, "commerce_captured_fields"),
+		"draft_id": draft.ID.String(), "captured_fields": captured,
 		"media_references": media, "summary": summary,
+		"notes":  tiqrecommerce.SessionHandoffNotes(session),
 		"cart":   cart,
 		"addons": addons,
 	}
@@ -382,6 +385,7 @@ func commerceHandoffMetadata(draft *models.CommerceDraft, category tickermcp.Cat
 			"url": "/api/media/" + messageID,
 		})
 	}
+	media = tiqrecommerce.MergeMediaReferences(media, draft.CapturedFields)
 	fulfillment := map[string]any{}
 	if draft.FulfillmentMode != "" {
 		fulfillment["delivery_mode"] = draft.FulfillmentMode
@@ -422,8 +426,14 @@ func commerceHandoffMetadata(draft *models.CommerceDraft, category tickermcp.Cat
 }
 
 func commerceHandoffSummary(draft *models.CommerceDraft, category tickermcp.Category) string {
-	return fmt.Sprintf("Commerce handoff · %s · draft %s · %d captured fields · %d media",
+	summary := fmt.Sprintf("Commerce handoff · %s · draft %s · %d captured fields · %d media",
 		category.Name, draft.ID, len(draft.CapturedFields), len(draft.Attachments))
+	if draft != nil && draft.Notes != nil {
+		if extra := strings.TrimSpace(asString(draft.Notes["media_shared"])); extra != "" {
+			return summary + "\n" + extra
+		}
+	}
+	return summary
 }
 
 func applyCommerceTags(tx *gorm.DB, contact *models.Contact, configured []string) error {

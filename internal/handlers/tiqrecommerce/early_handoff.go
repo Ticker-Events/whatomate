@@ -238,43 +238,7 @@ func askEarlyHandoffCaptureFields(c *Conv, collection map[string]any) bool {
 
 // askCaptureFieldNoCheckout is askCaptureField without diverting to checkout.
 func (c *Conv) askCaptureFieldNoCheckout(name string, field map[string]any) (any, bool) {
-	if c.Stop {
-		return nil, false
-	}
-	if rec, done := c.DoneCall(); done {
-		if !codedflow.CallOK(rec) {
-			return nil, false
-		}
-		value, ok := rec["value"]
-		if !ok {
-			return nil, false
-		}
-		return value, true
-	}
-	body := strings.TrimSpace(promptCaptureField(field))
-	if body == "" {
-		body = "Please share " + asString(field["label"]) + "."
-	}
-	if c.NoAnswerYet() {
-		if !c.sendCapturePrompt(name, body) {
-			return nil, false
-		}
-		c.Wait(name)
-		return nil, false
-	}
-	input := strings.TrimSpace(c.ChatCtx().UserInput())
-	if input == "" || !validCaptureValue(field, input) {
-		c.ChatCtx().SetConsumed(true)
-		if !c.sendCapturePrompt(name, "Please provide a valid value.\n"+body) {
-			return nil, false
-		}
-		c.Wait(name)
-		return nil, false
-	}
-	value := normalizedCaptureValue(field, input)
-	c.ChatCtx().SetConsumed(true)
-	c.AppendCall(map[string]any{"name": name, "ok": true, "value": value})
-	return value, true
+	return c.answerCaptureField(name, field, false)
 }
 
 func askEarlyHandoffAddons(c *Conv, productID string) bool {
