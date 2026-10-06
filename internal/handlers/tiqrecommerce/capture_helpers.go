@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
+	"github.com/shridarpatil/whatomate/internal/models"
 )
 
 var (
@@ -32,7 +34,260 @@ func promptCaptureField(field map[string]any) string {
 	} else if options, ok := field["options"].([]string); ok && len(options) > 0 {
 		label += "\nOptions: " + strings.Join(options, ", ")
 	}
+	if CaptureFieldAcceptsAttachment(field) {
+		if imageCaptureField(field) {
+			label += "\nPlease send a photo."
+		} else {
+			label += "\nPlease attach the requested file."
+		}
+	}
 	return label
+}
+
+const (
+	capturePendingKey      = "commerce_capture_pending"
+	inboundCaptureMediaKey = "_inbound_capture_media"
+	captureMediaNotesKey   = "media_shared"
+)
+
+// CaptureMediaLink is the handoff and order-notes URL for a saved WhatsApp message.
+func CaptureMediaLink(messageID string) string {
+	id := strings.TrimSpace(messageID)
+	if id == "" {
+		return ""
+	}
+	return "/api/media/" + id
+}
+
+// StashInboundCaptureMedia keeps this turn's photo on the session until the coded flow reads it.
+func StashInboundCaptureMedia(session *models.ChatbotSession, messageID, mediaURL, mimeType, filename string) {
+	if session == nil || strings.TrimSpace(mediaURL) == "" || strings.TrimSpace(messageID) == "" {
+		return
+	}
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
+	session.SessionData[inboundCaptureMediaKey] = map[string]any{
+		"message_id": messageID,
+		"media_url":  mediaURL,
+		"mime_type":  mimeType,
+		"filename":   filename,
+	}
+}
+
+// TakeInboundCaptureMedia removes and returns the stashed photo so it is not persisted.
+func TakeInboundCaptureMedia(session *models.ChatbotSession) codedflow.InboundMedia {
+	if session == nil || session.SessionData == nil {
+		return codedflow.InboundMedia{}
+	}
+	raw, ok := asStringMap(session.SessionData[inboundCaptureMediaKey])
+	delete(session.SessionData, inboundCaptureMediaKey)
+	if !ok {
+		return codedflow.InboundMedia{}
+	}
+	return codedflow.InboundMedia{
+		MessageID: strings.TrimSpace(asString(raw["message_id"])),
+		MediaURL:  strings.TrimSpace(asString(raw["media_url"])),
+		MIMEType:  strings.TrimSpace(asString(raw["mime_type"])),
+		Filename:  strings.TrimSpace(asString(raw["filename"])),
+	}
+}
+
+// SessionExpectsCaptureAttachment reports a coded-flow step waiting for a photo or file.
+func SessionExpectsCaptureAttachment(session *models.ChatbotSession) bool {
+	if session == nil || session.SessionData == nil {
+		return false
+	}
+	pending, ok := asStringMap(session.SessionData[capturePendingKey])
+	if !ok {
+		return false
+	}
+	if strings.TrimSpace(asString(pending["step"])) != strings.TrimSpace(session.CurrentStep) {
+		return false
+	}
+	return CaptureFieldAcceptsAttachment(pending)
+}
+
+// RecordCaptureMediaNote stores the image link in commerce notes for checkout and handoff.
+func RecordCaptureMediaNote(session *models.ChatbotSession, field map[string]any, link string) {
+	link = strings.TrimSpace(link)
+	if session == nil || link == "" {
+		return
+	}
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
+	notes := jsonMapFromSession(session, "commerce_notes")
+	label := strings.TrimSpace(asString(field["label"]))
+	if label == "" {
+		label = strings.TrimSpace(asString(field["key"]))
+	}
+	if label == "" {
+		label = "Image"
+	}
+	line := label + ": " + link
+	existing := strings.TrimSpace(asString(notes[captureMediaNotesKey]))
+	switch {
+	case existing == "":
+		notes[captureMediaNotesKey] = line
+	case !strings.Contains(existing, link):
+		notes[captureMediaNotesKey] = existing + "\n" + line
+	}
+	if key := strings.TrimSpace(asString(field["key"])); key != "" {
+		notes[key] = link
+	}
+	session.SessionData["commerce_notes"] = map[string]any(notes)
+}
+
+// SessionHandoffNotes is the readable notes text copied into handoff context.
+func SessionHandoffNotes(session *models.ChatbotSession) string {
+	if session == nil {
+		return ""
+	}
+	return joinHandoffNoteParts(jsonMapFromSession(session, "commerce_notes"))
+}
+
+func joinHandoffNoteParts(notes models.JSONB) string {
+	if len(notes) == 0 {
+		return ""
+	}
+	primary := strings.TrimSpace(asString(notes["order_notes"]))
+	if primary == "" {
+		primary = strings.TrimSpace(asString(notes["customer_notes"]))
+	}
+	media := strings.TrimSpace(asString(notes[captureMediaNotesKey]))
+	if media == "" || strings.Contains(primary, media) {
+		return primary
+	}
+	if primary == "" {
+		return media
+	}
+	return primary + "\n" + media
+}
+
+// MediaReferencesFromCaptured lists image links stored on captured field values.
+func MediaReferencesFromCaptured(captured models.JSONB) []any {
+	if len(captured) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(captured))
+	for key := range captured {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]any, 0)
+	for _, key := range keys {
+		out = append(out, mediaRefsFromValue(key, captured[key])...)
+	}
+	return out
+}
+
+// MergeMediaReferences appends captured image links that are not already listed.
+func MergeMediaReferences(existing []any, captured models.JSONB) []any {
+	seen := map[string]bool{}
+	out := make([]any, 0, len(existing))
+	for _, raw := range existing {
+		item, ok := asStringMap(raw)
+		if !ok {
+			continue
+		}
+		if key := mediaRefIdentity(item); key != "" {
+			seen[key] = true
+		}
+		out = append(out, item)
+	}
+	for _, raw := range MediaReferencesFromCaptured(captured) {
+		item, ok := asStringMap(raw)
+		if !ok {
+			continue
+		}
+		key := mediaRefIdentity(item)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func mediaRefIdentity(item map[string]any) string {
+	if id := strings.TrimSpace(asString(item["message_id"])); id != "" {
+		return id
+	}
+	return strings.TrimSpace(asString(item["url"]))
+}
+
+func mediaRefsFromValue(captureKey string, value any) []any {
+	switch typed := value.(type) {
+	case map[string]any:
+		if item := mediaRefItem(captureKey, typed); item != nil {
+			return []any{item}
+		}
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, entry := range typed {
+			item, ok := asStringMap(entry)
+			if !ok {
+				continue
+			}
+			if ref := mediaRefItem(captureKey, item); ref != nil {
+				out = append(out, ref)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func mediaRefItem(captureKey string, item map[string]any) map[string]any {
+	messageID := strings.TrimSpace(asString(item["message_id"]))
+	url := strings.TrimSpace(asString(item["url"]))
+	if url == "" {
+		url = CaptureMediaLink(messageID)
+	}
+	if url == "" {
+		return nil
+	}
+	key := strings.TrimSpace(asString(item["capture_key"]))
+	if key == "" {
+		key = captureKey
+	}
+	return map[string]any{
+		"message_id":  messageID,
+		"type":        strings.TrimSpace(asString(item["mime_type"])),
+		"filename":    strings.TrimSpace(asString(item["filename"])),
+		"capture_key": key,
+		"url":         url,
+	}
+}
+
+func imageCaptureField(field map[string]any) bool {
+	fieldType := strings.ToLower(asString(field["type"]))
+	if fieldType == "image" || fieldType == "images" {
+		return true
+	}
+	key := strings.ToLower(asString(field["key"]))
+	return strings.Contains(key, "reference") && strings.Contains(key, "image")
+}
+
+// CaptureFieldAcceptsAttachment reports collection fields answered with a WhatsApp photo or file.
+func CaptureFieldAcceptsAttachment(field map[string]any) bool {
+	fieldType := strings.ToLower(asString(field["type"]))
+	switch fieldType {
+	case "image", "images", "file", "document", "media", "attachment":
+		return true
+	}
+	key := strings.ToLower(asString(field["key"]))
+	return strings.Contains(key, "reference") && strings.Contains(key, "image")
+}
+
+// CaptureAttachmentRetry is the reply when a photo or file field did not receive media.
+func CaptureAttachmentRetry(field map[string]any) string {
+	if imageCaptureField(field) {
+		return "Please send the photo again."
+	}
+	return "Please attach the requested file again."
 }
 
 func validCaptureValue(field map[string]any, value string) bool {

@@ -59,6 +59,7 @@ func attachmentsJSON(items []AIAttachment) models.JSONBArray {
 		out = append(out, map[string]any{
 			"message_id": item.MessageID.String(), "media_url": item.MediaURL,
 			"mime_type": item.MIMEType, "filename": item.Filename, "capture_key": item.CaptureKey,
+			"url": "/api/media/" + item.MessageID.String(),
 		})
 	}
 	return out

@@ -1,9 +1,9 @@
 package tiqrecommerce
 
 import (
-	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"errors"
 	"fmt"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"strconv"
 	"strings"
 	"time"
@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	HandoffCartKey    = "commerce_handoff_cart"
-	CartSource   = "tiqr_ecommerce"
-	commerceNotesMissingKey   = "missing_fields"
+	HandoffCartKey             = "commerce_handoff_cart"
+	CartSource                 = "tiqr_ecommerce"
+	commerceNotesMissingKey    = "missing_fields"
 	commerceNotesOrderNotesKey = "order_notes"
 )
 
@@ -383,10 +383,7 @@ func CommerceHandoffNotesText(draft *models.CommerceDraft) string {
 	if draft == nil || draft.Notes == nil {
 		return ""
 	}
-	if notes := strings.TrimSpace(asString(draft.Notes[commerceNotesOrderNotesKey])); notes != "" {
-		return notes
-	}
-	return strings.TrimSpace(asString(draft.Notes["customer_notes"]))
+	return joinHandoffNoteParts(draft.Notes)
 }
 
 // ensureDraftStoreID prefers the store loaded by the coded flow when the draft

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"regexp"
 	"sort"
 	"strconv"
@@ -784,11 +785,26 @@ func formatLineCapture(line TiqrCartLine) string {
 
 func formatCaptureAnswer(value any) string {
 	switch typed := value.(type) {
+	case map[string]any:
+		if url := strings.TrimSpace(asString(typed["url"])); url != "" {
+			return url
+		}
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text == "<nil>" {
+			return ""
+		}
+		return text
 	case []string:
 		return strings.Join(nonEmpty(typed...), ", ")
 	case []any:
 		parts := make([]string, 0, len(typed))
 		for _, item := range typed {
+			if itemMap, ok := asStringMap(item); ok {
+				if url := strings.TrimSpace(asString(itemMap["url"])); url != "" {
+					parts = append(parts, url)
+					continue
+				}
+			}
 			if text := strings.TrimSpace(fmt.Sprint(item)); text != "" && text != "<nil>" {
 				parts = append(parts, text)
 			}
@@ -999,6 +1015,10 @@ func askCollectionCaptureFields(c *Conv) (map[string]any, []string, bool) {
 }
 
 func (c *Conv) askCaptureField(name string, field map[string]any) (any, bool) {
+	return c.answerCaptureField(name, field, true)
+}
+
+func (c *Conv) answerCaptureField(name string, field map[string]any, allowCheckout bool) (any, bool) {
 	if c.Stop {
 		return nil, false
 	}
@@ -1017,30 +1037,85 @@ func (c *Conv) askCaptureField(name string, field map[string]any) (any, bool) {
 		body = "Please share " + asString(field["label"]) + "."
 	}
 	if c.NoAnswerYet() {
-		if !c.sendCapturePrompt(name, body) {
-			return nil, false
-		}
-		c.Wait(name)
-		return nil, false
+		return c.waitForCapture(name, body, field)
+	}
+	if CaptureFieldAcceptsAttachment(field) {
+		return c.acceptCaptureAttachment(name, body, field)
 	}
 	input := strings.TrimSpace(c.ChatCtx().UserInput())
-	if isCheckoutStartIntent(input) && !validCaptureValue(field, input) {
+	if allowCheckout && isCheckoutStartIntent(input) && !validCaptureValue(field, input) {
 		c.ChatCtx().SetConsumed(true)
 		c.Divert = codedflow.RouteCheckout
 		return nil, false
 	}
 	if input == "" || !validCaptureValue(field, input) {
 		c.ChatCtx().SetConsumed(true)
-		if !c.sendCapturePrompt(name, "Please provide a valid value.\n"+body) {
-			return nil, false
-		}
-		c.Wait(name)
-		return nil, false
+		return c.waitForCapture(name, "Please provide a valid value.\n"+body, field)
 	}
 	value := normalizedCaptureValue(field, input)
+	c.clearCapturePending()
 	c.ChatCtx().SetConsumed(true)
 	c.AppendCall(map[string]any{"name": name, "ok": true, "value": value})
 	return value, true
+}
+
+func (c *Conv) acceptCaptureAttachment(name, body string, field map[string]any) (any, bool) {
+	media := codedflow.InboundMedia{}
+	if c.ChatCtx() != nil {
+		media = c.ChatCtx().InboundMedia()
+	}
+	link := CaptureMediaLink(media.MessageID)
+	if strings.TrimSpace(media.MediaURL) == "" || link == "" {
+		c.ChatCtx().SetConsumed(true)
+		return c.waitForCapture(name, CaptureAttachmentRetry(field)+"\n"+body, field)
+	}
+	value := []any{map[string]any{
+		"message_id":  media.MessageID,
+		"media_url":   media.MediaURL,
+		"mime_type":   media.MIMEType,
+		"filename":    media.Filename,
+		"capture_key": asString(field["key"]),
+		"url":         link,
+	}}
+	RecordCaptureMediaNote(c.Session(), field, link)
+	c.clearCapturePending()
+	c.ChatCtx().SetConsumed(true)
+	c.AppendCall(map[string]any{"name": name, "ok": true, "value": value})
+	return value, true
+}
+
+func (c *Conv) waitForCapture(name, body string, field map[string]any) (any, bool) {
+	c.markCapturePending(name, field)
+	if !c.sendCapturePrompt(name, body) {
+		return nil, false
+	}
+	c.Wait(name)
+	return nil, false
+}
+
+func (c *Conv) markCapturePending(name string, field map[string]any) {
+	session := c.Session()
+	if session == nil {
+		return
+	}
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
+	session.SessionData[capturePendingKey] = map[string]any{
+		"step":      name,
+		"key":       asString(field["key"]),
+		"label":     asString(field["label"]),
+		"type":      asString(field["type"]),
+		"help_text": asString(field["help_text"]),
+	}
+}
+
+func (c *Conv) clearCapturePending() {
+	session := c.Session()
+	if session == nil || session.SessionData == nil {
+		return
+	}
+	delete(session.SessionData, capturePendingKey)
 }
 
 func (c *Conv) sendCapturePrompt(name, body string) bool {

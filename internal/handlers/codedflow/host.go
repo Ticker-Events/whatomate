@@ -13,6 +13,14 @@ type NodeResult struct {
 	Yield   bool
 }
 
+// InboundMedia is a WhatsApp photo or file on the current turn.
+type InboundMedia struct {
+	MessageID string
+	MediaURL  string
+	MIMEType  string
+	Filename  string
+}
+
 // Chat wraps the inbound turn state Conv needs from chatNodeCtx.
 // Native returns the underlying *chatNodeCtx for the handlers adapter.
 type Chat interface {
@@ -22,6 +30,7 @@ type Chat interface {
 
 	UserInput() string
 	SetUserInput(string)
+	InboundMedia() InboundMedia
 	ButtonID() string
 	SetButtonID(string)
 	FlowResponseData() map[string]any

@@ -35,11 +35,12 @@ func (c *codedChat) Account() *models.WhatsAppAccount {
 }
 func (c *codedChat) Contact() *models.Contact { return c.ctx.contact }
 
-func (c *codedChat) UserInput() string                  { return c.ctx.userInput }
-func (c *codedChat) SetUserInput(v string)              { c.ctx.userInput = v }
-func (c *codedChat) ButtonID() string                   { return c.ctx.buttonID }
-func (c *codedChat) SetButtonID(v string)               { c.ctx.buttonID = v }
-func (c *codedChat) FlowResponseData() map[string]any   { return c.ctx.flowResponseData }
+func (c *codedChat) UserInput() string                    { return c.ctx.userInput }
+func (c *codedChat) SetUserInput(v string)                { c.ctx.userInput = v }
+func (c *codedChat) InboundMedia() codedflow.InboundMedia { return c.ctx.inboundMedia }
+func (c *codedChat) ButtonID() string                     { return c.ctx.buttonID }
+func (c *codedChat) SetButtonID(v string)                 { c.ctx.buttonID = v }
+func (c *codedChat) FlowResponseData() map[string]any     { return c.ctx.flowResponseData }
 func (c *codedChat) SetFlowResponseData(v map[string]any) {
 	c.ctx.flowResponseData = v
 }
@@ -611,4 +612,3 @@ func (a *App) LogCodedFlowTiqrResponse(session *models.ChatbotSession, apiType, 
 
 // Ensure *App implements codedflow.Host at compile time.
 var _ codedflow.Host = (*App)(nil)
-

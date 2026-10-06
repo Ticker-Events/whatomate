@@ -15,6 +15,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
+	"github.com/shridarpatil/whatomate/pkg/tickermcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -3116,4 +3117,160 @@ func TestTiqrEcommerce_OptionListPagesWithShowMore(t *testing.T) {
 	reloadSession(t, app, session)
 	assert.Equal(t, "quantity", session.CurrentStep)
 	assert.Equal(t, "12", session.SessionData["option_id"])
+}
+
+func TestCodedOrderNotesIncludesImageLink(t *testing.T) {
+	t.Parallel()
+	notes := tiqrecommerce.CodedOrderNotes(map[string]any{
+		"commerce_captured_fields": map[string]any{
+			"reference_image": []any{map[string]any{"url": "/api/media/msg-1"}},
+		},
+		"commerce_capture_labels": map[string]any{"reference_image": "Reference photo"},
+	})
+	assert.Contains(t, notes, "Reference photo")
+	assert.Contains(t, notes, "/api/media/msg-1")
+}
+
+func TestSessionExpectsImageCapture(t *testing.T) {
+	t.Parallel()
+	session := &models.ChatbotSession{
+		CurrentStep: "capture_0_reference_image",
+		SessionData: models.JSONB{
+			"commerce_capture_pending": map[string]any{
+				"step": "capture_0_reference_image",
+				"key":  "reference_image",
+				"type": "image",
+			},
+		},
+	}
+	assert.True(t, tiqrecommerce.SessionExpectsCaptureAttachment(session))
+	session.CurrentStep = "quantity"
+	assert.False(t, tiqrecommerce.SessionExpectsCaptureAttachment(session))
+}
+
+func TestHandoffContextIncludesImageLink(t *testing.T) {
+	t.Parallel()
+	link := "/api/media/msg-9"
+	session := &models.ChatbotSession{SessionData: models.JSONB{
+		"commerce_notes": map[string]any{
+			"order_notes":  "Kunafa\n- Reference photo: " + link,
+			"media_shared": "Reference photo: " + link,
+		},
+	}}
+	assert.Contains(t, tiqrecommerce.SessionHandoffNotes(session), link)
+
+	media := tiqrecommerce.MergeMediaReferences(nil, models.JSONB{
+		"reference_image": []any{map[string]any{
+			"message_id": "msg-9", "url": link, "capture_key": "reference_image", "filename": "ref.jpg",
+		}},
+	})
+	require.Len(t, media, 1)
+	item, ok := media[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, link, item["url"])
+
+	summary := commerceHandoffSummary(&models.CommerceDraft{
+		Notes: models.JSONB{"media_shared": "Reference photo: " + link},
+	}, tickermcp.Category{Name: "Sweets"})
+	assert.Contains(t, summary, link)
+}
+
+func TestTiqrEcommerce_ImageCaptureStoresLink(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":   "57",
+				"name": "Sweets",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "reference_image", "label": "Reference photo", "type": "image", "required": true,
+					},
+				},
+			},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "quantity", session.CurrentStep)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "capture_0_reference_image", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "Please send a photo.")
+	assert.True(t, tiqrecommerce.SessionExpectsCaptureAttachment(session))
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "[Image attached]", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "capture_0_reference_image", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "Please send the photo again.")
+
+	messageID := uuid.New()
+	tiqrecommerce.StashInboundCaptureMedia(session, messageID.String(), "images/ref.jpg", "image/jpeg", "ref.jpg")
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "[Image attached]", "", nil))
+	reloadSession(t, app, session)
+	assert.NotEqual(t, "capture_0_reference_image", session.CurrentStep)
+	link := "/api/media/" + messageID.String()
+	captured, _ := session.SessionData["commerce_captured_fields"].(map[string]any)
+	require.NotNil(t, captured)
+	assert.Contains(t, fmt.Sprint(captured["reference_image"]), link)
+	notes, _ := session.SessionData["commerce_notes"].(map[string]any)
+	require.NotNil(t, notes)
+	assert.Contains(t, fmt.Sprint(notes["media_shared"]), link)
+	assert.Contains(t, tiqrecommerce.CodedOrderNotes(session.SessionData), link)
+	_, stillStashed := session.SessionData["_inbound_capture_media"]
+	assert.False(t, stillStashed)
+}
+
+func TestCheckoutImageCaptureContinuesAndNotesLink(t *testing.T) {
+	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	messageID := uuid.New()
+	setCheckoutState(session, &checkoutState{
+		Step:         "capture",
+		Flow:         checkoutFlowPostCart,
+		CaptureIndex: 0,
+		CaptureFields: []map[string]any{
+			{"key": "reference_image", "label": "Reference photo", "type": "image"},
+			{"key": "writing", "label": "Cake writing", "type": "text"},
+		},
+		NewAddress: map[string]any{},
+	})
+	handled := app.handleCheckoutConversation(account, contact, session, &models.ChatbotSettings{}, "[Image attached]", "", &models.Message{
+		BaseModel:     models.BaseModel{ID: messageID},
+		MediaURL:      "images/ref.jpg",
+		MediaMimeType: "image/jpeg",
+	})
+	require.True(t, handled)
+	st := getCheckoutState(session)
+	require.NotNil(t, st)
+	assert.Equal(t, 1, st.CaptureIndex)
+	link := "/api/media/" + messageID.String()
+	assert.Contains(t, checkoutNotes(session), link)
+	assert.Contains(t, outgoingBlob(t, app, session), "Cake writing")
+
+	setCheckoutState(session, &checkoutState{
+		Step:         "capture",
+		Flow:         checkoutFlowPostCart,
+		CaptureIndex: 0,
+		CaptureFields: []map[string]any{
+			{"key": "reference_image", "label": "Reference photo", "type": "image"},
+		},
+		NewAddress: map[string]any{},
+	})
+	handled = app.handleCheckoutConversation(account, contact, session, &models.ChatbotSettings{}, "[Image attached]", "", &models.Message{})
+	require.True(t, handled)
+	st = getCheckoutState(session)
+	require.NotNil(t, st)
+	assert.Equal(t, 0, st.CaptureIndex)
+	retry := outgoingBlob(t, app, session)
+	assert.Contains(t, retry, "Please send the photo again.")
+	assert.Contains(t, retry, "Please send a photo.")
 }

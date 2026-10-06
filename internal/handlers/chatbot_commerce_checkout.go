@@ -414,7 +414,23 @@ func promptCaptureField(field map[string]any) string {
 	} else if options, ok := field["options"].([]string); ok && len(options) > 0 {
 		label += "\nOptions: " + strings.Join(options, ", ")
 	}
+	if captureFieldAcceptsAttachment(field) {
+		if imageCapturePrompt(field) {
+			label += "\nPlease send a photo."
+		} else {
+			label += "\nPlease attach the requested file."
+		}
+	}
 	return label
+}
+
+func imageCapturePrompt(field map[string]any) bool {
+	fieldType := strings.ToLower(asString(field["type"]))
+	if fieldType == "image" || fieldType == "images" {
+		return true
+	}
+	key := strings.ToLower(asString(field["key"]))
+	return strings.Contains(key, "reference") && strings.Contains(key, "image")
 }
 
 func productIDFromCartMeta(meta map[string]any) string {
@@ -1262,12 +1278,15 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		if captureFieldAcceptsAttachment(field) {
 			attachments := attachmentFromMessage(persistedMessage, asString(field["key"]))
 			if len(attachments) == 0 {
-				_ = a.sendAndSaveTextMessage(account, contact, "Please attach the requested file.\n"+promptCaptureField(field))
+				_ = a.sendAndSaveTextMessage(account, contact, tiqrecommerce.CaptureAttachmentRetry(field)+"\n"+promptCaptureField(field))
 				return true
 			}
 			captured := jsonMapFromSession(session, "commerce_captured_fields")
 			captured[asString(field["key"])] = attachmentsJSON(attachments)
 			session.SessionData["commerce_captured_fields"] = map[string]any(captured)
+			for _, attachment := range attachments {
+				tiqrecommerce.RecordCaptureMediaNote(session, field, tiqrecommerce.CaptureMediaLink(attachment.MessageID.String()))
+			}
 			a.appendDraftAttachments(session, attachments)
 			st.CaptureIndex++
 			if st.CaptureIndex >= len(st.CaptureFields) {
