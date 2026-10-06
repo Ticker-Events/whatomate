@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,10 +12,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 )
+
+var errInvalidMediaPath = errors.New("invalid media path")
 
 // getMediaStoragePath returns the base path for media storage
 func (a *App) getMediaStoragePath() string {
@@ -117,8 +121,8 @@ func getExtensionFromMimeType(mimeType string) string {
 	}
 }
 
-// DownloadAndSaveMedia downloads media from the configured provider and saves it locally.
-// Returns the local file path (relative to media storage) or error
+// DownloadAndSaveMedia downloads media from the configured provider and stores it.
+// Returns the relative storage key (local path or S3 key) or an error.
 func (a *App) DownloadAndSaveMedia(ctx context.Context, mediaID string, mimeType string, account *whatsapp.Account) (string, error) {
 	// Choose client based on provider field on the account
 	var client whatsapp.MessagingClient = a.WhatsApp
@@ -138,47 +142,31 @@ func (a *App) DownloadAndSaveMedia(ctx context.Context, mediaID string, mimeType
 		return "", fmt.Errorf("failed to download media: %w", err)
 	}
 
-	// Determine file extension
-	ext := getExtensionFromMimeType(mimeType)
-	if ext == "" {
-		ext = ".bin"
-	}
-
-	// Generate unique filename
-	filename := uuid.New().String() + ext
-
-	// Determine subdirectory based on media type
-	var subdir string
-	switch {
-	case strings.HasPrefix(mimeType, "image/"):
-		subdir = "images"
-	case strings.HasPrefix(mimeType, "video/"):
-		subdir = "videos"
-	case strings.HasPrefix(mimeType, "audio/"):
-		subdir = "audio"
-	default:
-		subdir = "documents"
-	}
-
-	// Ensure directory exists
-	if err := a.ensureMediaDir(subdir); err != nil {
-		return "", fmt.Errorf("failed to create media directory: %w", err)
-	}
-
-	// Save file
-	filePath := filepath.Join(a.getMediaStoragePath(), subdir, filename)
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
-		return "", fmt.Errorf("failed to save media file: %w", err)
-	}
-
-	// Return relative path for storage in database
-	relativePath := filepath.Join(subdir, filename)
-	a.Log.Info("Media saved", "path", relativePath, "size", len(data))
-
-	return relativePath, nil
+	return a.saveMediaLocally(data, mimeType, "")
 }
 
-// ServeMedia serves media files from local storage
+// readStoredMedia returns bytes for a relative media key. Files already on disk
+// are served from there. When S3 is configured, a missing local file is read
+// from the bucket at the same key.
+func (a *App) readStoredMedia(fullPath, relative string) ([]byte, error) {
+	info, err := os.Lstat(fullPath)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, errInvalidMediaPath
+		}
+		return os.ReadFile(fullPath)
+	}
+	if !os.IsNotExist(err) || a.S3Client == nil {
+		return nil, err
+	}
+	data, err := a.S3Client.Download(context.Background(), filepath.ToSlash(relative))
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// ServeMedia serves media files from storage.
 // Only authorized users who have access to the message can view the media
 func (a *App) ServeMedia(r *fastglue.Request) error {
 	// Get auth context
@@ -236,18 +224,14 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
 	}
 
-	// Reject symlinks
-	info, err := os.Lstat(fullPath)
+	data, err := a.readStoredMedia(fullPath, filePath)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "File not found", nil, "")
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
-	}
-
-	// Read file
-	data, err := os.ReadFile(fullPath)
-	if err != nil {
+		if os.IsNotExist(err) || storage.IsNotFound(err) {
+			return r.SendErrorEnvelope(fasthttp.StatusNotFound, "File not found", nil, "")
+		}
+		if errors.Is(err, errInvalidMediaPath) {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
+		}
 		a.Log.Error("Failed to read media file", "path", fullPath, "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file", nil, "")
 	}
