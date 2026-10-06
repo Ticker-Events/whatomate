@@ -113,6 +113,11 @@ type Host interface {
 	CodedOrderRetries() int
 	LookupLatestOrder(account *models.WhatsAppAccount, session *models.ChatbotSession) (map[string]any, error)
 
+	// ResolveEcommerceMetaFlowID returns the Meta WhatsApp Flow ID for
+	// pickup (delivery=false) or delivery (delivery=true) customer-details
+	// forms. Falls back to built-in defaults when unset.
+	ResolveEcommerceMetaFlowID(orgID uuid.UUID, accountName string, delivery bool) string
+
 	// Ecommerce handoff: returns handled=true when the session is a TiQR ecommerce coded flow.
 	TryEcommerceTransfer(chat Chat, message string) (handled bool, err error)
 

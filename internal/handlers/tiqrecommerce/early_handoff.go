@@ -413,11 +413,11 @@ func earliestSlotFromPayload(payload map[string]any) (earliestAt, timezone strin
 
 func askEarlyHandoffCustomerDetails(c *Conv) bool {
 	detailsBody := "Please share your name, email, and phone number so we can continue your request."
-	flowID := TiqrEcommercePickupFlowID
-	if asString(c.Session().SessionData["delivery_mode"]) == tiqrModeDelivery {
+	delivery := asString(c.Session().SessionData["delivery_mode"]) == tiqrModeDelivery
+	if delivery {
 		detailsBody = "Please share your name, phone number, and address so we can continue your request."
-		flowID = tiqrEcommerceFlowID
 	}
+	flowID := resolveEcommerceMetaFlowID(c, delivery)
 	return c.AskFlow("early_handoff_details", codedflow.FlowPrompt{
 		FlowID: flowID,
 		CTA:    "Enter details",

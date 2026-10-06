@@ -218,6 +218,7 @@ func (ChatbotFlow) TableName() string {
 
 // CodedFlowBinding stores the keywords an admin assigned to a flow that
 // ships in the binary. The flow definition itself is not editable here.
+// Settings holds per-flow account options (e.g. Meta flow IDs for tiqr_ecommerce).
 type CodedFlowBinding struct {
 	BaseModel
 	OrganizationID  uuid.UUID   `gorm:"type:uuid;not null;uniqueIndex:idx_coded_flow_binding,priority:1" json:"organization_id"`
@@ -225,6 +226,7 @@ type CodedFlowBinding struct {
 	FlowKey         string      `gorm:"size:100;not null;uniqueIndex:idx_coded_flow_binding,priority:3" json:"flow_key"`
 	Keywords        StringArray `gorm:"type:jsonb;default:'[]'" json:"keywords"`
 	IsEnabled       bool        `gorm:"default:false" json:"is_enabled"`
+	Settings        JSONB       `gorm:"type:jsonb;default:'{}'" json:"settings"`
 
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
 }

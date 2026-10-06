@@ -2157,11 +2157,11 @@ func formatCodedCaptureBlock(productName, optionName string, fields map[string]a
 
 func checkout(c *Conv) error {
 	detailsBody := "Please share your name, email, and phone number so we can place your pickup order."
-	flowID := TiqrEcommercePickupFlowID
-	if asString(c.Session().SessionData["delivery_mode"]) == tiqrModeDelivery {
+	delivery := asString(c.Session().SessionData["delivery_mode"]) == tiqrModeDelivery
+	if delivery {
 		detailsBody = "Please share your name, phone number, and address so we can place your delivery order."
-		flowID = tiqrEcommerceFlowID
 	}
+	flowID := resolveEcommerceMetaFlowID(c, delivery)
 	ok := c.AskFlow("details", codedflow.FlowPrompt{
 		FlowID: flowID,
 		CTA:    "Enter details",

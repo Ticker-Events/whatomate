@@ -22,6 +22,19 @@ func firstNonEmpty(values ...string) string {
 	return codedflow.FirstNonEmpty(values...)
 }
 
+// resolveEcommerceMetaFlowID returns the account-configured Meta flow ID for
+// pickup or delivery customer-details forms, falling back to built-in defaults.
+func resolveEcommerceMetaFlowID(c *Conv, delivery bool) string {
+	fallback := TiqrEcommercePickupFlowID
+	if delivery {
+		fallback = EcommerceFlowID
+	}
+	if c == nil || c.App() == nil || c.Session() == nil {
+		return fallback
+	}
+	return c.App().ResolveEcommerceMetaFlowID(c.Session().OrganizationID, c.Session().WhatsAppAccount, delivery)
+}
+
 func stashSessionCurrency(session *models.ChatbotSession, currency string) {
 	if session == nil {
 		return

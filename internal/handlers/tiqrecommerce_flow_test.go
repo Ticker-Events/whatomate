@@ -1407,6 +1407,62 @@ func TestTiqrEcommerce_EarlyHandoffCompletes(t *testing.T) {
 	assert.Equal(t, "Themed Cake", fieldString(line, "product_name"))
 }
 
+func TestTiqrEcommerce_UsesConfiguredPickupFlowID(t *testing.T) {
+	product := []any{
+		map[string]any{
+			"id": "101", "name": "Themed Cake", "min_price": "500",
+			"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "500"}},
+		},
+	}
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":              "57",
+				"name":            "Custom Cakes",
+				"description":     "Made to order",
+				"handoff_policy":  "after_capture",
+				"handoff_message": "A baker will review this.",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "writing", "label": "Cake writing", "type": "text", "required": true,
+					},
+				},
+			},
+		},
+	}
+	const customPickupFlowID = "777666555444333"
+	app, account, contact, session := startEcommerceWithStore(t, product, nil, store, nil)
+	require.NoError(t, app.DB.Where(
+		"organization_id = ? AND whats_app_account = ? AND flow_key = ?",
+		account.OrganizationID, account.Name, tiqrecommerce.FlowKey,
+	).Delete(&models.CodedFlowBinding{}).Error)
+	require.NoError(t, app.DB.Create(&models.CodedFlowBinding{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  account.OrganizationID,
+		WhatsAppAccount: account.Name,
+		FlowKey:         tiqrecommerce.FlowKey,
+		Keywords:        models.StringArray{"shop"},
+		IsEnabled:       true,
+		Settings: models.JSONB{
+			"pickup_flow_id": customPickupFlowID,
+		},
+	}).Error)
+
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Custom Cakes", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happy Birthday", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "early_handoff_details", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, customPickupFlowID)
+	assert.NotContains(t, blob, tiqrecommerce.TiqrEcommercePickupFlowID)
+}
+
 func TestEarlyHandoffProductOptionLineUsesChosenOption(t *testing.T) {
 	line, ok := tiqrecommerce.EarlyHandoffProductOptionLine(map[string]any{
 		"early_handoff_product_id": "101",

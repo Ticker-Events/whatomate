@@ -357,6 +357,10 @@ export type CodedFlowBinding = {
   keywords: string[]
   is_enabled: boolean
   whatsapp_account: string
+  pickup_flow_id?: string
+  delivery_flow_id?: string
+  stored_pickup_flow_id?: string
+  stored_delivery_flow_id?: string
 }
 
 export type CodedPreviewButton = {
@@ -464,7 +468,16 @@ export const chatbotService = {
 
   listCodedFlows: (account: string) =>
     api.get<{ flows: CodedFlowBinding[] }>('/chatbot/coded-flows', { params: { account } }),
-  updateCodedFlow: (key: string, account: string, data: { keywords: string[]; is_enabled: boolean }) =>
+  updateCodedFlow: (
+    key: string,
+    account: string,
+    data: {
+      keywords: string[]
+      is_enabled: boolean
+      pickup_flow_id?: string
+      delivery_flow_id?: string
+    },
+  ) =>
     api.put<CodedFlowBinding>(`/chatbot/coded-flows/${encodeURIComponent(key)}`, data, { params: { account } }),
   previewCodedFlow: (key: string, data: CodedPreviewRequest) =>
     api.post<CodedPreviewResponse>(`/chatbot/coded-flows/${encodeURIComponent(key)}/preview`, data),
