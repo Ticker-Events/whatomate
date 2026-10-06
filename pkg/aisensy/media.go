@@ -17,35 +17,13 @@ import (
 // caches the raw bytes. It returns a sentinel URL of the form
 // "aisensy-media://<nonce>" that DownloadMedia recognises.
 func (c *Client) GetMediaURL(ctx context.Context, mediaID string, account *whatsapp.Account) (string, error) {
-	token, err := c.getToken(ctx, account)
-	if err != nil {
-		return "", fmt.Errorf("failed to get aisensy token for media: %w", err)
-	}
-
 	url := c.baseURL + "/get-media/"
 	payload := map[string]string{"id": mediaID}
-	body, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	// doRequest reuses the cached JWT and, on 401, refreshes it once.
+	respBody, err := c.doRequest(ctx, http.MethodPost, url, payload, account)
 	if err != nil {
-		return "", fmt.Errorf("failed to create get-media request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("get-media request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read get-media response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", parseAPIError(resp.StatusCode, respBody)
+		return "", err
 	}
 
 	// AiSensy returns {"data": [byte_values]} — a JSON array of numbers
