@@ -903,7 +903,8 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 	return r.SendEnvelope(response)
 }
 
-// saveMediaLocally saves media data to local storage and returns the relative path
+// saveMediaLocally stores media on S3 when configured, otherwise on local disk.
+// The returned value is a relative key such as images/<uuid>.jpg.
 func (a *App) saveMediaLocally(data []byte, mimeType, filename string) (string, error) {
 	// Determine subdirectory based on MIME type
 	var subdir string
@@ -916,11 +917,6 @@ func (a *App) saveMediaLocally(data []byte, mimeType, filename string) (string, 
 		subdir = "audio"
 	default:
 		subdir = "documents"
-	}
-
-	// Ensure directory exists
-	if err := a.ensureMediaDir(subdir); err != nil {
-		return "", fmt.Errorf("failed to create media directory: %w", err)
 	}
 
 	// Get extension from MIME type or filename
@@ -936,17 +932,27 @@ func (a *App) saveMediaLocally(data []byte, mimeType, filename string) (string, 
 
 	// Generate unique filename
 	newFilename := uuid.New().String() + ext
-	filePath := filepath.Join(a.getMediaStoragePath(), subdir, newFilename)
+	relativePath := filepath.ToSlash(filepath.Join(subdir, newFilename))
 
-	// Save file
+	if a.S3Client != nil {
+		if err := a.S3Client.Upload(context.Background(), relativePath, bytes.NewReader(data), mimeType); err != nil {
+			return "", fmt.Errorf("upload media to S3: %w", err)
+		}
+		a.Log.Info("Media saved to S3", "key", relativePath, "size", len(data))
+		return relativePath, nil
+	}
+
+	// Ensure directory exists
+	if err := a.ensureMediaDir(subdir); err != nil {
+		return "", fmt.Errorf("failed to create media directory: %w", err)
+	}
+
+	filePath := filepath.Join(a.getMediaStoragePath(), relativePath)
 	if err := os.WriteFile(filePath, data, 0644); err != nil {
 		return "", fmt.Errorf("failed to save media file: %w", err)
 	}
 
-	// Return relative path
-	relativePath := filepath.Join(subdir, newFilename)
 	a.Log.Info("Media saved locally", "path", relativePath, "size", len(data))
-
 	return relativePath, nil
 }
 

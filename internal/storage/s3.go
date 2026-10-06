@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"github.com/shridarpatil/whatomate/internal/config"
 )
 
@@ -86,6 +89,35 @@ func (s *S3Client) Upload(ctx context.Context, key string, body io.Reader, conte
 		ContentType: aws.String(contentType),
 	})
 	return err
+}
+
+// Download reads an object from S3.
+func (s *S3Client) Download(ctx context.Context, key string) ([]byte, error) {
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = out.Body.Close() }()
+	return io.ReadAll(out.Body)
+}
+
+// IsNotFound reports whether err means the object key does not exist.
+func IsNotFound(err error) bool {
+	var noSuchKey *types.NoSuchKey
+	if errors.As(err, &noSuchKey) {
+		return true
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "NoSuchKey", "NotFound":
+			return true
+		}
+	}
+	return false
 }
 
 // GetPresignedURL returns a time-limited download URL for the given S3 key.

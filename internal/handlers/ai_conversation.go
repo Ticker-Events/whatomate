@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/storage"
 )
 
 const maxAIImageBytes = 5 * 1024 * 1024
@@ -115,24 +117,12 @@ func (a *App) loadAIImage(attachment AIAttachment) ([]byte, error) {
 	if err != nil || (path != base && !strings.HasPrefix(path, base+string(filepath.Separator))) {
 		return nil, errors.New("media path escapes storage root")
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open controlled media: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
+	data, err := a.readAIImageBytes(path, relative)
 	if err != nil {
 		return nil, err
 	}
-	if info.Size() <= 0 || info.Size() > maxAIImageBytes {
+	if len(data) == 0 || len(data) > maxAIImageBytes {
 		return nil, fmt.Errorf("AI image size must be between 1 and %d bytes", maxAIImageBytes)
-	}
-	data, err := io.ReadAll(io.LimitReader(file, maxAIImageBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxAIImageBytes {
-		return nil, fmt.Errorf("AI image exceeds %d bytes", maxAIImageBytes)
 	}
 	detectedMIME := normalizeImageMIME(http.DetectContentType(data))
 	if detectedMIME == "" {
@@ -142,6 +132,32 @@ func (a *App) loadAIImage(attachment AIAttachment) ([]byte, error) {
 		return nil, fmt.Errorf("AI image content type %q does not match declared MIME type %q", detectedMIME, mimeType)
 	}
 	return data, nil
+}
+
+func (a *App) readAIImageBytes(fullPath, relative string) ([]byte, error) {
+	file, err := os.Open(fullPath)
+	if err != nil {
+		if a.S3Client == nil || !os.IsNotExist(err) {
+			return nil, fmt.Errorf("open controlled media: %w", err)
+		}
+		data, derr := a.S3Client.Download(context.Background(), filepath.ToSlash(relative))
+		if derr != nil {
+			if storage.IsNotFound(derr) {
+				return nil, fmt.Errorf("open controlled media: %w", os.ErrNotExist)
+			}
+			return nil, fmt.Errorf("download media: %w", derr)
+		}
+		return data, nil
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() <= 0 || info.Size() > maxAIImageBytes {
+		return nil, fmt.Errorf("AI image size must be between 1 and %d bytes", maxAIImageBytes)
+	}
+	return io.ReadAll(io.LimitReader(file, maxAIImageBytes+1))
 }
 
 func (a *App) openAIContent(text string, attachments []AIAttachment) any {
