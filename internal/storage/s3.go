@@ -82,12 +82,25 @@ func normalizeS3Bucket(raw, region string) (bucket, outRegion, endpoint, publicB
 
 // Upload uploads a file to S3 at the given key.
 func (s *S3Client) Upload(ctx context.Context, key string, body io.Reader, contentType string) error {
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+	return s.put(ctx, key, body, contentType, "")
+}
+
+// UploadPublic uploads a file that browsers can fetch at PublicURL without credentials.
+func (s *S3Client) UploadPublic(ctx context.Context, key string, body io.Reader, contentType string) error {
+	return s.put(ctx, key, body, contentType, types.ObjectCannedACLPublicRead)
+}
+
+func (s *S3Client) put(ctx context.Context, key string, body io.Reader, contentType string, acl types.ObjectCannedACL) error {
+	input := &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(key),
 		Body:        body,
 		ContentType: aws.String(contentType),
-	})
+	}
+	if acl != "" {
+		input.ACL = acl
+	}
+	_, err := s.client.PutObject(ctx, input)
 	return err
 }
 
