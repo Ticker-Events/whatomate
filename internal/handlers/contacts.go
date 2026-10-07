@@ -935,7 +935,7 @@ func (a *App) saveMediaLocally(data []byte, mimeType, filename string) (string, 
 	relativePath := filepath.ToSlash(filepath.Join(subdir, newFilename))
 
 	if a.S3Client != nil {
-		if err := a.S3Client.Upload(context.Background(), relativePath, bytes.NewReader(data), mimeType); err != nil {
+		if err := a.S3Client.UploadPublic(context.Background(), relativePath, bytes.NewReader(data), mimeType); err != nil {
 			return "", fmt.Errorf("upload media to S3: %w", err)
 		}
 		a.Log.Info("Media saved to S3", "key", relativePath, "size", len(data))

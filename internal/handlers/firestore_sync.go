@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/storage"
 )
 
 // syncMessageToFirestore writes a new or updated message and contact summary to Firestore.
@@ -21,10 +23,32 @@ func (a *App) syncMessageToFirestore(orgID uuid.UUID, msg *models.Message, conta
 		defer cancel()
 
 		maskPhone := a.ShouldMaskPhoneNumbers(orgID)
-		if err := a.Firestore.SyncMessage(ctx, orgID, msg, contact, maskPhone); err != nil {
+		synced := msg
+		if msg != nil {
+			copy := *msg
+			copy.MediaURL = firestoreMediaURL(a.S3Client, msg.MediaURL)
+			synced = &copy
+		}
+		if err := a.Firestore.SyncMessage(ctx, orgID, synced, contact, maskPhone); err != nil {
 			a.Log.Error("Failed to sync message to Firestore", "error", err, "message_id", msg.ID)
 		}
 	}()
+}
+
+// firestoreMediaURL is the address tiqr.store loads. Relative storage keys become
+// the Spaces URL. Values that are already absolute are left unchanged.
+func firestoreMediaURL(client *storage.S3Client, stored string) string {
+	stored = strings.TrimSpace(stored)
+	if stored == "" || strings.Contains(stored, "://") {
+		return stored
+	}
+	if client == nil {
+		return stored
+	}
+	if url := client.PublicURL(strings.TrimPrefix(stored, "/")); url != "" {
+		return url
+	}
+	return stored
 }
 
 // syncMessageStatusToFirestore updates message delivery status in Firestore.
