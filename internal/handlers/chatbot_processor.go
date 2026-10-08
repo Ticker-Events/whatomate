@@ -444,6 +444,22 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if a.resumeCodedFlow(account, contact, session, messageText, buttonID, flowResponseData) {
 		return
 	}
+	// A default coded flow owns the first inbound message in a new session,
+	// regardless of its contents. The message is not treated as flow input.
+	if isNewSession {
+		if flow := a.matchDefaultCodedFlow(account.OrganizationID, account.Name); flow != nil {
+			session.CurrentFlowID = nil
+			session.CurrentStep = ""
+			session.StepRetries = 0
+			session.SessionData = models.JSONB{
+				codedflow.DataKey: flow.Key,
+			}
+			if err := a.runCodedFlow(account, contact, session, flow, messageText, buttonID, flowResponseData); err != nil {
+				a.Log.Error("Default coded flow failed at start", "error", err, "session", session.ID, "flow", flow.Key)
+			}
+			return
+		}
+	}
 	// Checkout reads the persisted message directly. Drop the stash so it is not saved.
 	tiqrecommerce.TakeInboundCaptureMedia(session)
 

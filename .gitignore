@@ -63,3 +63,4 @@ test-results/
 
 # Docker 
 docker/.env
+.gitnexus

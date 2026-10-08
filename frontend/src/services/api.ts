@@ -356,6 +356,7 @@ export type CodedFlowBinding = {
   steps: CodedFlowStep[]
   keywords: string[]
   is_enabled: boolean
+  is_default: boolean
   whatsapp_account: string
   pickup_flow_id?: string
   delivery_flow_id?: string
@@ -474,6 +475,7 @@ export const chatbotService = {
     data: {
       keywords: string[]
       is_enabled: boolean
+      is_default: boolean
       pickup_flow_id?: string
       delivery_flow_id?: string
     },
