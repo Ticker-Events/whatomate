@@ -4,7 +4,7 @@ import { loginAsAdmin } from '../../helpers'
 test.describe('Dashboard', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page)
-    await page.goto('/')
+    await page.goto('/dashboard')
     await page.waitForLoadState('networkidle')
   })
 
