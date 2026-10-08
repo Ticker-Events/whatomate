@@ -102,6 +102,7 @@ func TestApp_UpdateCodedFlowBinding_OrgIsolation(t *testing.T) {
 	save := testutil.NewJSONRequest(t, map[string]any{
 		"keywords":   []string{"shop", "shop"},
 		"is_enabled": true,
+		"is_default": true,
 	})
 	testutil.SetAuthContext(save, org.ID, user.ID)
 	testutil.SetQueryParam(save, "account", account.Name)
@@ -115,6 +116,7 @@ func TestApp_UpdateCodedFlowBinding_OrgIsolation(t *testing.T) {
 	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(save), &saved))
 	assert.Equal(t, []string{"shop"}, saved.Data.Keywords)
 	assert.True(t, saved.Data.IsEnabled)
+	assert.True(t, saved.Data.IsDefault)
 
 	listOther := testutil.NewGETRequest(t)
 	testutil.SetAuthContext(listOther, other.ID, otherUser.ID)

@@ -21,8 +21,8 @@ const (
 	codedSettingDeliveryFlowID = "delivery_flow_id"
 )
 
-// CodedFlowBindingResponse is one compiled-in flow plus the keywords
-// assigned for a WhatsApp account. Steps are read-only.
+// CodedFlowBindingResponse is one compiled-in flow plus its account settings.
+// Steps are read-only.
 type CodedFlowBindingResponse struct {
 	Key             string                `json:"key"`
 	Name            string                `json:"name"`
@@ -30,6 +30,7 @@ type CodedFlowBindingResponse struct {
 	Steps           []codedflow.CodedStep `json:"steps"`
 	Keywords        []string              `json:"keywords"`
 	IsEnabled       bool                  `json:"is_enabled"`
+	IsDefault       bool                  `json:"is_default"`
 	WhatsAppAccount string                `json:"whatsapp_account"`
 	// PickupFlowID / DeliveryFlowID are the effective Meta flow IDs
 	// (stored override or built-in default) for tiqr_ecommerce.
@@ -81,6 +82,7 @@ func (a *App) ListCodedFlows(r *fastglue.Request) error {
 		if b, ok := bindings[flow.Key]; ok {
 			item.Keywords = []string(b.Keywords)
 			item.IsEnabled = b.IsEnabled
+			item.IsDefault = b.IsDefault
 			binding = &b
 		}
 		if item.Keywords == nil {
@@ -95,7 +97,8 @@ func (a *App) ListCodedFlows(r *fastglue.Request) error {
 	})
 }
 
-// UpdateCodedFlowBinding sets keywords and enabled for one compiled-in flow.
+// UpdateCodedFlowBinding sets keywords, enabled, and session-start behavior for
+// one compiled-in flow.
 // Unknown keys are rejected. The flow definition cannot be created or deleted.
 func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -124,6 +127,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 	var req struct {
 		Keywords       []string `json:"keywords"`
 		IsEnabled      bool     `json:"is_enabled"`
+		IsDefault      bool     `json:"is_default"`
 		PickupFlowID   *string  `json:"pickup_flow_id"`
 		DeliveryFlowID *string  `json:"delivery_flow_id"`
 	}
@@ -148,12 +152,21 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		before = &copy
 		binding.Keywords = keywords
 		binding.IsEnabled = req.IsEnabled
+		binding.IsDefault = req.IsDefault
 		merged, mergeErr := mergeEcommerceFlowSettings(flow.Key, binding.Settings, req.PickupFlowID, req.DeliveryFlowID)
 		if mergeErr != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, mergeErr.Error(), nil, "")
 		}
 		if flow.Key == tiqrecommerce.FlowKey {
 			binding.Settings = merged
+		}
+		if req.IsDefault {
+			if err := a.DB.Model(&models.CodedFlowBinding{}).
+				Where("organization_id = ? AND whats_app_account = ? AND flow_key <> ?", orgID, accountName, flow.Key).
+				Update("is_default", false).Error; err != nil {
+				a.Log.Error("Failed to clear existing default coded flow", "error", err)
+				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update coded flow", nil, "")
+			}
 		}
 		if err := a.DB.Save(&binding).Error; err != nil {
 			a.Log.Error("Failed to update coded flow binding", "error", err)
@@ -171,7 +184,16 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 			FlowKey:         flow.Key,
 			Keywords:        keywords,
 			IsEnabled:       req.IsEnabled,
+			IsDefault:       req.IsDefault,
 			Settings:        settings,
+		}
+		if req.IsDefault {
+			if err := a.DB.Model(&models.CodedFlowBinding{}).
+				Where("organization_id = ? AND whats_app_account = ?", orgID, accountName).
+				Update("is_default", false).Error; err != nil {
+				a.Log.Error("Failed to clear existing default coded flow", "error", err)
+				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update coded flow", nil, "")
+			}
 		}
 		if err := a.DB.Create(&binding).Error; err != nil {
 			a.Log.Error("Failed to create coded flow binding", "error", err)
@@ -196,6 +218,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		Steps:           flow.Steps,
 		Keywords:        []string(binding.Keywords),
 		IsEnabled:       binding.IsEnabled,
+		IsDefault:       binding.IsDefault,
 		WhatsAppAccount: accountName,
 	}
 	applyEcommerceFlowIDs(&resp, flow.Key, &binding)

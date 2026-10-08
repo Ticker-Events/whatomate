@@ -36,6 +36,7 @@ type WhatsAppFlowOption = {
 type KeywordDraft = {
   keywords: string
   enabled: boolean
+  isDefault: boolean
   pickupFlowId: string
   deliveryFlowId: string
   saving: boolean
@@ -80,6 +81,7 @@ function applyFlows(rows: CodedFlowBinding[]) {
     next[flow.key] = {
       keywords: (flow.keywords || []).join(', '),
       enabled: flow.is_enabled,
+      isDefault: flow.is_default,
       pickupFlowId: draftPickupValue(flow),
       deliveryFlowId: draftDeliveryValue(flow),
       saving: false,
@@ -178,11 +180,13 @@ async function save(flow: CodedFlowBinding) {
     const payload: {
       keywords: string[]
       is_enabled: boolean
+      is_default: boolean
       pickup_flow_id?: string
       delivery_flow_id?: string
     } = {
       keywords,
       is_enabled: draft.enabled,
+      is_default: draft.isDefault,
     }
     if (flow.key === TIQR_ECOMMERCE_KEY) {
       payload.pickup_flow_id = resolveStoredFlowId(draft.pickupFlowId)
@@ -193,12 +197,22 @@ async function save(flow: CodedFlowBinding) {
     const saved = body.data ?? body
     flow.keywords = saved.keywords ?? keywords
     flow.is_enabled = saved.is_enabled ?? draft.enabled
+    flow.is_default = saved.is_default ?? draft.isDefault
+    if (flow.is_default) {
+      for (const other of flows.value) {
+        if (other.key !== flow.key) {
+          other.is_default = false
+          if (drafts.value[other.key]) drafts.value[other.key].isDefault = false
+        }
+      }
+    }
     flow.pickup_flow_id = saved.pickup_flow_id
     flow.delivery_flow_id = saved.delivery_flow_id
     flow.stored_pickup_flow_id = saved.stored_pickup_flow_id
     flow.stored_delivery_flow_id = saved.stored_delivery_flow_id
     draft.keywords = (flow.keywords || []).join(', ')
     draft.enabled = flow.is_enabled
+    draft.isDefault = flow.is_default
     draft.pickupFlowId = draftPickupValue(flow)
     draft.deliveryFlowId = draftDeliveryValue(flow)
     toast.success(t('codedFlows.saved'))
@@ -319,6 +333,17 @@ watch(showPreview, (open) => {
                 :placeholder="$t('codedFlows.keywordsHint')"
               />
               <p class="text-xs text-muted-foreground">{{ $t('codedFlows.keywordsHint') }}</p>
+            </div>
+            <div class="flex items-center justify-between gap-4 rounded-lg border p-3">
+              <div>
+                <Label class="text-xs">{{ $t('codedFlows.defaultFlow') }}</Label>
+                <p class="text-xs text-muted-foreground mt-0.5">{{ $t('codedFlows.defaultFlowHint') }}</p>
+              </div>
+              <Switch
+                :checked="drafts[flow.key]?.isDefault"
+                :disabled="!canWrite"
+                @update:checked="drafts[flow.key].isDefault = $event"
+              />
             </div>
 
             <div v-if="flow.key === TIQR_ECOMMERCE_KEY && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">

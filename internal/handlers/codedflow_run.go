@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"gorm.io/gorm"
 )
 
 func tryEcommerceTransfer(a *App, chat codedflow.Chat, message string) (bool, error) {
@@ -90,4 +93,19 @@ func (a *App) matchCodedFlowTrigger(orgID uuid.UUID, accountName, messageText st
 		return nil
 	}
 	return codedflow.MatchTrigger(bindings, messageText)
+}
+
+func (a *App) matchDefaultCodedFlow(orgID uuid.UUID, accountName string) *codedflow.CodedFlow {
+	var binding models.CodedFlowBinding
+	err := a.DB.Where(
+		"organization_id = ? AND whats_app_account = ? AND is_enabled = ? AND is_default = ?",
+		orgID, accountName, true, true,
+	).First(&binding).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			a.Log.Error("Failed to fetch default coded flow", "error", err)
+		}
+		return nil
+	}
+	return codedflow.ByKey(binding.FlowKey)
 }

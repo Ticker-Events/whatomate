@@ -949,6 +949,21 @@ func TestMatchCodedFlowTrigger_DisabledDoesNotMatch(t *testing.T) {
 	assert.Nil(t, app.matchCodedFlowTrigger(org.ID, account.Name, "shop"))
 }
 
+func TestMatchDefaultCodedFlow_RequiresEnabledDefaultBinding(t *testing.T) {
+	app, org, account, _, _ := newGraphTestFixtures(t)
+	enableTiqrEcommerce(t, app, org.ID, account.Name, "shop", true)
+
+	assert.Nil(t, app.matchDefaultCodedFlow(org.ID, account.Name))
+
+	require.NoError(t, app.DB.Model(&models.CodedFlowBinding{}).
+		Where("organization_id = ? AND whats_app_account = ? AND flow_key = ?", org.ID, account.Name, tiqrecommerce.FlowKey).
+		Update("is_default", true).Error)
+
+	flow := app.matchDefaultCodedFlow(org.ID, account.Name)
+	require.NotNil(t, flow)
+	assert.Equal(t, tiqrecommerce.FlowKey, flow.Key)
+}
+
 func TestTiqrEcommerce_KeywordDoesNotSelectMenu(t *testing.T) {
 	var counts storeCounts
 	app, account, _, session := startEcommerce(t, twoProducts(nil), &counts)
