@@ -23,6 +23,7 @@ func (c *legendTestChat) ButtonID() string                           { return ""
 func (c *legendTestChat) SetButtonID(string)                         {}
 func (c *legendTestChat) FlowResponseData() map[string]any           { return nil }
 func (c *legendTestChat) SetFlowResponseData(map[string]any)         {}
+func (c *legendTestChat) QuotedMessage() *QuotedMessage              { return nil }
 func (c *legendTestChat) Consumed() bool                             { return false }
 func (c *legendTestChat) SetConsumed(bool)                           {}
 func (c *legendTestChat) Capturing() bool                            { return false }

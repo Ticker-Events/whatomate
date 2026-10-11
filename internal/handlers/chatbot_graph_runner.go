@@ -37,6 +37,7 @@ type chatNodeCtx struct {
 	inboundMedia     codedflow.InboundMedia
 	buttonID         string
 	flowResponseData map[string]any // form fields from a WhatsApp Flow submission
+	quotedMessage    *codedflow.QuotedMessage
 	consumed         bool
 	lastTiqr         map[string]any // payload from the latest tiqr_store_api call
 	lastTiqrErr      string         // truncated error from the latest failed tiqr call

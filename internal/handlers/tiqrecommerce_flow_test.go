@@ -2309,6 +2309,170 @@ func TestValidateCodedIntent_AnswerRoute(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func stashQuotedProductCarousel(t *testing.T, app *App, session *models.ChatbotSession, productID, body string) {
+	t.Helper()
+	codedflow.StashQuotedInbound(session, &codedflow.QuotedMessage{
+		ID:               "quoted-product-msg",
+		Content:          "Here is what's available.",
+		Direction:        string(models.DirectionOutgoing),
+		IsLatestOutgoing: false,
+		InteractiveData: map[string]any{
+			"type": "carousel",
+			"body": "Here is what's available.",
+			"cards": []any{
+				map[string]any{
+					"body": body,
+					"buttons": []any{
+						map[string]any{"id": productID, "title": "Add to cart"},
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, app.PersistSessionData(session))
+}
+
+func TestTiqrEcommerce_QuotedReplyAddsEarlierProduct(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "product", session.CurrentStep)
+	assert.NotNil(t, session.SessionData["shown_products"])
+
+	// Later collection overwrites the current products list only.
+	session.SessionData["products"] = []any{
+		map[string]any{
+			"id": "201", "name": "Other Cake", "min_price": "90",
+			"options": []any{map[string]any{"id": "90", "name": "Default", "price": "90"}},
+		},
+		map[string]any{
+			"id": "202", "name": "Second Cake", "min_price": "95",
+			"options": []any{map[string]any{"id": "91", "name": "Default", "price": "95"}},
+		},
+	}
+	session.SessionData["collection_id"] = "58"
+	session.SessionData["collection_name"] = "Cakes"
+	require.NoError(t, app.PersistSessionData(session))
+
+	stashQuotedProductCarousel(t, app, session, "101", "Kunafa (₹120)")
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "101", nil))
+	reloadSession(t, app, session)
+
+	assert.Equal(t, "quantity", session.CurrentStep)
+	assert.Equal(t, "101", asString(session.SessionData["product_id"]))
+	assert.Equal(t, "Kunafa", asString(session.SessionData["product_name"]))
+	assert.Equal(t, "9", asString(session.SessionData["option_id"]))
+	_ = contact
+}
+
+func TestTiqrEcommerce_QuotedReplyLatestPromptUsesCurrentStep(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+
+	codedflow.StashQuotedInbound(session, &codedflow.QuotedMessage{
+		ID:               "latest-prompt",
+		Content:          "Here is what's available in *Sweets*.",
+		Direction:        string(models.DirectionOutgoing),
+		IsLatestOutgoing: true,
+		InteractiveData: map[string]any{
+			"type": "carousel",
+			"cards": []any{
+				map[string]any{
+					"body": "Kunafa (₹120)",
+					"buttons": []any{
+						map[string]any{"id": "101", "title": "Add to cart"},
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, app.PersistSessionData(session))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "101", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "quantity", session.CurrentStep)
+	assert.Equal(t, "101", asString(session.SessionData["product_id"]))
+	_ = contact
+}
+
+func TestTiqrEcommerce_QuotedReplyUnclearThenHandoff(t *testing.T) {
+	useCodedIntent(t, func(string, codedflow.IntentContext) (codedflow.IntentResult, error) {
+		return codedflow.IntentResult{Language: "en", Route: codedflow.RouteUnclear, Confidence: 0.2}, nil
+	}, func(string) (string, error) {
+		return "Did you mean the Kunafa from earlier, or something else?", nil
+	})
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+
+	stashQuotedProductCarousel(t, app, session, "101", "Kunafa (₹120)")
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "maybe that one", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusActive, session.Status)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "could not tell what you meant")
+	assert.Contains(t, blob, "Did you mean the Kunafa from earlier")
+
+	stashQuotedProductCarousel(t, app, session, "101", "Kunafa (₹120)")
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "still unclear", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(1), transfers)
+}
+
+func TestTiqrEcommerce_QuotedReplyCollectionRow(t *testing.T) {
+	products := twoProducts(nil)
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "collection", session.CurrentStep)
+
+	// Move to product step for Cakes, then quote the earlier collection list row for Sweets.
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Cakes", "58", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "product", session.CurrentStep)
+
+	codedflow.StashQuotedInbound(session, &codedflow.QuotedMessage{
+		ID:               "quoted-collections",
+		Content:          "Choose a collection",
+		Direction:        string(models.DirectionOutgoing),
+		IsLatestOutgoing: false,
+		InteractiveData: map[string]any{
+			"type": "list",
+			"rows": []any{
+				map[string]any{"id": "57", "title": "Sweets", "description": "Desserts"},
+				map[string]any{"id": "58", "title": "Cakes", "description": "Celebration cakes"},
+			},
+		},
+	})
+	require.NoError(t, app.PersistSessionData(session))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "product", session.CurrentStep)
+	assert.Equal(t, "57", asString(session.SessionData["collection_id"]))
+	assert.Equal(t, "Sweets", asString(session.SessionData["collection_name"]))
+	_ = contact
+}
+
 func TestBuildIntentPrompt_IncludesStepContext(t *testing.T) {
 	prompt := codedflow.BuildIntentPrompt("Kunafaa", codedflow.IntentContext{
 		Question:  "Here is what's available in *Sweets*.",

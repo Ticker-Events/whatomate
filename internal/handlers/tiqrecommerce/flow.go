@@ -123,15 +123,16 @@ func runTiqrEcommerce(c *Conv) error {
 	}
 	route, ok := c.AskRouteButtons("intent", menuButtons(store), codedflow.RouteOptions{AllowCatalog: true})
 	if !ok {
+		if c.HasReplyRoute() {
+			return buyProducts(c, collections, c.TakeReplyRoute())
+		}
 		return c.afterCheckoutDivert(collections)
 	}
 	switch route.Kind {
 	case codedflow.RouteCheckout:
 		c.Divert = codedflow.RouteCheckout
 		return c.afterCheckoutDivert(collections)
-	case codedflow.RouteCollection:
-		return buyProducts(c, collections, route)
-	case codedflow.RouteProduct:
+	case codedflow.RouteCollection, codedflow.RouteProduct, codedflow.RouteSelectProduct:
 		return buyProducts(c, collections, route)
 	case codedflow.RouteChoice:
 		switch route.ID {
@@ -149,6 +150,9 @@ func runTiqrEcommerce(c *Conv) error {
 
 // afterCheckoutDivert runs when the menu turn diverted to checkout (or waited).
 func (c *Conv) afterCheckoutDivert(collections []any) error {
+	if c.HasReplyRoute() {
+		return buyProducts(c, collections, c.TakeReplyRoute())
+	}
 	res, err := c.applyCheckoutDivert()
 	if err != nil || c.Ended {
 		return err
@@ -188,6 +192,15 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 	for {
 		route := first
 		first = codedflow.Route{}
+		if route.Kind == "" && c.HasReplyRoute() {
+			route = c.TakeReplyRoute()
+		}
+		if handled, err := handleBuyReplyRoute(c, route); handled {
+			if err != nil || c.Ended || c.Stop {
+				return err
+			}
+			continue
+		}
 		if route.Kind == codedflow.RouteCheckout {
 			c.Divert = codedflow.RouteCheckout
 			res, err := c.applyCheckoutDivert()
@@ -198,6 +211,61 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 				continue
 			}
 			return nil
+		}
+		if route.Kind == codedflow.RouteSelectProduct {
+			if !restoreSelectedProduct(c, route.ID, route.Title) {
+				if c.Stop || c.Ended {
+					return nil
+				}
+				continue
+			}
+			if product := selectedProductMap(c); product != nil {
+				if col := earlyHandoffCollectionForProduct(c, product); col != nil {
+					return runEarlyHandoff(c, col, fieldString(product, "id"))
+				}
+			}
+			if !addPickedProduct(c) {
+				cont, err := continueAfterAskFail(c)
+				if err != nil || c.Ended || c.Stop {
+					return err
+				}
+				if cont {
+					first = c.TakeReplyRoute()
+					continue
+				}
+				return nil
+			}
+			action, ok := askAfterCartAdd(c)
+			if !ok {
+				cont, err := continueAfterAskFail(c)
+				if err != nil || c.Ended || c.Stop {
+					return err
+				}
+				if cont {
+					first = c.TakeReplyRoute()
+					continue
+				}
+				return nil
+			}
+			if action == tiqrCheckout {
+				ready, ok := reviewCartBeforeOrder(c)
+				if !ok {
+					cont, err := continueAfterAskFail(c)
+					if err != nil || c.Ended || c.Stop {
+						return err
+					}
+					if cont {
+						first = c.TakeReplyRoute()
+						continue
+					}
+					return nil
+				}
+				if !ready {
+					continue
+				}
+				return checkout(c)
+			}
+			continue
 		}
 		if route.Kind == "" {
 			var ok bool
@@ -221,11 +289,12 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 				},
 			}, codedflow.RouteOptions{AllowCatalog: true})
 			if !ok {
-				res, err := c.applyCheckoutDivert()
+				cont, err := continueAfterAskFail(c)
 				if err != nil || c.Ended || c.Stop {
 					return err
 				}
-				if res == divertEmptyCart {
+				if cont {
+					first = c.TakeReplyRoute()
 					continue
 				}
 				return nil
@@ -240,6 +309,16 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 					continue
 				}
 				return nil
+			}
+			if route.Kind == codedflow.RouteSelectProduct || route.Kind == codedflow.RouteHandoff {
+				first = route
+				continue
+			}
+			if handled, err := handleBuyReplyRoute(c, route); handled {
+				if err != nil || c.Ended || c.Stop {
+					return err
+				}
+				continue
 			}
 		}
 		if route.Kind == codedflow.RouteCollection || (route.Kind == codedflow.RouteChoice && strings.TrimSpace(route.ID) != "") {
@@ -265,11 +344,12 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 		}
 		_, ok = askProducts(c, products)
 		if !ok {
-			res, err := c.applyCheckoutDivert()
+			cont, err := continueAfterAskFail(c)
 			if err != nil || c.Ended || c.Stop {
 				return err
 			}
-			if res == divertEmptyCart {
+			if cont {
+				first = c.TakeReplyRoute()
 				continue
 			}
 			return nil
@@ -280,22 +360,24 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 			}
 		}
 		if !addPickedProduct(c) {
-			res, err := c.applyCheckoutDivert()
+			cont, err := continueAfterAskFail(c)
 			if err != nil || c.Ended || c.Stop {
 				return err
 			}
-			if res == divertEmptyCart {
+			if cont {
+				first = c.TakeReplyRoute()
 				continue
 			}
 			return nil
 		}
 		action, ok := askAfterCartAdd(c)
 		if !ok {
-			res, err := c.applyCheckoutDivert()
+			cont, err := continueAfterAskFail(c)
 			if err != nil || c.Ended || c.Stop {
 				return err
 			}
-			if res == divertEmptyCart {
+			if cont {
+				first = c.TakeReplyRoute()
 				continue
 			}
 			return nil
@@ -303,11 +385,12 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 		if action == tiqrCheckout {
 			ready, ok := reviewCartBeforeOrder(c)
 			if !ok {
-				res, err := c.applyCheckoutDivert()
+				cont, err := continueAfterAskFail(c)
 				if err != nil || c.Ended || c.Stop {
 					return err
 				}
-				if res == divertEmptyCart {
+				if cont {
+					first = c.TakeReplyRoute()
 					continue
 				}
 				return nil
@@ -320,6 +403,96 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 		// tiqrAddMore — keep browsing
 	}
 	return nil
+}
+
+// continueAfterAskFail handles checkout divert or a pending quoted-reply route.
+// cont=true means the buy loop should continue (empty cart or reply route ready).
+func continueAfterAskFail(c *Conv) (cont bool, err error) {
+	if c.HasReplyRoute() {
+		return true, nil
+	}
+	if c.Divert == codedflow.RouteCheckout {
+		res, err := c.applyCheckoutDivert()
+		if err != nil || c.Ended || c.Stop {
+			return false, err
+		}
+		return res == divertEmptyCart, nil
+	}
+	return false, nil
+}
+
+// handleBuyReplyRoute handles menu-style reply routes inside buyProducts.
+// handled=true means the route was fully processed (including continue-loop cases).
+func handleBuyReplyRoute(c *Conv, route codedflow.Route) (handled bool, err error) {
+	switch route.Kind {
+	case codedflow.RouteHandoff:
+		return true, c.Transfer(codedflow.AgentHandoff)
+	case codedflow.RouteChoice:
+		switch strings.TrimSpace(route.ID) {
+		case tiqrTalkToAgent:
+			return true, c.Transfer(codedflow.AgentHandoff)
+		case tiqrCheckOrderStatus:
+			return true, orderStatus(c)
+		case tiqrBuyProducts, tiqrAddMore:
+			return true, nil // continue buy loop at collection list
+		case tiqrCheckout, tiqrConfirmItems:
+			c.Divert = codedflow.RouteCheckout
+			res, err := c.applyCheckoutDivert()
+			if err != nil || c.Ended || c.Stop {
+				return true, err
+			}
+			if res == divertEmptyCart {
+				return true, nil
+			}
+			return true, nil
+		case tiqrEditCart:
+			return false, nil // fall through; edit is not entered mid-buy this way
+		}
+	}
+	return false, nil
+}
+
+// restoreSelectedProduct loads a previously shown product into session fields
+// used by addPickedProduct.
+func restoreSelectedProduct(c *Conv, productID, title string) bool {
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return false
+	}
+	product := codedflow.ShownProductByID(c.Session().SessionData, productID)
+	if product == nil {
+		fetched, ok := c.Store("reply_product_"+productID, "get_product", map[string]string{
+			"product_id": productID,
+		})
+		if !ok || fetched == nil {
+			c.Say(tiqrEcommerceUnavailable)
+			return false
+		}
+		product = fetched
+		codedflow.MergeShownProducts(c.Session().SessionData, []any{product})
+	}
+	name := fieldString(product, "name")
+	if name == "" {
+		name = strings.TrimSpace(title)
+	}
+	c.Session().SessionData["product_id"] = productID
+	c.Session().SessionData["product_name"] = name
+	c.Session().SessionData["product_selected"] = name
+	if opts, ok := anySlice(product["options"]); ok {
+		c.Session().SessionData["options"] = opts
+	} else {
+		c.Session().SessionData["options"] = []any{}
+	}
+	c.Session().SessionData["products"] = []any{product}
+	if catID := productCategoryID(product); catID != "" {
+		c.Session().SessionData["collection_id"] = catID
+		if col := collectionByID(c, catID); col != nil {
+			if n := fieldString(col, "name"); n != "" {
+				c.Session().SessionData["collection_name"] = n
+			}
+		}
+	}
+	return true
 }
 
 // askAfterCartAdd offers Add more / Edit cart / Checkout until the shopper

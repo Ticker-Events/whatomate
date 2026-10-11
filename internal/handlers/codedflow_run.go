@@ -77,6 +77,7 @@ func (a *App) runCodedFlowPreview(
 		inboundMedia:     tiqrecommerce.TakeInboundCaptureMedia(session),
 		buttonID:         buttonID,
 		flowResponseData: flowResponseData,
+		quotedMessage:    codedflow.TakeQuotedInbound(session),
 		preview:          preview,
 	})
 	return codedflow.RunPreview(a, session, flow, chat, preview)

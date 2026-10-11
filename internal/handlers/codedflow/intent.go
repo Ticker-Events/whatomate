@@ -89,6 +89,11 @@ type IntentContext struct {
 	Pattern      string            // when set, answer route must match this pattern
 	ChoiceIDs    map[string]string // id -> title (or card body + title)
 	Collections  map[string]string // id -> name
+
+	// Quoted reply context (set only when classifying a quote-reply).
+	QuotedContent string
+	QuotedKind    string
+	QuotedChoices map[string]string // id -> label from the quoted interactive message
 }
 
 var (
@@ -109,6 +114,9 @@ func (c *Conv) AskRouteList(name string, items []any, prompt ListPrompt, opts Ro
 	}
 	if prompt.ItemsKey != "" && items != nil {
 		c.session().SessionData[prompt.ItemsKey] = items
+		if prompt.ItemsKey == "products" {
+			MergeShownProducts(c.session().SessionData, items)
+		}
 	}
 	return c.askRoute(name, c.listConfig(prompt), opts)
 }
@@ -119,6 +127,9 @@ func (c *Conv) AskRouteCarousel(name string, items []any, prompt CarouselPrompt,
 	}
 	if prompt.ItemsKey != "" && items != nil {
 		c.session().SessionData[prompt.ItemsKey] = items
+		if prompt.ItemsKey == "products" {
+			MergeShownProducts(c.session().SessionData, items)
+		}
 	}
 	return c.askRoute(name, c.carouselConfig(prompt), opts)
 }
@@ -151,6 +162,19 @@ func (c *Conv) askRoute(name string, cfg map[string]any, opts RouteOptions) (Rou
 		return Route{}, false
 	}
 	if c.resendShowMore(name, cfg, false) {
+		return Route{}, false
+	}
+	_ = c.prepareQuotedProductSelection(cfg)
+	if id := c.offeredButtonID(cfg); id != "" {
+		c.chat.SetButtonID(id)
+		choice, ok := c.acceptButton(name, cfg)
+		if !ok {
+			return Route{}, false
+		}
+		c.clearGuide()
+		return Route{Kind: codedRouteChoice, ID: choice.ID, Title: choice.Title}, true
+	}
+	if c.tryQuotedReply(name, cfg, opts) {
 		return Route{}, false
 	}
 	if id := c.offeredButtonID(cfg); id != "" {

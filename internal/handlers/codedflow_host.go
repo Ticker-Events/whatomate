@@ -44,6 +44,7 @@ func (c *codedChat) FlowResponseData() map[string]any     { return c.ctx.flowRes
 func (c *codedChat) SetFlowResponseData(v map[string]any) {
 	c.ctx.flowResponseData = v
 }
+func (c *codedChat) QuotedMessage() *codedflow.QuotedMessage { return c.ctx.quotedMessage }
 
 func (c *codedChat) Consumed() bool     { return c.ctx.consumed }
 func (c *codedChat) SetConsumed(v bool) { c.ctx.consumed = v }

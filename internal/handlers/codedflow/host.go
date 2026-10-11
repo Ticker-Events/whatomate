@@ -35,6 +35,7 @@ type Chat interface {
 	SetButtonID(string)
 	FlowResponseData() map[string]any
 	SetFlowResponseData(map[string]any)
+	QuotedMessage() *QuotedMessage
 
 	Consumed() bool
 	SetConsumed(bool)

@@ -141,6 +141,7 @@ type Conv struct {
 	err        error
 	skipIntent bool   // true after a failed normalized answer; avoid a second AI call
 	Divert     string // codedRouteCheckout when free text should leave the current ask
+	ReplyRoute Route  // quoted-reply action for the ecommerce caller to run
 }
 
 func (c *Conv) session() *models.ChatbotSession {
@@ -248,6 +249,9 @@ func (c *Conv) AskList(name string, items []any, prompt ListPrompt) (Choice, boo
 	}
 	if prompt.ItemsKey != "" && items != nil {
 		c.session().SessionData[prompt.ItemsKey] = items
+		if prompt.ItemsKey == "products" {
+			MergeShownProducts(c.session().SessionData, items)
+		}
 	}
 	return c.askChoice(name, c.listConfig(prompt))
 }
@@ -259,6 +263,9 @@ func (c *Conv) AskCarousel(name string, items []any, prompt CarouselPrompt) (Cho
 	}
 	if prompt.ItemsKey != "" && items != nil {
 		c.session().SessionData[prompt.ItemsKey] = items
+		if prompt.ItemsKey == "products" {
+			MergeShownProducts(c.session().SessionData, items)
+		}
 	}
 	return c.askChoice(name, c.carouselConfig(prompt))
 }
@@ -270,6 +277,9 @@ func (c *Conv) AskImageButtons(name string, items []any, prompt ImageButtonPromp
 	}
 	if prompt.ItemsKey != "" && items != nil {
 		c.session().SessionData[prompt.ItemsKey] = items
+		if prompt.ItemsKey == "products" {
+			MergeShownProducts(c.session().SessionData, items)
+		}
 	}
 	return c.askChoice(name, c.imageButtonConfig(prompt))
 }
@@ -309,6 +319,9 @@ func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
 			return "", false
 		}
 		cfg := numberConfig(body, prompt)
+		if c.tryQuotedReply(name, cfg, RouteOptions{}) {
+			return "", false
+		}
 		route, ok := c.resolveFreeText(name, cfg, RouteOptions{})
 		if ok && route.Kind == codedRouteCheckout {
 			return "", false
@@ -319,6 +332,11 @@ func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
 		input = strings.TrimSpace(route.Answer)
 		if !re.MatchString(input) {
 			c.skipIntent = true
+			return "", false
+		}
+	} else if c.chat.QuotedMessage() != nil && !c.chat.QuotedMessage().IsLatestOutgoing {
+		cfg := numberConfig(body, prompt)
+		if c.tryQuotedReply(name, cfg, RouteOptions{}) {
 			return "", false
 		}
 	}
@@ -355,10 +373,14 @@ func (c *Conv) AskText(name, body string, step StepNote) (string, bool) {
 	if input == "" {
 		return "", false
 	}
+	cfg := map[string]any{"body": message, "mode": "text"}
+	putStepNote(cfg, step)
+	if c.tryQuotedReply(name, cfg, RouteOptions{AllowCatalog: true}) {
+		return "", false
+	}
 	c.chat.SetConsumed(true)
 	c.session().SessionData[name] = input
 	c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": input})
-	_ = step // notes reserved for future intent on this step
 	return input, true
 }
 
@@ -519,6 +541,9 @@ func (c *Conv) StoreList(name, operation string, params map[string]string) ([]an
 		return nil, false
 	}
 	c.session().SessionData[name] = items
+	if name == "products" {
+		MergeShownProducts(c.session().SessionData, items)
+	}
 	c.rememberList(name, operation, "rest", params, c.chat.LastTiqr())
 	c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": items})
 	return items, true
@@ -631,6 +656,15 @@ func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 	if c.resendShowMore(name, cfg, false) {
 		return Choice{}, false
 	}
+	_ = c.prepareQuotedProductSelection(cfg)
+	if id := c.offeredButtonID(cfg); id != "" {
+		c.chat.SetButtonID(id)
+		return c.acceptButton(name, cfg)
+	}
+	if c.tryQuotedReply(name, cfg, RouteOptions{}) {
+		return Choice{}, false
+	}
+	// Free-text quote handling may restore a product and set the button id.
 	if id := c.offeredButtonID(cfg); id != "" {
 		c.chat.SetButtonID(id)
 		return c.acceptButton(name, cfg)

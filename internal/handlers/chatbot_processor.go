@@ -447,6 +447,9 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if persistedMessage != nil && strings.TrimSpace(persistedMessage.MediaURL) != "" {
 		tiqrecommerce.StashInboundCaptureMedia(session, persistedMessage.ID.String(), persistedMessage.MediaURL, persistedMessage.MediaMimeType, persistedMessage.MediaFilename)
 	}
+	if quoted := a.loadQuotedInbound(persistedMessage); quoted != nil {
+		codedflow.StashQuotedInbound(session, quoted)
+	}
 
 	// An in-progress coded flow owns the conversation, including WhatsApp
 	// Flow submissions that commerce checkout would otherwise capture.
@@ -2008,6 +2011,37 @@ type MediaInfo struct {
 	MediaURL      string
 	MediaMimeType string
 	MediaFilename string
+}
+
+// loadQuotedInbound loads the message the customer quoted, when present.
+func (a *App) loadQuotedInbound(incoming *models.Message) *codedflow.QuotedMessage {
+	if incoming == nil || incoming.ReplyToMessageID == nil {
+		return nil
+	}
+	var quoted models.Message
+	if err := a.DB.Where("id = ?", *incoming.ReplyToMessageID).First(&quoted).Error; err != nil {
+		a.Log.Warn("Quoted message not found", "reply_to_message_id", incoming.ReplyToMessageID, "error", err)
+		return nil
+	}
+	out := &codedflow.QuotedMessage{
+		ID:          quoted.ID.String(),
+		WhatsAppID:  quoted.WhatsAppMessageID,
+		Content:     quoted.Content,
+		MessageType: string(quoted.MessageType),
+		Direction:   string(quoted.Direction),
+	}
+	if quoted.InteractiveData != nil {
+		out.InteractiveData = map[string]any(quoted.InteractiveData)
+	}
+	var latest models.Message
+	err := a.DB.Where(
+		"organization_id = ? AND contact_id = ? AND direction = ?",
+		quoted.OrganizationID, quoted.ContactID, models.DirectionOutgoing,
+	).Order("created_at DESC").First(&latest).Error
+	if err == nil && latest.ID == quoted.ID {
+		out.IsLatestOutgoing = true
+	}
+	return out
 }
 
 // saveIncomingMessage saves an incoming message to the messages table
