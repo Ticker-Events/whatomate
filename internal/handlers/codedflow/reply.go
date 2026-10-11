@@ -709,7 +709,7 @@ route handoff: they ask for a person, or you would have to invent an id.
 route unclear: you cannot tell whether they mean the quoted message or the current question.
 
 confidence is from 0 to 1. Use 0.9 or higher when the quoted message clearly supplies the target. Use below 0.75 when unsure.
-language is a short label for the language the customer is writing in. English is en.
+%s
 reasoning explains the choice for an operator. At most 200 words.
 
 Reply with JSON only:
@@ -717,7 +717,8 @@ Reply with JSON only:
 
 Customer message:
 %s`, ctx.QuotedKind, quoted, choices.String(), collections.String(), current,
-		strings.TrimSpace(ctx.Doing), strings.TrimSpace(ctx.Expect), message)
+		strings.TrimSpace(ctx.Doing), strings.TrimSpace(ctx.Expect),
+		languagePromptInstruction(ctx.SupportedLanguages), message)
 }
 
 func buildQuotedReplyGuidePrompt(message, lang string, ctx IntentContext) string {
@@ -754,11 +755,8 @@ func ValidateQuotedReplyIntent(raw IntentResult, ctx IntentContext) (IntentResul
 	raw.CollectionID = strings.TrimSpace(raw.CollectionID)
 	raw.ProductQuery = strings.TrimSpace(raw.ProductQuery)
 	raw.Answer = strings.TrimSpace(raw.Answer)
-	raw.Language = strings.TrimSpace(raw.Language)
+	raw.Language = normalizeDetectedLanguage(raw.Language, ctx.SupportedLanguages)
 	raw.Reasoning = LimitWords(raw.Reasoning, 200)
-	if raw.Language == "" {
-		raw.Language = "en"
-	}
 	switch raw.Route {
 	case RouteCurrent:
 		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" {

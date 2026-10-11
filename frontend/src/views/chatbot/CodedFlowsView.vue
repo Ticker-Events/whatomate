@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Code2, Loader2, Play } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { accountsService, chatbotService, flowsService, type CodedFlowBinding } from '@/services/api'
+import { accountsService, chatbotService, flowsService, CODED_FLOW_LANGUAGE_OPTIONS, type CodedFlowBinding } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { getErrorMessage } from '@/lib/api-utils'
 import { PageHeader, ErrorState } from '@/components/shared'
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -33,14 +34,20 @@ type WhatsAppFlowOption = {
   status?: string
 }
 
+type LanguageMode = 'all' | 'selected'
+
 type KeywordDraft = {
   keywords: string
   enabled: boolean
   isDefault: boolean
+  languageMode: LanguageMode
+  supportedLanguages: string[]
   pickupFlowId: string
   deliveryFlowId: string
   saving: boolean
 }
+
+const languageOptions = CODED_FLOW_LANGUAGE_OPTIONS
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -74,20 +81,71 @@ function draftDeliveryValue(flow: CodedFlowBinding): string {
   return flow.stored_delivery_flow_id || USE_DEFAULT
 }
 
+function languageModeFrom(langs: string[] | undefined): LanguageMode {
+  return langs && langs.length > 0 ? 'selected' : 'all'
+}
+
 function applyFlows(rows: CodedFlowBinding[]) {
   flows.value = rows
   const next: Record<string, KeywordDraft> = {}
   for (const flow of rows) {
+    const langs = [...(flow.supported_languages || [])]
     next[flow.key] = {
       keywords: (flow.keywords || []).join(', '),
       enabled: flow.is_enabled,
       isDefault: flow.is_default,
+      languageMode: languageModeFrom(langs),
+      supportedLanguages: langs,
       pickupFlowId: draftPickupValue(flow),
       deliveryFlowId: draftDeliveryValue(flow),
       saving: false,
     }
   }
   drafts.value = next
+}
+
+function setLanguageMode(key: string, mode: LanguageMode) {
+  const draft = drafts.value[key]
+  if (!draft) return
+  draft.languageMode = mode
+  if (mode === 'all') {
+    draft.supportedLanguages = []
+  } else if (draft.supportedLanguages.length === 0) {
+    draft.supportedLanguages = languageOptions.map((lang) => lang.code)
+  }
+}
+
+function toggleLanguage(key: string, code: string, checked: boolean | 'indeterminate') {
+  const draft = drafts.value[key]
+  if (!draft || draft.languageMode !== 'selected') return
+  const on = checked === true
+  if (on) {
+    if (!draft.supportedLanguages.includes(code)) {
+      draft.supportedLanguages = [...draft.supportedLanguages, code]
+    }
+    return
+  }
+  draft.supportedLanguages = draft.supportedLanguages.filter((item) => item !== code)
+}
+
+function selectAllLanguages(key: string) {
+  const draft = drafts.value[key]
+  if (!draft) return
+  draft.languageMode = 'selected'
+  draft.supportedLanguages = languageOptions.map((lang) => lang.code)
+}
+
+function clearLanguages(key: string) {
+  const draft = drafts.value[key]
+  if (!draft) return
+  draft.languageMode = 'selected'
+  draft.supportedLanguages = []
+}
+
+function allLanguagesSelected(key: string): boolean {
+  const draft = drafts.value[key]
+  if (!draft) return false
+  return draft.supportedLanguages.length === languageOptions.length
 }
 
 function flowOptionsFor(selectedId: string): WhatsAppFlowOption[] {
@@ -174,6 +232,12 @@ function resolveStoredFlowId(draftValue: string): string {
 async function save(flow: CodedFlowBinding) {
   const draft = drafts.value[flow.key]
   if (!draft || !account.value) return
+  const supportedLanguages =
+    draft.languageMode === 'selected' ? [...draft.supportedLanguages] : []
+  if (draft.languageMode === 'selected' && supportedLanguages.length === 0) {
+    toast.error(t('codedFlows.languagesRequired'))
+    return
+  }
   draft.saving = true
   try {
     const keywords = draft.keywords.split(',').map((keyword) => keyword.trim()).filter(Boolean)
@@ -181,12 +245,14 @@ async function save(flow: CodedFlowBinding) {
       keywords: string[]
       is_enabled: boolean
       is_default: boolean
+      supported_languages: string[]
       pickup_flow_id?: string
       delivery_flow_id?: string
     } = {
       keywords,
       is_enabled: draft.enabled,
       is_default: draft.isDefault,
+      supported_languages: supportedLanguages,
     }
     if (flow.key === TIQR_ECOMMERCE_KEY) {
       payload.pickup_flow_id = resolveStoredFlowId(draft.pickupFlowId)
@@ -198,6 +264,7 @@ async function save(flow: CodedFlowBinding) {
     flow.keywords = saved.keywords ?? keywords
     flow.is_enabled = saved.is_enabled ?? draft.enabled
     flow.is_default = saved.is_default ?? draft.isDefault
+    flow.supported_languages = saved.supported_languages ?? supportedLanguages
     if (flow.is_default) {
       for (const other of flows.value) {
         if (other.key !== flow.key) {
@@ -213,6 +280,8 @@ async function save(flow: CodedFlowBinding) {
     draft.keywords = (flow.keywords || []).join(', ')
     draft.enabled = flow.is_enabled
     draft.isDefault = flow.is_default
+    draft.supportedLanguages = [...(flow.supported_languages || [])]
+    draft.languageMode = languageModeFrom(draft.supportedLanguages)
     draft.pickupFlowId = draftPickupValue(flow)
     draft.deliveryFlowId = draftDeliveryValue(flow)
     toast.success(t('codedFlows.saved'))
@@ -344,6 +413,72 @@ watch(showPreview, (open) => {
                 :disabled="!canWrite"
                 @update:checked="drafts[flow.key].isDefault = $event"
               />
+            </div>
+
+            <div v-if="drafts[flow.key]" class="space-y-3 rounded-lg border p-3">
+              <div>
+                <Label class="text-xs">{{ $t('codedFlows.supportedLanguages') }}</Label>
+                <p class="text-xs text-muted-foreground mt-0.5">{{ $t('codedFlows.supportedLanguagesHint') }}</p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  :variant="drafts[flow.key].languageMode === 'all' ? 'default' : 'outline'"
+                  :disabled="!canWrite"
+                  @click="setLanguageMode(flow.key, 'all')"
+                >
+                  {{ $t('codedFlows.allLanguages') }}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  :variant="drafts[flow.key].languageMode === 'selected' ? 'default' : 'outline'"
+                  :disabled="!canWrite"
+                  @click="setLanguageMode(flow.key, 'selected')"
+                >
+                  {{ $t('codedFlows.selectedLanguages') }}
+                </Button>
+              </div>
+              <div v-if="drafts[flow.key].languageMode === 'selected'" class="space-y-3">
+                <div class="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    :disabled="!canWrite || allLanguagesSelected(flow.key)"
+                    @click="selectAllLanguages(flow.key)"
+                  >
+                    {{ $t('codedFlows.selectAllLanguages') }}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    :disabled="!canWrite || drafts[flow.key].supportedLanguages.length === 0"
+                    @click="clearLanguages(flow.key)"
+                  >
+                    {{ $t('codedFlows.clearLanguages') }}
+                  </Button>
+                </div>
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <div
+                    v-for="lang in languageOptions"
+                    :key="lang.code"
+                    class="flex items-center gap-2 rounded-md border px-2 py-1.5"
+                  >
+                    <Checkbox
+                      :id="`${flow.key}-${lang.code}`"
+                      :checked="drafts[flow.key].supportedLanguages.includes(lang.code)"
+                      :disabled="!canWrite"
+                      @update:checked="(checked) => toggleLanguage(flow.key, lang.code, checked)"
+                    />
+                    <Label :for="`${flow.key}-${lang.code}`" class="cursor-pointer text-sm font-normal">
+                      {{ lang.name }}
+                    </Label>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div v-if="flow.key === TIQR_ECOMMERCE_KEY && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">

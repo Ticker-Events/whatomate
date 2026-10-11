@@ -119,6 +119,10 @@ type Host interface {
 	// forms. Falls back to built-in defaults when unset.
 	ResolveEcommerceMetaFlowID(orgID uuid.UUID, accountName string, delivery bool) string
 
+	// CodedFlowSupportedLanguages returns the language codes configured for
+	// the session's active coded flow. Empty means all languages.
+	CodedFlowSupportedLanguages(session *models.ChatbotSession) []string
+
 	// Ecommerce handoff: returns handled=true when the session is a TiQR ecommerce coded flow.
 	TryEcommerceTransfer(chat Chat, message string) (handled bool, err error)
 

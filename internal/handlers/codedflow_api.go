@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	codedSettingPickupFlowID   = "pickup_flow_id"
-	codedSettingDeliveryFlowID = "delivery_flow_id"
+	codedSettingPickupFlowID        = "pickup_flow_id"
+	codedSettingDeliveryFlowID      = "delivery_flow_id"
+	codedSettingSupportedLanguages  = "supported_languages"
 )
 
 // CodedFlowBindingResponse is one compiled-in flow plus its account settings.
@@ -32,6 +33,9 @@ type CodedFlowBindingResponse struct {
 	IsEnabled       bool                  `json:"is_enabled"`
 	IsDefault       bool                  `json:"is_default"`
 	WhatsAppAccount string                `json:"whatsapp_account"`
+	// SupportedLanguages limits AI language detection for this flow.
+	// Empty means all languages (open detection).
+	SupportedLanguages []string `json:"supported_languages"`
 	// PickupFlowID / DeliveryFlowID are the effective Meta flow IDs
 	// (stored override or built-in default) for tiqr_ecommerce.
 	PickupFlowID   string `json:"pickup_flow_id,omitempty"`
@@ -71,22 +75,27 @@ func (a *App) ListCodedFlows(r *fastglue.Request) error {
 	response := make([]CodedFlowBindingResponse, 0, len(flows))
 	for _, flow := range flows {
 		item := CodedFlowBindingResponse{
-			Key:             flow.Key,
-			Name:            flow.Name,
-			Description:     flow.Description,
-			Steps:           flow.Steps,
-			Keywords:        []string{},
-			WhatsAppAccount: accountName,
+			Key:                flow.Key,
+			Name:               flow.Name,
+			Description:        flow.Description,
+			Steps:              flow.Steps,
+			Keywords:           []string{},
+			SupportedLanguages: []string{},
+			WhatsAppAccount:    accountName,
 		}
 		var binding *models.CodedFlowBinding
 		if b, ok := bindings[flow.Key]; ok {
 			item.Keywords = []string(b.Keywords)
 			item.IsEnabled = b.IsEnabled
 			item.IsDefault = b.IsDefault
+			item.SupportedLanguages = supportedLanguagesFromSettings(b.Settings)
 			binding = &b
 		}
 		if item.Keywords == nil {
 			item.Keywords = []string{}
+		}
+		if item.SupportedLanguages == nil {
+			item.SupportedLanguages = []string{}
 		}
 		applyEcommerceFlowIDs(&item, flow.Key, binding)
 		response = append(response, item)
@@ -125,11 +134,12 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 	}
 
 	var req struct {
-		Keywords       []string `json:"keywords"`
-		IsEnabled      bool     `json:"is_enabled"`
-		IsDefault      bool     `json:"is_default"`
-		PickupFlowID   *string  `json:"pickup_flow_id"`
-		DeliveryFlowID *string  `json:"delivery_flow_id"`
+		Keywords           []string  `json:"keywords"`
+		IsEnabled          bool      `json:"is_enabled"`
+		IsDefault          bool      `json:"is_default"`
+		SupportedLanguages *[]string `json:"supported_languages"`
+		PickupFlowID       *string   `json:"pickup_flow_id"`
+		DeliveryFlowID     *string   `json:"delivery_flow_id"`
 	}
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
@@ -153,13 +163,11 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		binding.Keywords = keywords
 		binding.IsEnabled = req.IsEnabled
 		binding.IsDefault = req.IsDefault
-		merged, mergeErr := mergeEcommerceFlowSettings(flow.Key, binding.Settings, req.PickupFlowID, req.DeliveryFlowID)
+		merged, mergeErr := mergeCodedFlowSettings(flow.Key, binding.Settings, req.SupportedLanguages, req.PickupFlowID, req.DeliveryFlowID)
 		if mergeErr != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, mergeErr.Error(), nil, "")
 		}
-		if flow.Key == tiqrecommerce.FlowKey {
-			binding.Settings = merged
-		}
+		binding.Settings = merged
 		if req.IsDefault {
 			if err := a.DB.Model(&models.CodedFlowBinding{}).
 				Where("organization_id = ? AND whats_app_account = ? AND flow_key <> ?", orgID, accountName, flow.Key).
@@ -173,7 +181,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update coded flow", nil, "")
 		}
 	case errors.Is(findErr, gorm.ErrRecordNotFound):
-		settings, mergeErr := mergeEcommerceFlowSettings(flow.Key, nil, req.PickupFlowID, req.DeliveryFlowID)
+		settings, mergeErr := mergeCodedFlowSettings(flow.Key, nil, req.SupportedLanguages, req.PickupFlowID, req.DeliveryFlowID)
 		if mergeErr != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, mergeErr.Error(), nil, "")
 		}
@@ -212,14 +220,18 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		"coded_flow_binding", binding.ID, action, before, &binding)
 
 	resp := CodedFlowBindingResponse{
-		Key:             flow.Key,
-		Name:            flow.Name,
-		Description:     flow.Description,
-		Steps:           flow.Steps,
-		Keywords:        []string(binding.Keywords),
-		IsEnabled:       binding.IsEnabled,
-		IsDefault:       binding.IsDefault,
-		WhatsAppAccount: accountName,
+		Key:                flow.Key,
+		Name:               flow.Name,
+		Description:        flow.Description,
+		Steps:              flow.Steps,
+		Keywords:           []string(binding.Keywords),
+		IsEnabled:          binding.IsEnabled,
+		IsDefault:          binding.IsDefault,
+		SupportedLanguages: supportedLanguagesFromSettings(binding.Settings),
+		WhatsAppAccount:    accountName,
+	}
+	if resp.SupportedLanguages == nil {
+		resp.SupportedLanguages = []string{}
 	}
 	applyEcommerceFlowIDs(&resp, flow.Key, &binding)
 	return r.SendEnvelope(resp)
@@ -293,40 +305,88 @@ func ecommerceFlowIDsFromSettings(settings models.JSONB) (pickup, delivery strin
 	return strings.TrimSpace(pickup), strings.TrimSpace(delivery)
 }
 
-func mergeEcommerceFlowSettings(flowKey string, existing models.JSONB, pickupID, deliveryID *string) (models.JSONB, error) {
-	if flowKey != tiqrecommerce.FlowKey {
-		if existing == nil {
-			return models.JSONB{}, nil
-		}
-		return existing, nil
-	}
+func mergeCodedFlowSettings(
+	flowKey string,
+	existing models.JSONB,
+	langs *[]string,
+	pickupID, deliveryID *string,
+) (models.JSONB, error) {
 	out := models.JSONB{}
 	for k, v := range existing {
 		out[k] = v
 	}
-	if pickupID != nil {
-		normalized, err := normalizeMetaFlowID(*pickupID)
+	if langs != nil {
+		normalized, err := models.NormalizeCodedFlowLanguages(*langs)
 		if err != nil {
-			return nil, errors.New("Pickup flow ID must be a Meta flow ID (digits only), or blank to use the default")
+			return nil, err
 		}
-		if normalized == "" {
-			delete(out, codedSettingPickupFlowID)
+		if len(normalized) == 0 {
+			delete(out, codedSettingSupportedLanguages)
 		} else {
-			out[codedSettingPickupFlowID] = normalized
+			asAny := make([]any, len(normalized))
+			for i, code := range normalized {
+				asAny[i] = code
+			}
+			out[codedSettingSupportedLanguages] = asAny
 		}
 	}
-	if deliveryID != nil {
-		normalized, err := normalizeMetaFlowID(*deliveryID)
-		if err != nil {
-			return nil, errors.New("Delivery flow ID must be a Meta flow ID (digits only), or blank to use the default")
+	if flowKey == tiqrecommerce.FlowKey {
+		if pickupID != nil {
+			normalized, err := normalizeMetaFlowID(*pickupID)
+			if err != nil {
+				return nil, errors.New("Pickup flow ID must be a Meta flow ID (digits only), or blank to use the default")
+			}
+			if normalized == "" {
+				delete(out, codedSettingPickupFlowID)
+			} else {
+				out[codedSettingPickupFlowID] = normalized
+			}
 		}
-		if normalized == "" {
-			delete(out, codedSettingDeliveryFlowID)
-		} else {
-			out[codedSettingDeliveryFlowID] = normalized
+		if deliveryID != nil {
+			normalized, err := normalizeMetaFlowID(*deliveryID)
+			if err != nil {
+				return nil, errors.New("Delivery flow ID must be a Meta flow ID (digits only), or blank to use the default")
+			}
+			if normalized == "" {
+				delete(out, codedSettingDeliveryFlowID)
+			} else {
+				out[codedSettingDeliveryFlowID] = normalized
+			}
 		}
 	}
 	return out, nil
+}
+
+func supportedLanguagesFromSettings(settings models.JSONB) []string {
+	if settings == nil {
+		return []string{}
+	}
+	raw, ok := settings[codedSettingSupportedLanguages]
+	if !ok || raw == nil {
+		return []string{}
+	}
+	switch v := raw.(type) {
+	case []string:
+		out, _ := models.NormalizeCodedFlowLanguages(v)
+		if out == nil {
+			return []string{}
+		}
+		return out
+	case []any:
+		codes := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				codes = append(codes, s)
+			}
+		}
+		out, _ := models.NormalizeCodedFlowLanguages(codes)
+		if out == nil {
+			return []string{}
+		}
+		return out
+	default:
+		return []string{}
+	}
 }
 
 func normalizeMetaFlowID(raw string) (string, error) {
@@ -381,4 +441,25 @@ func (a *App) ResolveEcommerceMetaFlowID(orgID uuid.UUID, accountName string, de
 		}
 	}
 	return fallback
+}
+
+// CodedFlowSupportedLanguages returns the language codes configured for the
+// session's active coded flow. Empty means all languages (open detection).
+func (a *App) CodedFlowSupportedLanguages(session *models.ChatbotSession) []string {
+	if a == nil || a.DB == nil || session == nil {
+		return nil
+	}
+	flowKey := codedflow.SessionKey(session)
+	if flowKey == "" {
+		return nil
+	}
+	var binding models.CodedFlowBinding
+	err := a.DB.Where(
+		"organization_id = ? AND whats_app_account = ? AND flow_key = ?",
+		session.OrganizationID, session.WhatsAppAccount, flowKey,
+	).First(&binding).Error
+	if err != nil {
+		return nil
+	}
+	return supportedLanguagesFromSettings(binding.Settings)
 }

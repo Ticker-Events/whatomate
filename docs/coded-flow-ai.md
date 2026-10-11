@@ -46,4 +46,6 @@ One System One request carries:
 
 Code composes `codedIntentResult`. Number words such as “two” are normalized to digits in code. The existing grounding check and **0.75** confidence threshold still decide whether to act or ask a guide question.
 
-Language labels for Jev: `en`, `hi`, `ml`, `ta`, `te`, `kn`, `ar`, `es`, `manglish`, `other`.
+Language labels for Jev (open detection): `en`, `hi`, `ml`, `ta`, `te`, `kn`, `ar`, `es`, `manglish`, `other`.
+
+Each coded flow can limit detection via `supported_languages` on its binding (coded flows page). Empty means open detection. A non-empty list restricts Account AI and Jev to those codes (English, Arabic, Manglish, and Indian languages from the admin catalog). Jev also gets an internal `other` choice that is never stored. Labels outside the list, empty labels, and `other` become `en`, so the conversation continues in English.

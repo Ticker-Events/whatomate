@@ -163,18 +163,7 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 			"instructions": map[string]any{
 				"question": "Which label best describes the language of `message`?",
 			},
-			"criteria": map[string]any{
-				"en":       "English",
-				"hi":       "Hindi",
-				"ml":       "Malayalam",
-				"ta":       "Tamil",
-				"te":       "Telugu",
-				"kn":       "Kannada",
-				"ar":       "Arabic",
-				"es":       "Spanish",
-				"manglish": "Malayalam written in Latin letters, or mixed Malayalam and English",
-				"other":    "Any other language or mixed form",
-			},
+			"criteria": jevLanguageCriteria(ctx.SupportedLanguages),
 		},
 	}
 
@@ -328,8 +317,10 @@ func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentC
 		Language: "en",
 		Route:    codedRouteUnclear,
 	}
-	if langAns.Choice != "" {
-		result.Language = langAns.Choice
+	if langAns.Choice != "" && choiceConfidenceUsable(langAns) {
+		result.Language = normalizeDetectedLanguage(langAns.Choice, ctx.SupportedLanguages)
+	} else {
+		result.Language = normalizeDetectedLanguage("", ctx.SupportedLanguages)
 	}
 	if !routeOK || !choiceConfidenceUsable(routeAns) {
 		result.Reasoning = "route confidence unavailable"

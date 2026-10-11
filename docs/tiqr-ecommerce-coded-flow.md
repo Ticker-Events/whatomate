@@ -313,6 +313,8 @@ Ungrounded output, a grounded `handoff`, or an intent error transfers immediatel
 
 Language from the first successful intent call is stored as `customer_language` only if the session does not already have one. Button taps never set it.
 
+Admins configure `supported_languages` per coded flow on the coded flows page (stored in the binding `settings` jsonb). Empty means open detection. When a list is set, intent may only choose those languages; anything else (including Jev `other`) is stored as `en` and the session stays in English.
+
 ### Guide
 
 `askGuide`. One short question, in the stored language (default `en`). Up to 3 questions per step, counted in `SessionData._coded_guide`. The 4th unclear reply transfers. An empty question or a guide error also transfers. A later confident route clears the counter.

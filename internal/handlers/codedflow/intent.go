@@ -89,6 +89,9 @@ type IntentContext struct {
 	Pattern      string            // when set, answer route must match this pattern
 	ChoiceIDs    map[string]string // id -> title (or card body + title)
 	Collections  map[string]string // id -> name
+	// SupportedLanguages limits language labels the AI may return.
+	// Empty means open detection (existing behavior).
+	SupportedLanguages []string
 
 	// Quoted reply context (set only when classifying a quote-reply).
 	QuotedContent string
@@ -378,13 +381,14 @@ func formatIntentResponse(raw IntentResult) string {
 
 func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) IntentContext {
 	ctx := IntentContext{
-		AllowCatalog: opts.AllowCatalog,
-		Question:     asString(cfg["body"]),
-		Doing:        asString(cfg["step_doing"]),
-		Expect:       asString(cfg["step_expect"]),
-		Pattern:      asString(cfg["pattern"]),
-		ChoiceIDs:    map[string]string{},
-		Collections:  map[string]string{},
+		AllowCatalog:       opts.AllowCatalog,
+		Question:           asString(cfg["body"]),
+		Doing:              asString(cfg["step_doing"]),
+		Expect:             asString(cfg["step_expect"]),
+		Pattern:            asString(cfg["pattern"]),
+		ChoiceIDs:          map[string]string{},
+		Collections:        map[string]string{},
+		SupportedLanguages: c.supportedLanguages(),
 	}
 	buttons, err := c.app.ButtonsForNode(cfg, c.session().SessionData)
 	if err == nil {
@@ -472,11 +476,14 @@ func (c *Conv) rememberLanguage(lang string) {
 	if strings.TrimSpace(asString(c.session().SessionData[customerLanguageKey])) != "" {
 		return
 	}
-	lang = strings.TrimSpace(lang)
-	if lang == "" {
-		lang = "en"
+	c.session().SessionData[customerLanguageKey] = normalizeDetectedLanguage(lang, c.supportedLanguages())
+}
+
+func (c *Conv) supportedLanguages() []string {
+	if c == nil || c.app == nil || c.session() == nil {
+		return nil
 	}
-	c.session().SessionData[customerLanguageKey] = lang
+	return c.app.CodedFlowSupportedLanguages(c.session())
 }
 
 // GuideTurns returns how many guide turns have been used for step.
@@ -523,11 +530,8 @@ func ValidateCodedIntent(raw IntentResult, ctx IntentContext) (IntentResult, boo
 	raw.CollectionID = strings.TrimSpace(raw.CollectionID)
 	raw.ProductQuery = strings.TrimSpace(raw.ProductQuery)
 	raw.Answer = strings.TrimSpace(raw.Answer)
-	raw.Language = strings.TrimSpace(raw.Language)
+	raw.Language = normalizeDetectedLanguage(raw.Language, ctx.SupportedLanguages)
 	raw.Reasoning = LimitWords(raw.Reasoning, 200)
-	if raw.Language == "" {
-		raw.Language = "en"
-	}
 	switch raw.Route {
 	case codedRouteChoice:
 		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
@@ -709,14 +713,14 @@ route handoff: they ask for a human, agent, or staff, they seem confused or stuc
 route unclear: more than one shopping route fits, or none of them fit, and they are not asking for a person and do not seem stuck.
 
 confidence is from 0 to 1. Use 0.9 or higher for an obvious route, including a clear request for a person, a clearly confused customer, a clear typo of an allowed choice, a clear checkout request, and a clear normalized answer. Use a value below 0.75 when you are unsure. If you are unsure whether a catalog id exists, use handoff instead of guessing an id.
-language is a short label for the language the customer is writing in. English is en. Any other language, including mixed forms such as Manglish, gets its own label. Do not translate the message.
+%s
 reasoning explains why you chose this route, for an operator debugging the flow. At most 200 words. Do not address the customer.
 
 Reply with JSON only:
 {"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","confidence":0,"reasoning":""}
 
 Customer message:
-%s`, question, doing, expect, patternLine, choices.String(), collections.String(), message)
+%s`, question, doing, expect, patternLine, choices.String(), collections.String(), languagePromptInstruction(ctx.SupportedLanguages), message)
 }
 
 func buildGuidePrompt(message, lang string, ctx IntentContext) string {

@@ -246,6 +246,105 @@ func TestApp_UpdateCodedFlowBinding_EcommerceFlowIDs(t *testing.T) {
 	assert.Empty(t, cleared.Data.StoredDeliveryFlowID)
 }
 
+func TestApp_UpdateCodedFlowBinding_SupportedLanguages(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	perms := getChatbotFlowPermissions(t, app)
+	role := testutil.CreateTestRole(t, app.DB, org.ID, "coded-flow-langs", perms)
+	user := testutil.CreateTestUser(t, app.DB, org.ID,
+		testutil.WithEmail(testutil.UniqueEmail("coded-langs")),
+		testutil.WithRoleID(&role.ID),
+	)
+
+	save := testutil.NewJSONRequest(t, map[string]any{
+		"keywords":            []string{"shop"},
+		"is_enabled":          true,
+		"supported_languages": []string{"en", "hi", "manglish", "ar"},
+		"pickup_flow_id":      "111222333444555",
+	})
+	testutil.SetAuthContext(save, org.ID, user.ID)
+	testutil.SetQueryParam(save, "account", account.Name)
+	testutil.SetPathParam(save, "key", "tiqr_ecommerce")
+	require.NoError(t, app.UpdateCodedFlowBinding(save))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(save))
+
+	var saved struct {
+		Data handlers.CodedFlowBindingResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(save), &saved))
+	assert.Equal(t, []string{"en", "hi", "manglish", "ar"}, saved.Data.SupportedLanguages)
+	assert.Equal(t, "111222333444555", saved.Data.StoredPickupFlowID)
+
+	session := &models.ChatbotSession{
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		SessionData:     models.JSONB{"_coded_flow": "tiqr_ecommerce"},
+	}
+	assert.Equal(t, []string{"en", "hi", "manglish", "ar"}, app.CodedFlowSupportedLanguages(session))
+
+	// Omitting supported_languages leaves the stored list unchanged and keeps other settings.
+	keep := testutil.NewJSONRequest(t, map[string]any{
+		"keywords":   []string{"shop"},
+		"is_enabled": true,
+	})
+	testutil.SetAuthContext(keep, org.ID, user.ID)
+	testutil.SetQueryParam(keep, "account", account.Name)
+	testutil.SetPathParam(keep, "key", "tiqr_ecommerce")
+	require.NoError(t, app.UpdateCodedFlowBinding(keep))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(keep))
+
+	var kept struct {
+		Data handlers.CodedFlowBindingResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(keep), &kept))
+	assert.Equal(t, []string{"en", "hi", "manglish", "ar"}, kept.Data.SupportedLanguages)
+	assert.Equal(t, "111222333444555", kept.Data.StoredPickupFlowID)
+
+	clear := testutil.NewJSONRequest(t, map[string]any{
+		"keywords":            []string{"shop"},
+		"is_enabled":          true,
+		"supported_languages": []string{},
+	})
+	testutil.SetAuthContext(clear, org.ID, user.ID)
+	testutil.SetQueryParam(clear, "account", account.Name)
+	testutil.SetPathParam(clear, "key", "tiqr_ecommerce")
+	require.NoError(t, app.UpdateCodedFlowBinding(clear))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(clear))
+
+	var cleared struct {
+		Data handlers.CodedFlowBindingResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(clear), &cleared))
+	assert.Empty(t, cleared.Data.SupportedLanguages)
+	assert.Equal(t, "111222333444555", cleared.Data.StoredPickupFlowID)
+}
+
+func TestApp_UpdateCodedFlowBinding_RejectsUnknownLanguage(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	perms := getChatbotFlowPermissions(t, app)
+	role := testutil.CreateTestRole(t, app.DB, org.ID, "coded-flow-bad-lang", perms)
+	user := testutil.CreateTestUser(t, app.DB, org.ID,
+		testutil.WithEmail(testutil.UniqueEmail("coded-bad-lang")),
+		testutil.WithRoleID(&role.ID),
+	)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"keywords":            []string{"shop"},
+		"is_enabled":          true,
+		"supported_languages": []string{"en", "esperanto"},
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetQueryParam(req, "account", account.Name)
+	testutil.SetPathParam(req, "key", "tiqr_ecommerce")
+
+	err := app.UpdateCodedFlowBinding(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+}
+
 func TestApp_UpdateCodedFlowBinding_RejectsInvalidFlowID(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
