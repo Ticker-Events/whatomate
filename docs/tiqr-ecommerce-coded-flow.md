@@ -321,9 +321,13 @@ Catalog add-on selection also uses the guide role to parse free text into indexe
 
 ### Translation
 
-`Conv.text` in `internal/handlers/codedflow/ai.go` runs on every authored line before send, including button titles (then truncated to 20 characters). It does not run when `customer_language` is empty, `en`, or `en-*`. English taps therefore stay in the authored English.
+`Conv.text` in `internal/handlers/codedflow/ai.go` runs on authored message bodies before send. It does not run when `customer_language` is empty, `en`, or `en-*`.
 
-Catalog text is not translated: collection names, product names, option names, and prices stay as the store sent them. Placeholders, asterisks, numbers, prices, and line breaks are supposed to be kept. Results are cached on the session under `_translations`. A translation error sends the English source.
+Interactive option labels (reply button titles, list opener, section title, header, footer, carousel / image-button titles, flow CTA, and Pay now) are **never** translated. `Conv.limit` only truncates to WhatsApp’s length caps. Translated labels often exceed those caps and would be cut mid-word.
+
+When the customer language is not English and the message has fewer than `ExplainInteractiveOptionsBelow` options (default `4`, defined in `codedflow`), a short legend is appended under the body. Each unique label is explained as `English label — translation`. WhatsApp reply menus (at most 3 buttons) always get the legend. A list or carousel page of 4 or more rows does not. Identical labels (for example “Add to cart” on every card) are explained once. “Show more” counts toward the option total. The final body is capped at 1024 characters.
+
+Catalog text on the buttons themselves stays as the store sent it: collection names, product names, option names, and prices. Placeholders, asterisks, numbers, prices, and line breaks are supposed to be kept. Results are cached on the session under `_translations`. A translation error sends the English source.
 
 ### Order recovery
 

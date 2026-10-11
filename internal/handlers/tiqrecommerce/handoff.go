@@ -3,11 +3,11 @@ package tiqrecommerce
 import (
 	"errors"
 	"fmt"
-	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
 )
@@ -26,6 +26,12 @@ const (
 // queue transfer.
 func TransferEcommerce(base *codedflow.Conv, message string) error {
 	return wrap(base).transferTiqrEcommerce(message)
+}
+
+// CompleteEcommerceHandoff snapshots the cart and creates a commerce transfer
+// without messaging the customer. The caller has already sent a notice.
+func CompleteEcommerceHandoff(base *codedflow.Conv) error {
+	return wrap(base).completeEcommerceHandoff()
 }
 
 func (c *Conv) transferTiqrEcommerce(message string) error {
@@ -62,6 +68,39 @@ func (c *Conv) transferTiqrEcommerce(message string) error {
 		return nil
 	}
 
+	if err := c.stageEcommerceHandoffDraft(settings); err != nil {
+		return err
+	}
+	_ = c.App().SendAndSaveTextMessage(account, contact, body)
+	return c.finishEcommerceHandoffTransfer(settings)
+}
+
+func (c *Conv) completeEcommerceHandoff() error {
+	if c == nil || c.App() == nil || c.ChatCtx() == nil {
+		return errors.New("coded ecommerce transfer is not configured")
+	}
+	account := c.ChatCtx().Account()
+	if account == nil {
+		return errors.New("coded ecommerce transfer is missing account or contact")
+	}
+	settings, err := c.App().GetChatbotSettingsCached(account.OrganizationID, account.Name)
+	if err != nil || settings == nil {
+		return fmt.Errorf("load chatbot settings for ecommerce handoff: %w", err)
+	}
+	if err := c.stageEcommerceHandoffDraft(settings); err != nil {
+		return err
+	}
+	return c.finishEcommerceHandoffTransfer(settings)
+}
+
+func (c *Conv) stageEcommerceHandoffDraft(settings *models.ChatbotSettings) error {
+	account := c.ChatCtx().Account()
+	contact := c.ChatCtx().Contact()
+	session := c.Session()
+	if account == nil || contact == nil || session == nil {
+		return errors.New("coded ecommerce transfer is missing account or contact")
+	}
+
 	stageTiqrEcommerceHandoffSession(c.App(), session)
 
 	if _, err := c.App().EnsureCommerceDraft(contact, session, settings); err != nil {
@@ -69,14 +108,21 @@ func (c *Conv) transferTiqrEcommerce(message string) error {
 	}
 	_ = c.App().SyncReferencedCommerceDraft(session)
 
-	category := tiqrEcommerceHandoffCategory(session)
-
 	if err := c.App().PersistSessionData(session); err != nil {
 		c.App().LogWarn("persist ecommerce handoff session before transfer failed", "error", err)
 	}
+	return nil
+}
 
-	_ = c.App().SendAndSaveTextMessage(account, contact, body)
+func (c *Conv) finishEcommerceHandoffTransfer(settings *models.ChatbotSettings) error {
+	account := c.ChatCtx().Account()
+	contact := c.ChatCtx().Contact()
+	session := c.Session()
+	if account == nil || contact == nil || session == nil {
+		return errors.New("coded ecommerce transfer is missing account or contact")
+	}
 
+	category := tiqrEcommerceHandoffCategory(session)
 	transfer, created, err := c.App().CreateCommerceTransfer(account, contact, session, settings, category)
 	if err != nil {
 		return fmt.Errorf("create commerce transfer for ecommerce handoff: %w", err)

@@ -371,6 +371,15 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		a.Log.Error("Failed to load chatbot settings", "error", err, "account", account.Name, "org_id", account.OrganizationID)
 		return
 	}
+
+	// Voice notes cannot be transcribed. Tell the customer and hand off to a
+	// person. Active agent transfers already returned above so the agent can
+	// listen to the saved audio without a second handoff.
+	if msg.Type == "audio" {
+		a.handleInboundAudioUnsupported(account, contact, settings)
+		return
+	}
+
 	if !settings.IsEnabled {
 		a.Log.Debug("Chatbot not enabled for this account, creating transfer for agent queue", "account", account.Name, "settings_id", settings.ID)
 		// Create transfer to agent queue when chatbot is disabled
@@ -670,6 +679,74 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	} else if !isNewSession {
 		a.Log.Info("No fallback message configured for existing session")
 	}
+}
+
+// handleInboundAudioUnsupported tells the customer voice notes are unsupported
+// and hands the chat to a person. Ecommerce coded-flow sessions snapshot the
+// cart first. Outside business hours the voice notice is still sent; an
+// out-of-hours message may follow, and no agent is queued.
+func (a *App) handleInboundAudioUnsupported(account *models.WhatsAppAccount, contact *models.Contact, settings *models.ChatbotSettings) {
+	if account == nil || contact == nil {
+		return
+	}
+	timeoutMins := 30
+	if settings != nil && settings.SessionTimeoutMins > 0 {
+		timeoutMins = settings.SessionTimeoutMins
+	}
+	session := a.findActiveSession(account.OrganizationID, contact.ID, account.Name, timeoutMins)
+
+	notice := codedflow.VoiceUnsupportedMessage
+	if session != nil && session.SessionData != nil {
+		lang := asString(session.SessionData[codedflow.CustomerLanguageKey])
+		if !codedflow.EnglishLanguage(lang) {
+			if translated, err := codedflow.TranslateCodedLine(a, session, lang, notice); err == nil {
+				if t := strings.TrimSpace(translated); t != "" {
+					notice = t
+				}
+			}
+		}
+	}
+	if err := a.sendAndSaveTextMessage(account, contact, notice); err != nil {
+		a.Log.Error("Failed to send voice-unsupported notice", "error", err, "contact", contact.PhoneNumber)
+	}
+
+	if settings != nil && settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 &&
+		!a.isWithinBusinessHours(settings.BusinessHours.Hours) {
+		a.Log.Info("Outside business hours after voice note; not creating agent transfer",
+			"contact_id", contact.ID)
+		if settings.BusinessHours.OutOfHoursMessage != "" {
+			_ = a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
+		}
+		if session != nil && codedflow.SessionKey(session) == tiqrecommerce.FlowKey {
+			codedflow.FinishSession(session)
+			if err := a.persistChatSession(session); err != nil {
+				a.Log.Error("Failed to finish ecommerce session after voice note outside hours",
+					"error", err, "session", session.ID)
+			}
+		}
+		return
+	}
+
+	if session != nil && codedflow.SessionKey(session) == tiqrecommerce.FlowKey {
+		chat := newCodedChat(&chatNodeCtx{
+			account: account,
+			contact: contact,
+			session: session,
+		})
+		if err := tiqrecommerce.CompleteEcommerceHandoff(codedflow.NewConv(a, chat)); err != nil {
+			a.Log.Warn("ecommerce handoff after voice note failed; queueing transfer",
+				"error", err, "session", session.ID)
+			a.createTransferToQueue(account, contact, models.TransferSourceAudio)
+			codedflow.FinishSession(session)
+			if err := a.persistChatSession(session); err != nil {
+				a.Log.Error("Failed to finish ecommerce session after voice note fallback",
+					"error", err, "session", session.ID)
+			}
+		}
+		return
+	}
+
+	a.createTransferToQueue(account, contact, models.TransferSourceAudio)
 }
 
 func inboundCaptureMediaType(messageType string) bool {

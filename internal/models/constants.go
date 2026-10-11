@@ -191,6 +191,7 @@ const (
 	TransferSourceKeyword         TransferSource = "keyword"
 	TransferSourceChatbotDisabled TransferSource = "chatbot_disabled"
 	TransferSourceCommerce        TransferSource = "commerce"
+	TransferSourceAudio           TransferSource = "audio"
 )
 
 // CampaignStatus represents bulk message campaign states

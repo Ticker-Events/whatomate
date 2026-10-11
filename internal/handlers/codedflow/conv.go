@@ -14,6 +14,17 @@ const (
 	codedTranslationsKey = "_translations"
 	CustomerLanguageKey  = "customer_language"
 	customerLanguageKey  = CustomerLanguageKey
+
+	// ExplainInteractiveOptionsBelow is the cutoff for the option legend.
+	// A message with fewer options than this gets translations under the body.
+	// The labels on the buttons themselves are never translated.
+	ExplainInteractiveOptionsBelow = 4
+
+	// InteractiveBodyMaxRunes is WhatsApp's interactive message body limit.
+	InteractiveBodyMaxRunes = 1024
+
+	// VoiceUnsupportedMessage is sent when the customer sends a voice note.
+	VoiceUnsupportedMessage = "I'm unable to handle voice messages right now. I'm connecting you with a team member who can help."
 )
 
 // Choice is one accepted answer. ID is the button or row id, never a translated title.
@@ -95,7 +106,8 @@ type NumberPrompt struct {
 	Step    StepNote
 }
 
-// FlowPrompt opens a WhatsApp Flow. Only the opener text is translated.
+// FlowPrompt opens a WhatsApp Flow. Body is translated when needed; Header
+// and CTA stay in the authored language (length-capped).
 type FlowPrompt struct {
 	FlowID string
 	Header string
@@ -188,6 +200,8 @@ func (c *Conv) SayPaymentCTA(order map[string]any) {
 	}
 	body, paymentURL := c.codedPaymentCTAContent(order, c.app.SessionCurrencyCode(c.session()))
 	body = c.text(body)
+	const payNow = "Pay now"
+	body = c.bodyWithOptionLegend(body, []string{payNow})
 	if paymentURL == "" {
 		if _, err := c.app.ExecChatMessage(c.chat, "say_payment_cta", map[string]any{"message": body}); err != nil {
 			c.fail(err)
@@ -196,7 +210,7 @@ func (c *Conv) SayPaymentCTA(order map[string]any) {
 		c.appendCall(map[string]any{"name": "say_payment_cta", "ok": true})
 		return
 	}
-	if err := c.app.DeliverCodedCTAURL(c.chat, "say_payment_cta", body, "Pay now", paymentURL); err != nil {
+	if err := c.app.DeliverCodedCTAURL(c.chat, "say_payment_cta", body, payNow, paymentURL); err != nil {
 		fallback := body + "\nPay here: " + paymentURL
 		if _, err := c.app.ExecChatMessage(c.chat, "say_payment_cta", map[string]any{"message": fallback}); err != nil {
 			c.fail(err)
@@ -409,11 +423,12 @@ func (c *Conv) AskFlow(name string, prompt FlowPrompt) bool {
 	if rec, done := c.doneCall(); done {
 		return callOK(rec)
 	}
+	cta := c.limit(prompt.CTA, 20)
 	cfg := map[string]any{
 		"flow_id": prompt.FlowID,
-		"header":  c.text(prompt.Header),
-		"body":    c.text(prompt.Body),
-		"cta":     c.text(prompt.CTA),
+		"header":  c.limit(prompt.Header, 60),
+		"body":    c.bodyWithOptionLegend(c.text(prompt.Body), []string{cta}),
+		"cta":     cta,
 	}
 	putStepNote(cfg, prompt.Step)
 	if !c.chat.Consumed() && len(c.chat.FlowResponseData()) > 0 {
@@ -634,6 +649,7 @@ func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 		c.chat.SetFlowResponseData(nil)
 	}
 	if c.noAnswerYet() {
+		c.applyOptionLegend(cfg)
 		out, err := c.app.ExecChatButtons(c.chat, name, cfg)
 		if err != nil {
 			c.fail(err)
@@ -675,6 +691,7 @@ func (c *Conv) resendShowMore(name string, cfg map[string]any, force bool) bool 
 	c.chat.SetButtonID("")
 	c.chat.SetUserInput("")
 	c.chat.SetConsumed(true)
+	c.applyOptionLegend(cfg)
 	out, err := c.app.ExecChatButtons(c.chat, name, cfg)
 	if err != nil {
 		c.fail(err)
@@ -838,6 +855,70 @@ func locationPinFromSession(data models.JSONB, name string) LocationPin {
 		Name:      asString(raw["name"]),
 		Address:   asString(raw["address"]),
 	}
+}
+
+// applyOptionLegend appends translated option explanations under the body
+// when the customer language is not English and the message has fewer than
+// ExplainInteractiveOptionsBelow options. Button labels stay authored.
+func (c *Conv) applyOptionLegend(cfg map[string]any) {
+	if cfg == nil || c.app == nil || c.session() == nil {
+		return
+	}
+	if englishLanguage(asString(c.session().SessionData[customerLanguageKey])) {
+		return
+	}
+	buttons, err := c.app.ButtonsForNode(cfg, c.session().SessionData)
+	if err != nil || len(buttons) == 0 || len(buttons) >= ExplainInteractiveOptionsBelow {
+		return
+	}
+	titles := optionLegendTitles(buttons)
+	if len(titles) == 0 {
+		return
+	}
+	cfg["body"] = c.bodyWithOptionLegend(asString(cfg["body"]), titles)
+}
+
+func (c *Conv) bodyWithOptionLegend(body string, titles []string) string {
+	if body == "" || len(titles) == 0 {
+		return body
+	}
+	if englishLanguage(asString(c.session().SessionData[customerLanguageKey])) {
+		return body
+	}
+	if len(titles) >= ExplainInteractiveOptionsBelow {
+		return body
+	}
+	seen := make(map[string]struct{}, len(titles))
+	var lines []string
+	for _, title := range titles {
+		title = strings.TrimSpace(title)
+		if title == "" {
+			continue
+		}
+		if _, ok := seen[title]; ok {
+			continue
+		}
+		seen[title] = struct{}{}
+		translated := strings.TrimSpace(c.text(title))
+		if translated == "" || translated == title {
+			continue
+		}
+		lines = append(lines, title+" — "+translated)
+	}
+	if len(lines) == 0 {
+		return body
+	}
+	return truncateRunes(body+"\n\n"+strings.Join(lines, "\n"), InteractiveBodyMaxRunes)
+}
+
+func optionLegendTitles(buttons []map[string]any) []string {
+	out := make([]string, 0, len(buttons))
+	for _, button := range buttons {
+		if title := strings.TrimSpace(fieldString(button, "title")); title != "" {
+			out = append(out, title)
+		}
+	}
+	return out
 }
 
 func (c *Conv) buttonConfig(prompt ButtonPrompt) map[string]any {

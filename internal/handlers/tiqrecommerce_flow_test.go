@@ -2130,6 +2130,62 @@ func TestTiqrEcommerce_PreferredLanguageFromIntent(t *testing.T) {
 	assert.Contains(t, outgoingBlob(t, app, session), "HI:Choose a collection")
 }
 
+func TestTiqrEcommerce_OptionLegendOnMenuButtons(t *testing.T) {
+	useCodedTranslate(t, func(_, text string) (string, error) {
+		return "HI:" + text, nil
+	})
+	srv := newStoreServer(t, twoProducts(nil), nil)
+	useStoreREST(t, srv)
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+	session.SessionData = models.JSONB{codedflow.CustomerLanguageKey: "hi"}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
+	reloadSession(t, app, session)
+
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Buy products — HI:Buy products")
+	assert.Contains(t, blob, "Check order status — HI:Check order status")
+	assert.Contains(t, blob, "Talk to staff — HI:Talk to staff")
+	assert.Contains(t, blob, `"title":"Buy products"`)
+	assert.NotContains(t, blob, `"title":"HI:Buy products"`)
+	assert.Contains(t, blob, "HI:Welcome to Demo")
+}
+
+func TestTiqrEcommerce_NoOptionLegendWhenFourOrMore(t *testing.T) {
+	useCodedTranslate(t, func(_, text string) (string, error) {
+		return "HI:" + text, nil
+	})
+	useCodedIntent(t, nil, nil)
+	store := map[string]any{
+		"id": 42, "name": "Demo",
+		"test_collections": []any{
+			map[string]any{"id": "1", "name": "One", "description": "d1"},
+			map[string]any{"id": "2", "name": "Two", "description": "d2"},
+			map[string]any{"id": "3", "name": "Three", "description": "d3"},
+			map[string]any{"id": "4", "name": "Four", "description": "d4"},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, store, nil)
+	session.SessionData[codedflow.CustomerLanguageKey] = "hi"
+
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "HI:Choose a collection")
+	assert.NotContains(t, blob, "One — HI:One")
+	assert.NotContains(t, blob, "Two — HI:Two")
+	assert.Contains(t, blob, `"title":"One"`)
+}
+
 func TestTiqrEcommerce_EnglishSkipsTranslation(t *testing.T) {
 	useCodedIntent(t, nil, nil)
 	useCodedTranslate(t, nil)

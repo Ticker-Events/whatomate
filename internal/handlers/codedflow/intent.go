@@ -174,6 +174,7 @@ func (c *Conv) askRoute(name string, cfg map[string]any, opts RouteOptions) (Rou
 		c.chat.SetFlowResponseData(nil)
 	}
 	if c.noAnswerYet() {
+		c.applyOptionLegend(cfg)
 		out, err := c.app.ExecChatButtons(c.chat, name, cfg)
 		if err != nil {
 			c.fail(err)

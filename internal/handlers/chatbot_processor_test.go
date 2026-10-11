@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/shridarpatil/whatomate/test/testutil"
@@ -785,6 +787,80 @@ func TestMatchFlowTrigger_Match(t *testing.T) {
 	// No match
 	noMatch := app.matchFlowTrigger(org.ID, "hello there")
 	assert.Nil(t, noMatch)
+}
+
+// =============================================================================
+// inbound audio → notice + handoff
+// =============================================================================
+
+func TestHandleInboundAudioUnsupported_CreatesTransfer(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+
+	settings, err := app.getChatbotSettingsCached(org.ID, account.Name)
+	require.NoError(t, err)
+	app.handleInboundAudioUnsupported(account, contact, settings)
+
+	var msgs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).Find(&msgs).Error)
+	require.NotEmpty(t, msgs)
+	foundNotice := false
+	for _, msg := range msgs {
+		if strings.Contains(msg.Content, "unable to handle voice messages") {
+			foundNotice = true
+			break
+		}
+	}
+	assert.True(t, foundNotice, "customer should receive the voice-unsupported notice")
+
+	var transfers []models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).Find(&transfers).Error)
+	require.Len(t, transfers, 1)
+	assert.Equal(t, models.TransferSourceAudio, transfers[0].Source)
+	assert.Equal(t, models.TransferStatusActive, transfers[0].Status)
+}
+
+func TestProcessIncomingMessageFull_AudioWithActiveTransferSkipsHandoff(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+
+	existing := models.AgentTransfer{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.TransferStatusActive,
+		Source:          models.TransferSourceManual,
+		TransferredAt:   time.Now(),
+	}
+	require.NoError(t, app.DB.Create(&existing).Error)
+
+	app.processIncomingMessageFull(account.PhoneID, IncomingTextMessage{
+		From:      contact.PhoneNumber,
+		ID:        "wamid.audio_active_transfer",
+		Timestamp: "1710000000",
+		Type:      "audio",
+		Audio: &struct {
+			ID       string `json:"id"`
+			MimeType string `json:"mime_type"`
+		}{ID: "audio-media-1", MimeType: "audio/ogg"},
+	}, "Tester")
+
+	var transfers []models.AgentTransfer
+	require.NoError(t, app.DB.Where("contact_id = ?", contact.ID).Find(&transfers).Error)
+	require.Len(t, transfers, 1, "active transfer must not get a second handoff")
+	assert.Equal(t, existing.ID, transfers[0].ID)
+
+	var outs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).Find(&outs).Error)
+	for _, msg := range outs {
+		assert.NotContains(t, msg.Content, codedflow.VoiceUnsupportedMessage)
+	}
 }
 
 // =============================================================================

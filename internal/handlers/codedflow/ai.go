@@ -26,25 +26,39 @@ func (c *Conv) text(src string) string {
 	if err != nil {
 		call.Error = err.Error()
 		c.notePreviewAI(call)
-		c.app.LogCodedFlowAI(c.session(), "translate", prompt, "", err.Error(), "language", lang)
+		if c.app != nil {
+			c.app.LogCodedFlowAI(c.session(), "translate", prompt, "", err.Error(), "language", lang)
+		}
 		translated = src
 	} else if strings.TrimSpace(translated) == "" {
 		call.Error = "empty translation"
 		c.notePreviewAI(call)
-		c.app.LogCodedFlowAI(c.session(), "translate", prompt, "", "empty translation", "language", lang)
+		if c.app != nil {
+			c.app.LogCodedFlowAI(c.session(), "translate", prompt, "", "empty translation", "language", lang)
+		}
 		translated = src
 	} else {
 		call.Response = translated
 		c.notePreviewAI(call)
-		c.app.LogCodedFlowAI(c.session(), "translate", prompt, translated, "", "language", lang)
+		if c.app != nil {
+			c.app.LogCodedFlowAI(c.session(), "translate", prompt, translated, "", "language", lang)
+		}
 	}
 	cache[src] = translated
 	c.session().SessionData[codedTranslationsKey] = cache
 	return translated
 }
 
+// limit truncates authored interactive chrome (button titles, list opener,
+// section titles, headers, footers, CTAs). It does not translate: WhatsApp
+// option labels have short hard caps, and many translations exceed them.
 func (c *Conv) limit(src string, max int) string {
-	return truncateRunes(c.text(src), max)
+	return truncateRunes(src, max)
+}
+
+// EnglishLanguage reports whether lang is unset or English (en / en-*).
+func EnglishLanguage(lang string) bool {
+	return englishLanguage(lang)
 }
 
 func (c *Conv) translationCache() map[string]string {
