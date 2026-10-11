@@ -124,6 +124,8 @@ Catalog text is not translated. Collection names, product names, option names, a
 
 **Preview** on the coded-flow card runs the same function without sending WhatsApp messages and without creating an agent transfer. The preview session lives in memory for 30 minutes.
 
+The phone composer can attach an image or file the same way chat does (paperclip, type checks, 16MB limit). The preview turn sends media metadata only — no file bytes are stored and no WhatsApp message is created — and stashes it so image and file capture fields accept the attachment. Capture notes still record a `/api/media/{id}` stand-in link.
+
 Each outbound preview bubble includes a snapshot of session context variables at send time. Intent, guide, and translate calls for that turn are returned as `ai_calls` and attached to the related message (or shown as a debug bubble when no message followed). The sidebar shows the latest full context as a collapsed JSON tree (expand nodes as needed) and the AI calls from the last turn, with copy buttons for both.
 
 ### Production tracing (SignOz)

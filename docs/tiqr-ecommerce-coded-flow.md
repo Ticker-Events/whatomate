@@ -137,7 +137,7 @@ Code: `runEarlyHandoff` in `internal/handlers/tiqrecommerce/early_handoff.go`.
 
 Fulfillment time (`list_fulfillment_slots` / `propose_fulfillment_time`) is skipped for now. Pickup vs delivery and the location pin already ran earlier in the buy flow.
 
-Image and file capture fields are asked as text; the coded runner does not attach WhatsApp media the way the commerce chatbot does.
+Image and file capture fields accept a WhatsApp photo or document (same stash as live chat). In coded-flow preview, the paperclip sends media metadata only — no file bytes are stored — and the capture notes use a stand-in `/api/media/{id}` link.
 
 `productsForRoute`:
 
@@ -406,4 +406,4 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 
 12. **Order status is thinner than commerce checkout.** No payment link, no retry payment, no order id prompt. A failed lookup and a customer with no orders share one sentence.
 
-13. **Collection AI instructions are not read aloud.** Required capture fields are asked as their own questions before the cart line. The store-authored `ai_instructions` text is still not added to the prompt. File fields accept a text reply, because this flow does not collect a WhatsApp attachment.
+13. **Collection AI instructions are not read aloud.** Required capture fields are asked as their own questions before the cart line. The store-authored `ai_instructions` text is still not added to the prompt. Image and file fields require a photo or document attachment (live WhatsApp or preview paperclip); a plain text reply asks again.

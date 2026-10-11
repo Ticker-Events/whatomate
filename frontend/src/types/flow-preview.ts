@@ -77,6 +77,12 @@ export interface FlowData {
 export type SimulationStatus = 'idle' | 'running' | 'paused' | 'waiting_input' | 'completed' | 'error'
 export type MessageType = 'bot' | 'user' | 'system' | 'debug'
 
+export type SimulationMedia = {
+  type: 'image' | 'video' | 'audio' | 'document'
+  url?: string | null
+  filename?: string
+}
+
 export interface SimulationMessage {
   id: string
   type: MessageType
@@ -95,6 +101,7 @@ export interface SimulationMessage {
   inputConfig?: Record<string, any>
   isValidationError?: boolean
   isApiMessage?: boolean
+  media?: SimulationMedia
   context?: Record<string, unknown>
   ai?: Array<{
     role: string

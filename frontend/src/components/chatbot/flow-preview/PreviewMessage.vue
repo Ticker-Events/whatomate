@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { SimulationMessage } from '@/types/flow-preview'
-import { Bug, Braces, ChevronDown, ChevronRight, ExternalLink, Info, Sparkles } from 'lucide-vue-next'
+import { Bug, Braces, ChevronDown, ChevronRight, ExternalLink, FileText, Info, Sparkles } from 'lucide-vue-next'
 import JsonTree from './JsonTree.vue'
 
 const props = defineProps<{
@@ -150,7 +150,31 @@ function formatValue(value: unknown) {
   <div v-else-if="isUser" class="flex justify-end">
     <div class="max-w-[85%]">
       <div class="bg-[#d9fdd3] dark:bg-[#005c4b] rounded-lg rounded-tr-none p-3 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] dark:shadow-[0_1px_0.5px_rgba(0,0,0,0.5)] ring-1 ring-black/5 dark:ring-white/5">
-        <p class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap">{{ message.content }}</p>
+        <img
+          v-if="message.media?.type === 'image' && message.media.url"
+          :src="message.media.url"
+          :alt="message.media.filename || ''"
+          class="mb-2 max-h-40 w-full rounded-md object-cover"
+        />
+        <video
+          v-else-if="message.media?.type === 'video' && message.media.url"
+          :src="message.media.url"
+          controls
+          class="mb-2 max-h-40 w-full rounded-md"
+        />
+        <div
+          v-else-if="message.media && (message.media.type === 'audio' || message.media.type === 'document' || !message.media.url)"
+          class="mb-2 flex items-center gap-2 rounded-md bg-black/5 dark:bg-white/10 px-2.5 py-2"
+        >
+          <FileText class="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-200" />
+          <p class="text-sm text-gray-800 dark:text-gray-100 truncate">
+            {{ message.media.filename || message.media.type }}
+          </p>
+        </div>
+        <p
+          v-if="message.content"
+          class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap"
+        >{{ message.content }}</p>
         <p class="text-[10px] text-gray-500 dark:text-gray-300 text-right mt-1 flex items-center justify-end gap-1">
           {{ formattedTime }}
           <svg class="h-4 w-4 text-[#53bdeb]" viewBox="0 0 24 24" fill="currentColor">

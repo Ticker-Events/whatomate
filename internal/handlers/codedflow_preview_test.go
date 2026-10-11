@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -317,6 +318,84 @@ func TestPreviewCodedFlow_MockAsksBeforeTiqrCalls(t *testing.T) {
 	assert.Equal(t, "needs_mock", second.Status)
 	assert.Equal(t, "list_collections", second.MockOperation)
 	assert.Zero(t, hits)
+}
+
+func TestPreviewCodedFlow_ImageCaptureAcceptsMedia(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	useCodedTranslate(t, nil)
+	app, org, account, _, _ := newGraphTestFixtures(t)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: "http://preview.invalid",
+		CommerceStoreID: "42",
+	})
+	userID := uuid.New()
+	var sessionID uuid.UUID
+	turn := func(in codedPreviewInput) codedflow.CodedPreviewResponse {
+		t.Helper()
+		if sessionID != uuid.Nil {
+			in.SessionID = sessionID
+		}
+		resp, err := app.previewCodedTurn(org.ID, userID, account.Name, tiqrecommerce.FlowKey, in)
+		require.NoError(t, err)
+		id, err := uuid.Parse(resp.SessionID)
+		require.NoError(t, err)
+		sessionID = id
+		return resp
+	}
+	supply := func(operation string, payload map[string]any) codedflow.CodedPreviewResponse {
+		t.Helper()
+		resp := turn(codedPreviewInput{Mocks: map[string]any{operation: payload}})
+		require.NotEqual(t, operation, resp.MockOperation, previewMessageText(resp.Messages))
+		return resp
+	}
+
+	sweets := map[string]any{
+		"id": "57", "name": "Sweets", "description": "Desserts",
+		"required_capture_fields": []any{
+			map[string]any{
+				"key": "reference_image", "label": "Reference photo", "type": "image", "required": true,
+			},
+		},
+	}
+
+	asked := turn(codedPreviewInput{})
+	require.Equal(t, "get_store", asked.MockOperation)
+	supply("get_store", map[string]any{"id": 42, "name": "Demo"})
+	menu := supply("list_collections", map[string]any{"results": []any{sweets}})
+	require.Equal(t, "waiting_input", menu.Status)
+
+	turn(codedPreviewInput{Text: "Buy products", ButtonID: tiqrecommerce.BuyProducts})
+	asked = turn(codedPreviewInput{Text: "Sweets", ButtonID: "57"})
+	require.Equal(t, "list_products", asked.MockOperation)
+	supply("list_products", map[string]any{
+		"results": twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}}),
+	})
+	turn(codedPreviewInput{Text: "Kunafa", ButtonID: "101"})
+	captureAsk := turn(codedPreviewInput{Text: "1"})
+	require.Equal(t, "waiting_input", captureAsk.Status)
+	require.Equal(t, "capture_0_reference_image", captureAsk.Step)
+	assert.Contains(t, previewMessageText(captureAsk.Messages), "Please send a photo.")
+
+	retry := turn(codedPreviewInput{Text: "just text"})
+	require.Equal(t, "waiting_input", retry.Status)
+	assert.Equal(t, "capture_0_reference_image", retry.Step)
+	assert.Contains(t, previewMessageText(retry.Messages), "Please send the photo again.")
+
+	accepted := turn(codedPreviewInput{
+		Media: codedPreviewMedia{
+			Type:     "image",
+			MIMEType: "image/jpeg",
+			Filename: "ref.jpg",
+		},
+	})
+	require.Equal(t, "waiting_input", accepted.Status)
+	assert.NotEqual(t, "capture_0_reference_image", accepted.Step)
+	captured, ok := accepted.Context["commerce_captured_fields"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, fmt.Sprint(captured["reference_image"]), "/api/media/")
+	notes, ok := accepted.Context["commerce_notes"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, fmt.Sprint(notes["media_shared"]), "/api/media/")
 }
 
 func TestPreviewCodedFlow_MockCreateOrderIsNotSent(t *testing.T) {

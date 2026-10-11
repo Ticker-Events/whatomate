@@ -7,7 +7,7 @@ import PreviewMessage from './PreviewMessage.vue'
 import PreviewButtonGroup from './PreviewButtonGroup.vue'
 import PreviewListPicker from './PreviewListPicker.vue'
 import PreviewCarousel from './PreviewCarousel.vue'
-import PreviewInputBar from './PreviewInputBar.vue'
+import PreviewInputBar, { type PreviewMediaPayload } from './PreviewInputBar.vue'
 
 const props = defineProps<{
   name: string
@@ -18,11 +18,13 @@ const props = defineProps<{
   inputType: string | null
   flowCta?: string
   busy?: boolean
+  allowMedia?: boolean
 }>()
 
 const emit = defineEmits<{
   select: [button: ButtonConfig]
   submit: [value: string]
+  submitMedia: [caption: string, media: PreviewMediaPayload]
   completeFlow: []
 }>()
 
@@ -168,7 +170,9 @@ const inputDisabled = computed(() => props.busy || !props.waiting || props.input
           <PreviewInputBar
             :input-type="inputType"
             :disabled="inputDisabled"
+            :allow-media="allowMedia"
             @submit="emit('submit', $event)"
+            @submit-media="(caption, media) => emit('submitMedia', caption, media)"
           />
         </div>
       </div>

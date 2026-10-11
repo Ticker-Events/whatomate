@@ -465,6 +465,12 @@ export type CodedPreviewResponse = {
   api_calls?: CodedPreviewAPICall[]
 }
 
+export type CodedPreviewMedia = {
+  type: 'image' | 'video' | 'audio' | 'document'
+  mime_type?: string
+  filename?: string
+}
+
 export type CodedPreviewRequest = {
   account: string
   session_id?: string
@@ -472,6 +478,7 @@ export type CodedPreviewRequest = {
   text?: string
   button_id?: string
   flow_response?: Record<string, string>
+  media?: CodedPreviewMedia
   mock?: boolean
   mocks?: Record<string, Record<string, unknown>>
 }

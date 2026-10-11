@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -49,14 +50,42 @@ var codedPreviewStore = struct {
 	items map[uuid.UUID]*codedPreviewHold
 }{items: map[uuid.UUID]*codedPreviewHold{}}
 
+type codedPreviewMedia struct {
+	Type     string
+	MIMEType string
+	Filename string
+}
+
 type codedPreviewInput struct {
 	SessionID    uuid.UUID
 	Phone        string
 	Text         string
 	ButtonID     string
 	FlowResponse map[string]any
+	Media        codedPreviewMedia
 	Mock         *bool
 	Mocks        map[string]any
+}
+
+func (m codedPreviewMedia) present() bool {
+	return strings.TrimSpace(m.Type) != ""
+}
+
+// previewMediaUserText is the caption, or the same fallback live chat uses for media-only turns.
+func previewMediaUserText(caption string, media codedPreviewMedia) string {
+	if text := strings.TrimSpace(caption); text != "" {
+		return text
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(media.Type))
+	switch mediaType {
+	case "video", "audio":
+		mediaType = "document"
+	}
+	text := commerceMediaFallbackText(mediaType, media.Filename)
+	if text == "" {
+		return "[Image attached]"
+	}
+	return text
 }
 
 func (in codedPreviewInput) mockOn() bool {
@@ -89,10 +118,23 @@ func (a *App) previewCodedTurn(orgID, userID uuid.UUID, accountName, flowKey str
 		hold.session.PhoneNumber = phone
 	}
 
+	userText := strings.TrimSpace(in.Text)
+	if in.Media.present() {
+		messageID := uuid.New()
+		tiqrecommerce.StashInboundCaptureMedia(
+			hold.session,
+			messageID.String(),
+			"preview/"+messageID.String(),
+			strings.TrimSpace(in.Media.MIMEType),
+			strings.TrimSpace(in.Media.Filename),
+		)
+		userText = previewMediaUserText(userText, in.Media)
+	}
+
 	sink := &codedflow.PreviewSink{Mock: hold.Mock, Mocks: in.Mocks, Session: hold.session}
 	runErr := a.runCodedFlowPreview(
 		hold.account, hold.contact, hold.session, flow,
-		in.Text, in.ButtonID, in.FlowResponse, sink,
+		userText, in.ButtonID, in.FlowResponse, sink,
 	)
 	if runErr != nil && !errors.Is(runErr, codedflow.ErrPreviewNeedsMock) {
 		a.Log.Error("Coded flow preview failed", "error", runErr, "flow", flow.Key)
@@ -421,8 +463,13 @@ func (a *App) PreviewCodedFlow(r *fastglue.Request) error {
 		Text         string         `json:"text"`
 		ButtonID     string         `json:"button_id"`
 		FlowResponse map[string]any `json:"flow_response"`
-		Mock         *bool          `json:"mock"`
-		Mocks        map[string]any `json:"mocks"`
+		Media        *struct {
+			Type     string `json:"type"`
+			MIMEType string `json:"mime_type"`
+			Filename string `json:"filename"`
+		} `json:"media"`
+		Mock  *bool          `json:"mock"`
+		Mocks map[string]any `json:"mocks"`
 	}
 	if len(r.RequestCtx.PostBody()) > 0 {
 		if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
@@ -444,6 +491,13 @@ func (a *App) PreviewCodedFlow(r *fastglue.Request) error {
 		FlowResponse: req.FlowResponse,
 		Mock:         req.Mock,
 		Mocks:        req.Mocks,
+	}
+	if req.Media != nil {
+		in.Media = codedPreviewMedia{
+			Type:     req.Media.Type,
+			MIMEType: req.Media.MIMEType,
+			Filename: req.Media.Filename,
+		}
 	}
 	if strings.TrimSpace(req.SessionID) != "" {
 		id, err := uuid.Parse(strings.TrimSpace(req.SessionID))

@@ -26,6 +26,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import PreviewPhone from './PreviewPhone.vue'
+import type { PreviewMediaPayload } from './PreviewInputBar.vue'
 import JsonTree from './JsonTree.vue'
 
 const props = defineProps<{
@@ -194,14 +195,25 @@ function unwrap(payload: { data?: CodedPreviewResponse } & Partial<CodedPreviewR
   return payload as CodedPreviewResponse
 }
 
-async function turn(extra: Partial<CodedPreviewRequest>, userText?: string) {
+async function turn(
+  extra: Partial<CodedPreviewRequest>,
+  userText?: string,
+  media?: PreviewMediaPayload,
+) {
   if (!props.account || busy.value) return
-  if (userText) {
+  if (userText || media) {
     messages.value.push({
       id: newId(),
       type: 'user',
-      content: userText,
+      content: userText || '',
       timestamp: new Date(),
+      media: media
+        ? {
+            type: media.type,
+            url: media.previewUrl,
+            filename: media.filename,
+          }
+        : undefined,
     })
   }
   busy.value = true
@@ -253,7 +265,15 @@ function start() {
   turn({})
 }
 
+function revokeMessageMedia() {
+  for (const message of messages.value) {
+    const url = message.media?.url
+    if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
+  }
+}
+
 function reset() {
+  revokeMessageMedia()
   sessionId.value = ''
   step.value = ''
   input.value = ''
@@ -297,6 +317,22 @@ function submitText(value: string) {
   turn({ text }, text)
 }
 
+function submitMedia(caption: string, media: PreviewMediaPayload) {
+  if (!waiting.value || (input.value !== 'text' && input.value !== 'button')) return
+  turn(
+    {
+      text: caption.trim(),
+      media: {
+        type: media.type,
+        mime_type: media.mimeType,
+        filename: media.filename,
+      },
+    },
+    caption.trim(),
+    media,
+  )
+}
+
 function submitFlow() {
   if (!waiting.value || input.value !== 'whatsapp_flow') return
   const flowResponse: Record<string, string> = {}
@@ -334,8 +370,10 @@ function submitLocation() {
       :busy="busy"
       :input-type="input || null"
       :flow-cta="flowCta"
+      allow-media
       @select="selectButton"
       @submit="submitText"
+      @submit-media="submitMedia"
       @complete-flow="submitFlow"
     />
 
