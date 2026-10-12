@@ -571,14 +571,14 @@ watch(showPreview, (open) => {
     </ScrollArea>
 
     <Dialog v-model:open="showPreview">
-      <DialogContent class="left-0 top-0 flex h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 p-0 shadow-none ring-0 light:ring-0 sm:rounded-none">
+      <DialogContent class="left-0 top-0 flex h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 shadow-none ring-0 light:ring-0 sm:rounded-none">
         <div class="flex shrink-0 items-center border-b px-4 py-3 pr-12">
           <DialogTitle class="truncate">{{ previewFlow?.name || $t('codedFlows.preview') }}</DialogTitle>
         </div>
         <CodedFlowPreview
           v-if="previewFlow && account"
           :key="`${account}:${previewFlow.key}`"
-          class="min-h-0 flex-1"
+          class="min-h-0 flex-1 overflow-hidden"
           :flow="previewFlow"
           :account="account"
         />

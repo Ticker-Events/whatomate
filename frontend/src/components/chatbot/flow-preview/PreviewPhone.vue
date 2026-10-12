@@ -106,12 +106,14 @@ const inputDisabled = computed(() => props.busy || !props.waiting || props.input
             </div>
           </div>
 
-          <ScrollArea ref="chatScrollRef" class="flex-1 p-4 whatsapp-bg">
+          <ScrollArea ref="chatScrollRef" class="min-h-0 flex-1 p-4 whatsapp-bg">
             <div class="space-y-3">
-              <div v-if="status === 'idle' && messages.length === 0" class="text-center py-12">
+              <div v-if="messages.length === 0" class="text-center py-12">
                 <MessageSquare class="h-12 w-12 mx-auto text-gray-300 dark:text-gray-600 mb-4" />
                 <p class="text-sm text-gray-500 dark:text-gray-400">
-                  Start the preview to simulate the flow
+                  <template v-if="status === 'idle'">Start the preview to simulate the flow</template>
+                  <template v-else-if="status === 'running'">Waiting for a response in the sidebar</template>
+                  <template v-else>No messages in this preview</template>
                 </p>
               </div>
 

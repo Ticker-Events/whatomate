@@ -153,7 +153,7 @@ async function copyCurl(curl: string) {
 }
 
 const statusLabel = computed(() => {
-  const match = props.flow.steps.find((item) => outlineActive(item.name))
+  const match = (props.flow.steps || []).find((item) => outlineActive(item.name))
   return match?.label || step.value
 })
 
@@ -465,7 +465,7 @@ function submitLocation() {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-1 flex-row overflow-hidden">
+  <div class="flex h-full min-h-0 w-full flex-1 flex-row overflow-hidden">
     <PreviewPhone
       :name="flow.name"
       :status="status"
@@ -491,6 +491,14 @@ function submitLocation() {
         <Button size="sm" variant="outline" :disabled="busy || (status === 'idle' && !importMode)" @click="reset">
           <RotateCcw class="h-4 w-4 mr-1" />
           {{ $t('codedFlows.previewReset') }}
+        </Button>
+      </div>
+
+      <div v-if="needsMock" class="shrink-0 space-y-2 border-b px-4 py-3">
+        <Label class="text-xs">{{ $t('codedFlows.previewMockFor', { operation: mockOperation }) }}</Label>
+        <Textarea v-model="mockBody" class="min-h-28 font-mono text-xs" :disabled="busy" />
+        <Button size="sm" class="w-full" :disabled="busy" @click="submitMock">
+          {{ $t('codedFlows.previewMockSubmit') }}
         </Button>
       </div>
 
@@ -536,14 +544,6 @@ function submitLocation() {
             />
           </div>
 
-          <div v-if="needsMock" class="space-y-2">
-            <Label class="text-xs">{{ $t('codedFlows.previewMockFor', { operation: mockOperation }) }}</Label>
-            <Textarea v-model="mockBody" class="min-h-28 font-mono text-xs" :disabled="busy" />
-            <Button size="sm" class="w-full" :disabled="busy" @click="submitMock">
-              {{ $t('codedFlows.previewMockSubmit') }}
-            </Button>
-          </div>
-
           <div class="space-y-1.5">
             <Label class="text-xs">{{ $t('codedFlows.previewPhone') }}</Label>
             <Input v-model="phone" :disabled="busy" placeholder="910000000000" />
@@ -554,7 +554,7 @@ function submitLocation() {
             <p class="text-xs font-medium text-muted-foreground mb-2">{{ $t('codedFlows.steps') }}</p>
             <ol class="space-y-1">
               <li
-                v-for="item in flow.steps"
+                v-for="item in flow.steps || []"
                 :key="item.name"
                 class="text-sm rounded-md px-2 py-1"
                 :class="outlineActive(item.name) ? 'bg-primary/10 text-foreground font-medium' : 'text-muted-foreground'"
