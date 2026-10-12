@@ -234,7 +234,14 @@ When the form is sent, `flow_action_payload.data` may include init values. Keys 
 
 Missing API key or a failed lookup still opens the form; phone may be prefilled and address fields stay empty for the customer to type.
 
-Published Meta flows are immutable. To enable prefill (and optional email): clone the pickup/delivery flow, add screen `data` string fields with `__example__` values, set matching `init-value` bindings, set `customer_email` `required: false`, publish, point the coded-flow binding at the new Meta flow ids, and save the JSON on the `WhatsAppFlow` row.
+Configure prefill in **Flows → Flow Builder** (no raw JSON required):
+
+1. Select the entry screen → **Screen data (prefill)** → add keys (`customer_phone`, and for delivery also `pincode` / `city` / `state` / `country`) with example values.
+2. Select each TextInput → set **Init value** to `${data.<key>}` (or use **Bind to data**). Set `customer_email` **Required** off and **Input type** to Email for pickup.
+3. Select the Footer → edit **Payload** (helpers: Screen fields / Data keys / Prev screens). For multi-screen delivery, navigate must forward form fields and data keys; Save to Meta merges auto-generated payloads with your custom rows (custom wins).
+4. Save the flow, **Save to Meta**, publish, then point Coded flows → TiQR Ecommerce at the new Meta flow ids.
+
+Published Meta flows are immutable after publish; clone or create a new draft to change prefill again.
 
 Early handoff uses the same `AskFlow` prefill path.
 

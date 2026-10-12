@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -758,17 +759,19 @@ func sanitizeScreensForMeta(screens []any) []any {
 			newScreen["id"] = sanitizeID(id)
 		}
 
-		// Add data model for fields from previous screens (required for multi-screen flows)
+		// Add data model for fields from previous screens (required for multi-screen flows).
+		// Preserve existing keys and __example__ values set in the Flow Builder.
 		if i > 0 && len(fieldsFromPreviousScreens) > 0 {
 			dataModel := make(map[string]any)
-			// Copy existing data model if present
 			if existingData, ok := newScreen["data"].(map[string]any); ok {
 				for k, v := range existingData {
 					dataModel[k] = v
 				}
 			}
-			// Add entries for fields from previous screens
 			for _, fieldName := range fieldsFromPreviousScreens {
+				if _, exists := dataModel[fieldName]; exists {
+					continue
+				}
 				dataModel[fieldName] = map[string]any{
 					"type":        "string",
 					"__example__": "",
@@ -776,6 +779,8 @@ func sanitizeScreensForMeta(screens []any) []any {
 			}
 			newScreen["data"] = dataModel
 		}
+
+		screenDataKeys := screenDataModelKeys(newScreen["data"])
 
 		// Sanitize layout children and check for terminal action
 		isTerminal := false
@@ -787,7 +792,7 @@ func sanitizeScreensForMeta(screens []any) []any {
 
 			if children, ok := layout["children"].([]any); ok {
 				// Sanitize and auto-populate action payloads
-				sanitizedChildren := sanitizeComponentsWithPayload(children, allFieldNames, fieldsFromPreviousScreens)
+				sanitizedChildren := sanitizeComponentsWithPayload(children, allFieldNames, fieldsFromPreviousScreens, screenDataKeys)
 				newLayout["children"] = sanitizedChildren
 
 				// Check if any child has on-click-action with name "complete"
@@ -942,10 +947,46 @@ func sanitizeID(id string) string {
 	return string(result)
 }
 
+// screenDataModelKeys returns the keys declared on a screen's data schema.
+func screenDataModelKeys(raw any) []string {
+	data, ok := raw.(map[string]any)
+	if !ok || len(data) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		if strings.TrimSpace(k) != "" {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+// mergeActionPayload overlays existing payload entries on top of auto-generated
+// ones so Flow Builder custom bindings (renames, data-only keys) survive Save to Meta.
+func mergeActionPayload(auto map[string]any, existing any) map[string]any {
+	out := make(map[string]any, len(auto))
+	for k, v := range auto {
+		out[k] = v
+	}
+	existingMap, ok := existing.(map[string]any)
+	if !ok {
+		return out
+	}
+	for k, v := range existingMap {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // sanitizeComponentsWithPayload sanitizes components and auto-populates action payloads
 // - For navigate actions: passes current screen's form fields using ${form.fieldName}
+//   plus screen data keys as ${data.key}, then merges any existing payload (existing wins)
 // - For complete actions: uses ${data.fieldName} for previous screens, ${form.fieldName} for current
-func sanitizeComponentsWithPayload(children []any, allFieldNames []string, fieldsFromPreviousScreens []string) []any {
+func sanitizeComponentsWithPayload(children []any, allFieldNames []string, fieldsFromPreviousScreens []string, screenDataKeys []string) []any {
 	result := make([]any, len(children))
 
 	// Collect this screen's field names
@@ -1027,28 +1068,29 @@ func sanitizeComponentsWithPayload(children []any, allFieldNames []string, field
 				payload := make(map[string]any)
 				for _, fieldName := range allFieldNames {
 					if thisScreenFieldSet[fieldName] {
-						// Current screen's field - use form reference
 						payload[fieldName] = "${form." + fieldName + "}"
 					} else {
-						// Previous screen's field - use data reference
 						payload[fieldName] = "${data." + fieldName + "}"
 					}
 				}
-				newAction["payload"] = payload
+				newAction["payload"] = mergeActionPayload(payload, action["payload"])
 			case "navigate":
-				// Navigate action: pass current screen's form fields to next screen
-				// Use ${form.fieldName} for current screen's fields
-				if len(thisScreenFields) > 0 {
-					payload := make(map[string]any)
-					// Pass previous screen data through
-					for _, fieldName := range fieldsFromPreviousScreens {
-						payload[fieldName] = "${data." + fieldName + "}"
+				// Navigate: form fields + previous form fields + this screen's data keys.
+				payload := make(map[string]any)
+				for _, fieldName := range fieldsFromPreviousScreens {
+					payload[fieldName] = "${data." + fieldName + "}"
+				}
+				for _, fieldName := range thisScreenFields {
+					payload[fieldName] = "${form." + fieldName + "}"
+				}
+				for _, key := range screenDataKeys {
+					if _, exists := payload[key]; exists {
+						continue
 					}
-					// Add current screen's form fields
-					for _, fieldName := range thisScreenFields {
-						payload[fieldName] = "${form." + fieldName + "}"
-					}
-					newAction["payload"] = payload
+					payload[key] = "${data." + key + "}"
+				}
+				if len(payload) > 0 || action["payload"] != nil {
+					newAction["payload"] = mergeActionPayload(payload, action["payload"])
 				}
 			}
 

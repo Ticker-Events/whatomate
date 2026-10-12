@@ -344,6 +344,223 @@ function updateOption(index: number, key: string, value: string) {
   selectedComponent.value['data-source'][index][key] = value
 }
 
+type ScreenDataRow = { key: string; example: string }
+
+const screenDataRows = computed((): ScreenDataRow[] => {
+  const data = selectedScreen.value?.data
+  if (!data || typeof data !== 'object') return []
+  return Object.entries(data).map(([key, raw]) => {
+    const example =
+      raw && typeof raw === 'object' && '__example__' in (raw as object)
+        ? String((raw as { __example__?: unknown }).__example__ ?? '')
+        : ''
+    return { key, example }
+  })
+})
+
+function ensureScreenData() {
+  if (!selectedScreen.value) return
+  if (!selectedScreen.value.data || typeof selectedScreen.value.data !== 'object') {
+    selectedScreen.value.data = {}
+  }
+}
+
+function addScreenDataKey() {
+  if (!selectedScreen.value) return
+  ensureScreenData()
+  let n = 1
+  let key = `field_${n}`
+  while (key in selectedScreen.value.data) {
+    n += 1
+    key = `field_${n}`
+  }
+  selectedScreen.value.data[key] = { type: 'string', __example__: '' }
+}
+
+function removeScreenDataKey(key: string) {
+  if (!selectedScreen.value?.data) return
+  delete selectedScreen.value.data[key]
+}
+
+function renameScreenDataKey(oldKey: string, newKey: string) {
+  if (!selectedScreen.value?.data || oldKey === newKey) return
+  const trimmed = newKey.trim()
+  if (!trimmed || trimmed in selectedScreen.value.data) return
+  const prev = selectedScreen.value.data[oldKey]
+  delete selectedScreen.value.data[oldKey]
+  selectedScreen.value.data[trimmed] = prev
+}
+
+function updateScreenDataExample(key: string, example: string) {
+  if (!selectedScreen.value?.data) return
+  const prev = selectedScreen.value.data[key]
+  if (prev && typeof prev === 'object') {
+    selectedScreen.value.data[key] = { ...prev, type: 'string', __example__: example }
+  } else {
+    selectedScreen.value.data[key] = { type: 'string', __example__: example }
+  }
+}
+
+function namedFieldsOnScreen(screen: FlowScreen): string[] {
+  const names: string[] = []
+  for (const comp of screen.layout.children) {
+    if (comp.name && ['TextInput', 'TextArea', 'Dropdown', 'RadioButtonsGroup', 'CheckboxGroup', 'DatePicker'].includes(comp.type)) {
+      names.push(comp.name)
+    }
+  }
+  return names
+}
+
+function addDataKeysFromFieldNames() {
+  if (!selectedScreen.value) return
+  ensureScreenData()
+  for (const name of namedFieldsOnScreen(selectedScreen.value)) {
+    if (!(name in selectedScreen.value.data)) {
+      selectedScreen.value.data[name] = { type: 'string', __example__: '' }
+    }
+  }
+}
+
+function bindInitValueToData() {
+  if (!selectedComponent.value?.name || !selectedScreen.value) return
+  ensureScreenData()
+  const name = selectedComponent.value.name
+  if (!(name in selectedScreen.value.data)) {
+    selectedScreen.value.data[name] = { type: 'string', __example__: '' }
+  }
+  updateComponentProperty('init-value', `\${data.${name}}`)
+}
+
+function setInitValue(value: string) {
+  if (!value) {
+    if (selectedComponentIndex.value === null || !selectedScreen.value) return
+    delete selectedScreen.value.layout.children[selectedComponentIndex.value]['init-value']
+    return
+  }
+  updateComponentProperty('init-value', value)
+}
+
+function footerActionPayload(): Record<string, string> {
+  const action = selectedComponent.value?.['on-click-action']
+  const raw = action?.payload
+  if (!raw || typeof raw !== 'object') return {}
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    out[k] = v == null ? '' : String(v)
+  }
+  return out
+}
+
+const footerPayloadRows = computed(() => {
+  if (selectedComponent.value?.type !== 'Footer') return []
+  return Object.entries(footerActionPayload()).map(([key, value]) => ({ key, value }))
+})
+
+function setFooterAction(patch: Record<string, any>) {
+  if (!selectedComponent.value) return
+  const current = selectedComponent.value['on-click-action'] || { name: 'complete', payload: {} }
+  updateComponentProperty('on-click-action', {
+    ...current,
+    ...patch,
+    payload: patch.payload !== undefined ? patch.payload : (current.payload || {})
+  })
+}
+
+function setFooterActionName(name: string) {
+  const current = selectedComponent.value?.['on-click-action'] || {}
+  const next: Record<string, any> = {
+    name,
+    payload: current.payload && typeof current.payload === 'object' ? { ...current.payload } : {}
+  }
+  if (name === 'navigate') {
+    next.next = current.next || { type: 'screen', name: '' }
+  }
+  updateComponentProperty('on-click-action', next)
+}
+
+function setFooterNavigateTarget(screenId: string) {
+  const current = selectedComponent.value?.['on-click-action'] || {}
+  setFooterAction({
+    name: 'navigate',
+    next: { type: 'screen', name: screenId },
+    payload: current.payload && typeof current.payload === 'object' ? { ...current.payload } : {}
+  })
+}
+
+function writeFooterPayload(payload: Record<string, string>) {
+  const current = selectedComponent.value?.['on-click-action'] || { name: 'complete' }
+  setFooterAction({ ...current, payload })
+}
+
+function addFooterPayloadRow() {
+  const payload = { ...footerActionPayload() }
+  let n = 1
+  let key = `field_${n}`
+  while (key in payload) {
+    n += 1
+    key = `field_${n}`
+  }
+  payload[key] = ''
+  writeFooterPayload(payload)
+}
+
+function removeFooterPayloadRow(key: string) {
+  const payload = { ...footerActionPayload() }
+  delete payload[key]
+  writeFooterPayload(payload)
+}
+
+function renameFooterPayloadKey(oldKey: string, newKey: string) {
+  if (oldKey === newKey) return
+  const trimmed = newKey.trim()
+  if (!trimmed) return
+  const payload = { ...footerActionPayload() }
+  if (trimmed in payload) return
+  payload[trimmed] = payload[oldKey] ?? ''
+  delete payload[oldKey]
+  writeFooterPayload(payload)
+}
+
+function updateFooterPayloadValue(key: string, value: string) {
+  const payload = { ...footerActionPayload() }
+  payload[key] = value
+  writeFooterPayload(payload)
+}
+
+function fillPayloadFromScreenFields() {
+  if (!selectedScreen.value) return
+  const payload = { ...footerActionPayload() }
+  for (const name of namedFieldsOnScreen(selectedScreen.value)) {
+    payload[name] = `\${form.${name}}`
+  }
+  writeFooterPayload(payload)
+}
+
+function addPayloadFromScreenData() {
+  if (!selectedScreen.value?.data) return
+  const payload = { ...footerActionPayload() }
+  for (const key of Object.keys(selectedScreen.value.data)) {
+    if (!(key in payload)) {
+      payload[key] = `\${data.${key}}`
+    }
+  }
+  writeFooterPayload(payload)
+}
+
+function addPayloadFromPreviousScreens() {
+  if (!selectedScreen.value) return
+  const payload = { ...footerActionPayload() }
+  const idx = selectedScreenIndex.value
+  for (let i = 0; i < idx; i++) {
+    for (const name of namedFieldsOnScreen(screens.value[i])) {
+      if (!(name in payload)) {
+        payload[name] = `\${data.${name}}`
+      }
+    }
+  }
+  writeFooterPayload(payload)
+}
+
 function getComponentLabel(comp: FlowComponent): string {
   const typeInfo = componentTypes.find(t => t.type === comp.type)
   return typeInfo?.label || comp.type
@@ -648,7 +865,7 @@ defineExpose({
     </Card>
 
     <!-- Properties Panel -->
-    <Card class="w-72 flex-shrink-0 flex flex-col overflow-hidden">
+    <Card class="w-80 flex-shrink-0 flex flex-col overflow-hidden">
       <CardHeader class="py-3 px-4 flex-shrink-0">
         <CardTitle class="text-sm font-medium flex items-center gap-2">
           <Settings2 class="h-4 w-4" />
@@ -657,167 +874,306 @@ defineExpose({
       </CardHeader>
       <Separator />
       <ScrollArea class="flex-1">
-        <div v-if="selectedComponent" class="p-4 space-y-4">
-          <div class="flex items-center justify-between">
-            <Badge>{{ getComponentLabel(selectedComponent) }}</Badge>
-            <div class="flex gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7"
-                :disabled="selectedComponentIndex === 0"
-                @click="moveComponent(selectedComponentIndex!, 'up')"
-              >
-                <span class="rotate-180">▼</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7"
-                :disabled="selectedComponentIndex === selectedScreen!.layout.children.length - 1"
-                @click="moveComponent(selectedComponentIndex!, 'down')"
-              >
-                ▼
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7 text-destructive"
-                @click="removeComponent(selectedComponentIndex!)"
-              >
-                <Trash2 class="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
-          <!-- Text property -->
-          <div v-if="'text' in selectedComponent" class="space-y-2">
-            <Label class="text-xs">Text</Label>
-            <Input
-              :model-value="selectedComponent.text"
-              @update:model-value="updateComponentProperty('text', $event)"
-            />
-          </div>
-
-          <!-- Label property -->
-          <div v-if="'label' in selectedComponent && selectedComponent.type !== 'Footer'" class="space-y-2">
-            <Label class="text-xs">Label</Label>
-            <Input
-              :model-value="selectedComponent.label"
-              @update:model-value="updateComponentProperty('label', $event)"
-            />
-          </div>
-
-          <!-- Name property -->
-          <div v-if="'name' in selectedComponent" class="space-y-2">
-            <Label class="text-xs">Field Name (Key)</Label>
-            <Input
-              :model-value="selectedComponent.name"
-              @update:model-value="updateComponentProperty('name', $event)"
-              class="font-mono text-sm"
-              placeholder="e.g. email, phone, message"
-            />
-            <p class="text-xs text-muted-foreground">
-              This key is used in the response data. Use lowercase with underscores (e.g. customer_name).
-            </p>
-          </div>
-
-          <!-- Required property -->
-          <div v-if="'required' in selectedComponent" class="flex items-center justify-between">
-            <Label class="text-xs">Required</Label>
-            <Switch
-              :checked="selectedComponent.required"
-              @update:checked="updateComponentProperty('required', $event)"
-            />
-          </div>
-
-          <!-- Options for Dropdown, Radio, Checkbox -->
-          <div v-if="selectedComponent['data-source']" class="space-y-2">
-            <div class="flex items-center justify-between">
-              <Label class="text-xs">Options</Label>
-              <Button variant="ghost" size="sm" class="h-6 text-xs" @click="addOption">
-                <Plus class="h-3 w-3 mr-1" />
-                Add
-              </Button>
-            </div>
-            <div class="space-y-2">
-              <div
-                v-for="(opt, index) in selectedComponent['data-source']"
-                :key="opt.id"
-                class="flex gap-2"
-              >
-                <Input
-                  :model-value="opt.title"
-                  @update:model-value="updateOption(index, 'title', $event)"
-                  class="text-sm"
-                  placeholder="Option text"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-9 w-9 flex-shrink-0"
-                  @click="removeOption(index)"
-                >
-                  <Trash2 class="h-3 w-3" />
+        <div v-if="selectedScreen" class="p-4 space-y-4">
+          <!-- Screen data schema (prefill) -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <Label class="text-xs">Screen data (prefill)</Label>
+              <div class="flex gap-1">
+                <Button variant="ghost" size="sm" class="h-6 text-xs px-1.5" @click="addDataKeysFromFieldNames">
+                  From fields
+                </Button>
+                <Button variant="ghost" size="sm" class="h-6 text-xs px-1.5" @click="addScreenDataKey">
+                  <Plus class="h-3 w-3" />
                 </Button>
               </div>
             </div>
+            <p class="text-xs text-muted-foreground">
+              Keys declared here can be sent as flow init values (e.g. customer_phone).
+            </p>
+            <div v-if="screenDataRows.length === 0" class="text-xs text-muted-foreground border border-dashed rounded-md p-2">
+              No data keys yet
+            </div>
+            <div v-for="row in screenDataRows" :key="row.key" class="space-y-1 rounded-md border p-2">
+              <div class="flex gap-1">
+                <Input
+                  :model-value="row.key"
+                  class="font-mono text-xs h-8"
+                  placeholder="key"
+                  @change="renameScreenDataKey(row.key, ($event.target as HTMLInputElement).value)"
+                />
+                <Button variant="ghost" size="icon" class="h-8 w-8 flex-shrink-0" @click="removeScreenDataKey(row.key)">
+                  <Trash2 class="h-3 w-3" />
+                </Button>
+              </div>
+              <Input
+                :model-value="row.example"
+                class="text-xs h-8"
+                placeholder="Example value"
+                @update:model-value="updateScreenDataExample(row.key, String($event))"
+              />
+            </div>
           </div>
 
-          <!-- Footer specific -->
-          <div v-if="selectedComponent.type === 'Footer'" class="space-y-4">
-            <div class="space-y-2">
-              <Label class="text-xs">Button Text</Label>
+          <Separator />
+
+          <div v-if="selectedComponent" class="space-y-4">
+            <div class="flex items-center justify-between">
+              <Badge>{{ getComponentLabel(selectedComponent) }}</Badge>
+              <div class="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7"
+                  :disabled="selectedComponentIndex === 0"
+                  @click="moveComponent(selectedComponentIndex!, 'up')"
+                >
+                  <span class="rotate-180">▼</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7"
+                  :disabled="selectedComponentIndex === selectedScreen!.layout.children.length - 1"
+                  @click="moveComponent(selectedComponentIndex!, 'down')"
+                >
+                  ▼
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7 text-destructive"
+                  @click="removeComponent(selectedComponentIndex!)"
+                >
+                  <Trash2 class="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <!-- Text property -->
+            <div v-if="'text' in selectedComponent" class="space-y-2">
+              <Label class="text-xs">Text</Label>
+              <Input
+                :model-value="selectedComponent.text"
+                @update:model-value="updateComponentProperty('text', $event)"
+              />
+            </div>
+
+            <!-- Label property -->
+            <div v-if="'label' in selectedComponent && selectedComponent.type !== 'Footer'" class="space-y-2">
+              <Label class="text-xs">Label</Label>
               <Input
                 :model-value="selectedComponent.label"
                 @update:model-value="updateComponentProperty('label', $event)"
               />
             </div>
-            <div class="space-y-2">
-              <Label class="text-xs">Action</Label>
-              <Select
-                :model-value="selectedComponent['on-click-action']?.name || 'complete'"
-                @update:model-value="updateComponentProperty('on-click-action', { name: $event, payload: {} })"
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="complete">Complete Flow</SelectItem>
-                  <SelectItem value="navigate">Navigate to Screen</SelectItem>
-                </SelectContent>
-              </Select>
+
+            <!-- Name property -->
+            <div v-if="'name' in selectedComponent" class="space-y-2">
+              <Label class="text-xs">Field Name (Key)</Label>
+              <Input
+                :model-value="selectedComponent.name"
+                @update:model-value="updateComponentProperty('name', $event)"
+                class="font-mono text-sm"
+                placeholder="e.g. email, phone, message"
+              />
+              <p class="text-xs text-muted-foreground">
+                This key is used in the response data. Use lowercase with underscores (e.g. customer_name).
+              </p>
             </div>
+
+            <!-- Required property -->
+            <div v-if="'required' in selectedComponent" class="flex items-center justify-between">
+              <Label class="text-xs">Required</Label>
+              <Switch
+                :checked="selectedComponent.required"
+                @update:checked="updateComponentProperty('required', $event)"
+              />
+            </div>
+
+            <!-- Input type + init-value for TextInput / TextArea -->
             <div
-              v-if="selectedComponent['on-click-action']?.name === 'navigate'"
-              class="space-y-2"
+              v-if="selectedComponent.type === 'TextInput' || selectedComponent.type === 'TextArea'"
+              class="space-y-3"
             >
-              <Label class="text-xs">Target Screen</Label>
-              <Select
-                :model-value="selectedComponent['on-click-action']?.next?.name || ''"
-                @update:model-value="updateComponentProperty('on-click-action', {
-                  name: 'navigate',
-                  next: { type: 'screen', name: $event }
-                })"
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select screen" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="screen in screens.filter(s => s.id !== selectedScreen?.id)"
-                    :key="screen.id"
-                    :value="screen.id"
+              <div v-if="selectedComponent.type === 'TextInput'" class="space-y-2">
+                <Label class="text-xs">Input type</Label>
+                <Select
+                  :model-value="selectedComponent['input-type'] || 'text'"
+                  @update:model-value="updateComponentProperty('input-type', $event)"
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="text">Text</SelectItem>
+                    <SelectItem value="email">Email</SelectItem>
+                    <SelectItem value="number">Number</SelectItem>
+                    <SelectItem value="phone">Phone</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <Label class="text-xs">Init value (prefill)</Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 text-xs px-1.5"
+                    :disabled="!selectedComponent.name"
+                    @click="bindInitValueToData"
                   >
-                    {{ screen.title }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                    Bind to data
+                  </Button>
+                </div>
+                <Input
+                  :model-value="selectedComponent['init-value'] || ''"
+                  class="font-mono text-xs"
+                  placeholder="${data.customer_phone}"
+                  @update:model-value="setInitValue(String($event ?? ''))"
+                />
+                <p class="text-xs text-muted-foreground">
+                  Bind with a data expression such as ${data.customer_phone}.
+                </p>
+              </div>
             </div>
+
+            <!-- Options for Dropdown, Radio, Checkbox -->
+            <div v-if="selectedComponent['data-source']" class="space-y-2">
+              <div class="flex items-center justify-between">
+                <Label class="text-xs">Options</Label>
+                <Button variant="ghost" size="sm" class="h-6 text-xs" @click="addOption">
+                  <Plus class="h-3 w-3 mr-1" />
+                  Add
+                </Button>
+              </div>
+              <div class="space-y-2">
+                <div
+                  v-for="(opt, index) in selectedComponent['data-source']"
+                  :key="opt.id"
+                  class="flex gap-2"
+                >
+                  <Input
+                    :model-value="opt.title"
+                    @update:model-value="updateOption(index, 'title', $event)"
+                    class="text-sm"
+                    placeholder="Option text"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="h-9 w-9 flex-shrink-0"
+                    @click="removeOption(index)"
+                  >
+                    <Trash2 class="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer specific -->
+            <div v-if="selectedComponent.type === 'Footer'" class="space-y-4">
+              <div class="space-y-2">
+                <Label class="text-xs">Button Text</Label>
+                <Input
+                  :model-value="selectedComponent.label"
+                  @update:model-value="updateComponentProperty('label', $event)"
+                />
+              </div>
+              <div class="space-y-2">
+                <Label class="text-xs">Action</Label>
+                <Select
+                  :model-value="selectedComponent['on-click-action']?.name || 'complete'"
+                  @update:model-value="setFooterActionName(String($event))"
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="complete">Complete Flow</SelectItem>
+                    <SelectItem value="navigate">Navigate to Screen</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div
+                v-if="selectedComponent['on-click-action']?.name === 'navigate'"
+                class="space-y-2"
+              >
+                <Label class="text-xs">Target Screen</Label>
+                <Select
+                  :model-value="selectedComponent['on-click-action']?.next?.name || ''"
+                  @update:model-value="setFooterNavigateTarget(String($event))"
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select screen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="screen in screens.filter(s => s.id !== selectedScreen?.id)"
+                      :key="screen.id"
+                      :value="screen.id"
+                    >
+                      {{ screen.title }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between gap-1">
+                  <Label class="text-xs">Payload</Label>
+                  <Button variant="ghost" size="sm" class="h-6 text-xs px-1.5" @click="addFooterPayloadRow">
+                    <Plus class="h-3 w-3" />
+                  </Button>
+                </div>
+                <div class="flex flex-wrap gap-1">
+                  <Button variant="outline" size="sm" class="h-6 text-[10px] px-1.5" @click="fillPayloadFromScreenFields">
+                    Screen fields
+                  </Button>
+                  <Button variant="outline" size="sm" class="h-6 text-[10px] px-1.5" @click="addPayloadFromScreenData">
+                    Data keys
+                  </Button>
+                  <Button
+                    v-if="selectedComponent['on-click-action']?.name === 'complete' && selectedScreenIndex > 0"
+                    variant="outline"
+                    size="sm"
+                    class="h-6 text-[10px] px-1.5"
+                    @click="addPayloadFromPreviousScreens"
+                  >
+                    Prev screens
+                  </Button>
+                </div>
+                <div v-if="footerPayloadRows.length === 0" class="text-xs text-muted-foreground border border-dashed rounded-md p-2">
+                  Empty payload — use helpers or add rows
+                </div>
+                <div v-for="row in footerPayloadRows" :key="row.key" class="space-y-1 rounded-md border p-2">
+                  <div class="flex gap-1">
+                    <Input
+                      :model-value="row.key"
+                      class="font-mono text-xs h-8"
+                      placeholder="key"
+                      @change="renameFooterPayloadKey(row.key, ($event.target as HTMLInputElement).value)"
+                    />
+                    <Button variant="ghost" size="icon" class="h-8 w-8 flex-shrink-0" @click="removeFooterPayloadRow(row.key)">
+                      <Trash2 class="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <Input
+                    :model-value="row.value"
+                    class="font-mono text-xs h-8"
+                    placeholder="${form.field} or ${data.field}"
+                    @update:model-value="updateFooterPayloadValue(row.key, String($event))"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-center text-sm text-muted-foreground py-2">
+            Select a component to edit its properties
           </div>
         </div>
         <div v-else class="p-4 text-center text-sm text-muted-foreground">
-          Select a component to edit its properties
+          Select a screen to edit properties
         </div>
       </ScrollArea>
     </Card>
