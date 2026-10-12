@@ -2,12 +2,15 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/storage"
+	fs "github.com/shridarpatil/whatomate/pkg/firestore"
 )
 
 // syncMessageToFirestore writes a new or updated message and contact summary to Firestore.
@@ -132,6 +135,58 @@ func (a *App) syncCommerceHandoffToFirestore(orgID, contactID uuid.UUID, transfe
 		defer cancel()
 		if err := a.Firestore.SyncCommerceHandoff(ctx, orgID, contactID, transfer.ID, summary, tags); err != nil {
 			a.Log.Error("Failed to sync commerce handoff to Firestore", "error", err, "transfer_id", transfer.ID)
+		}
+	}()
+}
+
+// flushSessionArchiveToFirestore writes the preview-shaped coded-flow archive
+// to contacts/{id}/sessionArchives/{sessionId} with turn chunking.
+func (a *App) flushSessionArchiveToFirestore(session *models.ChatbotSession) {
+	if a == nil || a.Firestore == nil || !a.Firestore.Enabled() || session == nil {
+		return
+	}
+	archive := codedflow.MarkArchiveEnded(session)
+	if archive == nil || len(archive.Turns) == 0 {
+		archive = codedflow.LoadSessionArchive(session)
+	}
+	if archive == nil || len(archive.Turns) == 0 {
+		return
+	}
+	meta := fs.SessionArchiveDoc{
+		Version:        archive.Version,
+		FlowKey:        archive.FlowKey,
+		SessionID:      archive.SessionID,
+		ContactID:      archive.ContactID,
+		OrganizationID: archive.OrganizationID,
+		StartedAt:      archive.StartedAt,
+		EndedAt:        archive.EndedAt,
+		Status:         archive.Status,
+		TurnCount:      len(archive.Turns),
+	}
+	turns := make([]map[string]any, 0, len(archive.Turns))
+	for _, turn := range archive.Turns {
+		b, err := json.Marshal(turn)
+		if err != nil {
+			continue
+		}
+		row := map[string]any{}
+		if err := json.Unmarshal(b, &row); err != nil {
+			continue
+		}
+		turns = append(turns, row)
+	}
+	if err := a.persistSessionData(session); err != nil {
+		a.Log.Warn("persist session archive before Firestore flush failed",
+			"error", err, "session_id", session.ID)
+	}
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := a.Firestore.SyncSessionArchive(ctx, meta, turns); err != nil {
+			a.Log.Error("Failed to sync session archive to Firestore",
+				"error", err, "session_id", session.ID)
 		}
 	}()
 }

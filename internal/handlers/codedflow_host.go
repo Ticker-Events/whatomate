@@ -63,6 +63,10 @@ func (c *codedChat) Preview() *codedflow.PreviewSink { return c.ctx.preview }
 func (c *codedChat) SetPreview(p *codedflow.PreviewSink) {
 	c.ctx.preview = p
 }
+func (c *codedChat) Archive() *codedflow.PreviewSink { return c.ctx.archive }
+func (c *codedChat) SetArchive(p *codedflow.PreviewSink) {
+	c.ctx.archive = p
+}
 
 func (c *codedChat) Native() any { return c.ctx }
 

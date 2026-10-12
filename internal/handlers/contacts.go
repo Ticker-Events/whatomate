@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
@@ -1299,13 +1300,15 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 	return r.SendEnvelope(response)
 }
 
-// ContactCommerceSessionItem is one chatbot session with a commerce handoff snapshot.
+// ContactCommerceSessionItem is one chatbot session with commerce handoff and/or a coded archive.
 type ContactCommerceSessionItem struct {
-	SessionID   uuid.UUID              `json:"session_id"`
-	StartedAt   time.Time              `json:"started_at"`
-	Status      models.SessionStatus   `json:"status"`
-	SessionData map[string]any         `json:"session_data"`
-	Transfer    *AgentTransferResponse `json:"transfer,omitempty"`
+	SessionID        uuid.UUID              `json:"session_id"`
+	StartedAt        time.Time              `json:"started_at"`
+	Status           models.SessionStatus   `json:"status"`
+	SessionData      map[string]any         `json:"session_data"`
+	Transfer         *AgentTransferResponse `json:"transfer,omitempty"`
+	ArchiveAvailable bool                   `json:"archive_available"`
+	FlowKey          string                 `json:"flow_key,omitempty"`
 }
 
 // ListContactCommerceSessionsResponse is the list of commerce handoff sessions for a contact.
@@ -1332,6 +1335,22 @@ func sessionHasCommerceHandoffData(data models.JSONB) bool {
 		}
 	}
 	return false
+}
+
+func sessionHasCodedArchive(data models.JSONB) bool {
+	archive := codedflow.LoadSessionArchive(&models.ChatbotSession{SessionData: data})
+	return archive != nil && len(archive.Turns) > 0
+}
+
+func sessionArchiveFlowKey(data models.JSONB) string {
+	if key := codedflow.SessionKey(&models.ChatbotSession{SessionData: data}); key != "" {
+		return key
+	}
+	archive := codedflow.LoadSessionArchive(&models.ChatbotSession{SessionData: data})
+	if archive == nil {
+		return ""
+	}
+	return strings.TrimSpace(archive.FlowKey)
 }
 
 func sessionCommerceDraftID(data models.JSONB) uuid.UUID {
@@ -1362,7 +1381,7 @@ func commerceSessionDisplayData(data models.JSONB) map[string]any {
 	return out
 }
 
-// ListContactCommerceSessions returns chatbot sessions that carry commerce handoff state.
+// ListContactCommerceSessions returns chatbot sessions with commerce handoff and/or coded archives.
 // Newest started_at first. Transfer is attached only when its commerce_draft_id matches the session draft.
 func (a *App) ListContactCommerceSessions(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
@@ -1387,7 +1406,8 @@ func (a *App) ListContactCommerceSessions(r *fastglue.Request) error {
 	var sessions []models.ChatbotSession
 	err = a.DB.Where("contact_id = ? AND organization_id = ?", contactID, orgID).
 		Where("status IN ?", []models.SessionStatus{
-			models.SessionStatusActive, models.SessionStatusCompleted, models.SessionStatusCancelled,
+			models.SessionStatusActive, models.SessionStatusCompleted,
+			models.SessionStatusCancelled, models.SessionStatusTimeout,
 		}).
 		Order("started_at DESC").
 		Limit(100).
@@ -1399,14 +1419,18 @@ func (a *App) ListContactCommerceSessions(r *fastglue.Request) error {
 	items := make([]ContactCommerceSessionItem, 0, commerceSessionLimit)
 	draftIDs := make([]uuid.UUID, 0)
 	for _, session := range sessions {
-		if !sessionHasCommerceHandoffData(session.SessionData) {
+		hasCommerce := sessionHasCommerceHandoffData(session.SessionData)
+		hasArchive := sessionHasCodedArchive(session.SessionData)
+		if !hasCommerce && !hasArchive {
 			continue
 		}
 		items = append(items, ContactCommerceSessionItem{
-			SessionID:   session.ID,
-			StartedAt:   session.StartedAt,
-			Status:      session.Status,
-			SessionData: commerceSessionDisplayData(session.SessionData),
+			SessionID:        session.ID,
+			StartedAt:        session.StartedAt,
+			Status:           session.Status,
+			SessionData:      commerceSessionDisplayData(session.SessionData),
+			ArchiveAvailable: hasArchive,
+			FlowKey:          sessionArchiveFlowKey(session.SessionData),
 		})
 		if draftID := sessionCommerceDraftID(session.SessionData); draftID != uuid.Nil {
 			draftIDs = append(draftIDs, draftID)

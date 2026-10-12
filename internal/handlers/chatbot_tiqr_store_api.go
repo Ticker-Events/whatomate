@@ -125,7 +125,8 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 		client := newTiqrStoreRESTClient(settings.AI.CommerceRESTURL)
 		trace := a.ShouldTraceCodedFlow(ctx.session) && !ctx.capturing()
 		preview := ctx.capturing() && ctx.preview != nil
-		if trace || preview {
+		archive := ctx.archive != nil
+		if trace || preview || archive {
 			client.OnHTTP = func(method, rawURL string, reqBody []byte, status int, respBody []byte, callErr error) {
 				headers := map[string]string{"Accept": "application/json"}
 				if strings.EqualFold(method, http.MethodPost) {
@@ -143,19 +144,23 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 						parsed = string(respBody)
 					}
 				}
+				path := rawURL
+				if u, err := url.Parse(rawURL); err == nil {
+					path = u.RequestURI()
+				}
+				note := codedflow.CodedPreviewAPICall{
+					Name:       operation,
+					Path:       path,
+					Curl:       curl,
+					HTTPStatus: status,
+					Response:   parsed,
+					Error:      errMsg,
+				}
 				if preview {
-					path := rawURL
-					if u, err := url.Parse(rawURL); err == nil {
-						path = u.RequestURI()
-					}
-					ctx.preview.NoteAPI(codedflow.CodedPreviewAPICall{
-						Name:       operation,
-						Path:       path,
-						Curl:       curl,
-						HTTPStatus: status,
-						Response:   parsed,
-						Error:      errMsg,
-					})
+					ctx.preview.NoteAPI(note)
+				}
+				if archive {
+					ctx.archive.NoteAPI(note)
 				}
 				if !trace {
 					return

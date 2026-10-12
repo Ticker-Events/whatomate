@@ -58,6 +58,8 @@ const mockResponses = ref(true)
 const needsMock = ref(false)
 const mockOperation = ref('')
 const mockBody = ref('{\n  \n}')
+const importMode = ref(false)
+const importBody = ref('')
 const sessionId = ref('')
 const step = ref('')
 const input = ref<CodedPreviewResponse['input']>('')
@@ -86,8 +88,25 @@ const details = reactive<Record<DetailKey, string>>({
   customer_notes: '',
 })
 
-const waiting = computed(() => status.value === 'waiting_input')
+const waiting = computed(() => !importMode.value && status.value === 'waiting_input')
 const hasContext = computed(() => Object.keys(sessionContext.value || {}).length > 0)
+
+type ImportedSessionLog = {
+  version: number
+  turns: Array<{
+    at?: string
+    inbound?: Record<string, unknown>
+    messages?: CodedPreviewMessage[]
+    ai_calls?: CodedPreviewAICall[]
+    api_calls?: CodedPreviewAPICall[]
+    context?: Record<string, unknown>
+    step?: string
+    status?: string
+  }>
+  session_id?: string
+  flow_key?: string
+  status?: string
+}
 
 function formatDebugValue(value: unknown) {
   if (value === null || value === undefined) return String(value)
@@ -287,6 +306,93 @@ function reset() {
   mockOperation.value = ''
   mockBody.value = '{\n  \n}'
   mockResponses.value = true
+  importMode.value = false
+}
+
+function inboundUserContent(inbound: Record<string, unknown> | undefined): string {
+  if (!inbound) return ''
+  const parts: string[] = []
+  if (typeof inbound.text === 'string' && inbound.text.trim()) {
+    parts.push(inbound.text.trim())
+  }
+  if (typeof inbound.button_id === 'string' && inbound.button_id.trim()) {
+    parts.push(`[button:${inbound.button_id.trim()}]`)
+  }
+  if (inbound.media && typeof inbound.media === 'object') {
+    parts.push('[media]')
+  }
+  if (inbound.flow_response) {
+    parts.push('[flow response]')
+  }
+  return parts.join(' ')
+}
+
+function applyImportedLog() {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(importBody.value)
+  } catch {
+    toast.error(t('codedFlows.previewImportInvalid'))
+    return
+  }
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    typeof (parsed as ImportedSessionLog).version !== 'number' ||
+    !Array.isArray((parsed as ImportedSessionLog).turns)
+  ) {
+    toast.error(t('codedFlows.previewImportInvalid'))
+    return
+  }
+  const log = parsed as ImportedSessionLog
+  if (!log.turns.length) {
+    toast.error(t('codedFlows.previewImportInvalid'))
+    return
+  }
+  revokeMessageMedia()
+  sessionId.value = typeof log.session_id === 'string' ? log.session_id : ''
+  step.value = ''
+  input.value = ''
+  flowCta.value = ''
+  messages.value = []
+  sessionContext.value = {}
+  turnAICalls.value = []
+  previewAPICalls.value = []
+  needsMock.value = false
+  mockOperation.value = ''
+  importMode.value = true
+  status.value = 'completed'
+
+  const allAI: CodedPreviewAICall[] = []
+  const allAPI: CodedPreviewAPICall[] = []
+  for (const turnItem of log.turns) {
+    const userText = inboundUserContent(turnItem.inbound)
+    if (userText) {
+      messages.value.push({
+        id: newId(),
+        type: 'user',
+        content: userText,
+        timestamp: turnItem.at ? new Date(turnItem.at) : new Date(),
+      })
+    }
+    messages.value.push(...(turnItem.messages || []).map(toMessage))
+    if (turnItem.ai_calls?.length) {
+      allAI.push(...turnItem.ai_calls)
+    }
+    if (turnItem.api_calls?.length) {
+      allAPI.push(...turnItem.api_calls)
+    }
+    if (turnItem.context && typeof turnItem.context === 'object') {
+      sessionContext.value = turnItem.context
+    }
+    if (turnItem.step) {
+      step.value = turnItem.step
+    }
+  }
+  turnAICalls.value = allAI
+  previewAPICalls.value = allAPI
+  toast.success(t('codedFlows.previewImportLoaded'))
 }
 
 function submitMock() {
@@ -379,11 +485,11 @@ function submitLocation() {
 
     <aside class="w-80 shrink-0 border-l bg-background flex flex-col min-h-0">
       <div class="px-4 py-3 border-b flex items-center gap-2">
-        <Button size="sm" :disabled="busy || status !== 'idle'" @click="start">
+        <Button size="sm" :disabled="busy || importMode || status !== 'idle'" @click="start">
           <Play class="h-4 w-4 mr-1" />
           {{ $t('codedFlows.previewStart') }}
         </Button>
-        <Button size="sm" variant="outline" :disabled="busy || status === 'idle'" @click="reset">
+        <Button size="sm" variant="outline" :disabled="busy || (status === 'idle' && !importMode)" @click="reset">
           <RotateCcw class="h-4 w-4 mr-1" />
           {{ $t('codedFlows.previewReset') }}
         </Button>
@@ -391,7 +497,26 @@ function submitLocation() {
 
       <ScrollArea class="flex-1">
         <div class="p-4 space-y-4">
-          <div class="flex items-start justify-between gap-3">
+          <div class="space-y-2">
+            <div>
+              <p class="text-sm font-medium">{{ $t('codedFlows.previewImport') }}</p>
+              <p class="text-[11px] text-muted-foreground mt-1">{{ $t('codedFlows.previewImportHint') }}</p>
+            </div>
+            <Textarea
+              v-model="importBody"
+              class="min-h-28 font-mono text-xs"
+              :disabled="busy"
+              :placeholder="$t('codedFlows.previewImportPlaceholder')"
+            />
+            <Button size="sm" class="w-full" :disabled="busy || !importBody.trim()" @click="applyImportedLog">
+              {{ $t('codedFlows.previewImportLoad') }}
+            </Button>
+            <p v-if="importMode" class="text-[11px] text-muted-foreground">
+              {{ $t('codedFlows.previewImportReadOnly') }}
+            </p>
+          </div>
+
+          <div v-if="!importMode" class="flex items-start justify-between gap-3">
             <div>
               <p class="text-sm font-medium">{{ $t('codedFlows.previewMock') }}</p>
               <p class="text-[11px] text-muted-foreground mt-1">{{ $t('codedFlows.previewMockHint') }}</p>

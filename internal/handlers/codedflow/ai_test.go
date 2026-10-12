@@ -35,6 +35,8 @@ func (c *legendTestChat) LastTiqrStatus() int                        { return 0 
 func (c *legendTestChat) SetLastTiqrStatus(int)                      {}
 func (c *legendTestChat) Preview() *PreviewSink                      { return nil }
 func (c *legendTestChat) SetPreview(*PreviewSink)                    {}
+func (c *legendTestChat) Archive() *PreviewSink                      { return nil }
+func (c *legendTestChat) SetArchive(*PreviewSink)                    {}
 func (c *legendTestChat) Native() any                                { return nil }
 
 func TestLimitDoesNotTranslate(t *testing.T) {

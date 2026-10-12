@@ -11,6 +11,9 @@ func (a *App) deliverCodedText(ctx *chatNodeCtx, step, text string) error {
 	if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, text); err != nil {
 		return err
 	}
+	if ctx != nil && ctx.archive != nil {
+		ctx.archive.Text(step, text)
+	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, text, step)
 	a.LogCodedFlowWhatsApp(newCodedChat(ctx), step, "text", text)
 	return nil
@@ -26,6 +29,9 @@ func (a *App) deliverCodedCTAURL(ctx *chatNodeCtx, step, body, buttonText, url s
 	if err := a.sendAndSaveCTAURLButton(ctx.account, ctx.contact, body, buttonText, url); err != nil {
 		return err
 	}
+	if ctx != nil && ctx.archive != nil {
+		ctx.archive.CTAURL(step, body, buttonText, url)
+	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, step)
 	a.LogCodedFlowWhatsApp(newCodedChat(ctx), step, "cta_url", body)
 	return nil
@@ -39,6 +45,9 @@ func (a *App) deliverCodedLocationRequest(ctx *chatNodeCtx, step, body string) e
 	}
 	if err := a.sendAndSaveLocationRequest(ctx.account, ctx.contact, body); err != nil {
 		return err
+	}
+	if ctx != nil && ctx.archive != nil {
+		ctx.archive.ExpectLocation(step, body)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, step)
 	a.LogCodedFlowWhatsApp(newCodedChat(ctx), step, "location_request", body)

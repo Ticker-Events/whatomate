@@ -3,6 +3,7 @@ package firestore
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -12,8 +13,10 @@ import (
 )
 
 const (
-	collectionMessages = "messages"
-	collectionContacts = "contacts"
+	collectionMessages        = "messages"
+	collectionContacts        = "contacts"
+	collectionSessionArchives = "sessionArchives"
+	collectionArchiveTurns    = "turns"
 )
 
 // SyncMessage writes or replaces a message document and updates the contact summary.
@@ -104,6 +107,64 @@ func (c *Client) SyncCommerceHandoff(ctx context.Context, orgID, contactID, tran
 	_, err := c.firestore.Collection(collectionContacts).Doc(contactID.String()).Set(ctx, data, firestore.MergeAll)
 	if err != nil {
 		return fmt.Errorf("firestore sync commerce handoff %s: %w", contactID, err)
+	}
+	return nil
+}
+
+// SessionArchiveDoc is the parent metadata for a coded-flow session archive.
+type SessionArchiveDoc struct {
+	Version        int    `json:"version"`
+	FlowKey        string `json:"flow_key"`
+	SessionID      string `json:"session_id"`
+	ContactID      string `json:"contact_id"`
+	OrganizationID string `json:"organization_id"`
+	StartedAt      string `json:"started_at"`
+	EndedAt        string `json:"ended_at,omitempty"`
+	Status         string `json:"status"`
+	TurnCount      int    `json:"turn_count"`
+}
+
+// SyncSessionArchive writes archive metadata plus one document per turn under
+// contacts/{contactId}/sessionArchives/{sessionId}/turns/{index}.
+func (c *Client) SyncSessionArchive(ctx context.Context, meta SessionArchiveDoc, turns []map[string]any) error {
+	if !c.Enabled() {
+		return nil
+	}
+	contactID := strings.TrimSpace(meta.ContactID)
+	sessionID := strings.TrimSpace(meta.SessionID)
+	if contactID == "" || sessionID == "" {
+		return fmt.Errorf("firestore sync session archive: missing contact or session id")
+	}
+	parent := c.firestore.Collection(collectionContacts).Doc(contactID).
+		Collection(collectionSessionArchives).Doc(sessionID)
+
+	data := map[string]any{
+		"version":         meta.Version,
+		"flow_key":        meta.FlowKey,
+		"session_id":      meta.SessionID,
+		"contact_id":      meta.ContactID,
+		"organization_id": meta.OrganizationID,
+		"started_at":      meta.StartedAt,
+		"status":          meta.Status,
+		"turn_count":      meta.TurnCount,
+		"updated_at":      time.Now().UTC().Format(time.RFC3339),
+	}
+	if meta.EndedAt != "" {
+		data["ended_at"] = meta.EndedAt
+	}
+	if _, err := parent.Set(ctx, data); err != nil {
+		return fmt.Errorf("firestore sync session archive %s: %w", sessionID, err)
+	}
+	for i, turn := range turns {
+		docID := fmt.Sprintf("%04d", i)
+		payload := map[string]any{}
+		for key, value := range turn {
+			payload[key] = value
+		}
+		payload["index"] = i
+		if _, err := parent.Collection(collectionArchiveTurns).Doc(docID).Set(ctx, payload); err != nil {
+			return fmt.Errorf("firestore sync session archive turn %s/%s: %w", sessionID, docID, err)
+		}
 	}
 	return nil
 }

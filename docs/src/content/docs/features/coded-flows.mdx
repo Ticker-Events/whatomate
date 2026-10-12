@@ -157,6 +157,14 @@ Preview / mock runs do not write these production traces.
 
 The customer phone in the preview is used when the flow looks up an order. The default is `910000000000`.
 
+#### Import session log
+
+**Import session log** pastes a Copy Log JSON archive from tiqr.store Chat Summary and renders it read-only (inbound, messages, AI calls, API calls, context). It does not call the preview API, does not supply mocks, and does not mutate live sessions. The payload needs `version` and `turns`.
+
+#### Live session archives
+
+Every live coded-flow turn appends a preview-shaped turn onto `SessionData.coded_session_archive` (size-capped). When the session ends (completed, cancelled, timeout, or commerce handoff), Whatomate flushes metadata plus one Firestore document per turn under `contacts/{contactId}/sessionArchives/{sessionId}`. Chat Summary **Copy Log** reassembles that archive for Import session log.
+
 ## TiQR Ecommerce
 
 Key: `tiqr_ecommerce`.

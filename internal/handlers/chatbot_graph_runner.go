@@ -43,6 +43,7 @@ type chatNodeCtx struct {
 	lastTiqrErr      string         // truncated error from the latest failed tiqr call
 	lastTiqrStatus   int            // HTTP status when known (0 otherwise)
 	preview          *codedflow.PreviewSink
+	archive          *codedflow.PreviewSink // live session archive (never skips WhatsApp)
 }
 
 func (ctx *chatNodeCtx) capturing() bool {
@@ -308,6 +309,9 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		if err := a.sendAndSaveInteractiveCarousel(ctx.account, ctx.contact, body, cards); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send carousel: %w", err)
 		}
+		if ctx.archive != nil {
+			ctx.archive.Carousel(node.ID, body, cards)
+		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
 		a.LogCodedFlowWhatsApp(newCodedChat(ctx), node.ID, "carousel", body, "card_count", len(cards))
 		return nodeOutcome{yield: true}, nil
@@ -340,6 +344,9 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		if err := a.sendAndSaveInteractiveList(ctx.account, ctx.contact, body, header, footer, listButton, section, buttons); err != nil {
 			return nodeOutcome{}, fmt.Errorf("send list: %w", err)
 		}
+		if ctx.archive != nil {
+			ctx.archive.Buttons(node.ID, body, "list", buttons, header, footer, listButton, "")
+		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
 		a.LogCodedFlowWhatsApp(newCodedChat(ctx), node.ID, "list", body, "button_count", len(buttons))
 		return nodeOutcome{yield: true}, nil
@@ -351,6 +358,9 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 	}
 	if err := a.sendAndSaveInteractiveButtons(ctx.account, ctx.contact, body, buttons, headerImage); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
+	}
+	if ctx.archive != nil {
+		ctx.archive.Buttons(node.ID, body, "buttons", buttons, "", "", "", headerImage)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
 	a.LogCodedFlowWhatsApp(newCodedChat(ctx), node.ID, "buttons", body, "button_count", len(buttons))
@@ -1142,6 +1152,9 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	flowToken := fmt.Sprintf("chatbot_%s_%s_%d", ctx.session.ID.String(), node.ID, time.Now().UnixNano())
 	if err := a.sendAndSaveFlowMessage(ctx.account, ctx.contact, flowID, header, body, cta, flowToken, firstScreen); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send whatsapp_flow: %w", err)
+	}
+	if ctx.archive != nil {
+		ctx.archive.Flow(node.ID, header, body, cta)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
 	return nodeOutcome{yield: true}, nil

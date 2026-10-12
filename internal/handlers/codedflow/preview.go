@@ -161,7 +161,7 @@ func PreviewSessionContext(session *models.ChatbotSession) map[string]any {
 	out := make(map[string]any, len(session.SessionData)+2)
 	for key, value := range session.SessionData {
 		switch key {
-		case codedPreviewWaitKey, codedPreviewCTAKey:
+		case codedPreviewWaitKey, codedPreviewCTAKey, ArchiveKey:
 			continue
 		case codedCallsKey:
 			items, _ := anySlice(value)

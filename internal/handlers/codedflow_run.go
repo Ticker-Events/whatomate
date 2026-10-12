@@ -69,7 +69,11 @@ func (a *App) runCodedFlowPreview(
 	flowResponseData map[string]any,
 	preview *codedflow.PreviewSink,
 ) error {
-	chat := newCodedChat(&chatNodeCtx{
+	var archive *codedflow.PreviewSink
+	if preview == nil {
+		archive = &codedflow.PreviewSink{Session: session}
+	}
+	chatCtx := &chatNodeCtx{
 		account:          account,
 		contact:          contact,
 		session:          session,
@@ -79,8 +83,21 @@ func (a *App) runCodedFlowPreview(
 		flowResponseData: flowResponseData,
 		quotedMessage:    codedflow.TakeQuotedInbound(session),
 		preview:          preview,
-	})
-	return codedflow.RunPreview(a, session, flow, chat, preview)
+		archive:          archive,
+	}
+	chat := newCodedChat(chatCtx)
+	inbound := codedflow.ArchiveInboundFromChat(chat)
+	err := codedflow.RunPreview(a, session, flow, chat, preview)
+	if archive != nil {
+		codedflow.CommitArchiveTurn(session, flow.Key, archive, inbound)
+		if perr := a.persistSessionData(session); perr != nil && err == nil {
+			err = perr
+		}
+		if codedflow.SessionEnded(session) {
+			a.flushSessionArchiveToFirestore(session)
+		}
+	}
+	return err
 }
 
 func (a *App) matchCodedFlowTrigger(orgID uuid.UUID, accountName, messageText string) *codedflow.CodedFlow {

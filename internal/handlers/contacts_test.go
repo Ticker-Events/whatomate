@@ -1831,7 +1831,7 @@ func TestApp_ListContactCommerceSessions_PerSessionHandoff(t *testing.T) {
 	}
 	require.NoError(t, app.DB.Create(newSession).Error)
 
-	// Non-commerce session should be omitted.
+	// Non-commerce session without archive should be omitted.
 	plainSession := &models.ChatbotSession{
 		BaseModel:       models.BaseModel{ID: uuid.New()},
 		OrganizationID:  org.ID,
@@ -1844,6 +1844,32 @@ func TestApp_ListContactCommerceSessions_PerSessionHandoff(t *testing.T) {
 		SessionData:     models.JSONB{"name": "no commerce"},
 	}
 	require.NoError(t, app.DB.Create(plainSession).Error)
+
+	archiveSessionID := uuid.New()
+	archiveOnly := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: archiveSessionID},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusCompleted,
+		StartedAt:       time.Now().Add(-5 * time.Minute),
+		LastActivityAt:  time.Now(),
+		SessionData: models.JSONB{
+			"coded_session_archive": map[string]any{
+				"version":   1,
+				"flow_key":  "tiqr_ecommerce",
+				"session_id": archiveSessionID.String(),
+				"turns": []any{
+					map[string]any{
+						"at":       time.Now().UTC().Format(time.RFC3339),
+						"messages": []any{map[string]any{"type": "bot", "content": "hi"}},
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(archiveOnly).Error)
 
 	oldTransfer := &models.AgentTransfer{
 		BaseModel:       models.BaseModel{ID: uuid.New()},
@@ -1901,16 +1927,19 @@ func TestApp_ListContactCommerceSessions_PerSessionHandoff(t *testing.T) {
 		Data handlers.ListContactCommerceSessionsResponse `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
-	require.Len(t, resp.Data.Sessions, 2)
-	assert.Equal(t, newSession.ID, resp.Data.Sessions[0].SessionID)
-	assert.Equal(t, oldSession.ID, resp.Data.Sessions[1].SessionID)
+	require.Len(t, resp.Data.Sessions, 3)
+	assert.Equal(t, archiveSessionID, resp.Data.Sessions[0].SessionID)
+	assert.True(t, resp.Data.Sessions[0].ArchiveAvailable)
+	assert.Equal(t, "tiqr_ecommerce", resp.Data.Sessions[0].FlowKey)
+	assert.Equal(t, newSession.ID, resp.Data.Sessions[1].SessionID)
+	assert.Equal(t, oldSession.ID, resp.Data.Sessions[2].SessionID)
 
-	require.NotNil(t, resp.Data.Sessions[0].Transfer)
-	assert.Equal(t, newTransfer.ID.String(), resp.Data.Sessions[0].Transfer.ID)
 	require.NotNil(t, resp.Data.Sessions[1].Transfer)
-	assert.Equal(t, oldTransfer.ID.String(), resp.Data.Sessions[1].Transfer.ID)
+	assert.Equal(t, newTransfer.ID.String(), resp.Data.Sessions[1].Transfer.ID)
+	require.NotNil(t, resp.Data.Sessions[2].Transfer)
+	assert.Equal(t, oldTransfer.ID.String(), resp.Data.Sessions[2].Transfer.ID)
 
-	newHandoff, ok := resp.Data.Sessions[0].SessionData["commerce_handoff"].(map[string]any)
+	newHandoff, ok := resp.Data.Sessions[1].SessionData["commerce_handoff"].(map[string]any)
 	require.True(t, ok)
 	newCart, ok := newHandoff["cart"].(map[string]any)
 	require.True(t, ok)
@@ -1921,7 +1950,7 @@ func TestApp_ListContactCommerceSessions_PerSessionHandoff(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "222", newLine["product_option"])
 
-	oldHandoff, ok := resp.Data.Sessions[1].SessionData["commerce_handoff"].(map[string]any)
+	oldHandoff, ok := resp.Data.Sessions[2].SessionData["commerce_handoff"].(map[string]any)
 	require.True(t, ok)
 	oldCart, ok := oldHandoff["cart"].(map[string]any)
 	require.True(t, ok)

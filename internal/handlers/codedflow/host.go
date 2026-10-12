@@ -50,6 +50,8 @@ type Chat interface {
 
 	Preview() *PreviewSink
 	SetPreview(*PreviewSink)
+	Archive() *PreviewSink
+	SetArchive(*PreviewSink)
 
 	Native() any
 }

@@ -363,11 +363,16 @@ func (c *Conv) askGuide(name string, ctx IntentContext) (Route, bool) {
 func (c *Conv) NotePreviewAI(call CodedPreviewAICall) { c.notePreviewAI(call) }
 
 func (c *Conv) notePreviewAI(call CodedPreviewAICall) {
-	if c == nil || c.chat == nil || !c.chat.Capturing() {
+	if c == nil || c.chat == nil {
 		return
 	}
-	if p := c.chat.Preview(); p != nil {
-		p.NoteAI(call)
+	if c.chat.Capturing() {
+		if p := c.chat.Preview(); p != nil {
+			p.NoteAI(call)
+		}
+	}
+	if sink := c.chat.Archive(); sink != nil {
+		sink.NoteAI(call)
 	}
 }
 
