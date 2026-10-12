@@ -179,6 +179,8 @@ export const contactsService = {
   updateTags: (id: string, tags: string[]) =>
     api.put(`/contacts/${id}/tags`, { tags }),
   getSessionData: (id: string) => api.get(`/contacts/${id}/session-data`),
+  getCommerceSessions: (id: string) =>
+    api.get(`/contacts/${encodeURIComponent(id)}/commerce-sessions`),
   markRead: (id: string) => api.post(`/contacts/${encodeURIComponent(id)}/mark-read`)
 }
 

@@ -251,15 +251,49 @@ func (a *App) stageCommerceHandoffSessionData(session *models.ChatbotSession, ca
 		cart = map[string]any(draft.Cart)
 	}
 	addons := tiqrecommerce.HandoffDisplayAddons(session, draft.Addons)
+	notes := strings.TrimSpace(tiqrecommerce.SessionHandoffNotes(session))
+	if notes == "" {
+		notes = tiqrecommerce.CommerceHandoffNotesText(&draft)
+	}
 	handoff := map[string]any{
 		"draft_id": draft.ID.String(), "captured_fields": captured,
 		"media_references": media, "summary": summary,
-		"notes":  tiqrecommerce.SessionHandoffNotes(session),
+		"notes":  notes,
 		"cart":   cart,
 		"addons": addons,
 	}
 	if requests := strings.TrimSpace(asString(jsonMapFromSession(session, "commerce_notes")["addon_requests"])); requests != "" {
 		handoff["addon_requests"] = requests
+	}
+	if len(draft.AddressSnapshot) > 0 {
+		handoff["address"] = map[string]any(draft.AddressSnapshot)
+	}
+	fulfillment := map[string]any{}
+	if draft.FulfillmentMode != "" {
+		fulfillment["delivery_mode"] = draft.FulfillmentMode
+		fulfillment["fulfillment_mode"] = draft.FulfillmentMode
+	}
+	if draft.RequestedFulfillmentAt != nil {
+		fulfillment["requested_fulfillment_at"] = draft.RequestedFulfillmentAt
+	}
+	if draft.Latitude != nil {
+		fulfillment["latitude"] = *draft.Latitude
+	}
+	if draft.Longitude != nil {
+		fulfillment["longitude"] = *draft.Longitude
+	}
+	if len(fulfillment) > 0 {
+		handoff["fulfillment"] = fulfillment
+	}
+	if contactFields := tiqrecommerce.CommerceHandoffContact(&draft); len(contactFields) > 0 {
+		handoff["contact"] = contactFields
+	}
+	if missing := tiqrecommerce.CommerceHandoffMissingFields(&draft); len(missing) > 0 {
+		values := make([]any, 0, len(missing))
+		for _, field := range missing {
+			values = append(values, field)
+		}
+		handoff["missing_fields"] = values
 	}
 	session.SessionData["commerce_handoff"] = handoff
 }

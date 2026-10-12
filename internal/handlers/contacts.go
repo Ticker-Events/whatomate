@@ -1299,6 +1299,194 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 	return r.SendEnvelope(response)
 }
 
+// ContactCommerceSessionItem is one chatbot session with a commerce handoff snapshot.
+type ContactCommerceSessionItem struct {
+	SessionID   uuid.UUID              `json:"session_id"`
+	StartedAt   time.Time              `json:"started_at"`
+	Status      models.SessionStatus   `json:"status"`
+	SessionData map[string]any         `json:"session_data"`
+	Transfer    *AgentTransferResponse `json:"transfer,omitempty"`
+}
+
+// ListContactCommerceSessionsResponse is the list of commerce handoff sessions for a contact.
+type ListContactCommerceSessionsResponse struct {
+	Sessions []ContactCommerceSessionItem `json:"sessions"`
+}
+
+var commerceSessionDisplayKeys = []string{
+	"commerce_draft_id", "commerce_captured_fields", "commerce_media_references",
+	"commerce_handoff_summary", "commerce_handoff", "backend_order_id", "commerce_order_id",
+	"tiqr_cart", "commerce_addons", "commerce_notes", "commerce_handoff_cart",
+}
+
+func sessionHasCommerceHandoffData(data models.JSONB) bool {
+	if data == nil {
+		return false
+	}
+	for _, key := range []string{
+		"commerce_handoff", "commerce_handoff_cart", "commerce_captured_fields",
+		"tiqr_cart", "commerce_draft_id",
+	} {
+		if _, ok := data[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionCommerceDraftID(data models.JSONB) uuid.UUID {
+	if data == nil {
+		return uuid.Nil
+	}
+	if id, err := uuid.Parse(strings.TrimSpace(asString(data["commerce_draft_id"]))); err == nil {
+		return id
+	}
+	if handoff, ok := data["commerce_handoff"].(map[string]any); ok {
+		if id, err := uuid.Parse(strings.TrimSpace(asString(handoff["draft_id"]))); err == nil {
+			return id
+		}
+	}
+	return uuid.Nil
+}
+
+func commerceSessionDisplayData(data models.JSONB) map[string]any {
+	out := make(map[string]any)
+	if data == nil {
+		return out
+	}
+	for _, key := range commerceSessionDisplayKeys {
+		if value, ok := data[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+// ListContactCommerceSessions returns chatbot sessions that carry commerce handoff state.
+// Newest started_at first. Transfer is attached only when its commerce_draft_id matches the session draft.
+func (a *App) ListContactCommerceSessions(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	contactID, err := parsePathUUID(r, "id", "contact")
+	if err != nil {
+		return nil
+	}
+
+	var contact models.Contact
+	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
+	if !a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
+		query = query.Where("assigned_user_id = ?", userID)
+	}
+	if err := query.First(&contact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+
+	const commerceSessionLimit = 20
+	var sessions []models.ChatbotSession
+	err = a.DB.Where("contact_id = ? AND organization_id = ?", contactID, orgID).
+		Where("status IN ?", []models.SessionStatus{
+			models.SessionStatusActive, models.SessionStatusCompleted, models.SessionStatusCancelled,
+		}).
+		Order("started_at DESC").
+		Limit(100).
+		Find(&sessions).Error
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load sessions", nil, "")
+	}
+
+	items := make([]ContactCommerceSessionItem, 0, commerceSessionLimit)
+	draftIDs := make([]uuid.UUID, 0)
+	for _, session := range sessions {
+		if !sessionHasCommerceHandoffData(session.SessionData) {
+			continue
+		}
+		items = append(items, ContactCommerceSessionItem{
+			SessionID:   session.ID,
+			StartedAt:   session.StartedAt,
+			Status:      session.Status,
+			SessionData: commerceSessionDisplayData(session.SessionData),
+		})
+		if draftID := sessionCommerceDraftID(session.SessionData); draftID != uuid.Nil {
+			draftIDs = append(draftIDs, draftID)
+		}
+		if len(items) >= commerceSessionLimit {
+			break
+		}
+	}
+
+	transferByDraft := map[uuid.UUID]models.AgentTransfer{}
+	if len(draftIDs) > 0 {
+		var transfers []models.AgentTransfer
+		if err := a.DB.Where(
+			"organization_id = ? AND contact_id = ? AND commerce_draft_id IN ?",
+			orgID, contactID, draftIDs,
+		).Find(&transfers).Error; err == nil {
+			for _, transfer := range transfers {
+				if transfer.CommerceDraftID == nil {
+					continue
+				}
+				existing, ok := transferByDraft[*transfer.CommerceDraftID]
+				if !ok || transfer.TransferredAt.After(existing.TransferredAt) {
+					transferByDraft[*transfer.CommerceDraftID] = transfer
+				}
+			}
+		}
+	}
+
+	for i := range items {
+		draftID := sessionCommerceDraftID(models.JSONB(items[i].SessionData))
+		if draftID == uuid.Nil {
+			continue
+		}
+		transfer, ok := transferByDraft[draftID]
+		if !ok {
+			continue
+		}
+		resp := AgentTransferResponse{
+			ID:              transfer.ID.String(),
+			ContactID:       transfer.ContactID.String(),
+			PhoneNumber:     transfer.PhoneNumber,
+			WhatsAppAccount: transfer.WhatsAppAccount,
+			Status:          transfer.Status,
+			Source:          transfer.Source,
+			Notes:           transfer.Notes,
+			Metadata:        transfer.Metadata,
+			TransferredAt:   transfer.TransferredAt.Format(time.RFC3339),
+			SLABreached:     transfer.SLA.Breached,
+			EscalationLevel: transfer.SLA.EscalationLevel,
+		}
+		if transfer.CommerceDraftID != nil {
+			id := transfer.CommerceDraftID.String()
+			resp.CommerceDraftID = &id
+		}
+		if transfer.SLA.ResponseDeadline != nil {
+			s := transfer.SLA.ResponseDeadline.Format(time.RFC3339)
+			resp.SLAResponseDeadline = &s
+		}
+		if transfer.SLA.ResolutionDeadline != nil {
+			s := transfer.SLA.ResolutionDeadline.Format(time.RFC3339)
+			resp.SLAResolutionDeadline = &s
+		}
+		if transfer.SLA.BreachedAt != nil {
+			s := transfer.SLA.BreachedAt.Format(time.RFC3339)
+			resp.SLABreachedAt = &s
+		}
+		if transfer.SLA.PickedUpAt != nil {
+			s := transfer.SLA.PickedUpAt.Format(time.RFC3339)
+			resp.PickedUpAt = &s
+		}
+		if transfer.SLA.ExpiresAt != nil {
+			s := transfer.SLA.ExpiresAt.Format(time.RFC3339)
+			resp.ExpiresAt = &s
+		}
+		items[i].Transfer = &resp
+	}
+
+	return r.SendEnvelope(ListContactCommerceSessionsResponse{Sessions: items})
+}
+
 // UpdateContactTagsRequest represents the request body for updating contact tags
 type UpdateContactTagsRequest struct {
 	Tags      []string `json:"tags"`

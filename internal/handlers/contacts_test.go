@@ -1767,3 +1767,168 @@ func TestApp_UpdateContactTags_AtomicOperationsPreserveOtherTags(t *testing.T) {
 	require.NoError(t, app.DB.First(&updated, contact.ID).Error)
 	assert.Equal(t, models.JSONBArray{"existing"}, updated.Tags)
 }
+
+func TestApp_ListContactCommerceSessions_PerSessionHandoff(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	oldDraftID := uuid.New()
+	newDraftID := uuid.New()
+	oldStarted := time.Now().Add(-2 * time.Hour)
+	newStarted := time.Now().Add(-30 * time.Minute)
+
+	oldSession := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusCancelled,
+		StartedAt:       oldStarted,
+		LastActivityAt:  oldStarted,
+		SessionData: models.JSONB{
+			"commerce_draft_id": oldDraftID.String(),
+			"commerce_handoff": map[string]any{
+				"draft_id": oldDraftID.String(),
+				"summary":  "Older handoff",
+				"cart": map[string]any{
+					"lines": []any{
+						map[string]any{"product_option": "111", "quantity": 1},
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(oldSession).Error)
+
+	newSession := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusCancelled,
+		StartedAt:       newStarted,
+		LastActivityAt:  newStarted,
+		SessionData: models.JSONB{
+			"commerce_draft_id": newDraftID.String(),
+			"commerce_handoff": map[string]any{
+				"draft_id": newDraftID.String(),
+				"summary":  "Newer handoff",
+				"cart": map[string]any{
+					"lines": []any{
+						map[string]any{"product_option": "222", "quantity": 2},
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(newSession).Error)
+
+	// Non-commerce session should be omitted.
+	plainSession := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusCompleted,
+		StartedAt:       time.Now().Add(-10 * time.Minute),
+		LastActivityAt:  time.Now(),
+		SessionData:     models.JSONB{"name": "no commerce"},
+	}
+	require.NoError(t, app.DB.Create(plainSession).Error)
+
+	oldTransfer := &models.AgentTransfer{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.TransferStatusResumed,
+		Source:          models.TransferSourceCommerce,
+		Notes:           "Older transfer",
+		Metadata: models.JSONB{
+			"kind": "commerce_handoff",
+			"cart": map[string]any{
+				"lines": []any{
+					map[string]any{"product_option": "111", "quantity": 1},
+				},
+			},
+		},
+		CommerceDraftID: &oldDraftID,
+		TransferredAt:   oldStarted,
+	}
+	require.NoError(t, app.DB.Create(oldTransfer).Error)
+
+	newTransfer := &models.AgentTransfer{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.TransferStatusActive,
+		Source:          models.TransferSourceCommerce,
+		Notes:           "Newer transfer",
+		Metadata: models.JSONB{
+			"kind": "commerce_handoff",
+			"cart": map[string]any{
+				"lines": []any{
+					map[string]any{"product_option": "222", "quantity": 2},
+				},
+			},
+		},
+		CommerceDraftID: &newDraftID,
+		TransferredAt:   newStarted,
+	}
+	require.NoError(t, app.DB.Create(newTransfer).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+
+	err := app.ListContactCommerceSessions(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data handlers.ListContactCommerceSessionsResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	require.Len(t, resp.Data.Sessions, 2)
+	assert.Equal(t, newSession.ID, resp.Data.Sessions[0].SessionID)
+	assert.Equal(t, oldSession.ID, resp.Data.Sessions[1].SessionID)
+
+	require.NotNil(t, resp.Data.Sessions[0].Transfer)
+	assert.Equal(t, newTransfer.ID.String(), resp.Data.Sessions[0].Transfer.ID)
+	require.NotNil(t, resp.Data.Sessions[1].Transfer)
+	assert.Equal(t, oldTransfer.ID.String(), resp.Data.Sessions[1].Transfer.ID)
+
+	newHandoff, ok := resp.Data.Sessions[0].SessionData["commerce_handoff"].(map[string]any)
+	require.True(t, ok)
+	newCart, ok := newHandoff["cart"].(map[string]any)
+	require.True(t, ok)
+	newLines, ok := newCart["lines"].([]any)
+	require.True(t, ok)
+	require.Len(t, newLines, 1)
+	newLine, ok := newLines[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "222", newLine["product_option"])
+
+	oldHandoff, ok := resp.Data.Sessions[1].SessionData["commerce_handoff"].(map[string]any)
+	require.True(t, ok)
+	oldCart, ok := oldHandoff["cart"].(map[string]any)
+	require.True(t, ok)
+	oldLines, ok := oldCart["lines"].([]any)
+	require.True(t, ok)
+	require.Len(t, oldLines, 1)
+	oldLine, ok := oldLines[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "111", oldLine["product_option"])
+}
