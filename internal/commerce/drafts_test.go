@@ -131,6 +131,49 @@ func TestDraftCreateReloadsConcurrentActiveOwner(t *testing.T) {
 	assert.Equal(t, first.ID, concurrent.ID)
 }
 
+func TestAbandonActiveAllowsFreshDraft(t *testing.T) {
+	repo, _ := testDraftRepository(t)
+	old := newDraft()
+	old.CapturedFields = models.JSONB{"writing": "from previous session"}
+	old.Addons = models.JSONBArray{map[string]any{"addon": 9, "quantity": 1}}
+	require.NoError(t, repo.Create(old))
+
+	require.NoError(t, repo.AbandonActive(old.OrganizationID, old.ContactID, old.WhatsAppAccount, old.StoreID))
+
+	saved, err := repo.Get(old.ID, old.OrganizationID)
+	require.NoError(t, err)
+	assert.Equal(t, "abandoned", saved.Status)
+	assert.Nil(t, saved.ActiveOwnerKey)
+
+	fresh := newDraft()
+	fresh.OrganizationID = old.OrganizationID
+	fresh.ContactID = old.ContactID
+	fresh.WhatsAppAccount = old.WhatsAppAccount
+	fresh.StoreID = old.StoreID
+	require.NoError(t, repo.Create(fresh))
+	assert.NotEqual(t, old.ID, fresh.ID)
+	assert.Empty(t, fresh.CapturedFields)
+	assert.Empty(t, fresh.Addons)
+
+	active, err := repo.LatestActive(old.OrganizationID, old.ContactID, old.WhatsAppAccount, old.StoreID)
+	require.NoError(t, err)
+	assert.Equal(t, fresh.ID, active.ID)
+}
+
+func TestAbandonActiveLeavesPendingPayment(t *testing.T) {
+	repo, _ := testDraftRepository(t)
+	draft := newDraft()
+	require.NoError(t, repo.Create(draft))
+	draft.Status = "pending_payment"
+	require.NoError(t, repo.Save(draft, 1))
+
+	require.NoError(t, repo.AbandonActive(draft.OrganizationID, draft.ContactID, draft.WhatsAppAccount, draft.StoreID))
+
+	saved, err := repo.Get(draft.ID, draft.OrganizationID)
+	require.NoError(t, err)
+	assert.Equal(t, "pending_payment", saved.Status)
+}
+
 func TestCompleteSubmissionIsRecoverableAndIdempotent(t *testing.T) {
 	repo, _ := testDraftRepository(t)
 	draft := newDraft()

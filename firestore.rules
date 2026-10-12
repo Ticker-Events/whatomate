@@ -2,16 +2,39 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function orgMatches(orgId) {
+      return signedIn() && request.auth.token.org_id == orgId;
+    }
+
+    function contactOrgId(contactId) {
+      return get(/databases/$(database)/documents/contacts/$(contactId)).data.organizationId;
+    }
+
     match /messages/{messageId} {
-      allow read: if request.auth != null
-        && request.auth.token.org_id == resource.data.organizationId;
+      allow read: if orgMatches(resource.data.organizationId);
       allow write: if false;
     }
 
     match /contacts/{contactId} {
-      allow read: if request.auth != null
-        && request.auth.token.org_id == resource.data.organizationId;
+      allow read: if orgMatches(resource.data.organizationId);
       allow write: if false;
+
+      // Coded-flow session archives for Chat Summary Copy Log (tiqr.store).
+      // Org is taken from the parent contact so older archive docs without
+      // organizationId still read correctly.
+      match /sessionArchives/{sessionId} {
+        allow read: if orgMatches(contactOrgId(contactId));
+        allow write: if false;
+
+        match /turns/{turnId} {
+          allow read: if orgMatches(contactOrgId(contactId));
+          allow write: if false;
+        }
+      }
     }
   }
 }

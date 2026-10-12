@@ -10,7 +10,6 @@ import (
 	draftrepo "github.com/shridarpatil/whatomate/internal/commerce"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
-	"gorm.io/gorm"
 )
 
 const commerceDraftIDKey = "commerce_draft_id"
@@ -27,6 +26,9 @@ func (a *App) ensureCommerceDraft(contact *models.Contact, session *models.Chatb
 	if a == nil || a.DB == nil || contact == nil || session == nil || settings == nil {
 		return nil, errors.New("durable checkout is not configured")
 	}
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
 	repo := draftrepo.NewDraftRepository(a.DB)
 	if id := commerceDraftID(session); id != uuid.Nil {
 		draft, err := repo.Get(id, session.OrganizationID)
@@ -36,47 +38,40 @@ func (a *App) ensureCommerceDraft(contact *models.Contact, session *models.Chatb
 		return draft, nil
 	}
 	storeID := strings.TrimSpace(settings.AI.CommerceStoreID)
-	draft, err := repo.LatestActive(session.OrganizationID, contact.ID, session.WhatsAppAccount, storeID)
-	if err == nil {
-		session.SessionData[commerceDraftIDKey] = draft.ID.String()
-		hydrateSessionFromDraft(session, draft)
-		return draft, nil
+
+	// Never hydrate LatestActive onto a session that has no draft yet — that
+	// leaked captured fields / addons / cart from a previous chatbot session.
+	if err := repo.AbandonActive(session.OrganizationID, contact.ID, session.WhatsAppAccount, storeID); err != nil {
+		return nil, fmt.Errorf("abandon previous commerce draft: %w", err)
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	draft = &models.CommerceDraft{
+
+	draft := &models.CommerceDraft{
 		BaseModel:       models.BaseModel{ID: uuid.New()},
 		OrganizationID:  session.OrganizationID,
 		ContactID:       contact.ID,
 		WhatsAppAccount: session.WhatsAppAccount,
 		StoreID:         storeID,
-		Cart:            commerceDraftCart(session),
-		Addons:          tiqrecommerce.HandoffDisplayAddons(session, nil),
-		CapturedFields:  jsonMapFromSession(session, "commerce_captured_fields"),
-		Notes:           jsonMapFromSession(session, "commerce_notes"),
+		Cart:            models.JSONB{},
+		Addons:          models.JSONBArray{},
+		CapturedFields:  models.JSONB{},
+		Notes:           models.JSONB{},
 	}
-	if categoryID, err := strconv.Atoi(selectedCategoryID(session)); err == nil && categoryID > 0 {
-		draft.SelectedCategoryID = &categoryID
-	}
-	createdID := draft.ID
 	if err := repo.Create(draft); err != nil {
 		return nil, err
 	}
+	// Create may reload a concurrent owner (e.g. pending_payment). Bind the id
+	// only — do not copy cart/capture/addons into this session.
 	session.SessionData[commerceDraftIDKey] = draft.ID.String()
-	if createdID != uuid.Nil && createdID != draft.ID {
-		hydrateSessionFromDraft(session, draft)
-	}
 	return draft, nil
 }
 
+// recoverCommerceDraft used to hydrate LatestActive draft contents into any
+// session missing commerce_draft_id. That leaked prior-session captured fields
+// and addons into new chats. Drafts are created on demand via ensureCommerceDraft.
 func (a *App) recoverCommerceDraft(contact *models.Contact, session *models.ChatbotSession, settings *models.ChatbotSettings) {
-	if !commerceConfigured(settings.AI) || commerceDraftID(session) != uuid.Nil {
-		return
-	}
-	if _, err := a.ensureCommerceDraft(contact, session, settings); err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		a.Log.Warn("recover commerce draft failed", "error", err)
-	}
+	_ = contact
+	_ = session
+	_ = settings
 }
 
 func (a *App) recordCommerceMessage(session *models.ChatbotSession, messageID string) bool {

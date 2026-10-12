@@ -112,6 +112,25 @@ func (r *DraftRepository) LatestActive(organizationID, contactID uuid.UUID, acco
 	return &draft, err
 }
 
+// AbandonActive closes browsing drafts for this contact/account/store so a new
+// chatbot session can create a clean draft without inheriting cart/capture state.
+// Leaves submitting/pending_payment drafts alone.
+func (r *DraftRepository) AbandonActive(organizationID, contactID uuid.UUID, account, storeID string) error {
+	if r == nil || r.db == nil {
+		return errors.New("commerce draft repository is not configured")
+	}
+	return r.db.Model(&models.CommerceDraft{}).
+		Where(
+			"organization_id = ? AND contact_id = ? AND whats_app_account = ? AND store_id = ? AND status = ?",
+			organizationID, contactID, account, storeID, "active",
+		).
+		Updates(map[string]any{
+			"status":           "abandoned",
+			"active_owner_key": nil,
+			"version":          gorm.Expr("version + 1"),
+		}).Error
+}
+
 // Save performs an optimistic update. Callers must supply the version they read.
 func (r *DraftRepository) Save(draft *models.CommerceDraft, expectedVersion int64) error {
 	if draft == nil || expectedVersion < 1 {

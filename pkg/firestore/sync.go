@@ -144,10 +144,12 @@ func (c *Client) SyncSessionArchive(ctx context.Context, meta SessionArchiveDoc,
 		"session_id":      meta.SessionID,
 		"contact_id":      meta.ContactID,
 		"organization_id": meta.OrganizationID,
-		"started_at":      meta.StartedAt,
-		"status":          meta.Status,
-		"turn_count":      meta.TurnCount,
-		"updated_at":      time.Now().UTC().Format(time.RFC3339),
+		// CamelCase matches contacts/messages and firestore.rules org checks.
+		"organizationId": meta.OrganizationID,
+		"started_at":     meta.StartedAt,
+		"status":         meta.Status,
+		"turn_count":     meta.TurnCount,
+		"updated_at":     time.Now().UTC().Format(time.RFC3339),
 	}
 	if meta.EndedAt != "" {
 		data["ended_at"] = meta.EndedAt
