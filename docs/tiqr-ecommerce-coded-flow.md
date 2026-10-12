@@ -132,7 +132,7 @@ Code: `runEarlyHandoff` in `internal/handlers/tiqrecommerce/early_handoff.go`.
 1. Intro: `This is a custom {name} request — I’ll collect a few details and connect you with our team.`
 2. Required capture fields from that collection (same prompts as the cart path). Checkout phrases do not divert away from these questions.
 3. Add-ons: shared numbered catalog add-on step when the product has catalog add-ons. Products with no catalog add-ons skip this step.
-4. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup or delivery Meta flow ID from the account's coded-flow binding (`pickup_flow_id` / `delivery_flow_id`), falling back to `1484028330223507` (pickup: name, email, phone) or `1557965846018132` (delivery: name, phone, address). Flow fields are copied onto the commerce draft address snapshot and notes.
+4. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup or delivery Meta flow ID from the account's coded-flow binding (`pickup_flow_id` / `delivery_flow_id`), falling back to `1484028330223507` (pickup: name, email, phone) or `1557965846018132` (delivery: name, phone, address). Prefill uses the same phone and (for delivery) reverse-geocoded address data as checkout. Flow fields are copied onto the commerce draft address snapshot and notes; blank email falls back to `support+<digits>@tiqr.events`.
 5. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. Before the draft sync, capture answers are formatted with `CodedOrderNotes` into `commerce_notes.order_notes` (same string as checkout orders), including product/option headers from the staged early-handoff cart line. The cart and order paths are skipped.
 
 Fulfillment time (`list_fulfillment_slots` / `propose_fulfillment_time`) is skipped for now. Pickup vs delivery and the location pin already ran earlier in the buy flow.
@@ -223,11 +223,26 @@ Then buttons `add_more`, `edit_cart`, and `checkout`. Add more returns to the co
 | `PICKUP_FROM_STORE` (or empty) | `1484028330223507` | `customer_name`, `customer_email`, `customer_phone`, `customer_notes` | Name, email, and phone. No address |
 | `DELIVERY_TO_LOCATION` | `1557965846018132` | Same contact fields plus address lines | Name, phone, and address |
 
+#### Flow prefill
+
+When the form is sent, `flow_action_payload.data` may include init values. Keys are intersected with the first screen's `data` schema on the stored `WhatsAppFlow` row; unknown keys are dropped so Meta does not reject the message. Until the published flow declares those keys and each `TextInput` has `"init-value": "${data.<name>}"`, no data is sent (same as before).
+
+| Field | Source |
+| --- | --- |
+| `customer_phone` | Session WhatsApp number (`PhoneNumber` / `phone_number`), pickup and delivery |
+| `pincode`, `city`, `state`, `country` | Delivery only: Google Geocoding reverse lookup of `delivery_latitude` / `delivery_longitude` using the store's `ai_commerce_maps_api_key` from Chatbot → AI → Commerce settings. Cached on the session as `delivery_geocode` so replays do not call Google again |
+
+Missing API key or a failed lookup still opens the form; phone may be prefilled and address fields stay empty for the customer to type.
+
+Published Meta flows are immutable. To enable prefill (and optional email): clone the pickup/delivery flow, add screen `data` string fields with `__example__` values, set matching `init-value` bindings, set `customer_email` `required: false`, publish, point the coded-flow binding at the new Meta flow ids, and save the JSON on the `WhatsAppFlow` row.
+
+Early handoff uses the same `AskFlow` prefill path.
+
 `pickupOrderParams` builds `create_order`:
 
 | Param | Source |
 | --- | --- |
-| `email` | `customer_email` or `email` if it matches a simple email. Phone fields are skipped. Other session values are scanned for an email |
+| `email` | `customer_email` or `email` if it matches a simple email. Phone fields are skipped. Other session values are scanned for an email. When still empty: `support+` + digits of `customer_phone` / WhatsApp number + `@tiqr.events` |
 | `phone_number` | `customer_phone`, `phone`, or `phone_number` when present |
 | `items` | `tiqr_cart` lines reduced to `product_option` and `quantity`. The TiQR client turns those strings into integers |
 | `addons` | `commerce_addons` reduced to `addon` and `quantity` when any were selected. Display names are not sent |
@@ -400,7 +415,7 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 
 9. **Empty store data is a transfer, not a retry inside the session.** `get_store` or `list_collections` failure completes the session. A later keyword can start a new session and call TiQR again. Within one session those calls are not retried, because the flow has already ended.
 
-10. **Fallback product image; Meta flow IDs are account-configurable.** Checkout and early handoff open the WhatsApp Flow configured on the coded-flow binding for that WhatsApp account (`pickup_flow_id` / `delivery_flow_id` under Settings → Coded flows → TiQR Ecommerce). When unset, pickup defaults to `1484028330223507` and delivery to `1557965846018132`. The fallback product photo is still one DigitalOcean Spaces URL (`FallbackMedia`); a dead image URL shows the wrong photo.
+10. **Fallback product image; Meta flow IDs are account-configurable.** Checkout and early handoff open the WhatsApp Flow configured on the coded-flow binding for that WhatsApp account (`pickup_flow_id` / `delivery_flow_id` under Settings → Coded flows → TiQR Ecommerce). When unset, pickup defaults to `1484028330223507` and delivery to `1557965846018132`. Prefill (`customer_phone` and delivery address from the pin) only appears after those published flows declare matching screen `data` keys and `init-value` bindings, and the `WhatsAppFlow` row stores that JSON. The fallback product photo is still one DigitalOcean Spaces URL (`FallbackMedia`); a dead image URL shows the wrong photo.
 
 11. **Language is sticky.** The first non-empty intent language wins for the session. A later message in another language does not replace it, so translation keeps using the first label.
 

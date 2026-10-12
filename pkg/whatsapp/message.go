@@ -769,8 +769,9 @@ func ButtonURLParamsToComponents(buttonParams map[string]string, templateButtons
 // SendFlowMessage sends an interactive WhatsApp Flow message
 // flowID is the Meta Flow ID, headerText is optional header, bodyText is the message body,
 // ctaText is the button text, flowToken is a unique token for tracking the flow response,
-// and firstScreen is the name of the first screen to navigate to
-func (c *Client) SendFlowMessage(ctx context.Context, account *Account, rcpt Recipient, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string) (string, error) {
+// firstScreen is the name of the first screen to navigate to, and data is optional
+// screen init values for flow_action_payload.data (omit when nil/empty).
+func (c *Client) SendFlowMessage(ctx context.Context, account *Account, rcpt Recipient, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string, data map[string]string) (string, error) {
 	if flowID == "" {
 		return "", fmt.Errorf("flow ID is required")
 	}
@@ -792,6 +793,7 @@ func (c *Client) SendFlowMessage(ctx context.Context, account *Account, rcpt Rec
 		ctaText = ctaText[:20]
 	}
 
+	payloadData := FlowActionPayload(firstScreen, data)
 	interactive := map[string]any{
 		"type": "flow",
 		"body": map[string]any{
@@ -805,9 +807,7 @@ func (c *Client) SendFlowMessage(ctx context.Context, account *Account, rcpt Rec
 				"flow_id":              flowID,
 				"flow_cta":             ctaText,
 				"flow_action":          "navigate",
-				"flow_action_payload": map[string]any{
-					"screen": firstScreen,
-				},
+				"flow_action_payload":  payloadData,
 			},
 		},
 	}
@@ -849,6 +849,26 @@ func (c *Client) SendFlowMessage(ctx context.Context, account *Account, rcpt Rec
 	messageID := resp.Messages[0].ID
 	c.Log.Info("Flow message sent", "message_id", messageID, "phone", rcpt.Phone, "flow_id", flowID)
 	return messageID, nil
+}
+
+// FlowActionPayload builds the navigate payload for a WhatsApp Flow message.
+// Empty data keeps the payload as {screen} only so Meta accepts flows without a data schema.
+func FlowActionPayload(firstScreen string, data map[string]string) map[string]any {
+	out := map[string]any{"screen": firstScreen}
+	if len(data) == 0 {
+		return out
+	}
+	payload := make(map[string]any, len(data))
+	for k, v := range data {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			continue
+		}
+		payload[k] = v
+	}
+	if len(payload) > 0 {
+		out["data"] = payload
+	}
+	return out
 }
 
 // SendTemplateMessage sends a template message with optional components (header, body, buttons, etc.)

@@ -68,6 +68,8 @@ type AIConfig struct {
 	CommerceMCPAPIKey string `gorm:"column:ai_commerce_mcp_api_key;type:text" json:"-"`                // optional X-MCP-API-Key
 	CommerceRESTURL   string `gorm:"column:ai_commerce_rest_url;size:500" json:"ai_commerce_rest_url"` // ticker-events origin for buyer REST, e.g. https://api.example.com
 	CommerceStoreID   string `gorm:"column:ai_commerce_store_id;size:50" json:"ai_commerce_store_id"`
+	// CommerceMapsAPIKey reverse-geocodes delivery pins for WhatsApp Flow address prefill.
+	CommerceMapsAPIKey string `gorm:"column:ai_commerce_maps_api_key;type:text" json:"-"` // Google Maps Geocoding API key (encrypted)
 
 	// Cached AI welcome for commerce new-session greetings (TTL enforced in handlers)
 	CommerceWelcomeMessage     string     `gorm:"column:ai_commerce_welcome_message;type:text" json:"ai_commerce_welcome_message"`
@@ -148,6 +150,7 @@ func (s *ChatbotSettings) DecryptSecrets(encryptionKey string) {
 		encryptionKey,
 		&s.AI.APIKey,
 		&s.AI.CommerceMCPAPIKey,
+		&s.AI.CommerceMapsAPIKey,
 		&s.AI.TypeSafeAPIKey,
 		&s.AI.GatewayAPIKey,
 	)

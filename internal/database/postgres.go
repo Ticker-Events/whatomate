@@ -167,10 +167,11 @@ func EncryptLegacyChatbotSecrets(db *gorm.DB, encryptionKey string) error {
 		for i := range settings {
 			updates := map[string]any{}
 			for column, value := range map[string]string{
-				"ai_api_key":              settings[i].AI.APIKey,
-				"ai_commerce_mcp_api_key": settings[i].AI.CommerceMCPAPIKey,
-				"ai_typesafe_api_key":     settings[i].AI.TypeSafeAPIKey,
-				"ai_gateway_api_key":      settings[i].AI.GatewayAPIKey,
+				"ai_api_key":               settings[i].AI.APIKey,
+				"ai_commerce_mcp_api_key":  settings[i].AI.CommerceMCPAPIKey,
+				"ai_commerce_maps_api_key": settings[i].AI.CommerceMapsAPIKey,
+				"ai_typesafe_api_key":      settings[i].AI.TypeSafeAPIKey,
+				"ai_gateway_api_key":       settings[i].AI.GatewayAPIKey,
 			} {
 				if value == "" || appcrypto.IsEncrypted(value) {
 					continue

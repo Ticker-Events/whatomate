@@ -38,6 +38,7 @@ type ChatbotSettingsResponse struct {
 	AICommerceRESTURL            string                `json:"ai_commerce_rest_url"`
 	AICommerceStoreID            string                `json:"ai_commerce_store_id"`
 	AICommerceMCPAPIKeySet       bool                  `json:"ai_commerce_mcp_api_key_set"`
+	AICommerceMapsAPIKeySet      bool                  `json:"ai_commerce_maps_api_key_set"`
 	AICommerceWelcomeMessage     string                `json:"ai_commerce_welcome_message"`
 	AICommerceWelcomeGeneratedAt *time.Time            `json:"ai_commerce_welcome_generated_at"`
 	AICommerceWelcomeStale       bool                  `json:"ai_commerce_welcome_stale"`
@@ -204,6 +205,7 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		AICommerceRESTURL:            settings.AI.CommerceRESTURL,
 		AICommerceStoreID:            settings.AI.CommerceStoreID,
 		AICommerceMCPAPIKeySet:       strings.TrimSpace(settings.AI.CommerceMCPAPIKey) != "",
+		AICommerceMapsAPIKeySet:      strings.TrimSpace(settings.AI.CommerceMapsAPIKey) != "",
 		AICommerceWelcomeMessage:     settings.AI.CommerceWelcomeMessage,
 		AICommerceWelcomeGeneratedAt: settings.AI.CommerceWelcomeGeneratedAt,
 		AICommerceWelcomeStale:       commerceWelcomeStale(settings.AI),
@@ -392,6 +394,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		AICommerceEnabled            *bool                  `json:"ai_commerce_enabled"`
 		AICommerceMCPURL             *string                `json:"ai_commerce_mcp_url"`
 		AICommerceMCPAPIKey          *string                `json:"ai_commerce_mcp_api_key"`
+		AICommerceMapsAPIKey         *string                `json:"ai_commerce_maps_api_key"`
 		AICommerceRESTURL            *string                `json:"ai_commerce_rest_url"`
 		AICommerceStoreID            *string                `json:"ai_commerce_store_id"`
 		AIIntentProvider             *models.IntentProvider `json:"ai_intent_provider"`
@@ -471,7 +474,8 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	aiTouched := req.AIEnabled != nil || req.AIProvider != nil || req.AIAPIKey != nil ||
 		req.AIModel != nil || req.AIMaxTokens != nil || req.AISystemPrompt != nil ||
 		req.AICommerceEnabled != nil || req.AICommerceMCPURL != nil ||
-		req.AICommerceMCPAPIKey != nil || req.AICommerceRESTURL != nil ||
+		req.AICommerceMCPAPIKey != nil || req.AICommerceMapsAPIKey != nil ||
+		req.AICommerceRESTURL != nil ||
 		req.AICommerceStoreID != nil ||
 		req.AIIntentProvider != nil ||
 		req.AITranslateProvider != nil || req.AIGuideProvider != nil ||
@@ -579,6 +583,15 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		}
 		settings.AI.CommerceMCPAPIKey = encrypted
 		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_commerce_mcp_api_key"))
+	}
+	if req.AICommerceMapsAPIKey != nil && *req.AICommerceMapsAPIKey != "" {
+		encrypted, err := crypto.Encrypt(*req.AICommerceMapsAPIKey, a.Config.App.EncryptionKey)
+		if err != nil {
+			a.Log.Error("Failed to encrypt commerce Maps API key", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save settings", nil, "")
+		}
+		settings.AI.CommerceMapsAPIKey = encrypted
+		aiSecretChanges = append(aiSecretChanges, maskedSecretChange("ai_commerce_maps_api_key"))
 	}
 	if req.AICommerceRESTURL != nil {
 		settings.AI.CommerceRESTURL = strings.TrimRight(strings.TrimSpace(*req.AICommerceRESTURL), "/")

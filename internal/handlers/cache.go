@@ -41,10 +41,11 @@ const (
 // chatbotSettingsCache is used for caching since AI secret fields have json:"-" tags
 type chatbotSettingsCache struct {
 	models.ChatbotSettings
-	AIAPIKey          string `json:"ai_api_key_cache"`
-	CommerceMCPAPIKey string `json:"ai_commerce_mcp_api_key_cache"`
-	TypeSafeAPIKey    string `json:"ai_typesafe_api_key_cache"`
-	GatewayAPIKey     string `json:"ai_gateway_api_key_cache"`
+	AIAPIKey           string `json:"ai_api_key_cache"`
+	CommerceMCPAPIKey  string `json:"ai_commerce_mcp_api_key_cache"`
+	CommerceMapsAPIKey string `json:"ai_commerce_maps_api_key_cache"`
+	TypeSafeAPIKey     string `json:"ai_typesafe_api_key_cache"`
+	GatewayAPIKey      string `json:"ai_gateway_api_key_cache"`
 }
 
 // getChatbotSettingsCached retrieves chatbot settings from cache or database
@@ -60,6 +61,7 @@ func (a *App) getChatbotSettingsCached(orgID uuid.UUID, whatsAppAccount string) 
 			// Restore secrets from the cache wrapper
 			cacheData.AI.APIKey = cacheData.AIAPIKey
 			cacheData.AI.CommerceMCPAPIKey = cacheData.CommerceMCPAPIKey
+			cacheData.AI.CommerceMapsAPIKey = cacheData.CommerceMapsAPIKey
 			cacheData.AI.TypeSafeAPIKey = cacheData.TypeSafeAPIKey
 			cacheData.AI.GatewayAPIKey = cacheData.GatewayAPIKey
 			cacheData.DecryptSecrets(a.Config.App.EncryptionKey)
@@ -80,11 +82,12 @@ func (a *App) getChatbotSettingsCached(orgID uuid.UUID, whatsAppAccount string) 
 
 	// Cache the result (include secrets explicitly since they have json:"-" tags)
 	cacheData := chatbotSettingsCache{
-		ChatbotSettings:   settings,
-		AIAPIKey:          settings.AI.APIKey,
-		CommerceMCPAPIKey: settings.AI.CommerceMCPAPIKey,
-		TypeSafeAPIKey:    settings.AI.TypeSafeAPIKey,
-		GatewayAPIKey:     settings.AI.GatewayAPIKey,
+		ChatbotSettings:    settings,
+		AIAPIKey:           settings.AI.APIKey,
+		CommerceMCPAPIKey:  settings.AI.CommerceMCPAPIKey,
+		CommerceMapsAPIKey: settings.AI.CommerceMapsAPIKey,
+		TypeSafeAPIKey:     settings.AI.TypeSafeAPIKey,
+		GatewayAPIKey:      settings.AI.GatewayAPIKey,
 	}
 	if data, err := json.Marshal(cacheData); err == nil {
 		a.Redis.Set(ctx, cacheKey, data, settingsCacheTTL)

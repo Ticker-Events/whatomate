@@ -135,6 +135,8 @@ const aiSettings = ref({
   ai_commerce_enabled: false,
   ai_commerce_mcp_url: '',
   ai_commerce_mcp_api_key: '',
+  ai_commerce_maps_api_key: '',
+  ai_commerce_maps_api_key_set: false,
   ai_commerce_rest_url: '',
   ai_commerce_store_id: '',
   ai_commerce_welcome_message: '',
@@ -312,6 +314,8 @@ onMounted(async () => {
         ai_commerce_enabled: aiCommerceEnabledValue,
         ai_commerce_mcp_url: chatbotData.settings.ai_commerce_mcp_url || chatbotData.settings.ai_commerce_base_url || '',
         ai_commerce_mcp_api_key: '',
+        ai_commerce_maps_api_key: '',
+        ai_commerce_maps_api_key_set: chatbotData.settings.ai_commerce_maps_api_key_set === true,
         ai_commerce_rest_url: chatbotData.settings.ai_commerce_rest_url || '',
         ai_commerce_store_id: chatbotData.settings.ai_commerce_store_id || '',
         ai_commerce_welcome_message: chatbotData.settings.ai_commerce_welcome_message || '',
@@ -445,6 +449,9 @@ async function saveAISettings() {
     if (aiSettings.value.ai_commerce_mcp_api_key) {
       payload.ai_commerce_mcp_api_key = aiSettings.value.ai_commerce_mcp_api_key
     }
+    if (aiSettings.value.ai_commerce_maps_api_key) {
+      payload.ai_commerce_maps_api_key = aiSettings.value.ai_commerce_maps_api_key
+    }
     if (aiSettings.value.ai_typesafe_api_key) {
       payload.ai_typesafe_api_key = aiSettings.value.ai_typesafe_api_key
     }
@@ -455,6 +462,10 @@ async function saveAISettings() {
     toast.success(t('chatbotSettings.aiSettingsSaved'))
     aiSettings.value.ai_api_key = ''
     aiSettings.value.ai_commerce_mcp_api_key = ''
+    if (aiSettings.value.ai_commerce_maps_api_key) {
+      aiSettings.value.ai_commerce_maps_api_key_set = true
+    }
+    aiSettings.value.ai_commerce_maps_api_key = ''
     aiSettings.value.ai_typesafe_api_key = ''
     aiSettings.value.ai_gateway_api_key = ''
     // Commerce URL/store changes clear the cached welcome — reload those fields.
@@ -1156,6 +1167,17 @@ function removeEscalationUser(userId: string) {
                         class="w-48"
                       />
                       <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceStoreIdHint') }}</p>
+                    </div>
+                    <div class="space-y-2">
+                      <Label>{{ $t('chatbotSettings.commerceMapsApiKey') }}</Label>
+                      <Input
+                        v-model="aiSettings.ai_commerce_maps_api_key"
+                        type="password"
+                        :placeholder="aiSettings.ai_commerce_maps_api_key_set
+                          ? $t('chatbotSettings.commerceMapsApiKeyPlaceholderSet')
+                          : $t('chatbotSettings.commerceMapsApiKeyPlaceholder')"
+                      />
+                      <p class="text-xs text-muted-foreground">{{ $t('chatbotSettings.commerceMapsApiKeyHint') }}</p>
                     </div>
 
                     <div class="space-y-2 rounded-md border p-3">

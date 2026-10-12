@@ -31,7 +31,7 @@ type Config struct {
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
 	Firebase     FirebaseConfig     `koanf:"firebase"`
-	CodedFlow    CodedFlowConfig    `koanf:"codedflow"`
+	CodedFlow CodedFlowConfig `koanf:"codedflow"`
 }
 
 // CodedFlowConfig controls coded-flow runtime behaviour.

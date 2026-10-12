@@ -74,11 +74,12 @@ type OutgoingMessageRequest struct {
 	ButtonURLParams     map[string]string // Button index (as string) -> dynamic URL param value
 
 	// WhatsApp Flow messages
-	FlowID          string // Meta Flow ID
-	FlowHeader      string // Optional header text for flow
-	FlowCTA         string // CTA button text (max 20 chars)
-	FlowToken       string // Unique token for flow response tracking
-	FlowFirstScreen string // First screen name to navigate to
+	FlowID          string            // Meta Flow ID
+	FlowHeader      string            // Optional header text for flow
+	FlowCTA         string            // CTA button text (max 20 chars)
+	FlowToken       string            // Unique token for flow response tracking
+	FlowFirstScreen string            // First screen name to navigate to
+	FlowData        map[string]string // Optional flow_action_payload.data init values
 
 	// Reply context
 	ReplyToMessage *models.Message
@@ -319,7 +320,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 			if req.FlowID == "" {
 				return "", fmt.Errorf("flow ID is required for flow messages")
 			}
-			return client.SendFlowMessage(sendCtx, waAccount, rcpt, req.FlowID, req.FlowHeader, req.BodyText, req.FlowCTA, req.FlowToken, req.FlowFirstScreen)
+			return client.SendFlowMessage(sendCtx, waAccount, rcpt, req.FlowID, req.FlowHeader, req.BodyText, req.FlowCTA, req.FlowToken, req.FlowFirstScreen, req.FlowData)
 
 		default:
 			return "", fmt.Errorf("unsupported message type: %s", req.Type)

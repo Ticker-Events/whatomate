@@ -1171,7 +1171,7 @@ func (a *App) sendAndSaveCTAURLButton(account *models.WhatsAppAccount, contact *
 
 // sendAndSaveFlowMessage sends a WhatsApp Flow message and saves it to the database
 // Uses the unified SendOutgoingMessage for consistent behavior
-func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *models.Contact, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string) error {
+func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *models.Contact, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string, data map[string]string) error {
 	ctx := context.Background()
 	_, err := a.SendOutgoingMessage(ctx, OutgoingMessageRequest{
 		Account:         account,
@@ -1183,6 +1183,7 @@ func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *m
 		FlowCTA:         ctaText,
 		FlowToken:       flowToken,
 		FlowFirstScreen: firstScreen,
+		FlowData:        data,
 	}, ChatbotSendOptions())
 	return err
 }

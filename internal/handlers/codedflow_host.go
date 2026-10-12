@@ -14,6 +14,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/pkg/geocode"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
 )
 
@@ -257,6 +258,30 @@ func (a *App) CodedOrderRetries() int {
 }
 
 func (a *App) OrderRetryCount() int { return a.CodedOrderRetries() }
+
+// ReverseGeocode looks up pincode/city/state/country for a delivery pin
+// using the store's Google Maps API key from chatbot commerce settings.
+func (a *App) ReverseGeocode(orgID uuid.UUID, accountName string, lat, lng float64) map[string]string {
+	if a == nil {
+		return nil
+	}
+	settings, err := a.getChatbotSettingsCached(orgID, accountName)
+	if err != nil || settings == nil {
+		return nil
+	}
+	key := strings.TrimSpace(settings.AI.CommerceMapsAPIKey)
+	if key == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	addr, err := geocode.ReverseGoogle(ctx, a.httpClient(), key, lat, lng)
+	if err != nil {
+		a.Log.Warn("reverse geocode failed", "error", err, "lat", lat, "lng", lng)
+		return nil
+	}
+	return addr.Map()
+}
 
 var lookupLatestOrder = defaultLookupLatestOrder
 

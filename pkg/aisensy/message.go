@@ -335,7 +335,7 @@ func (c *Client) SendTemplateMessage(ctx context.Context, account *whatsapp.Acco
 }
 
 // SendFlowMessage sends a WhatsApp Flow interactive message via AiSensy.
-func (c *Client) SendFlowMessage(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string) (string, error) {
+func (c *Client) SendFlowMessage(ctx context.Context, account *whatsapp.Account, rcpt whatsapp.Recipient, flowID, headerText, bodyText, ctaText, flowToken, firstScreen string, data map[string]string) (string, error) {
 	if ctaText == "" {
 		ctaText = "Open"
 	}
@@ -360,7 +360,7 @@ func (c *Client) SendFlowMessage(ctx context.Context, account *whatsapp.Account,
 				"flow_id":              flowID,
 				"flow_cta":             ctaText,
 				"flow_action":          "navigate",
-				"flow_action_payload":  map[string]any{"screen": firstScreen},
+				"flow_action_payload":  whatsapp.FlowActionPayload(firstScreen, data),
 			},
 		},
 	}

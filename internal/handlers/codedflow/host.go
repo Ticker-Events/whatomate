@@ -116,6 +116,11 @@ type Host interface {
 	CodedOrderRetries() int
 	LookupLatestOrder(account *models.WhatsAppAccount, session *models.ChatbotSession) (map[string]any, error)
 
+	// ReverseGeocode returns pincode/city/state/country for a lat/lng pin.
+	// Uses the store's commerce Maps API key from chatbot settings.
+	// Empty map when the key is unset or the lookup fails.
+	ReverseGeocode(orgID uuid.UUID, accountName string, lat, lng float64) map[string]string
+
 	// ResolveEcommerceMetaFlowID returns the Meta WhatsApp Flow ID for
 	// pickup (delivery=false) or delivery (delivery=true) customer-details
 	// forms. Falls back to built-in defaults when unset.

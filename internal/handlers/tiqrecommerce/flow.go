@@ -2173,6 +2173,12 @@ func contextEmail(data map[string]any) string {
 			return text
 		}
 	}
+	// Optional form field: when the customer leaves email blank, place the
+	// order with support+<whatsapp digits>@tiqr.events.
+	phone := contextValue(data, "customer_phone", "phone", "phone_number")
+	if email := fallbackSupportEmail(phone); email != "" {
+		return email
+	}
 	return ""
 }
 
@@ -2340,6 +2346,7 @@ func checkout(c *Conv) error {
 		CTA:    "Enter details",
 		Header: "Your details",
 		Body:   detailsBody,
+		Data:   detailsFlowPrefill(c),
 		Step: codedflow.StepNote{
 			Doing:  "The customer is asked to submit the details form.",
 			Expect: "A typed message is not the form.",

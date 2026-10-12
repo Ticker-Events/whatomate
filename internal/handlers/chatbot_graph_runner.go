@@ -1149,8 +1149,9 @@ func (a *App) execChatWhatsAppFlow(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 		}
 	}
 
+	flowData := filterFlowActionData(waFlow.FlowJSON, waFlow.Screens, firstScreen, stringMapFromConfig(node.Config, "data"))
 	flowToken := fmt.Sprintf("chatbot_%s_%s_%d", ctx.session.ID.String(), node.ID, time.Now().UnixNano())
-	if err := a.sendAndSaveFlowMessage(ctx.account, ctx.contact, flowID, header, body, cta, flowToken, firstScreen); err != nil {
+	if err := a.sendAndSaveFlowMessage(ctx.account, ctx.contact, flowID, header, body, cta, flowToken, firstScreen, flowData); err != nil {
 		return nodeOutcome{}, fmt.Errorf("send whatsapp_flow: %w", err)
 	}
 	if ctx.archive != nil {
@@ -1217,6 +1218,115 @@ func stringFromConfig(cfg map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// stringMapFromConfig returns a string map at key (map[string]string or map[string]any).
+func stringMapFromConfig(cfg map[string]any, key string) map[string]string {
+	if cfg == nil {
+		return nil
+	}
+	switch raw := cfg[key].(type) {
+	case map[string]string:
+		if len(raw) == 0 {
+			return nil
+		}
+		out := make(map[string]string, len(raw))
+		for k, v := range raw {
+			if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+				continue
+			}
+			out[k] = v
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]string, len(raw))
+		for k, v := range raw {
+			s := strings.TrimSpace(asString(v))
+			if strings.TrimSpace(k) == "" || s == "" {
+				continue
+			}
+			out[k] = s
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// filterFlowActionData keeps only keys declared on the first screen's data schema.
+// No schema means no data is sent (Meta rejects unknown init keys).
+func filterFlowActionData(flowJSON models.JSONB, screens models.JSONBArray, firstScreen string, data map[string]string) map[string]string {
+	if len(data) == 0 {
+		return nil
+	}
+	allowed := flowScreenDataKeys(flowJSON, screens, firstScreen)
+	if len(allowed) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for k, v := range data {
+		if strings.TrimSpace(v) == "" || !allowed[k] {
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func flowScreenDataKeys(flowJSON models.JSONB, screens models.JSONBArray, firstScreen string) map[string]bool {
+	screen := findFlowScreen(flowJSON, screens, firstScreen)
+	if screen == nil {
+		return nil
+	}
+	raw, ok := screen["data"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(raw))
+	for k := range raw {
+		if strings.TrimSpace(k) != "" {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+func findFlowScreen(flowJSON models.JSONB, screens models.JSONBArray, firstScreen string) map[string]any {
+	candidates := make([]map[string]any, 0, 4)
+	for _, entry := range screens {
+		if screen, ok := entry.(map[string]any); ok {
+			candidates = append(candidates, screen)
+		}
+	}
+	if flowJSON != nil {
+		if list, ok := flowJSON["screens"].([]any); ok {
+			for _, entry := range list {
+				if screen, ok := entry.(map[string]any); ok {
+					candidates = append(candidates, screen)
+				}
+			}
+		}
+	}
+	if firstScreen != "" {
+		for _, screen := range candidates {
+			if id, _ := screen["id"].(string); id == firstScreen {
+				return screen
+			}
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return nil
 }
 
 // intFromConfig returns an int value from config at the given key, falling

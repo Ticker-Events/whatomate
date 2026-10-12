@@ -423,6 +423,7 @@ func askEarlyHandoffCustomerDetails(c *Conv) bool {
 		CTA:    "Enter details",
 		Header: "Your details",
 		Body:   detailsBody,
+		Data:   detailsFlowPrefill(c),
 		Step: codedflow.StepNote{
 			Doing:  "Collecting customer details for a custom request before agent handoff.",
 			Expect: "A WhatsApp Flow submission with contact details.",

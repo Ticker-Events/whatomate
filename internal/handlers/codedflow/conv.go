@@ -108,11 +108,14 @@ type NumberPrompt struct {
 
 // FlowPrompt opens a WhatsApp Flow. Body is translated when needed; Header
 // and CTA stay in the authored language (length-capped).
+// Data is optional screen init values (flow_action_payload.data). Keys must
+// match the published flow's first-screen data schema or they are dropped.
 type FlowPrompt struct {
 	FlowID string
 	Header string
 	Body   string
 	CTA    string
+	Data   map[string]string
 	Step   StepNote
 }
 
@@ -451,6 +454,9 @@ func (c *Conv) AskFlow(name string, prompt FlowPrompt) bool {
 		"header":  c.limit(prompt.Header, 60),
 		"body":    c.bodyWithOptionLegend(c.text(prompt.Body), []string{cta}),
 		"cta":     cta,
+	}
+	if len(prompt.Data) > 0 {
+		cfg["data"] = prompt.Data
 	}
 	putStepNote(cfg, prompt.Step)
 	if !c.chat.Consumed() && len(c.chat.FlowResponseData()) > 0 {
