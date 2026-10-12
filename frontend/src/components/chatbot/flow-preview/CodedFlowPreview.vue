@@ -17,7 +17,6 @@ import { getErrorMessage } from '@/lib/api-utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -466,7 +465,7 @@ function submitLocation() {
 </script>
 
 <template>
-  <div class="flex flex-1 min-h-0 h-full">
+  <div class="flex h-full min-h-0 flex-1 flex-row overflow-hidden">
     <PreviewPhone
       :name="flow.name"
       :status="status"
@@ -483,8 +482,8 @@ function submitLocation() {
       @complete-flow="submitFlow"
     />
 
-    <aside class="w-80 shrink-0 border-l bg-background flex flex-col min-h-0">
-      <div class="px-4 py-3 border-b flex items-center gap-2">
+    <aside class="flex h-full min-h-0 w-80 shrink-0 flex-col overflow-hidden border-l bg-background">
+      <div class="flex shrink-0 items-center gap-2 border-b px-4 py-3">
         <Button size="sm" :disabled="busy || importMode || status !== 'idle'" @click="start">
           <Play class="h-4 w-4 mr-1" />
           {{ $t('codedFlows.previewStart') }}
@@ -495,27 +494,36 @@ function submitLocation() {
         </Button>
       </div>
 
-      <ScrollArea class="flex-1">
-        <div class="p-4 space-y-4">
-          <div class="space-y-2">
-            <div>
-              <p class="text-sm font-medium">{{ $t('codedFlows.previewImport') }}</p>
-              <p class="text-[11px] text-muted-foreground mt-1">{{ $t('codedFlows.previewImportHint') }}</p>
-            </div>
-            <Textarea
-              v-model="importBody"
-              class="min-h-28 font-mono text-xs"
-              :disabled="busy"
-              :placeholder="$t('codedFlows.previewImportPlaceholder')"
-            />
-            <Button size="sm" class="w-full" :disabled="busy || !importBody.trim()" @click="applyImportedLog">
-              {{ $t('codedFlows.previewImportLoad') }}
-            </Button>
-            <p v-if="importMode" class="text-[11px] text-muted-foreground">
-              {{ $t('codedFlows.previewImportReadOnly') }}
-            </p>
-          </div>
+      <div
+        data-testid="coded-flow-preview-import"
+        class="shrink-0 space-y-2 border-b px-4 py-3"
+      >
+        <div>
+          <p class="text-sm font-medium">{{ $t('codedFlows.previewImport') }}</p>
+          <p class="mt-1 text-[11px] text-muted-foreground">{{ $t('codedFlows.previewImportHint') }}</p>
+        </div>
+        <Textarea
+          v-model="importBody"
+          class="min-h-24 font-mono text-xs"
+          :disabled="busy"
+          :placeholder="$t('codedFlows.previewImportPlaceholder')"
+        />
+        <Button
+          size="sm"
+          class="w-full"
+          data-testid="coded-flow-preview-import-load"
+          :disabled="busy || !importBody.trim()"
+          @click="applyImportedLog"
+        >
+          {{ $t('codedFlows.previewImportLoad') }}
+        </Button>
+        <p v-if="importMode" class="text-[11px] text-muted-foreground">
+          {{ $t('codedFlows.previewImportReadOnly') }}
+        </p>
+      </div>
 
+      <div class="min-h-0 flex-1 overflow-y-auto">
+        <div class="space-y-4 p-4">
           <div v-if="!importMode" class="flex items-start justify-between gap-3">
             <div>
               <p class="text-sm font-medium">{{ $t('codedFlows.previewMock') }}</p>
@@ -726,7 +734,7 @@ function submitLocation() {
 
           <p class="text-[11px] text-muted-foreground">{{ $t('codedFlows.previewNote') }}</p>
         </div>
-      </ScrollArea>
+      </div>
     </aside>
   </div>
 </template>

@@ -29,6 +29,11 @@ ENV API_UPSTREAM=agent-api:8080
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
+# Vite base is "./", so without <base href> deep SPA routes (e.g. /chatbot/coded-flows)
+# resolve ./favicon.svg → /chatbot/favicon.svg and 404. Mirror internal/frontend/embed.go.
+RUN sed -i 's|<head>|<head><base href="/">|' /usr/share/nginx/html/index.html \
+ && sed -i 's|</head>|<script>window.__BASE_PATH__="";</script></head>|' /usr/share/nginx/html/index.html
+
 # Copy nginx configuration template
 COPY <<EOF /etc/nginx/templates/default.conf.template
 server {
@@ -80,6 +85,13 @@ server {
         add_header Content-Type text/plain;
     }
 
+    # Exact root favicon (avoids regex location looking under SPA path prefixes)
+    location = /favicon.svg {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files /favicon.svg =404;
+    }
+
     # Handle SPA routing - serve index.html for all routes
     location / {
         try_files \$uri \$uri/ /index.html;
@@ -89,6 +101,7 @@ server {
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
+        try_files \$uri =404;
     }
 }
 EOF
