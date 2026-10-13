@@ -149,6 +149,51 @@ func TestProductSpanCandidates(t *testing.T) {
 	assert.Contains(t, spans, "Themed Cake")
 }
 
+func TestBuildJevIntentRequest_IncludesFAQWhenPresent(t *testing.T) {
+	state, questions := buildJevIntentRequest("what are your hours", IntentContext{
+		FAQs: map[string]string{"1": "What are your hours?"},
+	})
+	faqs, ok := state["faqs"].([]map[string]string)
+	require.True(t, ok)
+	require.Len(t, faqs, 1)
+	assert.Equal(t, "1", faqs[0]["id"])
+
+	route, ok := questions["route"].(map[string]any)
+	require.True(t, ok)
+	criteria, ok := route["criteria"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, criteria, "faq")
+	assert.Contains(t, questions, "faq_id")
+
+	_, questionsEmpty := buildJevIntentRequest("hello", IntentContext{})
+	routeEmpty, ok := questionsEmpty["route"].(map[string]any)
+	require.True(t, ok)
+	criteriaEmpty, ok := routeEmpty["criteria"].(map[string]any)
+	require.True(t, ok)
+	_, hasFAQ := criteriaEmpty["faq"]
+	assert.False(t, hasFAQ)
+	_, hasFaqID := questionsEmpty["faq_id"]
+	assert.False(t, hasFaqID)
+}
+
+func TestComposeJevIntent_FAQ(t *testing.T) {
+	ctx := codedIntentContext{
+		FAQs: map[string]string{"1": "What are your hours?"},
+	}
+	raw := JevSystemOneResponse{
+		Answers: map[string]json.RawMessage{
+			"route":    rawJSON(t, map[string]any{"type": "choice", "choice": "faq", "confidence": 0.9, "probabilities": map[string]float64{"faq": 0.9}}),
+			"faq_id":   rawJSON(t, map[string]any{"type": "choice", "choice": "1", "confidence": 0.88, "probabilities": map[string]float64{"1": 0.88, "none": 0.12}}),
+			"language": rawJSON(t, map[string]any{"type": "choice", "choice": "en", "confidence": 0.99, "probabilities": map[string]float64{"en": 0.99}}),
+		},
+	}
+	got, err := composeJevIntent(raw, "what time do you close", ctx)
+	require.NoError(t, err)
+	assert.Equal(t, RouteFAQ, got.Route)
+	assert.Equal(t, "1", got.FaqID)
+	assert.GreaterOrEqual(t, got.Confidence, 0.75)
+}
+
 func rawJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)

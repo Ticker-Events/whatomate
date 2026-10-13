@@ -555,6 +555,41 @@ func (c *Conv) StoreList(name, operation string, params map[string]string) ([]an
 	return items, true
 }
 
+// LoadFaqs loads active store FAQs into the session once.
+// An empty list or a failed fetch does not stop shopping: the call is still
+// recorded as ok so later turns do not retry, and intent simply has no FAQ route.
+func (c *Conv) LoadFaqs(name, operation string) []any {
+	if c.Stop {
+		return nil
+	}
+	if _, done := c.doneCall(); done {
+		items, _ := anySlice(c.session().SessionData[name])
+		return items
+	}
+	ok, err := c.tiqr(name, operation, "rest", nil)
+	if c.waitingForPreviewMock() {
+		return nil
+	}
+	items := []any{}
+	switch {
+	case err != nil:
+		if c.app != nil {
+			c.app.LogWarn("coded flow FAQ load failed", "error", err)
+		}
+	case !ok:
+		if c.app != nil {
+			c.app.LogWarn("coded flow FAQ load returned non-2xx")
+		}
+	case c.chat.LastTiqr() != nil:
+		if rows, _ := PageFromPayload(c.chat.LastTiqr()); rows != nil {
+			items = rows
+		}
+	}
+	c.session().SessionData[name] = items
+	c.appendCall(map[string]any{"name": name, "ok": true, "var": name, "value": items})
+	return items
+}
+
 // LookupOrder loads the latest order for this WhatsApp number. The lookup
 // is MCP-only, so it does not go through the REST store operations.
 func (c *Conv) LookupOrder(name string) (map[string]any, bool) {

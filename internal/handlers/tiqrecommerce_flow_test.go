@@ -621,6 +621,12 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case strings.Contains(r.URL.Path, "/faq/"):
+			results := []any{}
+			if extra, ok := store["test_faqs"].([]any); ok {
+				results = extra
+			}
+			_ = json.NewEncoder(w).Encode(pageStoreResults(r, results, testPageSize(store)))
 		case strings.Contains(r.URL.Path, "/category/"):
 			if counts != nil {
 				counts.collections++
@@ -676,7 +682,7 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 			}
 			payload := map[string]any{}
 			for key, value := range store {
-				if key == "test_collections" || key == "test_orders" || key == "test_page_size" {
+				if key == "test_collections" || key == "test_orders" || key == "test_page_size" || key == "test_faqs" {
 					continue
 				}
 				payload[key] = value
@@ -2284,6 +2290,7 @@ func TestValidateCodedIntent_RejectsInventedIDs(t *testing.T) {
 		AllowCatalog: true,
 		ChoiceIDs:    map[string]string{tiqrecommerce.BuyProducts: "Buy products"},
 		Collections:  map[string]string{"57": "Sweets"},
+		FAQs:         map[string]string{"1": "What are your hours?"},
 	}
 	_, ok := codedflow.ValidateCodedIntent(codedflow.IntentResult{Route: codedflow.RouteCollection, CollectionID: "999", Confidence: 1}, ctx)
 	assert.False(t, ok)
@@ -2293,6 +2300,24 @@ func TestValidateCodedIntent_RejectsInventedIDs(t *testing.T) {
 	assert.True(t, ok)
 	_, ok = codedflow.ValidateCodedIntent(codedflow.IntentResult{Route: codedflow.RouteHandoff, Confidence: 1}, ctx)
 	assert.True(t, ok)
+}
+
+func TestValidateCodedIntent_FAQRoute(t *testing.T) {
+	ctx := codedflow.IntentContext{
+		FAQs: map[string]string{"1": "What are your hours?", "2": "Do you deliver?"},
+	}
+	got, ok := codedflow.ValidateCodedIntent(codedflow.IntentResult{Route: codedflow.RouteFAQ, FaqID: "1", Confidence: 0.9}, ctx)
+	assert.True(t, ok)
+	assert.Equal(t, "1", got.FaqID)
+
+	_, ok = codedflow.ValidateCodedIntent(codedflow.IntentResult{Route: codedflow.RouteFAQ, FaqID: "999", Confidence: 0.9}, ctx)
+	assert.False(t, ok)
+
+	_, ok = codedflow.ValidateCodedIntent(codedflow.IntentResult{Route: codedflow.RouteFAQ, FaqID: "1", ChoiceID: "x", Confidence: 0.9}, ctx)
+	assert.False(t, ok)
+
+	_, ok = codedflow.ValidateCodedIntent(codedflow.IntentResult{Route: codedflow.RouteFAQ, FaqID: "1", Confidence: 0.9}, codedflow.IntentContext{})
+	assert.False(t, ok)
 }
 
 func TestValidateCodedIntent_AnswerRoute(t *testing.T) {
@@ -2487,6 +2512,46 @@ func TestBuildIntentPrompt_IncludesStepContext(t *testing.T) {
 	assert.Contains(t, prompt, "route answer:")
 	assert.Contains(t, prompt, "At most 200 words")
 	assert.Contains(t, prompt, `"reasoning":""`)
+	assert.Contains(t, prompt, `"faq_id":""`)
+	assert.NotContains(t, prompt, "route faq:")
+}
+
+func TestBuildIntentPrompt_IncludesFAQs(t *testing.T) {
+	prompt := codedflow.BuildIntentPrompt("what time do you close", codedflow.IntentContext{
+		FAQs: map[string]string{"1": "What are your hours?"},
+	})
+	assert.Contains(t, prompt, "What are your hours?")
+	assert.Contains(t, prompt, "id 1")
+	assert.Contains(t, prompt, "route faq:")
+	assert.Contains(t, prompt, `"faq_id":""`)
+}
+
+func TestTiqrEcommerce_FAQRouteAnswersAndStays(t *testing.T) {
+	useCodedIntent(t, func(string, codedflow.IntentContext) (codedflow.IntentResult, error) {
+		return codedflow.IntentResult{
+			Language:   "en",
+			Route:      codedflow.RouteFAQ,
+			FaqID:      "1",
+			Confidence: 0.92,
+		}, nil
+	}, nil)
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_faqs": []any{
+			map[string]any{"id": 1, "question": "What are your hours?", "answer": "We are open 9am to 9pm every day."},
+		},
+	}, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "what time do you close", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "intent", session.CurrentStep)
+	assert.Equal(t, models.SessionStatusActive, session.Status)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "We are open 9am to 9pm every day.")
+	faqs, ok := codedflow.AnySlice(session.SessionData["faqs"])
+	require.True(t, ok)
+	require.Len(t, faqs, 1)
 }
 
 func TestLimitWords_CapsAtLimit(t *testing.T) {

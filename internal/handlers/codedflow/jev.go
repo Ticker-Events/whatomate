@@ -103,6 +103,12 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 		sort.Slice(collections, func(i, j int) bool { return collections[i]["id"] < collections[j]["id"] })
 	}
 
+	faqs := make([]map[string]string, 0)
+	for id, question := range ctx.FAQs {
+		faqs = append(faqs, map[string]string{"id": id, "question": question})
+	}
+	sort.Slice(faqs, func(i, j int) bool { return faqs[i]["id"] < faqs[j]["id"] })
+
 	state := map[string]any{
 		"message":     message,
 		"question":    ctx.Question,
@@ -111,6 +117,7 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 		"pattern":     ctx.Pattern,
 		"choices":     choices,
 		"collections": collections,
+		"faqs":        faqs,
 	}
 
 	routeCriteria := map[string]any{
@@ -144,6 +151,12 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 		routeCriteria["answer"] = map[string]any{
 			"what":    "Their reply is a valid answer to the current question but is not one of the choice ids.",
 			"not_for": "A button id, collection name, or product name.",
+		}
+	}
+	if len(ctx.FAQs) > 0 {
+		routeCriteria["faq"] = map[string]any{
+			"what":    "They ask a question that one of the loaded FAQs already answers, including a paraphrase of that FAQ question.",
+			"not_for": "Buying, browsing a collection, naming a product, checkout, order status, or asking for a person.",
 		}
 	}
 
@@ -266,6 +279,26 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 		}
 	}
 
+	if len(ctx.FAQs) > 0 {
+		faqCriteria := map[string]any{
+			"none": "None of the loaded FAQs match.",
+		}
+		for id, question := range ctx.FAQs {
+			faqCriteria[id] = map[string]any{
+				"what":     question,
+				"question": question,
+			}
+		}
+		questions["faq_id"] = map[string]any{
+			"type": "choice",
+			"instructions": map[string]any{
+				"question": "Which loaded FAQ id answers `message`?",
+				"faqs":     "`faqs`",
+			},
+			"criteria": faqCriteria,
+		}
+	}
+
 	return state, questions
 }
 
@@ -307,6 +340,7 @@ func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentC
 	langAns, _ := parseJevChoice(raw.Answers["language"])
 	choiceAns, _ := parseJevChoice(raw.Answers["choice_id"])
 	collectionAns, _ := parseJevChoice(raw.Answers["collection_id"])
+	faqAns, _ := parseJevChoice(raw.Answers["faq_id"])
 	spanAns, _ := parseJevChoice(raw.Answers["product_span"])
 	namesCollection, hasNamesCollection := parseJevNoul(raw.Answers["names_collection"])
 	namesProduct, hasNamesProduct := parseJevNoul(raw.Answers["names_product"])
@@ -433,6 +467,15 @@ func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentC
 		result.ProductQuery = query
 	case codedRouteAnswer:
 		result.Answer = normalizeCodedAnswer(message, ctx.Pattern)
+	case codedRouteFAQ:
+		if faqAns.Choice != "" && faqAns.Choice != "none" && choiceConfidenceUsable(faqAns) {
+			if _, ok := ctx.FAQs[faqAns.Choice]; ok {
+				result.FaqID = faqAns.Choice
+				if faqAns.Confidence > 0 {
+					result.Confidence = faqAns.Confidence
+				}
+			}
+		}
 	}
 
 	result.Reasoning = fmt.Sprintf("route=%s confidence=%.2f", result.Route, result.Confidence)

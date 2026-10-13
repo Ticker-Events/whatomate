@@ -121,6 +121,10 @@ func runTiqrEcommerce(c *Conv) error {
 	if !ok {
 		return c.Transfer(tiqrEcommerceFailCollections)
 	}
+	_ = c.LoadFaqs("faqs", "list_faqs")
+	if c.Stop {
+		return nil
+	}
 	route, ok := c.AskRouteButtons("intent", menuButtons(store), codedflow.RouteOptions{AllowCatalog: true})
 	if !ok {
 		if c.HasReplyRoute() {
@@ -180,7 +184,7 @@ func menuButtons(store map[string]any) codedflow.ButtonPrompt {
 		},
 		Step: codedflow.StepNote{
 			Doing:  "The customer is at the welcome menu.",
-			Expect: "They may pick Buy products, Check order status, or Talk to staff, name a collection or a product, or ask to check out.",
+			Expect: "They may pick Buy products, Check order status, or Talk to staff, name a collection or a product, ask a store FAQ, or ask to check out.",
 		},
 	}
 }

@@ -22,11 +22,14 @@ flowchart TD
   store -->|error| xfer[Agent transfer]
   store --> cols["list_collections limit 20"]
   cols -->|error or empty| xfer
-  cols --> menu[Welcome menu]
+  cols --> faqs["list_faqs optional"]
+  faqs --> menu[Welcome menu]
   menu -->|Buy products| ful[Fulfillment]
   menu -->|named collection or product| ful
+  menu -->|FAQ match| faqAns[Send FAQ answer stay on menu]
   menu -->|Check order status| look[MCP list_orders_by_phone]
   menu -->|Talk to staff| xfer
+  faqAns --> menu
   look -->|empty| miss[Say no orders and end]
   look -->|orders| pick[WhatsApp order list]
   pick --> detail[MCP lookup_order_status]
@@ -67,6 +70,8 @@ Checkout said in free text on the menu, the collection list, a product card, an 
 ### 1. Load the store
 
 `Store("store", "get_store")` then `StoreList("collections", "list_collections", limit 20)`. Either failure transfers with a fixed line (`tiqrEcommerceFailBusiness` or `tiqrEcommerceFailCollections`) and completes the session. An empty collection list is the same failure: `StoreList` treats zero rows as not ok.
+
+After collections load, `LoadFaqs("faqs", "list_faqs")` stores active store FAQs on the session. An empty list or a failed FAQ fetch does not transfer: shopping continues without a FAQ intent route.
 
 `delivery_modes` on the store payload decides fulfillment later. Nothing else from the store is required to show the menu.
 
@@ -326,10 +331,11 @@ The model must return one route and leave the other slots empty. Go then checks 
 - `collection` id must be in the loaded collections, and only when catalog is allowed
 - `product` is a non-empty query, only when catalog is allowed. No product id is trusted
 - `answer` must match the step pattern
+- `faq` id must be in the loaded FAQs (available on every free-text step when FAQs were loaded). The model does not write the answer
 - `checkout` and `handoff` must not carry ids
 - anything else, including a product route on a step that does not allow catalog, is ungrounded
 
-At or above 0.75 and grounded: the route is applied in the same turn. `checkout` sets `c.divert` and does not record a shopping call, so the script can leave the step. Below 0.75, or route `unclear`: one guide question, staying on the same step.
+At or above 0.75 and grounded: the route is applied in the same turn. `checkout` sets `c.divert` and does not record a shopping call, so the script can leave the step. `faq` sends the stored FAQ answer (translated when the session language is not English) and stays on the same step without recording a shopping call, so buttons already on screen stay usable. Below 0.75, or route `unclear`: one guide question, staying on the same step.
 
 Ungrounded output, a grounded `handoff`, or an intent error transfers immediately with `codedAgentHandoff`. The customer does not get a guide question in those cases.
 
@@ -387,6 +393,7 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 | --- | --- |
 | `store` | `get_store` |
 | `collections` | `list_collections` rows |
+| `faqs` | `list_faqs` rows (may be empty) |
 | `delivery_mode` | Fulfillment. `PICKUP_FROM_STORE` or `DELIVERY_TO_LOCATION` |
 | `delivery_latitude`, `delivery_longitude` | Accepted pin |
 | `delivery_zone`, `delivery_distance_km`, `shipping_fee_paise` | Deliverable pin. Fee stays unset while the calculator returns 0 |

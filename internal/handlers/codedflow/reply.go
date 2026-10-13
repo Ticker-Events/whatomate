@@ -542,6 +542,7 @@ func (c *Conv) resolveQuotedFreeText(step string, cfg map[string]any, opts Route
 		"collection_id": result.CollectionID,
 		"product_query": result.ProductQuery,
 		"answer":        result.Answer,
+		"faq_id":        result.FaqID,
 		"confidence":    result.Confidence,
 		"reasoning":     raw.Reasoning,
 	}
@@ -551,6 +552,7 @@ func (c *Conv) resolveQuotedFreeText(step string, cfg map[string]any, opts Route
 		"route", result.Route,
 		"confidence", result.Confidence,
 		"grounded", grounded,
+		"faq_id", result.FaqID,
 		"quoted", true,
 	)
 	c.rememberLanguage(result.Language)
@@ -583,6 +585,8 @@ func (c *Conv) resolveQuotedFreeText(step string, cfg map[string]any, opts Route
 		return Route{Kind: RouteCheckout}, true
 	case codedRouteHandoff:
 		return Route{Kind: RouteHandoff}, true
+	case codedRouteFAQ:
+		return c.deliverFAQAnswer(step, result.FaqID)
 	default:
 		return c.askQuotedReplyGuide(step, ctx)
 	}
@@ -671,6 +675,16 @@ func BuildQuotedReplyIntentPrompt(message string, ctx IntentContext) string {
 			fmt.Fprintf(&collections, "\n- %s (id %s)", name, id)
 		}
 	}
+	var faqs strings.Builder
+	faqRoute := ""
+	if len(ctx.FAQs) == 0 {
+		faqs.WriteString("(none)")
+	} else {
+		for id, question := range ctx.FAQs {
+			fmt.Fprintf(&faqs, "\n- %s (id %s)", question, id)
+		}
+		faqRoute = "route faq: they ask a question that one of the loaded FAQs already answers, including a paraphrase. Set faq_id. Leave other ids empty.\n"
+	}
 	quoted := strings.TrimSpace(ctx.QuotedContent)
 	if quoted == "" {
 		quoted = "(empty)"
@@ -679,7 +693,7 @@ func BuildQuotedReplyIntentPrompt(message string, ctx IntentContext) string {
 	if current == "" {
 		current = "(not available)"
 	}
-	return fmt.Sprintf(`You map one customer message that quotes an earlier chat message. You do not reply to the customer. You do not invent ids, products, collections, prices, or stock.
+	return fmt.Sprintf(`You map one customer message that quotes an earlier chat message. You do not reply to the customer. You do not invent ids, products, collections, prices, or stock. You do not write FAQ answers; code sends the stored answer for a faq_id.
 
 The customer quoted this earlier message (%s):
 %s
@@ -688,6 +702,9 @@ Selectable ids from that quoted message (use only these ids for choice or select
 %s
 
 Collections already loaded (use only these ids for collection):
+%s
+
+Store FAQs already loaded (use only these ids for faq):
 %s
 
 Current question on screen (not the quoted message):
@@ -705,7 +722,7 @@ route select_product: they want the product from the quoted message. Set choice_
 route collection: they want the collection from the quoted message or name a loaded collection. Set collection_id.
 route product: they name a product to search for. Set product_query from their words.
 route checkout: they want to check out with the cart they already have.
-route handoff: they ask for a person, or you would have to invent an id.
+%sroute handoff: they ask for a person, or you would have to invent an id.
 route unclear: you cannot tell whether they mean the quoted message or the current question.
 
 confidence is from 0 to 1. Use 0.9 or higher when the quoted message clearly supplies the target. Use below 0.75 when unsure.
@@ -713,11 +730,11 @@ confidence is from 0 to 1. Use 0.9 or higher when the quoted message clearly sup
 reasoning explains the choice for an operator. At most 200 words.
 
 Reply with JSON only:
-{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","confidence":0,"reasoning":""}
+{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","faq_id":"","confidence":0,"reasoning":""}
 
 Customer message:
-%s`, ctx.QuotedKind, quoted, choices.String(), collections.String(), current,
-		strings.TrimSpace(ctx.Doing), strings.TrimSpace(ctx.Expect),
+%s`, ctx.QuotedKind, quoted, choices.String(), collections.String(), faqs.String(), current,
+		strings.TrimSpace(ctx.Doing), strings.TrimSpace(ctx.Expect), faqRoute,
 		languagePromptInstruction(ctx.SupportedLanguages), message)
 }
 
@@ -755,16 +772,17 @@ func ValidateQuotedReplyIntent(raw IntentResult, ctx IntentContext) (IntentResul
 	raw.CollectionID = strings.TrimSpace(raw.CollectionID)
 	raw.ProductQuery = strings.TrimSpace(raw.ProductQuery)
 	raw.Answer = strings.TrimSpace(raw.Answer)
+	raw.FaqID = strings.TrimSpace(raw.FaqID)
 	raw.Language = normalizeDetectedLanguage(raw.Language, ctx.SupportedLanguages)
 	raw.Reasoning = LimitWords(raw.Reasoning, 200)
 	switch raw.Route {
 	case RouteCurrent:
-		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" {
+		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		return raw, true
 	case RouteSelectProduct:
-		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		if _, ok := ctx.QuotedChoices[raw.ChoiceID]; !ok {
@@ -772,7 +790,7 @@ func ValidateQuotedReplyIntent(raw IntentResult, ctx IntentContext) (IntentResul
 		}
 		return raw, true
 	case codedRouteChoice:
-		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		if _, ok := ctx.QuotedChoices[raw.ChoiceID]; ok {
@@ -783,7 +801,7 @@ func ValidateQuotedReplyIntent(raw IntentResult, ctx IntentContext) (IntentResul
 		}
 		return raw, false
 	case codedRouteCollection:
-		if raw.CollectionID == "" || raw.ChoiceID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+		if raw.CollectionID == "" || raw.ChoiceID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		if _, ok := ctx.Collections[raw.CollectionID]; !ok {
@@ -791,12 +809,23 @@ func ValidateQuotedReplyIntent(raw IntentResult, ctx IntentContext) (IntentResul
 		}
 		return raw, true
 	case codedRouteProduct:
-		if raw.ProductQuery == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.Answer != "" {
+		if raw.ProductQuery == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		return raw, true
 	case codedRouteCheckout, codedRouteHandoff:
-		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
+			return raw, false
+		}
+		return raw, true
+	case codedRouteFAQ:
+		if len(ctx.FAQs) == 0 {
+			return raw, false
+		}
+		if raw.FaqID == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+			return raw, false
+		}
+		if _, ok := ctx.FAQs[raw.FaqID]; !ok {
 			return raw, false
 		}
 		return raw, true

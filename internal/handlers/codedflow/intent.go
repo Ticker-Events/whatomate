@@ -20,6 +20,7 @@ const (
 	RouteHandoff    = "handoff"
 	RouteUnclear    = "unclear"
 	RouteShowMore   = "show_more"
+	RouteFAQ        = "faq"
 
 	codedRouteChoice     = RouteChoice
 	codedRouteCollection = RouteCollection
@@ -28,12 +29,13 @@ const (
 	codedRouteCheckout   = RouteCheckout
 	codedRouteHandoff    = RouteHandoff
 	codedRouteUnclear    = RouteUnclear
+	codedRouteFAQ        = RouteFAQ
 )
 
 // Route is one accepted free-text or exact answer from AskRoute.
 type Route struct {
-	Kind   string // choice, collection, product, answer, checkout, handoff
-	ID     string // choice_id or collection_id
+	Kind   string // choice, collection, product, answer, checkout, handoff, faq
+	ID     string // choice_id, collection_id, or faq_id
 	Query  string // product_query
 	Title  string
 	Answer string // normalized free-text answer for number steps
@@ -77,6 +79,7 @@ type IntentResult struct {
 	CollectionID string  `json:"collection_id"`
 	ProductQuery string  `json:"product_query"`
 	Answer       string  `json:"answer"`
+	FaqID        string  `json:"faq_id"`
 	Confidence   float64 `json:"confidence"`
 	Reasoning    string  `json:"reasoning"`
 }
@@ -89,6 +92,7 @@ type IntentContext struct {
 	Pattern      string            // when set, answer route must match this pattern
 	ChoiceIDs    map[string]string // id -> title (or card body + title)
 	Collections  map[string]string // id -> name
+	FAQs         map[string]string // id -> question (loaded store FAQs)
 	// SupportedLanguages limits language labels the AI may return.
 	// Empty means open detection (existing behavior).
 	SupportedLanguages []string
@@ -249,6 +253,7 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		"collection_id": raw.CollectionID,
 		"product_query": raw.ProductQuery,
 		"answer":        raw.Answer,
+		"faq_id":        raw.FaqID,
 		"confidence":    raw.Confidence,
 		"reasoning":     raw.Reasoning,
 	}
@@ -266,6 +271,7 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		"collection_id", result.CollectionID,
 		"product_query", result.ProductQuery,
 		"answer", result.Answer,
+		"faq_id", result.FaqID,
 		"language", result.Language,
 		"reasoning", raw.Reasoning,
 	)
@@ -310,9 +316,46 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 			c.Divert = codedRouteCheckout
 			// No shopping call — buy/menu checks divert and leaves the step.
 			return Route{Kind: codedRouteCheckout}, true
+		case codedRouteFAQ:
+			c.clearGuide()
+			return c.deliverFAQAnswer(name, result.FaqID)
 		}
 	}
 	return c.askGuide(name, ctx)
+}
+
+// deliverFAQAnswer sends a stored FAQ answer and stays on the current step.
+func (c *Conv) deliverFAQAnswer(step, faqID string) (Route, bool) {
+	answer := faqAnswerByID(c.session().SessionData, faqID)
+	if answer == "" {
+		_ = c.Transfer(AgentHandoff)
+		return Route{}, false
+	}
+	text := c.text(answer)
+	if err := c.app.DeliverCodedText(c.chat, step, text); err != nil {
+		c.fail(err)
+		return Route{}, false
+	}
+	c.Stop = true
+	return Route{}, false
+}
+
+func faqAnswerByID(data models.JSONB, id string) string {
+	id = strings.TrimSpace(id)
+	if data == nil || id == "" {
+		return ""
+	}
+	items, _ := anySlice(data["faqs"])
+	for _, item := range items {
+		row, ok := asStringMap(item)
+		if !ok {
+			continue
+		}
+		if fieldString(row, "id") == id {
+			return strings.TrimSpace(fieldString(row, "answer"))
+		}
+	}
+	return ""
 }
 
 func (c *Conv) askGuide(name string, ctx IntentContext) (Route, bool) {
@@ -393,6 +436,7 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) IntentContex
 		Pattern:            asString(cfg["pattern"]),
 		ChoiceIDs:          map[string]string{},
 		Collections:        map[string]string{},
+		FAQs:               map[string]string{},
 		SupportedLanguages: c.supportedLanguages(),
 	}
 	buttons, err := c.app.ButtonsForNode(cfg, c.session().SessionData)
@@ -425,6 +469,19 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) IntentContex
 			}
 			ctx.Collections[id] = name
 		}
+	}
+	faqItems, _ := anySlice(c.session().SessionData["faqs"])
+	for _, item := range faqItems {
+		row, ok := asStringMap(item)
+		if !ok {
+			continue
+		}
+		id := fieldString(row, "id")
+		question := fieldString(row, "question")
+		if id == "" || question == "" {
+			continue
+		}
+		ctx.FAQs[id] = question
 	}
 	return ctx
 }
@@ -535,11 +592,12 @@ func ValidateCodedIntent(raw IntentResult, ctx IntentContext) (IntentResult, boo
 	raw.CollectionID = strings.TrimSpace(raw.CollectionID)
 	raw.ProductQuery = strings.TrimSpace(raw.ProductQuery)
 	raw.Answer = strings.TrimSpace(raw.Answer)
+	raw.FaqID = strings.TrimSpace(raw.FaqID)
 	raw.Language = normalizeDetectedLanguage(raw.Language, ctx.SupportedLanguages)
 	raw.Reasoning = LimitWords(raw.Reasoning, 200)
 	switch raw.Route {
 	case codedRouteChoice:
-		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		if _, ok := ctx.ChoiceIDs[raw.ChoiceID]; !ok {
@@ -550,7 +608,7 @@ func ValidateCodedIntent(raw IntentResult, ctx IntentContext) (IntentResult, boo
 		if !ctx.AllowCatalog {
 			return raw, false
 		}
-		if raw.CollectionID == "" || raw.ChoiceID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+		if raw.CollectionID == "" || raw.ChoiceID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		if _, ok := ctx.Collections[raw.CollectionID]; !ok {
@@ -561,7 +619,7 @@ func ValidateCodedIntent(raw IntentResult, ctx IntentContext) (IntentResult, boo
 		if !ctx.AllowCatalog {
 			return raw, false
 		}
-		if raw.ProductQuery == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.Answer != "" {
+		if raw.ProductQuery == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		return raw, true
@@ -569,7 +627,7 @@ func ValidateCodedIntent(raw IntentResult, ctx IntentContext) (IntentResult, boo
 		if ctx.Pattern == "" {
 			return raw, false
 		}
-		if raw.Answer == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" {
+		if raw.Answer == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		if !matchCodedPattern(ctx.Pattern, raw.Answer) {
@@ -577,18 +635,29 @@ func ValidateCodedIntent(raw IntentResult, ctx IntentContext) (IntentResult, boo
 		}
 		return raw, true
 	case codedRouteCheckout:
-		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		return raw, true
 	case codedRouteHandoff:
-		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
+			return raw, false
+		}
+		return raw, true
+	case codedRouteFAQ:
+		if len(ctx.FAQs) == 0 {
+			return raw, false
+		}
+		if raw.FaqID == "" || raw.ChoiceID != "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" {
+			return raw, false
+		}
+		if _, ok := ctx.FAQs[raw.FaqID]; !ok {
 			return raw, false
 		}
 		return raw, true
 	case codedRouteUnclear, "":
 		raw.Route = codedRouteUnclear
-		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.Answer != "" {
+		if raw.ChoiceID != "" || raw.CollectionID != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
 		return raw, true
@@ -673,6 +742,16 @@ func BuildIntentPrompt(message string, ctx IntentContext) string {
 			fmt.Fprintf(&collections, "\n- %s (id %s)", name, id)
 		}
 	}
+	var faqs strings.Builder
+	faqRoute := ""
+	if len(ctx.FAQs) == 0 {
+		faqs.WriteString("(none)")
+	} else {
+		for id, question := range ctx.FAQs {
+			fmt.Fprintf(&faqs, "\n- %s (id %s)", question, id)
+		}
+		faqRoute = "route faq: they ask a question that one of the loaded FAQs already answers, including a paraphrase of that FAQ question. Set faq_id from the list above. Leave choice_id, collection_id, product_query, and answer empty. Prefer shopping routes when they are buying, browsing, checking out, checking an order, or asking for a person.\n"
+	}
 	question := strings.TrimSpace(ctx.Question)
 	if question == "" {
 		question = "(not available)"
@@ -689,7 +768,7 @@ func BuildIntentPrompt(message string, ctx IntentContext) string {
 	if p := strings.TrimSpace(ctx.Pattern); p != "" {
 		patternLine = p
 	}
-	return fmt.Sprintf(`You map one customer message onto one route. You do not reply to the customer. You do not invent ids, products, collections, prices, or stock.
+	return fmt.Sprintf(`You map one customer message onto one route. You do not reply to the customer. You do not invent ids, products, collections, prices, or stock. You do not write FAQ answers; code sends the stored answer for a faq_id.
 
 Current question shown to the customer:
 %s
@@ -709,23 +788,26 @@ Allowed choices, use only these ids. A typo or paraphrase of one of these titles
 Collections already loaded, use only these ids. If this list is empty, do not use the collection route:
 %s
 
+Store FAQs already loaded, use only these ids. If this list is empty, do not use the faq route:
+%s
+
 route choice: they picked one of the choices above (including a misspelled title), or they want to buy or check an order when those are choices. Set choice_id. Do not use this for a request to talk to a person unless talk_to_agent is in the allowed choices and that is what they picked.
 route collection: they want the items in one collection, or they ask what is available in that collection. Set collection_id from the list above. Do not use this for a single product name.
 route product: they name a product or ask to buy a specific item. Set product_query to a short search string taken from their words. Leave both ids empty.
 route answer: their reply is a valid answer to the current question but is not one of the choice ids. Set answer to the normalized value that satisfies the pattern and expected reply (for example "Two" becomes "2"). Leave both ids and product_query empty. Only use this when a pattern is listed above.
 route checkout: they want to check out, place the order, pay, or finish shopping with what is already in the cart. Leave both ids, product_query, and answer empty. Do not use this for checking an existing order status.
-route handoff: they ask for a human, agent, or staff, they seem confused or stuck, or you would have to invent a product, collection, price, or id to help them. Leave both ids empty.
+%sroute handoff: they ask for a human, agent, or staff, they seem confused or stuck, or you would have to invent a product, collection, price, or id to help them. Leave both ids empty.
 route unclear: more than one shopping route fits, or none of them fit, and they are not asking for a person and do not seem stuck.
 
-confidence is from 0 to 1. Use 0.9 or higher for an obvious route, including a clear request for a person, a clearly confused customer, a clear typo of an allowed choice, a clear checkout request, and a clear normalized answer. Use a value below 0.75 when you are unsure. If you are unsure whether a catalog id exists, use handoff instead of guessing an id.
+confidence is from 0 to 1. Use 0.9 or higher for an obvious route, including a clear request for a person, a clearly confused customer, a clear typo of an allowed choice, a clear checkout request, a clear FAQ match, and a clear normalized answer. Use a value below 0.75 when you are unsure. If you are unsure whether a catalog or FAQ id exists, use handoff instead of guessing an id.
 %s
 reasoning explains why you chose this route, for an operator debugging the flow. At most 200 words. Do not address the customer.
 
 Reply with JSON only:
-{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","confidence":0,"reasoning":""}
+{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","faq_id":"","confidence":0,"reasoning":""}
 
 Customer message:
-%s`, question, doing, expect, patternLine, choices.String(), collections.String(), languagePromptInstruction(ctx.SupportedLanguages), message)
+%s`, question, doing, expect, patternLine, choices.String(), collections.String(), faqs.String(), faqRoute, languagePromptInstruction(ctx.SupportedLanguages), message)
 }
 
 func buildGuidePrompt(message, lang string, ctx IntentContext) string {

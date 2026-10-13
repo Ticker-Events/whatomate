@@ -40,11 +40,11 @@ Structured intent (`jev` / `gateway` with System One) does not require “Enable
 
 One System One request carries:
 
-- A route **Choice** for the routes this step can return
-- Speculative **Choice** fields for choice id, collection id, product span, and language
+- A route **Choice** for the routes this step can return (includes `faq` only when store FAQs are loaded)
+- Speculative **Choice** fields for choice id, collection id, FAQ id, product span, and language
 - **Noul** judges where two routes can both be true: `names_collection` / `names_product` on catalog steps, `asks_for_person` when choices are shown, `states_quantity` on number steps
 
-Code composes `codedIntentResult`. Number words such as “two” are normalized to digits in code. The existing grounding check and **0.75** confidence threshold still decide whether to act or ask a guide question.
+Code composes `codedIntentResult`. Number words such as “two” are normalized to digits in code. A grounded `faq` route uses the loaded FAQ id so code can send the stored answer without inventing text. The existing grounding check and **0.75** confidence threshold still decide whether to act or ask a guide question.
 
 Language labels for Jev (open detection): `en`, `hi`, `ml`, `ta`, `te`, `kn`, `ar`, `es`, `manglish`, `other`.
 

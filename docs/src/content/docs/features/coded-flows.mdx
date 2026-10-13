@@ -91,7 +91,7 @@ Every customer question carries a short step note (`Doing` and `Expect`) so the 
 Free text that is not one of those titles leaves the script. So does a number that fails `AskNumber`, and so does text sent while a WhatsApp Flow is waiting. The flow asks the intent role (text-only AI, no catalog tools) to map the message onto one route:
 
 ```json
-{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","confidence":0}
+{"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","faq_id":"","confidence":0}
 ```
 
 | Route | Meaning |
@@ -100,11 +100,12 @@ Free text that is not one of those titles leaves the script. So does a number th
 | `collection` | `collection_id` must already be in the loaded collections (menu and collection steps only) |
 | `product` | `product_query` is a short search string; no id is accepted |
 | `answer` | Normalized free-text value for this step (for example `"Two"` → `"2"`); must match the step pattern; no ids |
+| `faq` | `faq_id` must be one of the loaded store FAQs; code sends the stored answer and stays on the step |
 | `checkout` | Customer wants to place the order with the current cart; no ids |
 | `handoff` | Transfer to an agent (human/staff request, confused customer, or inventing catalog data) |
 | `unclear` | Ask one clarifying question and stay on the step |
 
-Go checks every id against an allow-list. An invented id, a product route that also fills an id, an answer that fails the pattern, or JSON that is not this contract transfers immediately. Confidence defaults to a threshold of `0.75`. A grounded `choice`, `collection`, `product`, `answer`, or `checkout` at or above the threshold is applied in the same turn. A grounded `unclear` (or a route below the threshold) asks up to three guide questions, then transfers. A button the flow offered, including **Talk to staff**, does not go through this AI step.
+Go checks every id against an allow-list. An invented id, a product route that also fills an id, an answer that fails the pattern, or JSON that is not this contract transfers immediately. Confidence defaults to a threshold of `0.75`. A grounded `choice`, `collection`, `product`, `answer`, or `checkout` at or above the threshold is applied in the same turn. A grounded `faq` at or above the threshold sends the store’s FAQ answer (translated when needed) and stays on the step. A grounded `unclear` (or a route below the threshold) asks up to three guide questions, then transfers. A button the flow offered, including **Talk to staff**, does not go through this AI step. The FAQ route appears only when the session has loaded active store FAQs.
 
 `checkout` from free text works on the menu and on any buy step. If `tiqr_cart` is empty, the customer is told the cart is empty and the collection list is shown again. If the cart has lines, the flow opens the checkout WhatsApp Flow and places the order the same way as the Checkout button.
 
