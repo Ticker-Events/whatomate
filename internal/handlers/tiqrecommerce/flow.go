@@ -2605,7 +2605,7 @@ func collectRecoverFields(c *Conv, name string, asks []codedflow.RecoverAsk) boo
 }
 
 func orderStatus(c *Conv) error {
-	page, ok := c.StoreMCP("orders_page", "list_orders_by_phone", nil)
+	page, ok := c.Store("orders_page", "list_orders_by_phone", map[string]string{"limit": "10"})
 	if !ok {
 		c.Say(tiqrEcommerceOrderUnavailable)
 		return c.End()
@@ -2654,7 +2654,7 @@ func orderStatus(c *Conv) error {
 		c.Say(tiqrEcommerceOrderUnavailable)
 		return c.End()
 	}
-	order, ok := c.StoreMCP("selected_order", "lookup_order_status", map[string]string{
+	order, ok := c.Store("selected_order", "lookup_order_status", map[string]string{
 		"order_id": displayUID,
 	})
 	if !ok {

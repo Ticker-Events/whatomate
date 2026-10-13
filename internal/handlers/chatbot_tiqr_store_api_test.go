@@ -394,6 +394,59 @@ func TestInvokeTiqrStoreRESTOperation_MCPOnlyOps(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not available over REST")
+
+	_, err = invokeTiqrStoreRESTOperation(context.Background(), client, "retry_payment", "1", "", map[string]string{
+		"order_uuid": "abc",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not available over REST")
+}
+
+func TestInvokeTiqrStoreRESTOperation_OrderStatusOps(t *testing.T) {
+	var sawByPhone, sawLookup bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/order/by-phone"):
+			sawByPhone = true
+			assert.Equal(t, "42", r.URL.Query().Get("store_id"))
+			assert.Equal(t, "919876543210", r.URL.Query().Get("phone_number"))
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{
+					map[string]any{"id": 1, "display_uid": "ORD-1", "status": "CONFIRMED"},
+				},
+			})
+		case strings.Contains(r.URL.Path, "/order/lookup"):
+			sawLookup = true
+			assert.Equal(t, "ORD-1", r.URL.Query().Get("display_uid"))
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 1, "display_uid": "ORD-1", "status": "CONFIRMED", "total_amount": 25000,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	client := ticker.NewClient(srv.URL, srv.Client())
+	page, err := invokeTiqrStoreRESTOperation(context.Background(), client, "list_orders_by_phone", "42", "919876543210", map[string]string{
+		"limit": "10",
+	})
+	require.NoError(t, err)
+	require.True(t, sawByPhone)
+	payload, ok := page.(map[string]any)
+	require.True(t, ok)
+	assert.NotNil(t, payload["results"])
+
+	detail, err := invokeTiqrStoreRESTOperation(context.Background(), client, "lookup_order_status", "42", "919876543210", map[string]string{
+		"order_id": "ORD-1",
+	})
+	require.NoError(t, err)
+	require.True(t, sawLookup)
+	order, ok := detail.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "ORD-1", asString(order["display_uid"]))
+	assert.Equal(t, float64(25000), order["total_amount"])
 }
 
 func TestInvokeTiqrStoreRESTOperation_FulfillmentSlots(t *testing.T) {

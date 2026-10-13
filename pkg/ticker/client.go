@@ -156,6 +156,57 @@ func (c *Client) GetOrder(ctx context.Context, orderUUID string) (map[string]any
 	return raw, nil
 }
 
+// ListOrdersByPhone lists recent store orders for a WhatsApp buyer phone.
+// Amounts stay in minor units; the list payload is id/display_uid only.
+func (c *Client) ListOrdersByPhone(ctx context.Context, storeID, phoneNumber string, limit, offset int) (map[string]any, error) {
+	if storeID == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	if strings.TrimSpace(phoneNumber) == "" {
+		return nil, fmt.Errorf("phone_number is required")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 10 {
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	q := url.Values{}
+	q.Set("store_id", storeID)
+	q.Set("phone_number", strings.TrimSpace(phoneNumber))
+	q.Set("limit", strconv.Itoa(limit))
+	if offset > 0 {
+		q.Set("offset", strconv.Itoa(offset))
+	}
+	return c.getPageAs(ctx, "/service/buyer/order/by-phone/?"+q.Encode(), "results", limit, offset)
+}
+
+// LookupOrderStatus fetches order detail for a phone-verified buyer.
+// displayUID may be empty to return the latest matching order.
+// Leaves money fields in minor units for WhatsApp status formatting.
+func (c *Client) LookupOrderStatus(ctx context.Context, storeID, phoneNumber, displayUID string) (map[string]any, error) {
+	if storeID == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	if strings.TrimSpace(phoneNumber) == "" {
+		return nil, fmt.Errorf("phone_number is required")
+	}
+	q := url.Values{}
+	q.Set("store_id", storeID)
+	q.Set("phone_number", strings.TrimSpace(phoneNumber))
+	if uid := strings.TrimSpace(displayUID); uid != "" {
+		q.Set("display_uid", uid)
+	}
+	var raw map[string]any
+	if err := c.getJSON(ctx, "/service/buyer/order/lookup/?"+q.Encode(), &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // ListCategoriesParams filters GET /service/buyer/store/{id}/category/.
 type ListCategoriesParams struct {
 	Search string

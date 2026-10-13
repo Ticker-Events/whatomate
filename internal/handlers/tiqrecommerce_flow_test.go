@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -629,6 +628,30 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 				results = extra
 			}
 			_ = json.NewEncoder(w).Encode(pageStoreResults(r, results, testPageSize(store)))
+		case strings.Contains(r.URL.Path, "/order/by-phone"):
+			results := []any{}
+			if extra, ok := store["test_orders"].([]any); ok {
+				results = extra
+			}
+			_ = json.NewEncoder(w).Encode(pageStoreResults(r, results, testPageSize(store)))
+		case strings.Contains(r.URL.Path, "/order/lookup"):
+			details, _ := store["test_order_details"].(map[string]any)
+			uid := strings.TrimSpace(r.URL.Query().Get("display_uid"))
+			if uid != "" {
+				if detail, ok := details[uid]; ok {
+					_ = json.NewEncoder(w).Encode(detail)
+					return
+				}
+				http.NotFound(w, r)
+				return
+			}
+			if len(details) > 0 {
+				for _, detail := range details {
+					_ = json.NewEncoder(w).Encode(detail)
+					return
+				}
+			}
+			http.NotFound(w, r)
 		case strings.Contains(r.URL.Path, "/category/"):
 			if counts != nil {
 				counts.collections++
@@ -684,7 +707,7 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 			}
 			payload := map[string]any{}
 			for key, value := range store {
-				if key == "test_collections" || key == "test_orders" || key == "test_page_size" || key == "test_faqs" {
+				if key == "test_collections" || key == "test_orders" || key == "test_order_details" || key == "test_page_size" || key == "test_faqs" {
 					continue
 				}
 				payload[key] = value
@@ -1917,8 +1940,7 @@ func TestTiqrEcommerce_IntentPaddedButtonIDSelectsBuy(t *testing.T) {
 
 func TestTiqrEcommerce_IntentTitleOnlyOrderStatus(t *testing.T) {
 	useCodedIntent(t, nil, nil)
-	withOrderStatusMCP(t, orderStatusStoreFixture()["test_orders"].([]any), orderStatusDetailByUID())
-	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, orderStatusAI())
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, orderStatusStoreFixture(), nil)
 	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", "", nil))
 	reloadSession(t, app, session)
@@ -1953,6 +1975,7 @@ func orderStatusStoreFixture() map[string]any {
 				"id": 2, "display_uid": "ORD-2", "created_at": "2026-09-15T08:00:00Z", "status": "PENDING_PAYMENT",
 			},
 		},
+		"test_order_details": orderStatusDetailByUID(),
 	}
 }
 
@@ -1996,55 +2019,8 @@ func orderStatusDetailByUID() map[string]any {
 	}
 }
 
-type orderStatusLookupStub struct {
-	lastName string
-	lastArgs map[string]any
-	orders   []any
-	byUID    map[string]any
-}
-
-func (s *orderStatusLookupStub) CallTool(_ context.Context, name string, args map[string]any) (any, error) {
-	s.lastName = name
-	s.lastArgs = args
-	switch name {
-	case "list_orders_by_phone":
-		orders := s.orders
-		if orders == nil {
-			orders = []any{}
-		}
-		return map[string]any{"orders": orders, "count": len(orders)}, nil
-	case "lookup_order_status":
-		uid := strings.TrimSpace(asString(args["order_display_id"]))
-		if detail, ok := s.byUID[uid]; ok {
-			return detail, nil
-		}
-		return nil, fmt.Errorf("order not found")
-	default:
-		return nil, fmt.Errorf("unexpected tool %s", name)
-	}
-}
-
-func (s *orderStatusLookupStub) Close() error { return nil }
-
-func withOrderStatusMCP(t *testing.T, orders []any, byUID map[string]any) *orderStatusLookupStub {
-	t.Helper()
-	stub := &orderStatusLookupStub{orders: orders, byUID: byUID}
-	prev := newTiqrStoreInvoker
-	newTiqrStoreInvoker = func(_, _ string) tiqrStoreInvoker { return stub }
-	t.Cleanup(func() { newTiqrStoreInvoker = prev })
-	return stub
-}
-
-func orderStatusAI() *models.AIConfig {
-	return &models.AIConfig{
-		CommerceEnabled: true,
-		CommerceMCPURL:  "http://mcp.test/mcp",
-	}
-}
-
 func TestTiqrEcommerce_OrderStatus(t *testing.T) {
-	stub := withOrderStatusMCP(t, orderStatusStoreFixture()["test_orders"].([]any), orderStatusDetailByUID())
-	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, orderStatusAI())
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, orderStatusStoreFixture(), nil)
 	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", tiqrecommerce.CheckOrderStatus, nil))
 	reloadSession(t, app, session)
@@ -2057,8 +2033,6 @@ func TestTiqrEcommerce_OrderStatus(t *testing.T) {
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "ORD-1", "1", nil))
 	reloadSession(t, app, session)
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
-	assert.Equal(t, "lookup_order_status", stub.lastName)
-	assert.Equal(t, "ORD-1", stub.lastArgs["order_display_id"])
 	blob = outgoingBlob(t, app, session)
 	assert.Contains(t, blob, "Order *ORD-1*")
 	assert.Contains(t, blob, "confirmed")
@@ -2069,8 +2043,7 @@ func TestTiqrEcommerce_OrderStatus(t *testing.T) {
 }
 
 func TestTiqrEcommerce_OrderStatusPickupOmitsAddress(t *testing.T) {
-	withOrderStatusMCP(t, orderStatusStoreFixture()["test_orders"].([]any), orderStatusDetailByUID())
-	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, orderStatusAI())
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, orderStatusStoreFixture(), nil)
 	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", tiqrecommerce.CheckOrderStatus, nil))
 	reloadSession(t, app, session)
@@ -2084,8 +2057,9 @@ func TestTiqrEcommerce_OrderStatusPickupOmitsAddress(t *testing.T) {
 }
 
 func TestTiqrEcommerce_OrderStatusMissing(t *testing.T) {
-	withOrderStatusMCP(t, []any{}, orderStatusDetailByUID())
-	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, orderStatusAI())
+	store := orderStatusStoreFixture()
+	store["test_orders"] = []any{}
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, store, nil)
 	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", tiqrecommerce.CheckOrderStatus, nil))
 	reloadSession(t, app, session)
@@ -2093,10 +2067,14 @@ func TestTiqrEcommerce_OrderStatusMissing(t *testing.T) {
 	assert.Contains(t, outgoingBlob(t, app, session), "couldn't find a recent order")
 }
 
-func TestTiqrEcommerce_OrderStatusUnavailableWithoutMCP(t *testing.T) {
-	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, map[string]any{"id": 42, "name": "Demo"}, &models.AIConfig{
-		CommerceEnabled: false,
-	})
+func TestTiqrEcommerce_OrderStatusUnavailableWithoutREST(t *testing.T) {
+	app, account, contact, session := startEcommerceWithStore(t, twoProducts(nil), nil, orderStatusStoreFixture(), nil)
+	var settings models.ChatbotSettings
+	require.NoError(t, app.DB.Where("organization_id = ?", account.OrganizationID).First(&settings).Error)
+	settings.AI.CommerceRESTURL = ""
+	require.NoError(t, app.DB.Save(&settings).Error)
+	app.InvalidateChatbotSettingsCache(account.OrganizationID)
+
 	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", tiqrecommerce.CheckOrderStatus, nil))
 	reloadSession(t, app, session)

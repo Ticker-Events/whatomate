@@ -312,11 +312,32 @@ func invokeTiqrStoreRESTOperation(
 			return nil, fmt.Errorf("order_uuid is required")
 		}
 		return client.GetOrder(ctx, uuid)
+	case "list_orders_by_phone":
+		phoneNumber := strings.TrimSpace(params["phone_number"])
+		if phoneNumber == "" {
+			phoneNumber = strings.TrimSpace(phone)
+		}
+		if phoneNumber == "" {
+			return nil, fmt.Errorf("phone_number is required")
+		}
+		if limit <= 0 {
+			limit = 10
+		}
+		return client.ListOrdersByPhone(ctx, storeID, phoneNumber, limit, offset)
+	case "lookup_order_status":
+		phoneNumber := strings.TrimSpace(params["phone_number"])
+		if phoneNumber == "" {
+			phoneNumber = strings.TrimSpace(phone)
+		}
+		if phoneNumber == "" {
+			return nil, fmt.Errorf("phone_number is required")
+		}
+		return client.LookupOrderStatus(ctx, storeID, phoneNumber, strings.TrimSpace(params["order_id"]))
 	case "list_fulfillment_slots":
 		return syntheticFulfillmentSlots(params["delivery_mode"]), nil
 	case "propose_fulfillment_time":
 		return syntheticProposeFulfillment(params)
-	case "check_delivery", "lookup_order_status", "list_orders_by_phone", "retry_payment":
+	case "check_delivery", "retry_payment":
 		return nil, fmt.Errorf("operation %q is not available over REST (use MCP)", operation)
 	default:
 		return nil, fmt.Errorf("unknown tiqr store operation %q", operation)
