@@ -316,6 +316,11 @@ func TestApp_CreateAgentTransfer_Success(t *testing.T) {
 	assert.Equal(t, contact.ID.String(), result.Data.Transfer.ContactID)
 	assert.Equal(t, models.TransferStatusActive, result.Data.Transfer.Status)
 	assert.Equal(t, models.TransferSourceManual, result.Data.Transfer.Source)
+
+	var dbContact models.Contact
+	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)
+	assert.False(t, dbContact.IsClosed)
+	require.NotNil(t, dbContact.AwaitingReplySince)
 }
 
 func TestApp_CreateAgentTransfer_WithAgent(t *testing.T) {

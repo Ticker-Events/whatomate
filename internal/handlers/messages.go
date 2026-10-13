@@ -349,7 +349,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 
 	// Update contact's last message
 	preview := a.getMessagePreview(req)
-	a.updateContactLastMessage(req.Contact, preview)
+	a.updateContactLastMessage(req.Contact, preview, opts.SentByUserID)
 
 	return msg, nil
 }
@@ -658,8 +658,11 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 	})
 }
 
-// updateContactLastMessage updates contact's last_message_at and preview
-func (a *App) updateContactLastMessage(contact *models.Contact, preview string) {
+// updateContactLastMessage updates contact's last_message_at and preview.
+// An agent reply closes the first-response clock. A system or bot message
+// does too, unless the chat is already with an agent: the handoff line is
+// not the agent's reply, so the clock started at transfer stays open.
+func (a *App) updateContactLastMessage(contact *models.Contact, preview string, sentByUserID *uuid.UUID) {
 	now := time.Now()
 	contact.LastMessageAt = &now
 	contact.LastMessagePreview = preview
@@ -667,9 +670,34 @@ func (a *App) updateContactLastMessage(contact *models.Contact, preview string) 
 		"last_message_at":      now,
 		"last_message_preview": preview,
 	}
-	maps.Copy(updates, contactutil.ApplyConversationWait(contact, false, now))
+	if a.keepAgentResponseWait(contact, sentByUserID) {
+		a.reloadConversationWait(contact)
+	} else {
+		maps.Copy(updates, contactutil.ApplyConversationWait(contact, false, now))
+	}
 	a.DB.Model(contact).Updates(updates)
 	a.syncContactToFirestore(contact)
+}
+
+// keepAgentResponseWait reports whether this outgoing message should leave
+// the agent response clock untouched. Only system sends (no user id) during
+// an active transfer qualify. The caller reloads the clock from the database
+// because the in-memory contact is often still closed from the last bot reply.
+func (a *App) keepAgentResponseWait(contact *models.Contact, sentByUserID *uuid.UUID) bool {
+	if a == nil || contact == nil || sentByUserID != nil {
+		return false
+	}
+	return a.hasActiveAgentTransfer(contact.OrganizationID, contact.ID)
+}
+
+func (a *App) reloadConversationWait(contact *models.Contact) {
+	var fresh models.Contact
+	if err := a.DB.Select("is_closed", "awaiting_reply_since").First(&fresh, "id = ?", contact.ID).Error; err != nil {
+		a.Log.Error("Failed to reload agent response wait", "error", err, "contact_id", contact.ID)
+		return
+	}
+	contact.IsClosed = fresh.IsClosed
+	contact.AwaitingReplySince = fresh.AwaitingReplySince
 }
 
 // getMessagePreview returns a preview string for the message

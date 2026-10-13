@@ -1407,6 +1407,11 @@ func TestTiqrEcommerce_EarlyHandoffCompletes(t *testing.T) {
 	assert.Equal(t, models.TransferStatusActive, transfers[0].Status)
 	require.NotNil(t, transfers[0].CommerceDraftID)
 
+	var handedOff models.Contact
+	require.NoError(t, app.DB.First(&handedOff, contact.ID).Error)
+	assert.False(t, handedOff.IsClosed)
+	require.NotNil(t, handedOff.AwaitingReplySince)
+
 	var draft models.CommerceDraft
 	require.NoError(t, app.DB.First(&draft, "id = ?", *transfers[0].CommerceDraftID).Error)
 	assert.Equal(t, "transferred", draft.Status)

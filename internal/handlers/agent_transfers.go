@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/assignment"
+	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/internal/websocket"
@@ -543,6 +544,7 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create transfer", nil, "")
 	}
 
+	a.startAgentResponseWait(contact)
 	a.syncContactChatbotPausedToFirestore(orgID, contactID, &transfer.ID, true)
 
 	// When AssignToSameAgent is enabled and no agent is already assigned,
@@ -1093,6 +1095,25 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 	})
 }
 
+// startAgentResponseWait opens the first-response clock when a chat is handed
+// to an agent. A clock that is already running is kept. A system message sent
+// before the transfer (keyword or flow body) has already closed the chat, so
+// this starts a fresh clock at handoff.
+func (a *App) startAgentResponseWait(contact *models.Contact) {
+	if a == nil || contact == nil {
+		return
+	}
+	updates := contactutil.ApplyConversationWait(contact, true, time.Now())
+	if len(updates) == 0 {
+		return
+	}
+	if err := a.DB.Model(contact).Updates(updates).Error; err != nil {
+		a.Log.Error("Failed to start agent response wait", "error", err, "contact_id", contact.ID)
+		return
+	}
+	a.syncContactToFirestore(contact)
+}
+
 // hasActiveAgentTransfer checks if a contact has an active agent transfer
 func (a *App) hasActiveAgentTransfer(orgID, contactID uuid.UUID) bool {
 	var count int64
@@ -1223,6 +1244,7 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 		return err
 	}
 
+	a.startAgentResponseWait(contact)
 	a.syncContactChatbotPausedToFirestore(transfer.OrganizationID, transfer.ContactID, &transfer.ID, true)
 
 	// Update contact assignment if agent assigned, but only when AssignToSameAgent

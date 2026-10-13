@@ -404,6 +404,9 @@ func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *m
 	a.syncContactChatbotPausedToFirestore(account.OrganizationID, contact.ID, &transfer.ID, true)
 	a.syncCommerceHandoffToFirestore(account.OrganizationID, contact.ID, &transfer, contact)
 	if created {
+		// Start before the handoff text. That system message must not clear
+		// the clock; updateContactLastMessage keeps it while a transfer is active.
+		a.startAgentResponseWait(contact)
 		a.broadcastTransferCreated(&transfer, contact)
 	}
 	return &transfer, created, nil

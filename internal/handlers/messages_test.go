@@ -841,6 +841,94 @@ func TestApp_SendOutgoingMessage_ContactLastMessageUpdated(t *testing.T) {
 	assert.Nil(t, updatedContact.AwaitingReplySince)
 }
 
+func TestApp_SendOutgoingMessage_SystemMessageKeepsAgentWait(t *testing.T) {
+	mockServer := newMockWhatsAppServer()
+	defer mockServer.close()
+
+	app := newMsgTestApp(t, mockServer)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := createTestAccount(t, app, org.ID)
+	started := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Microsecond)
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"is_closed":            false,
+		"awaiting_reply_since": started,
+	}).Error)
+	require.NoError(t, app.DB.Create(&models.AgentTransfer{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.TransferStatusActive,
+		Source:          models.TransferSourceCommerce,
+		TransferredAt:   time.Now(),
+	}).Error)
+
+	// Bot replies leave the in-memory contact closed. The handoff send must
+	// reload the clock the transfer just started instead of clearing it.
+	contact.IsClosed = true
+	contact.AwaitingReplySince = nil
+
+	_, err := app.SendOutgoingMessage(testutil.TestContext(t), handlers.OutgoingMessageRequest{
+		Account: account,
+		Contact: contact,
+		Type:    models.MessageTypeText,
+		Content: "A baker will review this and continue with you here.",
+	}, handlers.ChatbotSendOptions())
+	require.NoError(t, err)
+
+	var updated models.Contact
+	require.NoError(t, app.DB.First(&updated, contact.ID).Error)
+	assert.False(t, updated.IsClosed)
+	require.NotNil(t, updated.AwaitingReplySince)
+	assert.True(t, started.Equal(updated.AwaitingReplySince.UTC()))
+	assert.Equal(t, "A baker will review this and continue with you here.", updated.LastMessagePreview)
+}
+
+func TestApp_SendOutgoingMessage_AgentReplyClearsWaitDuringTransfer(t *testing.T) {
+	mockServer := newMockWhatsAppServer()
+	defer mockServer.close()
+
+	app := newMsgTestApp(t, mockServer)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := createTestAccount(t, app, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	started := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Microsecond)
+	contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+	require.NoError(t, app.DB.Model(contact).Updates(map[string]any{
+		"is_closed":            false,
+		"awaiting_reply_since": started,
+	}).Error)
+	require.NoError(t, app.DB.Create(&models.AgentTransfer{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.TransferStatusActive,
+		Source:          models.TransferSourceManual,
+		TransferredAt:   time.Now(),
+	}).Error)
+	require.NoError(t, app.DB.First(contact, contact.ID).Error)
+
+	opts := handlers.DefaultSendOptions()
+	opts.Async = false
+	opts.SentByUserID = &user.ID
+	_, err := app.SendOutgoingMessage(testutil.TestContext(t), handlers.OutgoingMessageRequest{
+		Account: account,
+		Contact: contact,
+		Type:    models.MessageTypeText,
+		Content: "On it.",
+	}, opts)
+	require.NoError(t, err)
+
+	var updated models.Contact
+	require.NoError(t, app.DB.First(&updated, contact.ID).Error)
+	assert.True(t, updated.IsClosed)
+	assert.Nil(t, updated.AwaitingReplySince)
+}
+
 func TestApp_SendOutgoingMessage_MediaPreview(t *testing.T) {
 	mockServer := newMockWhatsAppServer()
 	defer mockServer.close()
