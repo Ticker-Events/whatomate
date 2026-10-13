@@ -14,9 +14,9 @@ const (
 	typeSafeSystemOneURL  = "https://api.typesafe.ai/v1/systemone"
 	aiGatewaySystemOneURL = "https://ai-gateway.vercel.sh/typesafe/v1/systemone"
 
-	jevJudgeYes = 0.8
-	jevJudgeNo  = 0.2
-	jevMaxSpans = 200
+	jevJudgeYes      = 0.8
+	jevJudgeNo       = 0.2
+	maxFAQCandidates = 8
 )
 
 type JevEndpoint struct {
@@ -40,6 +40,11 @@ type jevNoulAnswer struct {
 type JevSystemOneResponse struct {
 	Model   string                     `json:"model"`
 	Answers map[string]json.RawMessage `json:"answers"`
+}
+
+type faqCandidate struct {
+	ID       string
+	Question string
 }
 
 func codedIntentProvider(settings *models.ChatbotSettings) models.IntentProvider {
@@ -85,7 +90,50 @@ func identifyCodedIntentJev(a Host, settings *models.ChatbotSettings, message st
 	if err != nil {
 		return codedIntentResult{}, err
 	}
-	return composeJevIntent(raw, message, ctx)
+	result, err := composeJevIntent(raw, message, ctx)
+	if err != nil {
+		return result, err
+	}
+	if result.Route != codedRouteFAQ || result.Confidence <= 0 {
+		return result, nil
+	}
+	if result.FaqID != "" {
+		return result, nil
+	}
+	if id := exactFAQMatch(message, ctx.FAQs); id != "" {
+		result.FaqID = id
+		result.Reasoning += " faq=exact"
+		return result, nil
+	}
+	if len(ctx.FAQs) == 0 {
+		return result, nil
+	}
+	faqState, faqQuestions := buildJevFAQRequest(message, ctx.FAQs)
+	faqRaw, err := a.CallSystemOne(endpoint, faqState, faqQuestions)
+	if err != nil {
+		return codedIntentResult{}, err
+	}
+	faqAns, ok := parseJevChoice(faqRaw.Answers["faq_id"])
+	if !ok || !choiceConfidenceUsable(faqAns) || faqAns.Choice == "" || faqAns.Choice == "none" {
+		result.Route = codedRouteUnclear
+		result.FaqID = ""
+		result.Confidence = 0
+		result.Reasoning += " faq_id unavailable"
+		return result, nil
+	}
+	if _, exists := ctx.FAQs[faqAns.Choice]; !exists {
+		result.Route = codedRouteUnclear
+		result.FaqID = ""
+		result.Confidence = 0
+		result.Reasoning += " faq_id ungrounded"
+		return result, nil
+	}
+	result.FaqID = faqAns.Choice
+	if faqAns.Confidence > 0 {
+		result.Confidence = faqAns.Confidence
+	}
+	result.Reasoning += " faq=follow_up"
+	return result, nil
 }
 
 func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]any, map[string]any) {
@@ -95,29 +143,25 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 	}
 	sort.Slice(choices, func(i, j int) bool { return choices[i]["id"] < choices[j]["id"] })
 
-	collections := make([]map[string]string, 0)
+	extraCollections := collectionsNotInChoices(ctx)
+	collections := make([]map[string]string, 0, len(extraCollections))
 	if ctx.AllowCatalog {
-		for id, name := range ctx.Collections {
+		for id, name := range extraCollections {
 			collections = append(collections, map[string]string{"id": id, "name": name})
 		}
 		sort.Slice(collections, func(i, j int) bool { return collections[i]["id"] < collections[j]["id"] })
 	}
 
-	faqs := make([]map[string]string, 0)
-	for id, question := range ctx.FAQs {
-		faqs = append(faqs, map[string]string{"id": id, "question": question})
-	}
-	sort.Slice(faqs, func(i, j int) bool { return faqs[i]["id"] < faqs[j]["id"] })
-
 	state := map[string]any{
-		"message":     message,
-		"question":    ctx.Question,
-		"doing":       ctx.Doing,
-		"expect":      ctx.Expect,
-		"pattern":     ctx.Pattern,
-		"choices":     choices,
-		"collections": collections,
-		"faqs":        faqs,
+		"message":  message,
+		"question": ctx.Question,
+		"doing":    ctx.Doing,
+		"expect":   ctx.Expect,
+		"pattern":  ctx.Pattern,
+		"choices":  choices,
+	}
+	if len(collections) > 0 {
+		state["collections"] = collections
 	}
 
 	routeCriteria := map[string]any{
@@ -137,11 +181,14 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 			"what": "More than one shopping route fits, or none of them fit, and they are not asking for a person.",
 		},
 	}
-	if ctx.AllowCatalog {
+	includeCollectionRoute := ctx.AllowCatalog && len(extraCollections) > 0
+	if includeCollectionRoute {
 		routeCriteria["collection"] = map[string]any{
 			"what":    "They want the items in one loaded collection, or ask what is available in that collection.",
 			"not_for": "A single product name to search.",
 		}
+	}
+	if ctx.AllowCatalog {
 		routeCriteria["product"] = map[string]any{
 			"what":    "They name a product or ask to buy a specific item.",
 			"not_for": "The Buy products button, or browsing a whole collection.",
@@ -153,9 +200,9 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 			"not_for": "A button id, collection name, or product name.",
 		}
 	}
-	if len(ctx.FAQs) > 0 {
+	if ctx.AllowFAQ && len(ctx.FAQs) > 0 {
 		routeCriteria["faq"] = map[string]any{
-			"what":    "They ask a question that one of the loaded FAQs already answers, including a paraphrase of that FAQ question.",
+			"what":    "They ask a store policy or FAQ question that the store already answers, including a paraphrase.",
 			"not_for": "Buying, browsing a collection, naming a product, checkout, order status, or asking for a person.",
 		}
 	}
@@ -185,16 +232,12 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 			"none": "None of the shown choices match.",
 		}
 		for id, title := range ctx.ChoiceIDs {
-			choiceCriteria[id] = map[string]any{
-				"what":  title,
-				"title": title,
-			}
+			choiceCriteria[id] = title
 		}
 		questions["choice_id"] = map[string]any{
 			"type": "choice",
 			"instructions": map[string]any{
 				"question": "Which shown choice id matches `message`?",
-				"choices":  "`choices`",
 			},
 			"criteria": choiceCriteria,
 		}
@@ -210,35 +253,33 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 		}
 	}
 
-	if ctx.AllowCatalog && len(ctx.Collections) > 0 {
+	if includeCollectionRoute {
 		collectionCriteria := map[string]any{
 			"none": "None of the loaded collections match.",
 		}
-		for id, name := range ctx.Collections {
-			collectionCriteria[id] = map[string]any{
-				"what": name,
-				"name": name,
-			}
+		for id, name := range extraCollections {
+			collectionCriteria[id] = name
 		}
 		questions["collection_id"] = map[string]any{
 			"type": "choice",
 			"instructions": map[string]any{
-				"question":    "Which loaded collection id matches `message`?",
-				"collections": "`collections`",
+				"question": "Which loaded collection id matches `message`?",
 			},
 			"criteria": collectionCriteria,
 		}
 		questions["names_collection"] = map[string]any{
 			"type": "noul",
 			"instructions": map[string]any{
-				"question":    "Does `message` refer to one loaded collection as a group to browse?",
-				"collections": "`collections`",
+				"question": "Does `message` refer to one loaded collection as a group to browse?",
 			},
 			"criteria": map[string]any{
 				"true":  "They want that collection's items as a group.",
 				"false": "They are not asking for a whole collection.",
 			},
 		}
+	}
+
+	if ctx.AllowCatalog {
 		questions["names_product"] = map[string]any{
 			"type": "noul",
 			"instructions": map[string]any{
@@ -248,20 +289,6 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 				"true":  "They name a product to find or buy.",
 				"false": "They are not naming a specific product.",
 			},
-		}
-	}
-
-	if ctx.AllowCatalog {
-		spanCriteria := map[string]any{"none": "No product search span is present."}
-		for _, span := range productSpanCandidates(message) {
-			spanCriteria[span] = span
-		}
-		questions["product_span"] = map[string]any{
-			"type": "choice",
-			"instructions": map[string]any{
-				"question": "Which span from `message` is the product search string?",
-			},
-			"criteria": spanCriteria,
 		}
 	}
 
@@ -279,61 +306,139 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 		}
 	}
 
-	if len(ctx.FAQs) > 0 {
-		faqCriteria := map[string]any{
-			"none": "None of the loaded FAQs match.",
-		}
-		for id, question := range ctx.FAQs {
-			faqCriteria[id] = map[string]any{
-				"what":     question,
-				"question": question,
-			}
-		}
-		questions["faq_id"] = map[string]any{
-			"type": "choice",
-			"instructions": map[string]any{
-				"question": "Which loaded FAQ id answers `message`?",
-				"faqs":     "`faqs`",
-			},
-			"criteria": faqCriteria,
-		}
-	}
-
 	return state, questions
 }
 
-func productSpanCandidates(message string) []string {
-	message = strings.TrimSpace(message)
-	if message == "" {
+func buildJevFAQRequest(message string, faqs map[string]string) (map[string]any, map[string]any) {
+	ranked := rankFAQs(message, faqs, maxFAQCandidates)
+	items := make([]map[string]string, 0, len(ranked))
+	faqCriteria := map[string]any{
+		"none": "None of the loaded FAQs match.",
+	}
+	for _, item := range ranked {
+		items = append(items, map[string]string{"id": item.ID, "question": item.Question})
+		faqCriteria[item.ID] = item.Question
+	}
+	state := map[string]any{
+		"message": message,
+		"faqs":    items,
+	}
+	questions := map[string]any{
+		"faq_id": map[string]any{
+			"type": "choice",
+			"instructions": map[string]any{
+				"question": "Which loaded FAQ id answers `message`?",
+			},
+			"criteria": faqCriteria,
+		},
+	}
+	return state, questions
+}
+
+func collectionsNotInChoices(ctx IntentContext) map[string]string {
+	if len(ctx.Collections) == 0 {
 		return nil
 	}
-	words := strings.Fields(message)
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(words)*2+1)
-	add := func(s string) {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			return
+	out := make(map[string]string)
+	for id, name := range ctx.Collections {
+		if _, ok := ctx.ChoiceIDs[id]; ok {
+			continue
 		}
-		if _, ok := seen[s]; ok {
-			return
-		}
-		if len(out) >= jevMaxSpans {
-			return
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-	add(message)
-	for i := range words {
-		add(words[i])
-		if i+1 < len(words) {
-			add(words[i] + " " + words[i+1])
-		}
+		out[id] = name
 	}
 	return out
 }
 
+func exactFAQMatch(message string, faqs map[string]string) string {
+	norm := normalizeIntentText(message)
+	if norm == "" {
+		return ""
+	}
+	for id, question := range faqs {
+		if normalizeIntentText(question) == norm {
+			return id
+		}
+	}
+	return ""
+}
+
+func rankFAQs(message string, faqs map[string]string, limit int) []faqCandidate {
+	if limit <= 0 || len(faqs) == 0 {
+		return nil
+	}
+	msgTokens := intentTokenSet(message)
+	type scored struct {
+		faqCandidate
+		score int
+	}
+	ranked := make([]scored, 0, len(faqs))
+	for id, question := range faqs {
+		overlap := 0
+		for tok := range intentTokenSet(question) {
+			if _, ok := msgTokens[tok]; ok {
+				overlap++
+			}
+		}
+		ranked = append(ranked, scored{faqCandidate: faqCandidate{ID: id, Question: question}, score: overlap})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].score != ranked[j].score {
+			return ranked[i].score > ranked[j].score
+		}
+		return ranked[i].ID < ranked[j].ID
+	})
+	if len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+	out := make([]faqCandidate, len(ranked))
+	for i, item := range ranked {
+		out[i] = item.faqCandidate
+	}
+	return out
+}
+
+func intentTokenSet(s string) map[string]struct{} {
+	norm := normalizeIntentText(s)
+	out := map[string]struct{}{}
+	for _, tok := range strings.Fields(norm) {
+		if tok == "" {
+			continue
+		}
+		out[tok] = struct{}{}
+	}
+	return out
+}
+
+var shoppingQueryPrefixes = []string{
+	"i want to buy",
+	"i want",
+	"i need",
+	"show me",
+	"do you have",
+	"looking for",
+	"can i get",
+	"please send",
+	"buy",
+}
+
+func productQueryFromMessage(message string) string {
+	trimmed := strings.TrimSpace(message)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	for _, prefix := range shoppingQueryPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			rest := strings.TrimSpace(trimmed[len(prefix):])
+			rest = strings.TrimLeft(rest, " ,.-:")
+			if rest != "" {
+				return rest
+			}
+			return trimmed
+		}
+	}
+	return trimmed
+}
 
 func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentContext) (codedIntentResult, error) {
 	routeAns, routeOK := parseJevChoice(raw.Answers["route"])
@@ -341,7 +446,6 @@ func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentC
 	choiceAns, _ := parseJevChoice(raw.Answers["choice_id"])
 	collectionAns, _ := parseJevChoice(raw.Answers["collection_id"])
 	faqAns, _ := parseJevChoice(raw.Answers["faq_id"])
-	spanAns, _ := parseJevChoice(raw.Answers["product_span"])
 	namesCollection, hasNamesCollection := parseJevNoul(raw.Answers["names_collection"])
 	namesProduct, hasNamesProduct := parseJevNoul(raw.Answers["names_product"])
 	asksPerson, hasAsksPerson := parseJevNoul(raw.Answers["asks_for_person"])
@@ -389,6 +493,19 @@ func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentC
 				result.Route = codedRouteUnclear
 				result.Confidence = 0
 				judgeNote = "catalog judge uncertain"
+			}
+		}
+	} else if hasNamesProduct && !hasNamesCollection {
+		switch {
+		case namesProduct >= jevJudgeYes:
+			result.Route = codedRouteProduct
+			result.Confidence = namesProduct
+			judgeNote = "names_product"
+		case namesProduct > jevJudgeNo && namesProduct < jevJudgeYes:
+			if result.Route == codedRouteProduct {
+				result.Route = codedRouteUnclear
+				result.Confidence = 0
+				judgeNote = "names_product uncertain"
 			}
 		}
 	}
@@ -460,11 +577,7 @@ func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentC
 			}
 		}
 	case codedRouteProduct:
-		query := strings.TrimSpace(spanAns.Choice)
-		if query == "" || query == "none" || !choiceConfidenceUsable(spanAns) {
-			query = strings.TrimSpace(message)
-		}
-		result.ProductQuery = query
+		result.ProductQuery = productQueryFromMessage(message)
 	case codedRouteAnswer:
 		result.Answer = normalizeCodedAnswer(message, ctx.Pattern)
 	case codedRouteFAQ:

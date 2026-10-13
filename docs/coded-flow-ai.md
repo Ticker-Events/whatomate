@@ -38,11 +38,23 @@ Structured intent (`jev` / `gateway` with System One) does not require “Enable
 
 ## Jev request shape (intent)
 
-One System One request carries:
+Intent uses one or two System One requests so FAQ and catalog lists are not pasted into every turn.
 
-- A route **Choice** for the routes this step can return (includes `faq` only when store FAQs are loaded)
-- Speculative **Choice** fields for choice id, collection id, FAQ id, product span, and language
-- **Noul** judges where two routes can both be true: `names_collection` / `names_product` on catalog steps, `asks_for_person` when choices are shown, `states_quantity` on number steps
+**Route request** (always for free text that is not an exact local match):
+
+- A route **Choice** for the routes this step can return (includes `faq` only when `AllowFAQ` is set and FAQs are loaded)
+- Speculative **Choice** fields for choice id, collection id (only when collections are not already the on-screen choices), and language
+- **Noul** judges where two routes can both be true: `names_collection` / `names_product` on catalog steps that still need a separate collection list, `names_product` alone when collection rows are already choices, `asks_for_person` when choices are shown, `states_quantity` on number steps
+- Criteria labels are a single string each (no duplicated `what` + `title` / `question` objects)
+- Product search strings are derived in code (shopping prefixes stripped). There is no `product_span` question. Product records stay out of the prompt
+
+**FAQ follow-up** (only when the route is `faq` and confidence is usable):
+
+- At most **8** FAQ questions, ranked by token overlap with the customer message
+- A `faq_id` **Choice** with a `none` option
+- An exact match on a FAQ question skips this call
+
+Exact matches on an on-screen choice title, a loaded collection name, or a FAQ question skip System One entirely.
 
 Code composes `codedIntentResult`. Number words such as “two” are normalized to digits in code. A grounded `faq` route uses the loaded FAQ id so code can send the stored answer without inventing text. The existing grounding check and **0.75** confidence threshold still decide whether to act or ask a guide question.
 

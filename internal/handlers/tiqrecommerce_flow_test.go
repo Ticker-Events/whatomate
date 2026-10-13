@@ -2518,12 +2518,21 @@ func TestBuildIntentPrompt_IncludesStepContext(t *testing.T) {
 
 func TestBuildIntentPrompt_IncludesFAQs(t *testing.T) {
 	prompt := codedflow.BuildIntentPrompt("what time do you close", codedflow.IntentContext{
-		FAQs: map[string]string{"1": "What are your hours?"},
+		AllowFAQ: true,
+		FAQs:     map[string]string{"1": "What are your hours?"},
 	})
 	assert.Contains(t, prompt, "What are your hours?")
 	assert.Contains(t, prompt, "id 1")
 	assert.Contains(t, prompt, "route faq:")
 	assert.Contains(t, prompt, `"faq_id":""`)
+}
+
+func TestBuildIntentPrompt_OmitsFAQsWithoutAllowFAQ(t *testing.T) {
+	prompt := codedflow.BuildIntentPrompt("what time do you close", codedflow.IntentContext{
+		FAQs: map[string]string{"1": "What are your hours?"},
+	})
+	assert.NotContains(t, prompt, "What are your hours?")
+	assert.NotContains(t, prompt, "route faq:")
 }
 
 func TestTiqrEcommerce_FAQRouteAnswersAndStays(t *testing.T) {

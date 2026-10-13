@@ -378,7 +378,7 @@ func (c *Conv) AskText(name, body string, step StepNote) (string, bool) {
 	}
 	cfg := map[string]any{"body": message, "mode": "text"}
 	putStepNote(cfg, step)
-	if c.tryQuotedReply(name, cfg, RouteOptions{AllowCatalog: true}) {
+	if c.tryQuotedReply(name, cfg, RouteOptions{}) {
 		return "", false
 	}
 	c.chat.SetConsumed(true)

@@ -474,8 +474,10 @@ func collectionNameByID(data models.JSONB, id string) string {
 }
 
 func (c *Conv) resolveQuotedFreeText(step string, cfg map[string]any, opts RouteOptions, quoted *QuotedMessage, choices []QuotedChoice) (Route, bool) {
-	ctx := c.intentContext(cfg, opts)
-	ctx.AllowCatalog = true
+	// Quoted replies use on-message labels only; do not force full catalog or FAQ lists.
+	ctx := c.intentContext(cfg, RouteOptions{AllowCatalog: opts.AllowCatalog})
+	ctx.FAQs = map[string]string{}
+	ctx.AllowFAQ = false
 	ctx.QuotedContent = strings.TrimSpace(quoted.Content)
 	if ctx.QuotedContent == "" && quoted.InteractiveData != nil {
 		ctx.QuotedContent = strings.TrimSpace(asString(quoted.InteractiveData["body"]))

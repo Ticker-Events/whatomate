@@ -125,7 +125,7 @@ func runTiqrEcommerce(c *Conv) error {
 	if c.Stop {
 		return nil
 	}
-	route, ok := c.AskRouteButtons("intent", menuButtons(store), codedflow.RouteOptions{AllowCatalog: true})
+	route, ok := c.AskRouteButtons("intent", menuButtons(store), codedflow.RouteOptions{AllowCatalog: true, AllowFAQ: true})
 	if !ok {
 		if c.HasReplyRoute() {
 			return buyProducts(c, collections, c.TakeReplyRoute())

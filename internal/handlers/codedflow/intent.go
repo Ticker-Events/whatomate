@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/shridarpatil/whatomate/internal/models"
 )
@@ -45,6 +46,8 @@ type Route struct {
 type RouteOptions struct {
 	// AllowCatalog enables collection and product routes using loaded collections.
 	AllowCatalog bool
+	// AllowFAQ enables the faq route using loaded store FAQ questions.
+	AllowFAQ bool
 }
 
 // codedAIRoleConfig selects a provider and model for one AI role.
@@ -86,13 +89,14 @@ type IntentResult struct {
 
 type IntentContext struct {
 	AllowCatalog bool
+	AllowFAQ     bool
 	Question     string
 	Doing        string
 	Expect       string
 	Pattern      string            // when set, answer route must match this pattern
 	ChoiceIDs    map[string]string // id -> title (or card body + title)
 	Collections  map[string]string // id -> name
-	FAQs         map[string]string // id -> question (loaded store FAQs)
+	FAQs         map[string]string // id -> question (loaded store FAQs; only when AllowFAQ)
 	// SupportedLanguages limits language labels the AI may return.
 	// Empty means open detection (existing behavior).
 	SupportedLanguages []string
@@ -228,8 +232,46 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 	c.chat.SetConsumed(true)
 	c.session().CurrentStep = name
 	ctx := c.intentContext(cfg, opts)
-	prompt := BuildIntentPrompt(c.chat.UserInput(), ctx)
-	raw, err := IdentifyCodedIntent(c.app, c.session(), c.chat.UserInput(), ctx)
+	message := c.chat.UserInput()
+	if local, ok := matchLocalIntent(message, ctx); ok {
+		call := CodedPreviewAICall{
+			Role:       "intent",
+			Prompt:     "(local exact match)",
+			Language:   local.Language,
+			Route:      local.Route,
+			Reasoning:  local.Reasoning,
+			Response:   formatIntentResponse(local),
+			Confidence: local.Confidence,
+			Parsed: map[string]any{
+				"language":      local.Language,
+				"route":         local.Route,
+				"choice_id":     local.ChoiceID,
+				"collection_id": local.CollectionID,
+				"product_query": local.ProductQuery,
+				"answer":        local.Answer,
+				"faq_id":        local.FaqID,
+				"confidence":    local.Confidence,
+				"reasoning":     local.Reasoning,
+			},
+		}
+		grounded := true
+		call.Grounded = &grounded
+		c.notePreviewAI(call)
+		c.app.LogCodedFlowAI(c.session(), "intent", call.Prompt, call.Response, "",
+			"route", local.Route,
+			"confidence", local.Confidence,
+			"grounded", true,
+			"choice_id", local.ChoiceID,
+			"collection_id", local.CollectionID,
+			"faq_id", local.FaqID,
+			"language", local.Language,
+			"reasoning", local.Reasoning,
+		)
+		c.rememberLanguage(local.Language)
+		return c.acceptIntentResult(name, cfg, ctx, local)
+	}
+	prompt := BuildIntentPrompt(message, ctx)
+	raw, err := IdentifyCodedIntent(c.app, c.session(), message, ctx)
 	raw.Reasoning = LimitWords(raw.Reasoning, 200)
 	call := CodedPreviewAICall{
 		Role:      "intent",
@@ -286,42 +328,48 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 		return Route{}, false
 	}
 	if result.Confidence >= IntentSettings.IntentThreshold {
-		switch result.Route {
-		case codedRouteChoice:
-			c.clearGuide()
-			if IsShowMoreID(result.ChoiceID) {
-				return Route{Kind: RouteShowMore, ID: result.ChoiceID, Title: ShowMoreTitle}, true
-			}
-			route := Route{Kind: codedRouteChoice, ID: result.ChoiceID, Title: ctx.ChoiceIDs[result.ChoiceID]}
-			c.applyRouteSelection(cfg, route)
-			c.appendRouteCall(name, route, cfg)
-			return route, true
-		case codedRouteCollection:
-			c.clearGuide()
-			route := Route{Kind: codedRouteCollection, ID: result.CollectionID, Title: ctx.Collections[result.CollectionID]}
-			c.ApplyCollectionSelection(route)
-			c.appendRouteCall(name, route, cfg)
-			return route, true
-		case codedRouteProduct:
-			c.clearGuide()
-			route := Route{Kind: codedRouteProduct, Query: result.ProductQuery}
-			c.appendRouteCall(name, route, cfg)
-			return route, true
-		case codedRouteAnswer:
-			c.clearGuide()
-			// Caller (AskNumber) stores the value and appends its own call.
-			return Route{Kind: codedRouteAnswer, Answer: result.Answer}, true
-		case codedRouteCheckout:
-			c.clearGuide()
-			c.Divert = codedRouteCheckout
-			// No shopping call — buy/menu checks divert and leaves the step.
-			return Route{Kind: codedRouteCheckout}, true
-		case codedRouteFAQ:
-			c.clearGuide()
-			return c.deliverFAQAnswer(name, result.FaqID)
-		}
+		return c.acceptIntentResult(name, cfg, ctx, result)
 	}
 	return c.askGuide(name, ctx)
+}
+
+func (c *Conv) acceptIntentResult(name string, cfg map[string]any, ctx IntentContext, result IntentResult) (Route, bool) {
+	switch result.Route {
+	case codedRouteChoice:
+		c.clearGuide()
+		if IsShowMoreID(result.ChoiceID) {
+			return Route{Kind: RouteShowMore, ID: result.ChoiceID, Title: ShowMoreTitle}, true
+		}
+		route := Route{Kind: codedRouteChoice, ID: result.ChoiceID, Title: ctx.ChoiceIDs[result.ChoiceID]}
+		c.applyRouteSelection(cfg, route)
+		c.appendRouteCall(name, route, cfg)
+		return route, true
+	case codedRouteCollection:
+		c.clearGuide()
+		route := Route{Kind: codedRouteCollection, ID: result.CollectionID, Title: ctx.Collections[result.CollectionID]}
+		c.ApplyCollectionSelection(route)
+		c.appendRouteCall(name, route, cfg)
+		return route, true
+	case codedRouteProduct:
+		c.clearGuide()
+		route := Route{Kind: codedRouteProduct, Query: result.ProductQuery}
+		c.appendRouteCall(name, route, cfg)
+		return route, true
+	case codedRouteAnswer:
+		c.clearGuide()
+		// Caller (AskNumber) stores the value and appends its own call.
+		return Route{Kind: codedRouteAnswer, Answer: result.Answer}, true
+	case codedRouteCheckout:
+		c.clearGuide()
+		c.Divert = codedRouteCheckout
+		// No shopping call — buy/menu checks divert and leaves the step.
+		return Route{Kind: codedRouteCheckout}, true
+	case codedRouteFAQ:
+		c.clearGuide()
+		return c.deliverFAQAnswer(name, result.FaqID)
+	default:
+		return c.askGuide(name, ctx)
+	}
 }
 
 // deliverFAQAnswer sends a stored FAQ answer and stays on the current step.
@@ -430,6 +478,7 @@ func formatIntentResponse(raw IntentResult) string {
 func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) IntentContext {
 	ctx := IntentContext{
 		AllowCatalog:       opts.AllowCatalog,
+		AllowFAQ:           opts.AllowFAQ,
 		Question:           asString(cfg["body"]),
 		Doing:              asString(cfg["step_doing"]),
 		Expect:             asString(cfg["step_expect"]),
@@ -470,20 +519,91 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) IntentContex
 			ctx.Collections[id] = name
 		}
 	}
-	faqItems, _ := anySlice(c.session().SessionData["faqs"])
-	for _, item := range faqItems {
-		row, ok := asStringMap(item)
-		if !ok {
-			continue
+	if opts.AllowFAQ {
+		faqItems, _ := anySlice(c.session().SessionData["faqs"])
+		for _, item := range faqItems {
+			row, ok := asStringMap(item)
+			if !ok {
+				continue
+			}
+			id := fieldString(row, "id")
+			question := fieldString(row, "question")
+			if id == "" || question == "" {
+				continue
+			}
+			ctx.FAQs[id] = question
 		}
-		id := fieldString(row, "id")
-		question := fieldString(row, "question")
-		if id == "" || question == "" {
-			continue
-		}
-		ctx.FAQs[id] = question
 	}
 	return ctx
+}
+
+// matchLocalIntent returns a high-confidence route when the message exactly
+// matches an on-screen choice title, a loaded collection name, or an FAQ question.
+func matchLocalIntent(message string, ctx IntentContext) (IntentResult, bool) {
+	norm := normalizeIntentText(message)
+	if norm == "" {
+		return IntentResult{}, false
+	}
+	for id, title := range ctx.ChoiceIDs {
+		if normalizeIntentText(title) == norm {
+			return IntentResult{
+				Language:   normalizeDetectedLanguage("", ctx.SupportedLanguages),
+				Route:      codedRouteChoice,
+				ChoiceID:   id,
+				Confidence: 1,
+				Reasoning:  "local exact choice title",
+			}, true
+		}
+	}
+	if ctx.AllowCatalog {
+		for id, name := range ctx.Collections {
+			if normalizeIntentText(name) == norm {
+				return IntentResult{
+					Language:     normalizeDetectedLanguage("", ctx.SupportedLanguages),
+					Route:        codedRouteCollection,
+					CollectionID: id,
+					Confidence:   1,
+					Reasoning:    "local exact collection name",
+				}, true
+			}
+		}
+	}
+	if ctx.AllowFAQ {
+		for id, question := range ctx.FAQs {
+			if normalizeIntentText(question) == norm {
+				return IntentResult{
+					Language:   normalizeDetectedLanguage("", ctx.SupportedLanguages),
+					Route:      codedRouteFAQ,
+					FaqID:      id,
+					Confidence: 1,
+					Reasoning:  "local exact FAQ question",
+				}, true
+			}
+		}
+	}
+	return IntentResult{}, false
+}
+
+func normalizeIntentText(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	prevSpace := false
+	for _, r := range s {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+			prevSpace = false
+		case unicode.IsSpace(r):
+			if !prevSpace && b.Len() > 0 {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func ChoiceLabel(button map[string]any) string { return choiceLabel(button) }
@@ -735,20 +855,21 @@ func BuildIntentPrompt(message string, ctx IntentContext) string {
 		}
 	}
 	var collections strings.Builder
-	if !ctx.AllowCatalog || len(ctx.Collections) == 0 {
+	extraCollections := collectionsNotInChoices(ctx)
+	if !ctx.AllowCatalog || len(extraCollections) == 0 {
 		collections.WriteString("(none)")
 	} else {
-		for id, name := range ctx.Collections {
+		for id, name := range extraCollections {
 			fmt.Fprintf(&collections, "\n- %s (id %s)", name, id)
 		}
 	}
 	var faqs strings.Builder
 	faqRoute := ""
-	if len(ctx.FAQs) == 0 {
+	if !ctx.AllowFAQ || len(ctx.FAQs) == 0 {
 		faqs.WriteString("(none)")
 	} else {
-		for id, question := range ctx.FAQs {
-			fmt.Fprintf(&faqs, "\n- %s (id %s)", question, id)
+		for _, item := range rankFAQs(message, ctx.FAQs, maxFAQCandidates) {
+			fmt.Fprintf(&faqs, "\n- %s (id %s)", item.Question, item.ID)
 		}
 		faqRoute = "route faq: they ask a question that one of the loaded FAQs already answers, including a paraphrase of that FAQ question. Set faq_id from the list above. Leave choice_id, collection_id, product_query, and answer empty. Prefer shopping routes when they are buying, browsing, checking out, checking an order, or asking for a person.\n"
 	}

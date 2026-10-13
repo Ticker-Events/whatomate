@@ -34,19 +34,18 @@ func TestComposeJevIntent_Choice(t *testing.T) {
 	assert.GreaterOrEqual(t, got.Confidence, 0.75)
 }
 
-func TestComposeJevIntent_ProductSpan(t *testing.T) {
+func TestComposeJevIntent_ProductQueryFromMessage(t *testing.T) {
 	ctx := codedIntentContext{AllowCatalog: true}
 	raw := JevSystemOneResponse{
 		Answers: map[string]json.RawMessage{
-			"route":        rawJSON(t, map[string]any{"type": "choice", "choice": "product", "confidence": 0.8, "probabilities": map[string]float64{"product": 0.8}}),
-			"product_span": rawJSON(t, map[string]any{"type": "choice", "choice": "Themed Cake", "confidence": 0.85, "probabilities": map[string]float64{"Themed Cake": 0.85}}),
-			"language":     rawJSON(t, map[string]any{"type": "choice", "choice": "en", "confidence": 0.9, "probabilities": map[string]float64{"en": 0.9}}),
+			"route":    rawJSON(t, map[string]any{"type": "choice", "choice": "product", "confidence": 0.8, "probabilities": map[string]float64{"product": 0.8}}),
+			"language": rawJSON(t, map[string]any{"type": "choice", "choice": "en", "confidence": 0.9, "probabilities": map[string]float64{"en": 0.9}}),
 		},
 	}
 	got, err := composeJevIntent(raw, "I want Themed Cake please", ctx)
 	require.NoError(t, err)
 	assert.Equal(t, RouteProduct, got.Route)
-	assert.Equal(t, "Themed Cake", got.ProductQuery)
+	assert.Equal(t, "Themed Cake please", got.ProductQuery)
 }
 
 func TestComposeJevIntent_QuantityWord(t *testing.T) {
@@ -113,7 +112,6 @@ func TestComposeJevIntent_MissingConfidenceUnclear(t *testing.T) {
 	assert.Equal(t, RouteUnclear, got.Route)
 }
 
-
 func TestJevEndpointFor(t *testing.T) {
 	_, err := jevEndpointFor(&models.ChatbotSettings{AI: models.AIConfig{IntentProvider: models.IntentProviderJev}})
 	require.Error(t, err)
@@ -142,28 +140,29 @@ func TestJevEndpointFor(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestProductSpanCandidates(t *testing.T) {
-	spans := productSpanCandidates("Themed Cake please")
-	assert.Contains(t, spans, "Themed Cake please")
-	assert.Contains(t, spans, "Themed")
-	assert.Contains(t, spans, "Themed Cake")
+func TestProductQueryFromMessage(t *testing.T) {
+	assert.Equal(t, "Themed Cake please", productQueryFromMessage("I want Themed Cake please"))
+	assert.Equal(t, "kunafa", productQueryFromMessage("show me kunafa"))
+	assert.Equal(t, "Themed Cake", productQueryFromMessage("Themed Cake"))
 }
 
-func TestBuildJevIntentRequest_IncludesFAQWhenPresent(t *testing.T) {
+func TestBuildJevIntentRequest_NoFAQOrProductSpanOnRouteCall(t *testing.T) {
 	state, questions := buildJevIntentRequest("what are your hours", IntentContext{
-		FAQs: map[string]string{"1": "What are your hours?"},
+		AllowFAQ: true,
+		FAQs:     map[string]string{"1": "What are your hours?", "2": "Do you deliver?"},
 	})
-	faqs, ok := state["faqs"].([]map[string]string)
-	require.True(t, ok)
-	require.Len(t, faqs, 1)
-	assert.Equal(t, "1", faqs[0]["id"])
+	_, hasFaqs := state["faqs"]
+	assert.False(t, hasFaqs)
 
 	route, ok := questions["route"].(map[string]any)
 	require.True(t, ok)
 	criteria, ok := route["criteria"].(map[string]any)
 	require.True(t, ok)
 	assert.Contains(t, criteria, "faq")
-	assert.Contains(t, questions, "faq_id")
+	_, hasFaqID := questions["faq_id"]
+	assert.False(t, hasFaqID)
+	_, hasSpan := questions["product_span"]
+	assert.False(t, hasSpan)
 
 	_, questionsEmpty := buildJevIntentRequest("hello", IntentContext{})
 	routeEmpty, ok := questionsEmpty["route"].(map[string]any)
@@ -172,13 +171,92 @@ func TestBuildJevIntentRequest_IncludesFAQWhenPresent(t *testing.T) {
 	require.True(t, ok)
 	_, hasFAQ := criteriaEmpty["faq"]
 	assert.False(t, hasFAQ)
-	_, hasFaqID := questionsEmpty["faq_id"]
-	assert.False(t, hasFaqID)
+}
+
+func TestBuildJevIntentRequest_OmitsCollectionsAlreadyChoices(t *testing.T) {
+	state, questions := buildJevIntentRequest("Cakes", IntentContext{
+		AllowCatalog: true,
+		ChoiceIDs:    map[string]string{"1": "Cakes", "2": "Sweets"},
+		Collections:  map[string]string{"1": "Cakes", "2": "Sweets"},
+	})
+	_, hasCollections := state["collections"]
+	assert.False(t, hasCollections)
+	route, ok := questions["route"].(map[string]any)
+	require.True(t, ok)
+	criteria, ok := route["criteria"].(map[string]any)
+	require.True(t, ok)
+	_, hasCollectionRoute := criteria["collection"]
+	assert.False(t, hasCollectionRoute)
+	assert.Contains(t, criteria, "product")
+	_, hasCollectionID := questions["collection_id"]
+	assert.False(t, hasCollectionID)
+	assert.Contains(t, questions, "names_product")
+}
+
+func TestBuildJevIntentRequest_IncludesExtraCollections(t *testing.T) {
+	state, questions := buildJevIntentRequest("Cakes", IntentContext{
+		AllowCatalog: true,
+		ChoiceIDs:    map[string]string{"buy_products": "Buy products"},
+		Collections:  map[string]string{"1": "Cakes"},
+	})
+	cols, ok := state["collections"].([]map[string]string)
+	require.True(t, ok)
+	require.Len(t, cols, 1)
+	assert.Equal(t, "1", cols[0]["id"])
+	assert.Contains(t, questions, "collection_id")
+	choiceCrit := questions["choice_id"].(map[string]any)["criteria"].(map[string]any)
+	assert.Equal(t, "Buy products", choiceCrit["buy_products"])
+}
+
+func TestBuildJevFAQRequest_RanksTopEight(t *testing.T) {
+	faqs := map[string]string{}
+	for i := 1; i <= 12; i++ {
+		faqs[string(rune('a'+i-1))] = "Question about topic " + string(rune('a'+i-1))
+	}
+	faqs["hours"] = "What are your store hours today?"
+	state, questions := buildJevFAQRequest("what are your store hours", faqs)
+	items, ok := state["faqs"].([]map[string]string)
+	require.True(t, ok)
+	require.Len(t, items, maxFAQCandidates)
+	assert.Equal(t, "hours", items[0]["id"])
+	faqQ := questions["faq_id"].(map[string]any)
+	criteria := faqQ["criteria"].(map[string]any)
+	assert.Contains(t, criteria, "none")
+	assert.Contains(t, criteria, "hours")
+	assert.Equal(t, "What are your store hours today?", criteria["hours"])
+}
+
+func TestMatchLocalIntent(t *testing.T) {
+	ctx := IntentContext{
+		AllowCatalog: true,
+		AllowFAQ:     true,
+		ChoiceIDs:    map[string]string{"buy_products": "Buy products"},
+		Collections:  map[string]string{"1": "Cakes"},
+		FAQs:         map[string]string{"9": "What are your hours?"},
+	}
+	got, ok := matchLocalIntent("buy products", ctx)
+	require.True(t, ok)
+	assert.Equal(t, RouteChoice, got.Route)
+	assert.Equal(t, "buy_products", got.ChoiceID)
+
+	got, ok = matchLocalIntent("Cakes!", ctx)
+	require.True(t, ok)
+	assert.Equal(t, RouteCollection, got.Route)
+	assert.Equal(t, "1", got.CollectionID)
+
+	got, ok = matchLocalIntent("What are your hours?", ctx)
+	require.True(t, ok)
+	assert.Equal(t, RouteFAQ, got.Route)
+	assert.Equal(t, "9", got.FaqID)
+
+	_, ok = matchLocalIntent("something else", ctx)
+	assert.False(t, ok)
 }
 
 func TestComposeJevIntent_FAQ(t *testing.T) {
 	ctx := codedIntentContext{
-		FAQs: map[string]string{"1": "What are your hours?"},
+		AllowFAQ: true,
+		FAQs:     map[string]string{"1": "What are your hours?"},
 	}
 	raw := JevSystemOneResponse{
 		Answers: map[string]json.RawMessage{

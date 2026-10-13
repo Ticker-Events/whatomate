@@ -87,7 +87,7 @@ Buttons, in order:
 
 The body is `Welcome to {store name}.` plus `What would you like to do?` when the store has a name.
 
-`askRouteButtons` is called with `AllowCatalog: true`. A tap on those three ids does not call AI. Free text can resolve to:
+`askRouteButtons` is called with `AllowCatalog: true` and `AllowFAQ: true`. A tap on those three ids does not call AI. Free text can resolve to:
 
 | Route | What the function does |
 | --- | --- |
@@ -126,7 +126,7 @@ A deliverable pin stores `delivery_mode`, `delivery_zone`, `delivery_distance_km
 
 The collection list uses header `Our collections`, button `Browse`, row title `{{name}}`, description `{{description}}`. A chosen row saves `collection_id` from `id` and `collection_name` from the rendered title.
 
-`askRouteList` also has `AllowCatalog: true`, so free text on this step can name another loaded collection or a product.
+`askRouteList` has `AllowCatalog: true` and does not set `AllowFAQ`. Free text can name a product to search, or pick a collection (collection rows are already the on-screen choices, so intent does not send a second full collections list). Cart, quantity, and fulfillment steps keep empty route options so they do not attach FAQ questions.
 
 #### Early-handoff collections (`handoff_policy: after_capture`)
 
