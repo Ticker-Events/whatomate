@@ -2131,7 +2131,7 @@
     "previewAPICopy": "Copy curl",
     "previewImport": "Import session log",
     "previewImportHint": "Paste a Copy Log JSON archive to review messages, AI, API, and context read-only. Nothing is re-executed.",
-    "previewImportPlaceholder": "{\"version\": 1, \"turns\": []}",
+    "previewImportPlaceholder": "{'{'}\"version\": 1, \"turns\": []{'}'}",
     "previewImportLoad": "Load session log",
     "previewImportInvalid": "Paste a valid session archive with version and turns.",
     "previewImportLoaded": "Session log loaded",
