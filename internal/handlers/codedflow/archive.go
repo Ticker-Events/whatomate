@@ -244,10 +244,14 @@ func ArchiveInboundFromChat(chat Chat) map[string]any {
 	}
 	media := chat.InboundMedia()
 	if media.MediaURL != "" || media.MIMEType != "" || media.Filename != "" {
+		url := strings.TrimSpace(media.DisplayURL)
+		if url == "" {
+			url = media.MediaURL
+		}
 		inbound["media"] = map[string]any{
-			"url":       media.MediaURL,
-			"mime":      media.MIMEType,
-			"filename":  media.Filename,
+			"url":        url,
+			"mime":       media.MIMEType,
+			"filename":   media.Filename,
 			"message_id": media.MessageID,
 		}
 	}

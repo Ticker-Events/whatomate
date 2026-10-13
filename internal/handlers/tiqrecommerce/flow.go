@@ -1241,7 +1241,10 @@ func (c *Conv) acceptCaptureAttachment(name, body string, field map[string]any) 
 	if c.ChatCtx() != nil {
 		media = c.ChatCtx().InboundMedia()
 	}
-	link := CaptureMediaLink(media.MessageID)
+	link := strings.TrimSpace(media.DisplayURL)
+	if link == "" {
+		link = CaptureMediaLink(media.MessageID)
+	}
 	if strings.TrimSpace(media.MediaURL) == "" || link == "" {
 		c.ChatCtx().SetConsumed(true)
 		return c.waitForCapture(name, CaptureAttachmentRetry(field)+"\n"+body, field)

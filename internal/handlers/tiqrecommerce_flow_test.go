@@ -11,9 +11,11 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
 	"github.com/stretchr/testify/assert"
@@ -3579,7 +3581,10 @@ func TestTiqrEcommerce_ImageCaptureStoresLink(t *testing.T) {
 	assert.Contains(t, outgoingBlob(t, app, session), "Please send the photo again.")
 
 	messageID := uuid.New()
-	tiqrecommerce.StashInboundCaptureMedia(session, messageID.String(), "images/ref.jpg", "image/jpeg", "ref.jpg")
+	tiqrecommerce.StashInboundCaptureMedia(
+		session, messageID.String(), "images/ref.jpg", "image/jpeg", "ref.jpg",
+		"/api/media/"+messageID.String(),
+	)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "[Image attached]", "", nil))
 	reloadSession(t, app, session)
 	assert.NotEqual(t, "capture_0_reference_image", session.CurrentStep)
@@ -3593,6 +3598,67 @@ func TestTiqrEcommerce_ImageCaptureStoresLink(t *testing.T) {
 	assert.Contains(t, tiqrecommerce.CodedOrderNotes(session.SessionData), link)
 	_, stillStashed := session.SessionData["_inbound_capture_media"]
 	assert.False(t, stillStashed)
+}
+
+func TestTiqrEcommerce_ImageCaptureStoresPublicURL(t *testing.T) {
+	client, err := storage.NewS3Client(&config.StorageConfig{
+		S3Bucket: "tiqr-agent-storage.sgp1.digitaloceanspaces.com",
+		S3Region: "sgp1",
+	})
+	require.NoError(t, err)
+
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":   "57",
+				"name": "Sweets",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "reference_image", "label": "Reference photo", "type": "image", "required": true,
+					},
+				},
+			},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	app.S3Client = client
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "capture_0_reference_image", session.CurrentStep)
+
+	messageID := uuid.New()
+	publicURL := "https://tiqr-agent-storage.sgp1.digitaloceanspaces.com/images/ref.jpg"
+	tiqrecommerce.StashInboundCaptureMedia(
+		session, messageID.String(), "images/ref.jpg", "image/jpeg", "ref.jpg", publicURL,
+	)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "[Image attached]", "", nil))
+	reloadSession(t, app, session)
+	assert.NotEqual(t, "capture_0_reference_image", session.CurrentStep)
+
+	captured, _ := session.SessionData["commerce_captured_fields"].(map[string]any)
+	require.NotNil(t, captured)
+	assert.Contains(t, fmt.Sprint(captured["reference_image"]), publicURL)
+	assert.NotContains(t, fmt.Sprint(captured["reference_image"]), "/api/media/")
+	notes, _ := session.SessionData["commerce_notes"].(map[string]any)
+	require.NotNil(t, notes)
+	assert.Contains(t, fmt.Sprint(notes["media_shared"]), publicURL)
+
+	media := tiqrecommerce.MergeMediaReferences(nil, models.JSONB(captured))
+	require.Len(t, media, 1)
+	item, ok := media[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, publicURL, item["url"])
 }
 
 func TestCheckoutImageCaptureContinuesAndNotesLink(t *testing.T) {

@@ -34,7 +34,7 @@ func (a *App) appendDraftAttachments(session *models.ChatbotSession, attachments
 			seen[asString(item["message_id"])] = true
 		}
 	}
-	for _, attachment := range attachmentsJSON(attachments) {
+	for _, attachment := range attachmentsJSON(a.S3Client, attachments) {
 		item, _ := attachment.(map[string]any)
 		if !seen[asString(item["message_id"])] {
 			draft.Attachments = append(draft.Attachments, item)
@@ -233,10 +233,14 @@ func (a *App) stageCommerceHandoffSessionData(session *models.ChatbotSession, ca
 			continue
 		}
 		messageID := asString(item["message_id"])
+		url := strings.TrimSpace(asString(item["url"]))
+		if url == "" || strings.HasPrefix(url, "/api/media/") {
+			url = displayMediaURL(a.S3Client, asString(item["media_url"]), messageID)
+		}
 		media = append(media, map[string]any{
 			"message_id": messageID, "type": asString(item["mime_type"]),
 			"filename": asString(item["filename"]), "capture_key": asString(item["capture_key"]),
-			"url": "/api/media/" + messageID,
+			"url": url,
 		})
 	}
 	captured := jsonMapFromSession(session, "commerce_captured_fields")
@@ -334,7 +338,7 @@ func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *m
 		}
 
 		tiqrecommerce.ApplySessionHandoffCart(&draft, session)
-		metadata := commerceHandoffMetadata(&draft, category)
+		metadata := a.commerceHandoffMetadata(&draft, category)
 		var agentID *uuid.UUID
 		if settings != nil && settings.AgentAssignment.AssignToSameAgent && contact.AssignedUserID != nil {
 			var agent models.User
@@ -405,7 +409,7 @@ func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *m
 	return &transfer, created, nil
 }
 
-func commerceHandoffMetadata(draft *models.CommerceDraft, category tickermcp.Category) models.JSONB {
+func (a *App) commerceHandoffMetadata(draft *models.CommerceDraft, category tickermcp.Category) models.JSONB {
 	media := make([]any, 0, len(draft.Attachments))
 	for _, raw := range draft.Attachments {
 		item, ok := raw.(map[string]any)
@@ -413,10 +417,14 @@ func commerceHandoffMetadata(draft *models.CommerceDraft, category tickermcp.Cat
 			continue
 		}
 		messageID := asString(item["message_id"])
+		url := strings.TrimSpace(asString(item["url"]))
+		if url == "" || strings.HasPrefix(url, "/api/media/") {
+			url = displayMediaURL(a.S3Client, asString(item["media_url"]), messageID)
+		}
 		media = append(media, map[string]any{
 			"message_id": messageID, "mime_type": asString(item["mime_type"]),
 			"filename": asString(item["filename"]), "capture_key": asString(item["capture_key"]),
-			"url": "/api/media/" + messageID,
+			"url": url,
 		})
 	}
 	media = tiqrecommerce.MergeMediaReferences(media, draft.CapturedFields)

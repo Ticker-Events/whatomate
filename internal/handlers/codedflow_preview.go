@@ -121,12 +121,14 @@ func (a *App) previewCodedTurn(orgID, userID uuid.UUID, accountName, flowKey str
 	userText := strings.TrimSpace(in.Text)
 	if in.Media.present() {
 		messageID := uuid.New()
+		storageKey := "preview/" + messageID.String()
 		tiqrecommerce.StashInboundCaptureMedia(
 			hold.session,
 			messageID.String(),
-			"preview/"+messageID.String(),
+			storageKey,
 			strings.TrimSpace(in.Media.MIMEType),
 			strings.TrimSpace(in.Media.Filename),
+			displayMediaURL(a.S3Client, storageKey, messageID.String()),
 		)
 		userText = previewMediaUserText(userText, in.Media)
 	}

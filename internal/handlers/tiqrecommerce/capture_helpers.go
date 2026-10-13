@@ -60,19 +60,24 @@ func CaptureMediaLink(messageID string) string {
 }
 
 // StashInboundCaptureMedia keeps this turn's photo on the session until the coded flow reads it.
-func StashInboundCaptureMedia(session *models.ChatbotSession, messageID, mediaURL, mimeType, filename string) {
+// displayURL is the handoff/archive link (public Spaces URL or /api/media/{id}).
+func StashInboundCaptureMedia(session *models.ChatbotSession, messageID, mediaURL, mimeType, filename, displayURL string) {
 	if session == nil || strings.TrimSpace(mediaURL) == "" || strings.TrimSpace(messageID) == "" {
 		return
 	}
 	if session.SessionData == nil {
 		session.SessionData = models.JSONB{}
 	}
-	session.SessionData[inboundCaptureMediaKey] = map[string]any{
+	item := map[string]any{
 		"message_id": messageID,
 		"media_url":  mediaURL,
 		"mime_type":  mimeType,
 		"filename":   filename,
 	}
+	if display := strings.TrimSpace(displayURL); display != "" {
+		item["display_url"] = display
+	}
+	session.SessionData[inboundCaptureMediaKey] = item
 }
 
 // TakeInboundCaptureMedia removes and returns the stashed photo so it is not persisted.
@@ -86,10 +91,11 @@ func TakeInboundCaptureMedia(session *models.ChatbotSession) codedflow.InboundMe
 		return codedflow.InboundMedia{}
 	}
 	return codedflow.InboundMedia{
-		MessageID: strings.TrimSpace(asString(raw["message_id"])),
-		MediaURL:  strings.TrimSpace(asString(raw["media_url"])),
-		MIMEType:  strings.TrimSpace(asString(raw["mime_type"])),
-		Filename:  strings.TrimSpace(asString(raw["filename"])),
+		MessageID:  strings.TrimSpace(asString(raw["message_id"])),
+		MediaURL:   strings.TrimSpace(asString(raw["media_url"])),
+		DisplayURL: strings.TrimSpace(asString(raw["display_url"])),
+		MIMEType:   strings.TrimSpace(asString(raw["mime_type"])),
+		Filename:   strings.TrimSpace(asString(raw["filename"])),
 	}
 }
 

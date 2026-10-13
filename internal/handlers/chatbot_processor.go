@@ -445,7 +445,14 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	a.logSessionMessageWithMessage(session.ID, models.DirectionIncoming, messageText, "keyword_check", persistedMessage, "")
 
 	if persistedMessage != nil && strings.TrimSpace(persistedMessage.MediaURL) != "" {
-		tiqrecommerce.StashInboundCaptureMedia(session, persistedMessage.ID.String(), persistedMessage.MediaURL, persistedMessage.MediaMimeType, persistedMessage.MediaFilename)
+		tiqrecommerce.StashInboundCaptureMedia(
+			session,
+			persistedMessage.ID.String(),
+			persistedMessage.MediaURL,
+			persistedMessage.MediaMimeType,
+			persistedMessage.MediaFilename,
+			displayMediaURL(a.S3Client, persistedMessage.MediaURL, persistedMessage.ID.String()),
+		)
 	}
 	if quoted := a.loadQuotedInbound(persistedMessage); quoted != nil {
 		codedflow.StashQuotedInbound(session, quoted)
@@ -1254,7 +1261,7 @@ func (a *App) logSessionMessageWithMessage(sessionID uuid.UUID, direction models
 	}
 	if persisted != nil {
 		msg.MessageID = &persisted.ID
-		msg.Attachments = attachmentsJSON(attachmentFromMessage(persisted, captureKey))
+		msg.Attachments = attachmentsJSON(a.S3Client, attachmentFromMessage(persisted, captureKey))
 	}
 	if err := a.DB.Create(&msg).Error; err != nil {
 		a.Log.Error("Failed to log session message", "error", err)

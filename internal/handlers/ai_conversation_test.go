@@ -89,6 +89,6 @@ func TestRequiredCaptureMissingIncludesMedia(t *testing.T) {
 	}
 	captured := models.JSONB{"flavour": "Chocolate", "reference_images": models.JSONBArray{}}
 	assert.Equal(t, []string{"reference_images"}, requiredCaptureMissing(fields, captured))
-	captured["reference_images"] = attachmentsJSON([]AIAttachment{{MessageID: uuid.New(), MediaURL: "images/a.jpg", MIMEType: "image/jpeg"}})
+	captured["reference_images"] = attachmentsJSON(nil, []AIAttachment{{MessageID: uuid.New(), MediaURL: "images/a.jpg", MIMEType: "image/jpeg"}})
 	assert.Empty(t, requiredCaptureMissing(fields, captured))
 }

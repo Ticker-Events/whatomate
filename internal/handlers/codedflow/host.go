@@ -15,10 +15,11 @@ type NodeResult struct {
 
 // InboundMedia is a WhatsApp photo or file on the current turn.
 type InboundMedia struct {
-	MessageID string
-	MediaURL  string
-	MIMEType  string
-	Filename  string
+	MessageID  string
+	MediaURL   string // storage key or absolute path used for server-side reads
+	DisplayURL string // public Spaces URL or /api/media/{id} for handoff / archive UI
+	MIMEType   string
+	Filename   string
 }
 
 // Chat wraps the inbound turn state Conv needs from chatNodeCtx.

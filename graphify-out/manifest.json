@@ -45,8 +45,8 @@
     "semantic_hash": ""
   },
   "docs/astro.config.mjs": {
-    "mtime": 1790737921.3176758,
-    "ast_hash": "bc6006bc0b96a0b2f93bd28d43028bb7",
+    "mtime": 1791872358.2989047,
+    "ast_hash": "7ccdfd0e9a90d0bc8e4fae1af0518c4f",
     "semantic_hash": ""
   },
   "docs/package.json": {
@@ -670,8 +670,8 @@
     "semantic_hash": ""
   },
   "frontend/src/components/chatbot/flow-preview/CodedFlowPreview.vue": {
-    "mtime": 1791792526.8954184,
-    "ast_hash": "d93a2af56e9882e36a6d3b33e7239f2f",
+    "mtime": 1791810801.7715108,
+    "ast_hash": "2943b3af0091b8adabfc7868871214bb",
     "semantic_hash": ""
   },
   "frontend/src/components/chatbot/flow-preview/DebugPanel.vue": {
@@ -725,8 +725,8 @@
     "semantic_hash": ""
   },
   "frontend/src/components/chatbot/flow-preview/PreviewPhone.vue": {
-    "mtime": 1791730465.5722609,
-    "ast_hash": "f11bffc4b736b0104cb7a5518357daf5",
+    "mtime": 1791810800.2354426,
+    "ast_hash": "c12f39e990c9ab708879e54c215a9805",
     "semantic_hash": ""
   },
   "frontend/src/components/chatbot/nodes/ChatbotApiNode.vue": {
@@ -795,8 +795,8 @@
     "semantic_hash": ""
   },
   "frontend/src/components/flow-builder/FlowBuilder.vue": {
-    "mtime": 1790592282.6332705,
-    "ast_hash": "f38e9d918f0362a7469e3b1780c56d09",
+    "mtime": 1791804648.127837,
+    "ast_hash": "bcf35082542bc879a0a2f5a4796ce6ba",
     "semantic_hash": ""
   },
   "frontend/src/components/layout/AppLayout.vue": {
@@ -2400,8 +2400,8 @@
     "semantic_hash": ""
   },
   "frontend/src/i18n/locales/en.json": {
-    "mtime": 1791792521.85518,
-    "ast_hash": "8c34272e29988e845b6fb956eb586747",
+    "mtime": 1791872322.510719,
+    "ast_hash": "23d53d53c15b397eb376b924941016c7",
     "semantic_hash": ""
   },
   "frontend/src/i18n/locales/es.json": {
@@ -2620,8 +2620,8 @@
     "semantic_hash": ""
   },
   "frontend/src/views/chatbot/CodedFlowsView.vue": {
-    "mtime": 1791729559.2652342,
-    "ast_hash": "5067cb4b5847d52674864a5d3e1ef5f5",
+    "mtime": 1791872324.5954378,
+    "ast_hash": "87f3e08cf6dd7a896fe395c1800f4dcc",
     "semantic_hash": ""
   },
   "frontend/src/views/chatbot/KeywordDetailView.vue": {
@@ -2705,8 +2705,8 @@
     "semantic_hash": ""
   },
   "frontend/src/views/settings/ChatbotSettingsView.vue": {
-    "mtime": 1790925046.3038864,
-    "ast_hash": "04a5593c1de348cccc342489a09b1421",
+    "mtime": 1791802436.8030505,
+    "ast_hash": "a37d0a15d9970e2c2f2382ce5bac9515",
     "semantic_hash": ""
   },
   "frontend/src/views/settings/ContactDetailView.vue": {
@@ -2915,8 +2915,8 @@
     "semantic_hash": ""
   },
   "internal/config/config.go": {
-    "mtime": 1790737921.3250444,
-    "ast_hash": "86f576311872c19d177f28056bf0dde8",
+    "mtime": 1791802416.2485375,
+    "ast_hash": "e619e7bd5142c20d01ab081f6250b509",
     "semantic_hash": ""
   },
   "internal/config/config_test.go": {
@@ -2960,8 +2960,8 @@
     "semantic_hash": ""
   },
   "internal/database/postgres.go": {
-    "mtime": 1790925005.8320723,
-    "ast_hash": "36f9acb130e7000f5895c870d6ebd31f",
+    "mtime": 1791802380.8214793,
+    "ast_hash": "6db5180d09959d583c5cbb7d52e4d3f7",
     "semantic_hash": ""
   },
   "internal/database/redis.go": {
@@ -3010,13 +3010,13 @@
     "semantic_hash": ""
   },
   "internal/handlers/ai_conversation.go": {
-    "mtime": 1791295241.6896222,
-    "ast_hash": "6ad70b0c1651907f3f766a13b91b24d5",
+    "mtime": 1791898904.7614667,
+    "ast_hash": "b40904ae4373e37e258cb4e03f37840a",
     "semantic_hash": ""
   },
   "internal/handlers/ai_conversation_test.go": {
-    "mtime": 1789046243.0474064,
-    "ast_hash": "a49696429f849aae729daf25b3fe920b",
+    "mtime": 1791898957.7663379,
+    "ast_hash": "ab8022fd2ab78c31a677efeb1797ca35",
     "semantic_hash": ""
   },
   "internal/handlers/ai_product_response.go": {
@@ -3095,8 +3095,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/cache.go": {
-    "mtime": 1790751592.1888554,
-    "ast_hash": "3ad2bc19bce6170b3c8333aaea83cd51",
+    "mtime": 1791802389.431336,
+    "ast_hash": "e29bb62c37d409668c884b3de6f528e0",
     "semantic_hash": ""
   },
   "internal/handlers/cache_internal_test.go": {
@@ -3150,8 +3150,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot.go": {
-    "mtime": 1790925755.0090015,
-    "ast_hash": "a14e7a0f49d1d120190be9a4e5d48e1b",
+    "mtime": 1791802409.8766074,
+    "ast_hash": "a79624de602c74b33dc77f8cd0627464",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce.go": {
@@ -3165,8 +3165,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_checkout.go": {
-    "mtime": 1791273231.0363648,
-    "ast_hash": "0e08a5d570d303cbae97305c3afd8f99",
+    "mtime": 1791898930.6789625,
+    "ast_hash": "50aaba1993f7853895a0d3f15e597a33",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_checkout_test.go": {
@@ -3185,8 +3185,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_handoff.go": {
-    "mtime": 1791737467.2390087,
-    "ast_hash": "d5f739677729bfe70f98ad5b6c1cb2d9",
+    "mtime": 1791898930.4789433,
+    "ast_hash": "9bc1f596a67e9000a8b54b110f72b77a",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_commerce_llm.go": {
@@ -3220,8 +3220,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_graph_runner.go": {
-    "mtime": 1791789566.832806,
-    "ast_hash": "acb9f1709f009c4c2d6163a5a1767a52",
+    "mtime": 1791801935.1756465,
+    "ast_hash": "bf521defd4b922895dc97c454bdbbfe6",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_graph_runner_test.go": {
@@ -3235,8 +3235,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_processor.go": {
-    "mtime": 1791727817.8897805,
-    "ast_hash": "e520bce18108c4d59337fe4600fe6c86",
+    "mtime": 1791898935.2630517,
+    "ast_hash": "88115b6e31541a116af6e9164fc612b8",
     "semantic_hash": ""
   },
   "internal/handlers/chatbot_processor_test.go": {
@@ -3260,8 +3260,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_api.go": {
-    "mtime": 1791729422.8445094,
-    "ast_hash": "91fed98ec61442c9a744f448cf828f92",
+    "mtime": 1791872336.6438382,
+    "ast_hash": "c5939607f0a85e9ae1af5b00bf1536c9",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_binding_test.go": {
@@ -3275,8 +3275,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_preview.go": {
-    "mtime": 1791730533.7907186,
-    "ast_hash": "188c7c0c90bbaf65332afd5cfc552b97",
+    "mtime": 1791898942.1149254,
+    "ast_hash": "f61a1fa9175c6a32d19d6abdd36e4fca",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_preview_test.go": {
@@ -3335,13 +3335,13 @@
     "semantic_hash": ""
   },
   "internal/handlers/firestore_sync.go": {
-    "mtime": 1791789617.173506,
-    "ast_hash": "c1eec40eb6edaf6f4475e2b21d6726a7",
+    "mtime": 1791898891.119901,
+    "ast_hash": "24fd612e7caa8e295a6904f0166888c4",
     "semantic_hash": ""
   },
   "internal/handlers/flows.go": {
-    "mtime": 1788265922.17014,
-    "ast_hash": "a96cf80d265f4c274fb41c312cd19057",
+    "mtime": 1791804697.3920727,
+    "ast_hash": "984270a0e9083d664ac3d8b7ed2c6381",
     "semantic_hash": ""
   },
   "internal/handlers/flows_test.go": {
@@ -3390,8 +3390,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/messages.go": {
-    "mtime": 1790518046.4499652,
-    "ast_hash": "eb6260b6ea06f07f35e41ff155b4c7d0",
+    "mtime": 1791801904.638216,
+    "ast_hash": "3079ee4a25f695735ade42616c1edc64",
     "semantic_hash": ""
   },
   "internal/handlers/messages_test.go": {
@@ -3620,13 +3620,13 @@
     "semantic_hash": ""
   },
   "internal/models/chatbot.go": {
-    "mtime": 1791726101.195949,
-    "ast_hash": "57309b075b6fdfc7f3b483abaf862590",
+    "mtime": 1791802377.8941922,
+    "ast_hash": "56253a3fa26fbda4ee17814aaa7b1f17",
     "semantic_hash": ""
   },
   "internal/models/chatbot_test.go": {
-    "mtime": 1788863961.9912488,
-    "ast_hash": "201b90d4ee0baeac2e86960c8644ffbc",
+    "mtime": 1791802378.928699,
+    "ast_hash": "4aac2d28e20d07e2b882db490c8a106a",
     "semantic_hash": ""
   },
   "internal/models/commerce_draft.go": {
@@ -3805,8 +3805,8 @@
     "semantic_hash": ""
   },
   "pkg/aisensy/message.go": {
-    "mtime": 1790518046.450423,
-    "ast_hash": "6e328b16c2cbb84f04ff6b1a5ff4458e",
+    "mtime": 1791801877.1880507,
+    "ast_hash": "061248c809007e2e417839b98ac6f8ae",
     "semantic_hash": ""
   },
   "pkg/aisensy/profile.go": {
@@ -3955,8 +3955,8 @@
     "semantic_hash": ""
   },
   "pkg/whatsapp/interface.go": {
-    "mtime": 1790518046.4510028,
-    "ast_hash": "6e7d47ef2027525058efe6906b872b04",
+    "mtime": 1791801863.5394447,
+    "ast_hash": "7e0850df80c927ee3173d132b2acaa64",
     "semantic_hash": ""
   },
   "pkg/whatsapp/list_message_test.go": {
@@ -3965,8 +3965,8 @@
     "semantic_hash": ""
   },
   "pkg/whatsapp/message.go": {
-    "mtime": 1790518046.4513884,
-    "ast_hash": "1ee0e2af7a09348fe32822af5afb54f1",
+    "mtime": 1791801891.6666613,
+    "ast_hash": "256c45ab8e4cac769ab6511f48256976",
     "semantic_hash": ""
   },
   "pkg/whatsapp/message_test.go": {
@@ -4185,8 +4185,8 @@
     "semantic_hash": ""
   },
   "docs/coded-flow-ai.md": {
-    "mtime": 1791729570.2737563,
-    "ast_hash": "59b5d1021faff3220f25734c55e37393",
+    "mtime": 1791875952.897065,
+    "ast_hash": "994eab028836fcd736bba06ddedbb811",
     "semantic_hash": ""
   },
   "docs/src/content/docs/api-reference/accounts.mdx": {
@@ -4220,8 +4220,8 @@
     "semantic_hash": ""
   },
   "docs/src/content/docs/api-reference/chatbot.mdx": {
-    "mtime": 1790925754.8938105,
-    "ast_hash": "a5d36449783e80224decf91766ab1e0e",
+    "mtime": 1791872358.6657095,
+    "ast_hash": "4d794fb22c26fe9a5d03e8022535c198",
     "semantic_hash": ""
   },
   "docs/src/content/docs/api-reference/contacts.mdx": {
@@ -4300,13 +4300,13 @@
     "semantic_hash": ""
   },
   "docs/src/content/docs/features/chatbot.mdx": {
-    "mtime": 1790737921.3185685,
-    "ast_hash": "0a138b2058ea78f83ac4d777e96c3ac9",
+    "mtime": 1791872358.3945487,
+    "ast_hash": "0e1d5ac691227914f146893821989ace",
     "semantic_hash": ""
   },
   "docs/src/content/docs/features/coded-flows.mdx": {
-    "mtime": 1791792374.6719096,
-    "ast_hash": "86425d487628cf277b4033fb9f870006",
+    "mtime": 1791873752.5142865,
+    "ast_hash": "1753fbc9aff34f467ba5e52461171df1",
     "semantic_hash": ""
   },
   "docs/src/content/docs/features/custom-actions.mdx": {
@@ -4365,8 +4365,8 @@
     "semantic_hash": ""
   },
   "docs/tiqr-ecommerce-coded-flow.md": {
-    "mtime": 1791730587.3645961,
-    "ast_hash": "742e0f81020219e351969a04f0d90bf8",
+    "mtime": 1791875956.2287939,
+    "ast_hash": "2ca585710609a61416f4785b193bbc74",
     "semantic_hash": ""
   },
   "frontend/crowdin.yml": {
@@ -4520,8 +4520,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/conv.go": {
-    "mtime": 1791792374.672457,
-    "ast_hash": "483f7f39b416968338dde51dcd72d64a",
+    "mtime": 1791875892.5582013,
+    "ast_hash": "2743ba996b42ba1a0bc411c19fe4921b",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/flow.go": {
@@ -4530,23 +4530,23 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/host.go": {
-    "mtime": 1791789498.139073,
-    "ast_hash": "8e1f20cede81d5eebe49ae091af4db2c",
+    "mtime": 1791898892.0838602,
+    "ast_hash": "d7b27a689839ff2bc9250104de65cd88",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/intent.go": {
-    "mtime": 1791789559.4732857,
-    "ast_hash": "1909364b0cbf6d64039998f14babff52",
+    "mtime": 1791875794.1461463,
+    "ast_hash": "7d1249b67bf90024ecb901c2b8fd7852",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/jev.go": {
-    "mtime": 1791729474.2094524,
-    "ast_hash": "aeb9525ffd12275af5040d99bbb6a063",
+    "mtime": 1791875873.7882872,
+    "ast_hash": "1c25e2e42f33de704535a4334f6f00b2",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/jev_test.go": {
-    "mtime": 1790866920.7804363,
-    "ast_hash": "a25ba7177fbead11ee2fafd600299054",
+    "mtime": 1791875941.325049,
+    "ast_hash": "a9f7d1c7fd213803ed14a5179724a8e8",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/jsonutil.go": {
@@ -4595,13 +4595,13 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_host.go": {
-    "mtime": 1791789497.743238,
-    "ast_hash": "e8bbfc85410b248a10964e250d0b12b9",
+    "mtime": 1791802412.5504632,
+    "ast_hash": "2f6265931171e1e2fae43d0aaf95b10b",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_run.go": {
-    "mtime": 1791789574.5012493,
-    "ast_hash": "f1fb7dc3a052c2ed429cd6860a787c98",
+    "mtime": 1791898956.8119366,
+    "ast_hash": "49364f1d5d5a7935c6a059ad002d478b",
     "semantic_hash": ""
   },
   "internal/handlers/tiqrecommerce/addons.go": {
@@ -4615,8 +4615,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/tiqrecommerce/capture_helpers.go": {
-    "mtime": 1791273231.0407746,
-    "ast_hash": "f07d7550e51f88a2939cf35716498395",
+    "mtime": 1791898897.9536784,
+    "ast_hash": "2a198f2097daf26154b44333d8bf24d9",
     "semantic_hash": ""
   },
   "internal/handlers/tiqrecommerce/conv.go": {
@@ -4635,13 +4635,13 @@
     "semantic_hash": ""
   },
   "internal/handlers/tiqrecommerce/early_handoff.go": {
-    "mtime": 1791273565.9949465,
-    "ast_hash": "bd2aae622ff5974bbade2bd004558d2a",
+    "mtime": 1791801962.765279,
+    "ast_hash": "afb4fb9b85470cab0790586de2cf8dd1",
     "semantic_hash": ""
   },
   "internal/handlers/tiqrecommerce/flow.go": {
-    "mtime": 1791728279.931466,
-    "ast_hash": "4f542dcd5f750c23e4bdefa0810bda47",
+    "mtime": 1791898909.0640762,
+    "ast_hash": "3504c0c2edb7c9fb219bf3198d436b43",
     "semantic_hash": ""
   },
   "internal/handlers/tiqrecommerce/handoff.go": {
@@ -4665,8 +4665,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/tiqrecommerce_flow_test.go": {
-    "mtime": 1791728020.480036,
-    "ast_hash": "f6aeee98f00f4fc48c724d78a0df4107",
+    "mtime": 1791899025.332301,
+    "ast_hash": "a3893ab442aca84a3fd6faec13b5f564",
     "semantic_hash": ""
   },
   "internal/handlers/tiqrecommerce/order_status_test.go": {
@@ -4680,8 +4680,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/archive.go": {
-    "mtime": 1791789618.947003,
-    "ast_hash": "09191f6d598adad0eb8326bcaaf5d2b7",
+    "mtime": 1791898911.038012,
+    "ast_hash": "861382480699771b931d941ce1b78f21",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/archive_test.go": {
@@ -4710,8 +4710,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/reply.go": {
-    "mtime": 1791729468.9598575,
-    "ast_hash": "a94b4e98b057f88d765fb04c5f77e60e",
+    "mtime": 1791875873.7883153,
+    "ast_hash": "89ef65db9afcaaf573460f6645569323",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/reply_quote_test.go": {
@@ -4725,8 +4725,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/firestore_media_url_test.go": {
-    "mtime": 1791462420.9240925,
-    "ast_hash": "16ebf39675042837d58098da0b579e64",
+    "mtime": 1791898998.3503313,
+    "ast_hash": "b4819ebd0104803c8cc5fd3e1344740f",
     "semantic_hash": ""
   },
   "internal/handlers/list_extend.go": {
@@ -4787,6 +4787,41 @@
   "CLAUDE.md": {
     "mtime": 1791729318.0654628,
     "ast_hash": "56f2403e5d4ad272ee8c87f0a3413960",
+    "semantic_hash": ""
+  },
+  "internal/handlers/flow_prefill_filter_test.go": {
+    "mtime": 1791801990.9473932,
+    "ast_hash": "3ffd89a7c28e909f15d90b3cd52a9abb",
+    "semantic_hash": ""
+  },
+  "internal/handlers/flows_sanitize_test.go": {
+    "mtime": 1791804708.388067,
+    "ast_hash": "0cbba474cba7703be779c713baca0fe8",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/flow_prefill.go": {
+    "mtime": 1791802414.4909363,
+    "ast_hash": "2e6513e8ef3865ed9fffe99845387775",
+    "semantic_hash": ""
+  },
+  "internal/handlers/tiqrecommerce/flow_prefill_test.go": {
+    "mtime": 1791802013.72115,
+    "ast_hash": "54a95a6f0ee083241adb8be5b316a567",
+    "semantic_hash": ""
+  },
+  "pkg/geocode/google.go": {
+    "mtime": 1791801835.4841166,
+    "ast_hash": "338a40305ce7724be9c10dbbe402401d",
+    "semantic_hash": ""
+  },
+  "pkg/geocode/google_test.go": {
+    "mtime": 1791801842.3068404,
+    "ast_hash": "1c9137f45566135a4af1043aed1b30be",
+    "semantic_hash": ""
+  },
+  "pkg/whatsapp/flow_payload_test.go": {
+    "mtime": 1791801987.837549,
+    "ast_hash": "270367720f5ddf01c80c09849ed166d7",
     "semantic_hash": ""
   }
 }

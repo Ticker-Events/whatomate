@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
@@ -73,12 +74,16 @@ func (a *App) runCodedFlowPreview(
 	if preview == nil {
 		archive = &codedflow.PreviewSink{Session: session}
 	}
+	inboundMedia := tiqrecommerce.TakeInboundCaptureMedia(session)
+	if inboundMedia.DisplayURL == "" && strings.TrimSpace(inboundMedia.MediaURL) != "" {
+		inboundMedia.DisplayURL = displayMediaURL(a.S3Client, inboundMedia.MediaURL, inboundMedia.MessageID)
+	}
 	chatCtx := &chatNodeCtx{
 		account:          account,
 		contact:          contact,
 		session:          session,
 		userInput:        userInput,
-		inboundMedia:     tiqrecommerce.TakeInboundCaptureMedia(session),
+		inboundMedia:     inboundMedia,
 		buttonID:         buttonID,
 		flowResponseData: flowResponseData,
 		quotedMessage:    codedflow.TakeQuotedInbound(session),

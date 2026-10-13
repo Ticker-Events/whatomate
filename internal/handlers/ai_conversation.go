@@ -55,13 +55,13 @@ func attachmentFromMessage(msg *models.Message, captureKey string) []AIAttachmen
 	}}
 }
 
-func attachmentsJSON(items []AIAttachment) models.JSONBArray {
+func attachmentsJSON(client *storage.S3Client, items []AIAttachment) models.JSONBArray {
 	out := make(models.JSONBArray, 0, len(items))
 	for _, item := range items {
 		out = append(out, map[string]any{
 			"message_id": item.MessageID.String(), "media_url": item.MediaURL,
 			"mime_type": item.MIMEType, "filename": item.Filename, "capture_key": item.CaptureKey,
-			"url": "/api/media/" + item.MessageID.String(),
+			"url": displayMediaURL(client, item.MediaURL, item.MessageID.String()),
 		})
 	}
 	return out

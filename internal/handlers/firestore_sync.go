@@ -54,6 +54,19 @@ func firestoreMediaURL(client *storage.S3Client, stored string) string {
 	return stored
 }
 
+// displayMediaURL is the address shown in handoff summary, notes, and session
+// archives. Prefer the public Spaces URL when available; otherwise /api/media/{id}.
+func displayMediaURL(client *storage.S3Client, stored, messageID string) string {
+	if public := firestoreMediaURL(client, stored); strings.Contains(public, "://") {
+		return public
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return strings.TrimSpace(stored)
+	}
+	return "/api/media/" + messageID
+}
+
 // syncMessageStatusToFirestore updates message delivery status in Firestore.
 func (a *App) syncMessageStatusToFirestore(messageID uuid.UUID, status models.MessageStatus, errorMessage string) {
 	if a.Firestore == nil || !a.Firestore.Enabled() {

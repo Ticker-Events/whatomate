@@ -1282,10 +1282,10 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 				return true
 			}
 			captured := jsonMapFromSession(session, "commerce_captured_fields")
-			captured[asString(field["key"])] = attachmentsJSON(attachments)
+			captured[asString(field["key"])] = attachmentsJSON(a.S3Client, attachments)
 			session.SessionData["commerce_captured_fields"] = map[string]any(captured)
 			for _, attachment := range attachments {
-				tiqrecommerce.RecordCaptureMediaNote(session, field, tiqrecommerce.CaptureMediaLink(attachment.MessageID.String()))
+				tiqrecommerce.RecordCaptureMediaNote(session, field, displayMediaURL(a.S3Client, attachment.MediaURL, attachment.MessageID.String()))
 			}
 			a.appendDraftAttachments(session, attachments)
 			st.CaptureIndex++
