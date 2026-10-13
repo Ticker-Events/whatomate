@@ -215,7 +215,7 @@ async function loadFlows() {
     const rows = body.data?.flows ?? body.flows ?? []
     applyFlows(rows)
   } catch (err) {
-    console.error('Failed to load coded flows:', err)
+    console.error('Failed to load TiQR Flows:', err)
     error.value = t('codedFlows.fetchError')
     flows.value = []
   } finally {

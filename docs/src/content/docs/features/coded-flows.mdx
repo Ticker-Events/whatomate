@@ -1,13 +1,13 @@
 ---
-title: Coded flows
+title: TiQR Flows
 description: How compiled-in conversations run, and how the TiQR Ecommerce flow shops, checks orders, and hands off to an agent
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-Coded flows are conversations written in Go and shipped in the binary. An admin assigns the keywords that start one and can turn it on or off. The steps cannot be edited in the flow builder.
+TiQR Flows are conversations written in Go and shipped in the binary. An admin assigns the keywords that start one and can turn it on or off. The steps cannot be edited in the flow builder.
 
-Visual flows under **Chatbot → Flows** are a graph stored in the database. A coded flow is a function. The outline shown in **Chatbot → Coded flows** is a label list for people. The function is what runs.
+Visual flows under **Chatbot → Flows** are a graph stored in the database. A TiQR Flow is a function. The outline shown in **Chatbot → TiQR Flows** is a label list for people. The function is what runs.
 
 The flow that ships today is **TiQR Ecommerce** (`tiqr_ecommerce`). It loads a TiQR store, then lets the customer buy for store pickup, check an order, or talk to an agent.
 
@@ -15,7 +15,7 @@ The flow that ships today is **TiQR Ecommerce** (`tiqr_ecommerce`). It loads a T
 
 <Steps>
 
-1. Open **Chatbot → Coded flows**.
+1. Open **Chatbot → TiQR Flows**.
 2. Pick the WhatsApp account. Keywords belong to that account.
 3. Enter keywords separated by commas. A message starts the flow when it contains one of them. Matching ignores case. Blank keywords are dropped. A keyword longer than 200 characters is rejected. Duplicates that differ only by case are stored once.
 4. Turn the flow on and save.
@@ -24,7 +24,7 @@ The flow that ships today is **TiQR Ecommerce** (`tiqr_ecommerce`). It loads a T
 
 Saving needs the `flows.chatbot` write permission. Listing and preview need read. A new binding is off until someone enables it.
 
-If a visual flow uses the same keyword, the coded flow starts. An empty keyword list never matches. A disabled binding never matches. The check is limited to the organization and the WhatsApp account on the inbound message.
+If a visual flow uses the same keyword, the TiQR Flow starts. An empty keyword list never matches. A disabled binding never matches. The check is limited to the organization and the WhatsApp account on the inbound message.
 
 The message that contains the keyword is the trigger. It is not treated as the customer's answer to the first question.
 
@@ -36,7 +36,7 @@ That is why the function can be straight-line Go, including loops, and still pau
 
 The session stores the log in `SessionData._coded_calls`. Each entry records the call name and whether it succeeded. A choice also stores the button or row id. A store call stores the payload. On the next message the function walks that log in order. Call order is the identity of a step. Inserting, removing, or reordering a call in the middle of a function changes what an in-progress session replays.
 
-While a coded flow is active the session has:
+While a TiQR Flow is active the session has:
 
 | Field | Meaning |
 | --- | --- |
@@ -45,7 +45,7 @@ While a coded flow is active the session has:
 | `CurrentStep` | Name of the call that is waiting for a reply |
 | `Status` | `active` until the flow ends or transfers |
 
-An active coded flow is resumed before commerce checkout, cart quantity, keyword rules, and visual flows. A WhatsApp Flow submission in the middle of a coded flow stays inside that flow.
+An active TiQR Flow is resumed before commerce checkout, cart quantity, keyword rules, and visual flows. A WhatsApp Flow submission in the middle of a TiQR Flow stays inside that flow.
 
 When the flow ends or transfers, `_coded_flow` is cleared, `CurrentStep` is cleared, and the session is marked completed.
 
@@ -116,13 +116,13 @@ When a TiQR fetch fails (store, collections, products), the recover role writes 
 
 The preferred language is stored as `customer_language` only when the intent role returns it on a free-text reply, and only if the session does not already have one. English button taps never call that role, so the language stays empty and messages are sent as written. English (`en` or `en-*`) is also sent as written. Any other label (Hindi, Tamil, Manglish, and so on) is translated before send. `{{placeholders}}`, asterisks, numbers, prices, and line breaks are kept. Translations are cached on the session in `_translations`, so the same line is not translated again on the next turn.
 
-Each coded flow can limit detection with **Supported languages** on the coded flows page. Leave **All languages** for open detection, or pick from English, Arabic, Manglish, and the Indian languages in the catalog. When a list is set, intent may only choose those codes; anything else continues in English.
+Each TiQR Flow can limit detection with **Supported languages** on the TiQR Flows page. Leave **All languages** for open detection, or pick from English, Arabic, Manglish, and the Indian languages in the catalog. When a list is set, intent may only choose those codes; anything else continues in English.
 
 Catalog text is not translated. Collection names, product names, option names, and prices stay as the store sent them. Button titles are limited to 20 characters after translation, list buttons to 20, section titles to 24, and list headers and footers to 60.
 
 ### Preview
 
-**Preview** on the coded-flow card runs the same function without sending WhatsApp messages and without creating an agent transfer. The preview session lives in memory for 30 minutes.
+**Preview** on the TiQR Flow card runs the same function without sending WhatsApp messages and without creating an agent transfer. The preview session lives in memory for 30 minutes.
 
 The phone composer can attach an image or file the same way chat does (paperclip, type checks, 16MB limit). The preview turn sends media metadata only — no file bytes are stored and no WhatsApp message is created — and stashes it so image and file capture fields accept the attachment. Capture notes still record a `/api/media/{id}` stand-in link.
 
@@ -130,7 +130,7 @@ Each outbound preview bubble includes a snapshot of session context variables at
 
 ### Production tracing (SignOz)
 
-Live coded-flow turns emit structured logs when tracing is enabled (default **on**). Set `WHATOMATE_CODEDFLOW_TRACE=false` (or `0` / `off` / `no`) to disable. You can also set `[codedflow] trace` in `config.toml`; the env var wins when present.
+Live TiQR Flow turns emit structured logs when tracing is enabled (default **on**). Set `WHATOMATE_CODEDFLOW_TRACE=false` (or `0` / `off` / `no`) to disable. You can also set `[codedflow] trace` in `config.toml`; the env var wins when present.
 
 Every line uses message `coded_flow.<event>` and attributes:
 
@@ -163,7 +163,7 @@ The customer phone in the preview is used when the flow looks up an order. The d
 
 #### Live session archives
 
-Every live coded-flow turn appends a preview-shaped turn onto `SessionData.coded_session_archive` (size-capped). When the session ends (completed, cancelled, timeout, or commerce handoff), Whatomate flushes metadata plus one Firestore document per turn under `contacts/{contactId}/sessionArchives/{sessionId}`. Chat Summary **Copy Log** reassembles that archive for Import session log.
+Every live TiQR Flow turn appends a preview-shaped turn onto `SessionData.coded_session_archive` (size-capped). When the session ends (completed, cancelled, timeout, or commerce handoff), Whatomate flushes metadata plus one Firestore document per turn under `contacts/{contactId}/sessionArchives/{sessionId}`. Chat Summary **Copy Log** reassembles that archive for Import session log.
 
 ## TiQR Ecommerce
 
@@ -348,7 +348,7 @@ The flow ends after that message. This path does not attach a payment link. Paym
 
 ### Agent handoff
 
-**Talk to agent**, an off-script reply the AI will not handle, and an AI error all end the same way. The customer is told a team member will help, an agent transfer is created, and the coded flow session is completed.
+**Talk to agent**, an off-script reply the AI will not handle, and an AI error all end the same way. The customer is told a team member will help, an agent transfer is created, and the TiQR Flow session is completed.
 
 ### Session values
 
@@ -383,7 +383,7 @@ These are the values later messages and the order payload read back.
 | `internal/handlers/codedflow_run.go` | Resume / trigger wrappers calling `codedflow.Run` |
 | `internal/handlers/codedflow_api.go` | List and keyword binding |
 | `internal/handlers/codedflow_preview.go` | HTTP preview + Redis/DB preview helpers |
-| `internal/handlers/tiqrecommerce/` | TiQR Ecommerce coded flow (`codedflow.Register` in `init`) |
+| `internal/handlers/tiqrecommerce/` | TiQR Ecommerce flow (`codedflow.Register` in `init`) |
 | `internal/handlers/chatbot_processor.go` | Resume and trigger, ahead of visual flows |
 
 A new flow is a `CodedFlow` value passed to `codedflow.Register` from `init`. It needs a unique `Key`, a `Name`, a `Description`, the outline `Steps`, and a `run` function. The admin UI picks it up from the binary. There is no API to create or delete the definition.

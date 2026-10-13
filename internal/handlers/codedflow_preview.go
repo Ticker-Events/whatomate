@@ -512,13 +512,13 @@ func (a *App) PreviewCodedFlow(r *fastglue.Request) error {
 	case nil:
 		return r.SendEnvelope(resp)
 	case errCodedFlowNotFound:
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Coded flow not found", nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "TiQR Flow not found", nil, "")
 	case errCodedPreviewAccount:
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "WhatsApp account not found", nil, "")
 	case errCodedPreviewSession:
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Preview session not found", nil, "")
 	default:
 		a.Log.Error("Coded flow preview failed", "error", err, "flow", key)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to preview coded flow", nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to preview TiQR Flow", nil, "")
 	}
 }

@@ -623,13 +623,13 @@ GET /api/chatbot/sessions/{id}
   Use the Sessions API to debug chatbot interactions and understand the conversation state.
 </Aside>
 
-## Coded flows
+## TiQR Flows
 
-Coded flows are compiled into the binary. These endpoints assign keywords for one WhatsApp account and run a preview. They do not create or edit the conversation. See [Coded flows](/whatomate/features/coded-flows/) for how a session replays and for the TiQR Ecommerce path.
+TiQR Flows are compiled into the binary. These endpoints assign keywords for one WhatsApp account and run a preview. They do not create or edit the conversation. See [TiQR Flows](/whatomate/features/coded-flows/) for how a session replays and for the TiQR Ecommerce path.
 
 Listing and preview need `flows.chatbot` read. Updating a binding needs write.
 
-### List coded flows
+### List TiQR Flows
 
 ```bash
 GET /api/chatbot/coded-flows?account={whatsapp_account_name}

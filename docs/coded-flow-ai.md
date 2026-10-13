@@ -1,6 +1,6 @@
-# Coded-flow AI
+# TiQR Flows AI
 
-Coded flows use four AI roles. Each role can use Account AI, TypeSafe Jev, or Vercel AI Gateway.
+TiQR Flows use four AI roles. Each role can use Account AI, TypeSafe Jev, or Vercel AI Gateway.
 
 ## Roles
 
@@ -48,4 +48,4 @@ Code composes `codedIntentResult`. Number words such as “two” are normalized
 
 Language labels for Jev (open detection): `en`, `hi`, `ml`, `ta`, `te`, `kn`, `ar`, `es`, `manglish`, `other`.
 
-Each coded flow can limit detection via `supported_languages` on its binding (coded flows page). Empty means open detection. A non-empty list restricts Account AI and Jev to those codes (English, Arabic, Manglish, and Indian languages from the admin catalog). Jev also gets an internal `other` choice that is never stored. Labels outside the list, empty labels, and `other` become `en`, so the conversation continues in English.
+Each TiQR Flow can limit detection via `supported_languages` on its binding (TiQR Flows page). Empty means open detection. A non-empty list restricts Account AI and Jev to those codes (English, Arabic, Manglish, and Indian languages from the admin catalog). Jev also gets an internal `other` choice that is never stored. Labels outside the list, empty labels, and `other` become `en`, so the conversation continues in English.

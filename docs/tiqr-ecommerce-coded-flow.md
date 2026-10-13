@@ -1,4 +1,4 @@
-# TiQR Ecommerce coded flow
+# TiQR Ecommerce flow
 
 Code: `internal/handlers/tiqrecommerce/`. Key: `tiqr_ecommerce`. Engine: `internal/handlers/codedflow/`.
 
@@ -132,12 +132,12 @@ Code: `runEarlyHandoff` in `internal/handlers/tiqrecommerce/early_handoff.go`.
 1. Intro: `This is a custom {name} request — I’ll collect a few details and connect you with our team.`
 2. Required capture fields from that collection (same prompts as the cart path). Checkout phrases do not divert away from these questions.
 3. Add-ons: shared numbered catalog add-on step when the product has catalog add-ons. Products with no catalog add-ons skip this step.
-4. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup or delivery Meta flow ID from the account's coded-flow binding (`pickup_flow_id` / `delivery_flow_id`), falling back to `1484028330223507` (pickup: name, email, phone) or `1557965846018132` (delivery: name, phone, address). Prefill uses the same phone and (for delivery) reverse-geocoded address data as checkout. Flow fields are copied onto the commerce draft address snapshot and notes; blank email falls back to `support+<digits>@tiqr.events`.
+4. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup or delivery Meta flow ID from the account's TiQR Flow binding (`pickup_flow_id` / `delivery_flow_id`), falling back to `1484028330223507` (pickup: name, email, phone) or `1557965846018132` (delivery: name, phone, address). Prefill uses the same phone and (for delivery) reverse-geocoded address data as checkout. Flow fields are copied onto the commerce draft address snapshot and notes; blank email falls back to `support+<digits>@tiqr.events`.
 5. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. Before the draft sync, capture answers are formatted with `CodedOrderNotes` into `commerce_notes.order_notes` (same string as checkout orders), including product/option headers from the staged early-handoff cart line. The cart and order paths are skipped.
 
 Fulfillment time (`list_fulfillment_slots` / `propose_fulfillment_time`) is skipped for now. Pickup vs delivery and the location pin already ran earlier in the buy flow.
 
-Image and file capture fields accept a WhatsApp photo or document (same stash as live chat). In coded-flow preview, the paperclip sends media metadata only — no file bytes are stored — and the capture notes use a stand-in `/api/media/{id}` link.
+Image and file capture fields accept a WhatsApp photo or document (same stash as live chat). In TiQR Flow preview, the paperclip sends media metadata only — no file bytes are stored — and the capture notes use a stand-in `/api/media/{id}` link.
 
 `productsForRoute`:
 
@@ -216,7 +216,7 @@ Then buttons `add_more`, `edit_cart`, and `checkout`. Add more returns to the co
 
 ### 6. Checkout
 
-`AskFlow` opens a WhatsApp Flow by delivery mode, button Enter details. Meta flow ids come from the TiQR Ecommerce coded-flow binding for the WhatsApp account (`pickup_flow_id` / `delivery_flow_id`). When unset, the defaults below apply and must exist as published flows on that account.
+`AskFlow` opens a WhatsApp Flow by delivery mode, button Enter details. Meta flow ids come from the TiQR Ecommerce binding for the WhatsApp account (`pickup_flow_id` / `delivery_flow_id`). When unset, the defaults below apply and must exist as published flows on that account.
 
 | `delivery_mode` | Default Meta flow id | Form fields | Body |
 | --- | --- | --- | --- |
@@ -239,7 +239,7 @@ Configure prefill in **Flows → Flow Builder** (no raw JSON required):
 1. Select the entry screen → **Screen data (prefill)** → add keys (`customer_phone`, and for delivery also `pincode` / `city` / `state` / `country`) with example values.
 2. Select each TextInput → set **Init value** to `${data.<key>}` (or use **Bind to data**). Set `customer_email` **Required** off and **Input type** to Email for pickup.
 3. Select the Footer → edit **Payload** (helpers: Screen fields / Data keys / Prev screens). For multi-screen delivery, navigate must forward form fields and data keys; Save to Meta merges auto-generated payloads with your custom rows (custom wins).
-4. Save the flow, **Save to Meta**, publish, then point Coded flows → TiQR Ecommerce at the new Meta flow ids.
+4. Save the flow, **Save to Meta**, publish, then point TiQR Flows → TiQR Ecommerce at the new Meta flow ids.
 
 Published Meta flows are immutable after publish; clone or create a new draft to change prefill again.
 
@@ -335,7 +335,7 @@ Ungrounded output, a grounded `handoff`, or an intent error transfers immediatel
 
 Language from the first successful intent call is stored as `customer_language` only if the session does not already have one. Button taps never set it.
 
-Admins configure `supported_languages` per coded flow on the coded flows page (stored in the binding `settings` jsonb). Empty means open detection. When a list is set, intent may only choose those languages; anything else (including Jev `other`) is stored as `en` and the session stays in English.
+Admins configure `supported_languages` per TiQR Flow on the TiQR Flows page (stored in the binding `settings` jsonb). Empty means open detection. When a list is set, intent may only choose those languages; anything else (including Jev `other`) is stored as `en` and the session stays in English.
 
 ### Guide
 
@@ -422,7 +422,7 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 
 9. **Empty store data is a transfer, not a retry inside the session.** `get_store` or `list_collections` failure completes the session. A later keyword can start a new session and call TiQR again. Within one session those calls are not retried, because the flow has already ended.
 
-10. **Fallback product image; Meta flow IDs are account-configurable.** Checkout and early handoff open the WhatsApp Flow configured on the coded-flow binding for that WhatsApp account (`pickup_flow_id` / `delivery_flow_id` under Settings → Coded flows → TiQR Ecommerce). When unset, pickup defaults to `1484028330223507` and delivery to `1557965846018132`. Prefill (`customer_phone` and delivery address from the pin) only appears after those published flows declare matching screen `data` keys and `init-value` bindings, and the `WhatsAppFlow` row stores that JSON. The fallback product photo is still one DigitalOcean Spaces URL (`FallbackMedia`); a dead image URL shows the wrong photo.
+10. **Fallback product image; Meta flow IDs are account-configurable.** Checkout and early handoff open the WhatsApp Flow configured on the TiQR Flow binding for that WhatsApp account (`pickup_flow_id` / `delivery_flow_id` under Settings → TiQR Flows → TiQR Ecommerce). When unset, pickup defaults to `1484028330223507` and delivery to `1557965846018132`. Prefill (`customer_phone` and delivery address from the pin) only appears after those published flows declare matching screen `data` keys and `init-value` bindings, and the `WhatsAppFlow` row stores that JSON. The fallback product photo is still one DigitalOcean Spaces URL (`FallbackMedia`); a dead image URL shows the wrong photo.
 
 11. **Language is sticky.** The first non-empty intent language wins for the session. A later message in another language does not replace it, so translation keeps using the first label.
 

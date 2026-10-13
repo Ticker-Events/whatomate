@@ -68,7 +68,7 @@ func (a *App) ListCodedFlows(r *fastglue.Request) error {
 	bindings, err := a.codedFlowBindings(orgID, accountName)
 	if err != nil {
 		a.Log.Error("Failed to list coded flow bindings", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list coded flows", nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list TiQR Flows", nil, "")
 	}
 
 	flows := codedflow.Flows()
@@ -122,7 +122,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 	key = strings.TrimSpace(key)
 	flow := codedflow.ByKey(key)
 	if flow == nil {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Coded flow not found", nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "TiQR Flow not found", nil, "")
 	}
 
 	accountName := strings.TrimSpace(string(r.RequestCtx.QueryArgs().Peek("account")))
@@ -173,12 +173,12 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 				Where("organization_id = ? AND whats_app_account = ? AND flow_key <> ?", orgID, accountName, flow.Key).
 				Update("is_default", false).Error; err != nil {
 				a.Log.Error("Failed to clear existing default coded flow", "error", err)
-				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update coded flow", nil, "")
+				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update TiQR Flow", nil, "")
 			}
 		}
 		if err := a.DB.Save(&binding).Error; err != nil {
 			a.Log.Error("Failed to update coded flow binding", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update coded flow", nil, "")
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update TiQR Flow", nil, "")
 		}
 	case errors.Is(findErr, gorm.ErrRecordNotFound):
 		settings, mergeErr := mergeCodedFlowSettings(flow.Key, nil, req.SupportedLanguages, req.PickupFlowID, req.DeliveryFlowID)
@@ -200,16 +200,16 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 				Where("organization_id = ? AND whats_app_account = ?", orgID, accountName).
 				Update("is_default", false).Error; err != nil {
 				a.Log.Error("Failed to clear existing default coded flow", "error", err)
-				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update coded flow", nil, "")
+				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update TiQR Flow", nil, "")
 			}
 		}
 		if err := a.DB.Create(&binding).Error; err != nil {
 			a.Log.Error("Failed to create coded flow binding", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update coded flow", nil, "")
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update TiQR Flow", nil, "")
 		}
 	default:
 		a.Log.Error("Failed to load coded flow binding", "error", findErr)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update coded flow", nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update TiQR Flow", nil, "")
 	}
 
 	action := models.AuditActionUpdated
