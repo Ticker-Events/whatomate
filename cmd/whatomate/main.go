@@ -51,6 +51,8 @@ func main() {
 		runMigrate(os.Args[2:])
 	case "fresh-session":
 		runFreshSession(os.Args[2:])
+	case "backfill-firestore-messages":
+		runBackfillFirestoreMessages(os.Args[2:])
 	case "version":
 		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
 	case "help", "-h", "--help":
@@ -73,6 +75,7 @@ Commands:
   worker         Start background workers only (no API server)
   migrate        Run database migrations and exit
   fresh-session  Cancel prior chatbot state and start a clean session for a phone
+  backfill-firestore-messages  Re-sync one contact's Postgres messages into Firestore
   version        Show version information
   help           Show this help message
 
@@ -103,6 +106,8 @@ Examples:
   whatomate worker -workers 4          # 4 workers only (no API)
   whatomate fresh-session -phone 919876543210
   whatomate fresh-session -phone +919876543210 -org <uuid> -account shop
+  whatomate backfill-firestore-messages -contact <uuid>
+  whatomate backfill-firestore-messages -contact <uuid> -dry-run
 
 Deployment Scenarios:
   All-in-one:    whatomate server

@@ -137,10 +137,12 @@ func ChatbotSendOptions() MessageSendOptions {
 	}
 }
 
-// APISendOptions returns options suitable for API/template sends
+// APISendOptions returns options suitable for API/template sends.
+// BroadcastWebSocket remains true so Firestore sync is not skipped; the
+// field historically gated both WS and Firestore writes.
 func APISendOptions() MessageSendOptions {
 	return MessageSendOptions{
-		BroadcastWebSocket: false,
+		BroadcastWebSocket: true,
 		DispatchWebhook:    true,
 		TrackSLA:           false,
 		Async:              true,
@@ -218,10 +220,10 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		return nil, fmt.Errorf("failed to create message: %w", err)
 	}
 
-	// Sync to Firestore before send/status updates so the document exists for patches.
-	if opts.BroadcastWebSocket {
-		a.broadcastNewMessage(req.Account.OrganizationID, msg, req.Contact)
-	}
+	// Always sync the message document to Firestore so tiqr.store (and any
+	// other Firestore client) can read the thread. BroadcastWebSocket only
+	// gated this historically; do not skip the write for API/template sends.
+	a.broadcastNewMessage(req.Account.OrganizationID, msg, req.Contact)
 
 	// 2. Define the send function based on message type
 	sendFn := func(sendCtx context.Context) (string, error) {
@@ -587,10 +589,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
 
-		// Sync failure status to Firestore so frontend updates immediately
-		if opts.BroadcastWebSocket {
-			a.syncMessageStatusToFirestore(msg.ID, models.MessageStatusFailed, errMsg)
-		}
+		a.syncMessageStatusToFirestore(msg.ID, models.MessageStatusFailed, errMsg)
 		return
 	}
 
@@ -605,10 +604,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		a.dispatchMessageSentWebhook(req.Account, req.Contact, msg)
 	}
 
-	// Sync status update to Firestore
-	if opts.BroadcastWebSocket {
-		a.syncMessageStatusToFirestore(msg.ID, models.MessageStatusSent, "")
-	}
+	a.syncMessageStatusToFirestore(msg.ID, models.MessageStatusSent, "")
 
 	// Mark the contact's incoming messages as read once a chatbot reply has
 	// gone out. Keeps the agent's contact-list unread count clean for

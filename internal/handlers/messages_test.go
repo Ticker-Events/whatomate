@@ -790,7 +790,7 @@ func TestChatbotSendOptions(t *testing.T) {
 func TestAPISendOptions(t *testing.T) {
 	opts := handlers.APISendOptions()
 
-	assert.False(t, opts.BroadcastWebSocket)
+	assert.True(t, opts.BroadcastWebSocket)
 	assert.True(t, opts.DispatchWebhook)
 	assert.False(t, opts.TrackSLA)
 	assert.True(t, opts.Async)
