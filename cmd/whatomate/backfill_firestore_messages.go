@@ -99,7 +99,7 @@ func runBackfillFirestoreMessages(args []string) {
 		for i := range messages {
 			msg := &messages[i]
 			writeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			err := fsClient.SyncMessage(writeCtx, contact.OrganizationID, msg, &contact, false)
+			err := fsClient.SyncMessageDocument(writeCtx, contact.OrganizationID, msg, &contact, false)
 			cancel()
 			if err != nil {
 				failed++
@@ -112,6 +112,16 @@ func runBackfillFirestoreMessages(args []string) {
 		offset += len(messages)
 		if len(messages) < page {
 			break
+		}
+	}
+
+	if written > 0 {
+		contactCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err := fsClient.SyncContact(contactCtx, contact.OrganizationID, &contact, false)
+		cancel()
+		if err != nil {
+			lo.Error("Failed to sync contact summary after backfill", "error", err)
+			os.Exit(1)
 		}
 	}
 

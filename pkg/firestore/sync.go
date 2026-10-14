@@ -34,6 +34,21 @@ func (c *Client) SyncMessage(ctx context.Context, orgID uuid.UUID, msg *models.M
 	return c.syncContactFromMessage(ctx, orgID, msg, contact, msgData, maskPhone)
 }
 
+// SyncMessageDocument writes only the message document. Use for backfills so
+// contact unread counters are not Increment()'d once per historical message.
+func (c *Client) SyncMessageDocument(ctx context.Context, orgID uuid.UUID, msg *models.Message, contact *models.Contact, maskPhone bool) error {
+	if !c.Enabled() || msg == nil || contact == nil {
+		return nil
+	}
+
+	msgData := buildMessageData(orgID, msg, contact, maskPhone)
+	_, err := c.firestore.Collection(collectionMessages).Doc(msg.ID.String()).Set(ctx, msgData)
+	if err != nil {
+		return fmt.Errorf("firestore sync message %s: %w", msg.ID, err)
+	}
+	return nil
+}
+
 // UpdateMessageStatus upserts delivery status on a message document.
 func (c *Client) UpdateMessageStatus(ctx context.Context, messageID uuid.UUID, status models.MessageStatus, errorMessage string) error {
 	if !c.Enabled() {
@@ -323,7 +338,11 @@ func buildMessageData(orgID uuid.UUID, msg *models.Message, contact *models.Cont
 		"isReply":        msg.IsReply,
 	}
 
-	applyAssignedUserField(data, contact)
+	// Message docs use a full Set (not Merge). firestore.Delete is illegal
+	// there, so only write assignedUserId when the contact has an assignee.
+	if contact.AssignedUserID != nil {
+		data["assignedUserId"] = contact.AssignedUserID.String()
+	}
 	if msg.MediaURL != "" {
 		data["mediaUrl"] = msg.MediaURL
 	}
