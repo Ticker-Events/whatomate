@@ -99,8 +99,9 @@ func TestCompactStore(t *testing.T) {
 		"capabilities": map[string]any{
 			"fulfillment_slots": false,
 		},
-		"logo":        "https://example.com/logo.png",
-		"cover_image": "https://example.com/cover.png",
+		"supported_languages": []any{"en", "hi"},
+		"logo":                "https://example.com/logo.png",
+		"cover_image":         "https://example.com/cover.png",
 	})
 	assert.Equal(t, map[string]any{
 		"id":                        float64(7),
@@ -116,6 +117,7 @@ func TestCompactStore(t *testing.T) {
 		"capabilities": map[string]any{
 			"fulfillment_slots": false,
 		},
+		"supported_languages": []any{"en", "hi"},
 	}, out)
 	assert.NotContains(t, out, "logo")
 }

@@ -341,7 +341,7 @@ Ungrounded output, a grounded `handoff`, or an intent error transfers immediatel
 
 Language from the first successful intent call is stored as `customer_language` only if the session does not already have one. Button taps never set it.
 
-Admins configure `supported_languages` per TiQR Flow on the TiQR Flows page (stored in the binding `settings` jsonb). Empty means open detection. When a list is set, intent may only choose those languages; anything else (including Jev `other`) is stored as `en` and the session stays in English.
+Ecommerce language detection reads `supported_languages` from the store (`session.SessionData["store"]`, or `GetStore` when the store is not cached yet). Empty means open detection. When a list is set, intent may only choose those languages; anything else (including Jev `other`) is stored as `en` and the session stays in English. Other coded flows have no language setting (open detection). Legacy binding `settings.supported_languages` is ignored.
 
 ### Guide
 

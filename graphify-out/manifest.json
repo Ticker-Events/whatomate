@@ -2460,8 +2460,8 @@
     "semantic_hash": ""
   },
   "frontend/src/services/api.ts": {
-    "mtime": 1791737976.6419158,
-    "ast_hash": "3c7b94e8f58ebebe7955554d0f953e17",
+    "mtime": 1791968175.5480149,
+    "ast_hash": "065193b7eea6e4d6e77c3875c15c77c1",
     "semantic_hash": ""
   },
   "frontend/src/services/firestore.ts": {
@@ -2620,8 +2620,8 @@
     "semantic_hash": ""
   },
   "frontend/src/views/chatbot/CodedFlowsView.vue": {
-    "mtime": 1791872324.5954378,
-    "ast_hash": "87f3e08cf6dd7a896fe395c1800f4dcc",
+    "mtime": 1791968158.4670374,
+    "ast_hash": "e437203565070c216b2f9ed8da0843d4",
     "semantic_hash": ""
   },
   "frontend/src/views/chatbot/KeywordDetailView.vue": {
@@ -3260,13 +3260,13 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_api.go": {
-    "mtime": 1791872336.6438382,
-    "ast_hash": "c5939607f0a85e9ae1af5b00bf1536c9",
+    "mtime": 1791968091.6380327,
+    "ast_hash": "63aebedddbf499de869be6b47eadcbed",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_binding_test.go": {
-    "mtime": 1791729594.6292646,
-    "ast_hash": "61a1bd6ba312bce18e1a31046c3f7152",
+    "mtime": 1791968202.35932,
+    "ast_hash": "04664359949976eb7120ea10f3639d43",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow_intent_settings_test.go": {
@@ -3890,13 +3890,13 @@
     "semantic_hash": ""
   },
   "pkg/tickermcp/client.go": {
-    "mtime": 1790925755.0176506,
-    "ast_hash": "410ce883f262e732c15f1b0d21fdb734",
+    "mtime": 1791968251.7927954,
+    "ast_hash": "d4b02609a8bbe2fb9fec78573c170afe",
     "semantic_hash": ""
   },
   "pkg/tickermcp/client_test.go": {
-    "mtime": 1789645222.0310543,
-    "ast_hash": "a99fb838e33ed9c72cbd3b807f79dc71",
+    "mtime": 1791968211.7201943,
+    "ast_hash": "44319d770abd41ba29b96ed9ce0877aa",
     "semantic_hash": ""
   },
   "pkg/whatsapp/analytics.go": {
@@ -4185,8 +4185,8 @@
     "semantic_hash": ""
   },
   "docs/coded-flow-ai.md": {
-    "mtime": 1791875952.897065,
-    "ast_hash": "994eab028836fcd736bba06ddedbb811",
+    "mtime": 1791968217.1135547,
+    "ast_hash": "880a6861a1e1b2c2d2cd67fa922d96cb",
     "semantic_hash": ""
   },
   "docs/src/content/docs/api-reference/accounts.mdx": {
@@ -4365,8 +4365,8 @@
     "semantic_hash": ""
   },
   "docs/tiqr-ecommerce-coded-flow.md": {
-    "mtime": 1791875956.2287939,
-    "ast_hash": "2ca585710609a61416f4785b193bbc74",
+    "mtime": 1791968214.4044044,
+    "ast_hash": "938201adc7dac4a5142d8d12452550d7",
     "semantic_hash": ""
   },
   "frontend/crowdin.yml": {
@@ -4530,8 +4530,8 @@
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/host.go": {
-    "mtime": 1791898892.0838602,
-    "ast_hash": "d7b27a689839ff2bc9250104de65cd88",
+    "mtime": 1791968092.9931037,
+    "ast_hash": "dca95302a3873a9f569622ef83e60274",
     "semantic_hash": ""
   },
   "internal/handlers/codedflow/intent.go": {
@@ -4735,8 +4735,8 @@
     "semantic_hash": ""
   },
   "internal/models/coded_flow_languages.go": {
-    "mtime": 1791729358.8434362,
-    "ast_hash": "74eb5f83fa082106a8e8cd7ada4b2075",
+    "mtime": 1791968218.8450599,
+    "ast_hash": "8e599f693651e6c461fc49bb7b492dcc",
     "semantic_hash": ""
   },
   "internal/models/coded_flow_languages_test.go": {

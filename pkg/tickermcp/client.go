@@ -501,7 +501,8 @@ func (c *Client) RetryPayment(ctx context.Context, orderUUID string) (PaymentRet
 	return result, err
 }
 
-// CompactStore keeps name, description, address, country, delivery modes, and delivery radii.
+// CompactStore keeps name, description, address, country, delivery modes,
+// delivery radii, and supported_languages.
 func CompactStore(m map[string]any) map[string]any {
 	if m == nil {
 		return map[string]any{}
@@ -533,6 +534,7 @@ func CompactStore(m map[string]any) map[string]any {
 		"delivery_radius",
 		"free_delivery_radius",
 		"location_based_delivery",
+		"supported_languages",
 	} {
 		if v, ok := m[key]; ok && v != nil {
 			out[key] = v

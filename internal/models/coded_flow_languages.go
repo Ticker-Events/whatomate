@@ -11,8 +11,8 @@ type CodedFlowLanguage struct {
 	Name string `json:"name"`
 }
 
-// CodedFlowSupportedLanguages is the admin picklist for per-flow language
-// detection. Empty selection means all languages (open detection).
+// CodedFlowSupportedLanguages is the catalog of language codes/names used when
+// prompting AI and labeling detected languages. Store-level lists may use these codes.
 var CodedFlowSupportedLanguages = []CodedFlowLanguage{
 	{Code: "en", Name: "English"},
 	{Code: "ar", Name: "Arabic"},
