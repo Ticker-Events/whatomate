@@ -85,7 +85,9 @@ Buttons, in order:
 | `check_order_status` | Check order status |
 | `talk_to_agent` | Talk to staff |
 
-The body is `Welcome to {store name}.` plus `What would you like to do?` when the store has a name.
+The body is the cached welcome on the coded-flow binding (`settings.welcome_message`), then a blank line and `What would you like to do?` when that CTA is not already the ending. When the welcome is empty, the body falls back to `Welcome to {store name}.` plus `What would you like to do?` (or only the CTA when the store has no name).
+
+Admins edit the welcome on the TiQR Flows screen (`/chatbot/coded-flows`) and can regenerate it with `POST /api/chatbot/coded-flows/tiqr_ecommerce/welcome/refresh?account=`. Regenerate loads buyer REST `get_store`, `get_store_info` (about_us only), and `list_collections`, then asks the account AI for a short plain-text greeting. It does not use MCP. There is no hourly TTL: a saved edit stays until the next regenerate or save.
 
 `askRouteButtons` is called with `AllowCatalog: true` and `AllowFAQ: true`. A tap on those three ids does not call AI. Free text can resolve to:
 

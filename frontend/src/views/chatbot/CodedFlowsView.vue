@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Code2, Loader2, Play } from 'lucide-vue-next'
+import { Code2, Loader2, Play, RefreshCw } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { accountsService, chatbotService, flowsService, type CodedFlowBinding } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
@@ -17,6 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import CodedFlowPreview from '@/components/chatbot/flow-preview/CodedFlowPreview.vue'
 
 const TIQR_ECOMMERCE_KEY = 'tiqr_ecommerce'
@@ -39,7 +40,10 @@ type KeywordDraft = {
   isDefault: boolean
   pickupFlowId: string
   deliveryFlowId: string
+  welcomeMessage: string
+  welcomeGeneratedAt: string
   saving: boolean
+  regeneratingWelcome: boolean
 }
 
 const { t } = useI18n()
@@ -88,10 +92,20 @@ function applyFlows(rows: CodedFlowBinding[]) {
       isDefault: flow.is_default,
       pickupFlowId: draftPickupValue(flow),
       deliveryFlowId: draftDeliveryValue(flow),
+      welcomeMessage: flow.welcome_message || '',
+      welcomeGeneratedAt: flow.welcome_generated_at || '',
       saving: false,
+      regeneratingWelcome: false,
     }
   }
   drafts.value = next
+}
+
+function formatWelcomeGeneratedAt(value: string | null | undefined): string {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString()
 }
 
 function flowOptionsFor(selectedId: string): WhatsAppFlowOption[] {
@@ -187,6 +201,7 @@ async function save(flow: CodedFlowBinding) {
       is_default: boolean
       pickup_flow_id?: string
       delivery_flow_id?: string
+      welcome_message?: string
     } = {
       keywords,
       is_enabled: draft.enabled,
@@ -195,6 +210,7 @@ async function save(flow: CodedFlowBinding) {
     if (flow.key === TIQR_ECOMMERCE_KEY) {
       payload.pickup_flow_id = resolveStoredFlowId(draft.pickupFlowId)
       payload.delivery_flow_id = resolveStoredFlowId(draft.deliveryFlowId)
+      payload.welcome_message = draft.welcomeMessage
     }
     const response = await chatbotService.updateCodedFlow(flow.key, account.value, payload)
     const body = response.data as { data?: CodedFlowBinding } & CodedFlowBinding
@@ -214,16 +230,44 @@ async function save(flow: CodedFlowBinding) {
     flow.delivery_flow_id = saved.delivery_flow_id
     flow.stored_pickup_flow_id = saved.stored_pickup_flow_id
     flow.stored_delivery_flow_id = saved.stored_delivery_flow_id
+    flow.welcome_message = saved.welcome_message
+    flow.welcome_generated_at = saved.welcome_generated_at
     draft.keywords = (flow.keywords || []).join(', ')
     draft.enabled = flow.is_enabled
     draft.isDefault = flow.is_default
     draft.pickupFlowId = draftPickupValue(flow)
     draft.deliveryFlowId = draftDeliveryValue(flow)
+    draft.welcomeMessage = flow.welcome_message || ''
+    draft.welcomeGeneratedAt = flow.welcome_generated_at || ''
     toast.success(t('codedFlows.saved'))
   } catch (err) {
     toast.error(getErrorMessage(err, t('codedFlows.saveError')))
   } finally {
     draft.saving = false
+  }
+}
+
+async function regenerateWelcome(flow: CodedFlowBinding) {
+  const draft = drafts.value[flow.key]
+  if (!draft || !account.value || draft.regeneratingWelcome) return
+  draft.regeneratingWelcome = true
+  try {
+    const response = await chatbotService.refreshCodedFlowWelcome(flow.key, account.value)
+    const body = response.data as {
+      data?: { welcome_message?: string; welcome_generated_at?: string }
+      welcome_message?: string
+      welcome_generated_at?: string
+    }
+    const payload = body.data ?? body
+    draft.welcomeMessage = payload.welcome_message || ''
+    draft.welcomeGeneratedAt = payload.welcome_generated_at || ''
+    flow.welcome_message = draft.welcomeMessage
+    flow.welcome_generated_at = draft.welcomeGeneratedAt
+    toast.success(t('codedFlows.welcomeRefreshed'))
+  } catch (err) {
+    toast.error(getErrorMessage(err, t('codedFlows.welcomeRefreshFailed')))
+  } finally {
+    draft.regeneratingWelcome = false
   }
 }
 
@@ -348,6 +392,37 @@ watch(showPreview, (open) => {
                 :disabled="!canWrite"
                 @update:checked="drafts[flow.key].isDefault = $event"
               />
+            </div>
+
+            <div v-if="flow.key === TIQR_ECOMMERCE_KEY && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs font-medium">{{ $t('codedFlows.welcomeTitle') }}</p>
+                  <p class="text-xs text-muted-foreground mt-0.5">{{ $t('codedFlows.welcomeHint') }}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  class="shrink-0"
+                  :disabled="!canWrite || drafts[flow.key].regeneratingWelcome || drafts[flow.key].saving"
+                  @click="regenerateWelcome(flow)"
+                >
+                  <Loader2 v-if="drafts[flow.key].regeneratingWelcome" class="mr-2 h-4 w-4 animate-spin" />
+                  <RefreshCw v-else class="mr-2 h-4 w-4" />
+                  {{ $t('codedFlows.welcomeRegenerate') }}
+                </Button>
+              </div>
+              <Textarea
+                v-model="drafts[flow.key].welcomeMessage"
+                :disabled="!canWrite"
+                :rows="4"
+                :placeholder="$t('codedFlows.welcomePlaceholder')"
+                class="resize-none"
+              />
+              <p v-if="drafts[flow.key].welcomeGeneratedAt" class="text-xs text-muted-foreground">
+                {{ $t('codedFlows.welcomeGeneratedAt', { time: formatWelcomeGeneratedAt(drafts[flow.key].welcomeGeneratedAt) }) }}
+              </p>
             </div>
 
             <div v-if="flow.key === TIQR_ECOMMERCE_KEY && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">

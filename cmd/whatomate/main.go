@@ -819,6 +819,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/chatbot/coded-flows", app.ListCodedFlows)
 	g.PUT("/api/chatbot/coded-flows/{key}", app.UpdateCodedFlowBinding)
 	g.POST("/api/chatbot/coded-flows/{key}/preview", app.PreviewCodedFlow)
+	g.POST("/api/chatbot/coded-flows/{key}/welcome/refresh", app.RefreshCodedFlowWelcome)
 
 	// Chatbot Flows
 	g.GET("/api/chatbot/flows", app.ListChatbotFlows)

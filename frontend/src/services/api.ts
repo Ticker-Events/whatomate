@@ -364,6 +364,8 @@ export type CodedFlowBinding = {
   delivery_flow_id?: string
   stored_pickup_flow_id?: string
   stored_delivery_flow_id?: string
+  welcome_message?: string
+  welcome_generated_at?: string
 }
 
 export type CodedPreviewButton = {
@@ -487,11 +489,18 @@ export const chatbotService = {
       is_default: boolean
       pickup_flow_id?: string
       delivery_flow_id?: string
+      welcome_message?: string
     },
   ) =>
     api.put<CodedFlowBinding>(`/chatbot/coded-flows/${encodeURIComponent(key)}`, data, { params: { account } }),
   previewCodedFlow: (key: string, data: CodedPreviewRequest) =>
     api.post<CodedPreviewResponse>(`/chatbot/coded-flows/${encodeURIComponent(key)}/preview`, data),
+  refreshCodedFlowWelcome: (key: string, account: string) =>
+    api.post<{ welcome_message: string; welcome_generated_at: string }>(
+      `/chatbot/coded-flows/${encodeURIComponent(key)}/welcome/refresh`,
+      {},
+      { params: { account } },
+    ),
 
   // AI Contexts
   listAIContexts: (params?: { search?: string; page?: number; limit?: number }) =>

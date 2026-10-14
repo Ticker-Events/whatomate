@@ -125,7 +125,7 @@ func runTiqrEcommerce(c *Conv) error {
 	if c.Stop {
 		return nil
 	}
-	route, ok := c.AskRouteButtons("intent", menuButtons(store), codedflow.RouteOptions{AllowCatalog: true, AllowFAQ: true})
+	route, ok := c.AskRouteButtons("intent", menuButtons(c, store), codedflow.RouteOptions{AllowCatalog: true, AllowFAQ: true})
 	if !ok {
 		if c.HasReplyRoute() {
 			return buyProducts(c, collections, c.TakeReplyRoute())
@@ -169,14 +169,15 @@ func (c *Conv) afterCheckoutDivert(collections []any) error {
 	}
 }
 
-func menuButtons(store map[string]any) codedflow.ButtonPrompt {
-	name := strings.TrimSpace(asString(store["name"]))
-	body := "What would you like to do?"
-	if name != "" {
-		body = "Welcome to " + name + ".\n\nWhat would you like to do?"
+const menuCTA = "What would you like to do?"
+
+func menuButtons(c *Conv, store map[string]any) codedflow.ButtonPrompt {
+	welcome := ""
+	if c != nil && c.App() != nil && c.Session() != nil {
+		welcome = c.App().EcommerceWelcomeMessage(c.Session().OrganizationID, c.Session().WhatsAppAccount)
 	}
 	return codedflow.ButtonPrompt{
-		Body: body,
+		Body: MenuWelcomeBody(store, welcome),
 		Buttons: []codedflow.Button{
 			{ID: tiqrBuyProducts, Title: "Buy products"},
 			{ID: tiqrCheckOrderStatus, Title: "Check order status"},
@@ -187,6 +188,23 @@ func menuButtons(store map[string]any) codedflow.ButtonPrompt {
 			Expect: "They may pick Buy products, Check order status, or Talk to staff, name a collection or a product, ask a store FAQ, or ask to check out.",
 		},
 	}
+}
+
+// MenuWelcomeBody builds the first-menu body from a cached welcome or the
+// store-name fallback.
+func MenuWelcomeBody(store map[string]any, welcome string) string {
+	welcome = strings.TrimSpace(welcome)
+	if welcome == "" {
+		name := strings.TrimSpace(asString(store["name"]))
+		if name != "" {
+			return "Welcome to " + name + ".\n\n" + menuCTA
+		}
+		return menuCTA
+	}
+	if strings.HasSuffix(welcome, menuCTA) {
+		return welcome
+	}
+	return welcome + "\n\n" + menuCTA
 }
 
 func buyProducts(c *Conv, collections []any, first codedflow.Route) error {

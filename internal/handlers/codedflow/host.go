@@ -127,6 +127,10 @@ type Host interface {
 	// forms. Falls back to built-in defaults when unset.
 	ResolveEcommerceMetaFlowID(orgID uuid.UUID, accountName string, delivery bool) string
 
+	// EcommerceWelcomeMessage returns the cached first-menu welcome for
+	// tiqr_ecommerce on this account, or empty when unset.
+	EcommerceWelcomeMessage(orgID uuid.UUID, accountName string) string
+
 	// CodedFlowSupportedLanguages returns language codes that limit AI detection.
 	// For tiqr_ecommerce these come from the store; empty means open detection.
 	// Other flows return nil (open detection).

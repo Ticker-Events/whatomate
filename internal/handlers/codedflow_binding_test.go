@@ -355,3 +355,71 @@ func TestApp_UpdateCodedFlowBinding_RejectsInvalidFlowID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
 }
+
+func TestApp_UpdateCodedFlowBinding_WelcomeMessage(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	perms := getChatbotFlowPermissions(t, app)
+	role := testutil.CreateTestRole(t, app.DB, org.ID, "coded-flow-welcome", perms)
+	user := testutil.CreateTestUser(t, app.DB, org.ID,
+		testutil.WithEmail(testutil.UniqueEmail("coded-welcome")),
+		testutil.WithRoleID(&role.ID),
+	)
+
+	save := testutil.NewJSONRequest(t, map[string]any{
+		"keywords":        []string{"shop"},
+		"is_enabled":      true,
+		"welcome_message": "Warm hello from our bakery. Ask for cakes or sweets.",
+	})
+	testutil.SetAuthContext(save, org.ID, user.ID)
+	testutil.SetQueryParam(save, "account", account.Name)
+	testutil.SetPathParam(save, "key", "tiqr_ecommerce")
+	require.NoError(t, app.UpdateCodedFlowBinding(save))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(save))
+
+	var saved struct {
+		Data handlers.CodedFlowBindingResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(save), &saved))
+	assert.Equal(t, "Warm hello from our bakery. Ask for cakes or sweets.", saved.Data.WelcomeMessage)
+	assert.Equal(t, "Warm hello from our bakery. Ask for cakes or sweets.", app.EcommerceWelcomeMessage(org.ID, account.Name))
+
+	list := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(list, org.ID, user.ID)
+	testutil.SetQueryParam(list, "account", account.Name)
+	require.NoError(t, app.ListCodedFlows(list))
+	var listed struct {
+		Data struct {
+			Flows []handlers.CodedFlowBindingResponse `json:"flows"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(list), &listed))
+	var ecommerce *handlers.CodedFlowBindingResponse
+	for i := range listed.Data.Flows {
+		if listed.Data.Flows[i].Key == "tiqr_ecommerce" {
+			ecommerce = &listed.Data.Flows[i]
+		}
+	}
+	require.NotNil(t, ecommerce)
+	assert.Equal(t, "Warm hello from our bakery. Ask for cakes or sweets.", ecommerce.WelcomeMessage)
+}
+
+func TestApp_RefreshCodedFlowWelcome_RejectsOtherFlow(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	perms := getChatbotFlowPermissions(t, app)
+	role := testutil.CreateTestRole(t, app.DB, org.ID, "coded-flow-welcome-other", perms)
+	user := testutil.CreateTestUser(t, app.DB, org.ID,
+		testutil.WithEmail(testutil.UniqueEmail("coded-welcome-other")),
+		testutil.WithRoleID(&role.ID),
+	)
+
+	req := testutil.NewJSONRequest(t, map[string]any{})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetQueryParam(req, "account", account.Name)
+	testutil.SetPathParam(req, "key", "not_ecommerce")
+	require.NoError(t, app.RefreshCodedFlowWelcome(req))
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+}

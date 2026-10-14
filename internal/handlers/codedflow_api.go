@@ -19,8 +19,10 @@ import (
 )
 
 const (
-	codedSettingPickupFlowID   = "pickup_flow_id"
-	codedSettingDeliveryFlowID = "delivery_flow_id"
+	codedSettingPickupFlowID       = "pickup_flow_id"
+	codedSettingDeliveryFlowID     = "delivery_flow_id"
+	codedSettingWelcomeMessage     = "welcome_message"
+	codedSettingWelcomeGeneratedAt = "welcome_generated_at"
 )
 
 // CodedFlowBindingResponse is one compiled-in flow plus its account settings.
@@ -42,6 +44,9 @@ type CodedFlowBindingResponse struct {
 	// (empty means use the built-in default).
 	StoredPickupFlowID   string `json:"stored_pickup_flow_id,omitempty"`
 	StoredDeliveryFlowID string `json:"stored_delivery_flow_id,omitempty"`
+	// WelcomeMessage is the cached first-menu body for tiqr_ecommerce.
+	WelcomeMessage     string `json:"welcome_message,omitempty"`
+	WelcomeGeneratedAt string `json:"welcome_generated_at,omitempty"`
 }
 
 // ListCodedFlows returns every coded flow shipped with this build, merged
@@ -91,6 +96,7 @@ func (a *App) ListCodedFlows(r *fastglue.Request) error {
 			item.Keywords = []string{}
 		}
 		applyEcommerceFlowIDs(&item, flow.Key, binding)
+		applyEcommerceWelcome(&item, flow.Key, binding)
 		response = append(response, item)
 	}
 
@@ -132,6 +138,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		IsDefault      bool     `json:"is_default"`
 		PickupFlowID   *string  `json:"pickup_flow_id"`
 		DeliveryFlowID *string  `json:"delivery_flow_id"`
+		WelcomeMessage *string  `json:"welcome_message"`
 	}
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
@@ -155,7 +162,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		binding.Keywords = keywords
 		binding.IsEnabled = req.IsEnabled
 		binding.IsDefault = req.IsDefault
-		merged, mergeErr := mergeCodedFlowSettings(flow.Key, binding.Settings, req.PickupFlowID, req.DeliveryFlowID)
+		merged, mergeErr := mergeCodedFlowSettings(flow.Key, binding.Settings, req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage)
 		if mergeErr != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, mergeErr.Error(), nil, "")
 		}
@@ -173,7 +180,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update TiQR Flow", nil, "")
 		}
 	case errors.Is(findErr, gorm.ErrRecordNotFound):
-		settings, mergeErr := mergeCodedFlowSettings(flow.Key, nil, req.PickupFlowID, req.DeliveryFlowID)
+		settings, mergeErr := mergeCodedFlowSettings(flow.Key, nil, req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage)
 		if mergeErr != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, mergeErr.Error(), nil, "")
 		}
@@ -222,6 +229,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		WhatsAppAccount: accountName,
 	}
 	applyEcommerceFlowIDs(&resp, flow.Key, &binding)
+	applyEcommerceWelcome(&resp, flow.Key, &binding)
 	return r.SendEnvelope(resp)
 }
 
@@ -284,6 +292,18 @@ func applyEcommerceFlowIDs(item *CodedFlowBindingResponse, flowKey string, bindi
 	item.DeliveryFlowID = firstNonEmptyFlowID(storedDelivery, tiqrecommerce.EcommerceFlowID)
 }
 
+func applyEcommerceWelcome(item *CodedFlowBindingResponse, flowKey string, binding *models.CodedFlowBinding) {
+	if item == nil || flowKey != tiqrecommerce.FlowKey || binding == nil || binding.Settings == nil {
+		return
+	}
+	if msg, ok := binding.Settings[codedSettingWelcomeMessage].(string); ok {
+		item.WelcomeMessage = strings.TrimSpace(msg)
+	}
+	if at, ok := binding.Settings[codedSettingWelcomeGeneratedAt].(string); ok {
+		item.WelcomeGeneratedAt = strings.TrimSpace(at)
+	}
+}
+
 func ecommerceFlowIDsFromSettings(settings models.JSONB) (pickup, delivery string) {
 	if settings == nil {
 		return "", ""
@@ -296,7 +316,7 @@ func ecommerceFlowIDsFromSettings(settings models.JSONB) (pickup, delivery strin
 func mergeCodedFlowSettings(
 	flowKey string,
 	existing models.JSONB,
-	pickupID, deliveryID *string,
+	pickupID, deliveryID, welcomeMessage *string,
 ) (models.JSONB, error) {
 	out := models.JSONB{}
 	for k, v := range existing {
@@ -324,6 +344,15 @@ func mergeCodedFlowSettings(
 				delete(out, codedSettingDeliveryFlowID)
 			} else {
 				out[codedSettingDeliveryFlowID] = normalized
+			}
+		}
+		if welcomeMessage != nil {
+			msg := truncateWelcomeRunes(strings.TrimSpace(*welcomeMessage), codedFlowWelcomeMaxChars)
+			if msg == "" {
+				delete(out, codedSettingWelcomeMessage)
+				delete(out, codedSettingWelcomeGeneratedAt)
+			} else {
+				out[codedSettingWelcomeMessage] = msg
 			}
 		}
 	}
