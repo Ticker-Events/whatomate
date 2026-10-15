@@ -474,7 +474,7 @@ func collectionNameByID(data models.JSONB, id string) string {
 }
 
 func (c *Conv) resolveQuotedFreeText(step string, cfg map[string]any, opts RouteOptions, quoted *QuotedMessage, choices []QuotedChoice) (Route, bool) {
-	// Quoted replies use on-message labels only; do not force full catalog or FAQ lists.
+	// Quoted replies keep loaded session collections; FAQs stay off unless the step enables them.
 	ctx := c.intentContext(cfg, RouteOptions{AllowCatalog: opts.AllowCatalog})
 	ctx.FAQs = map[string]string{}
 	ctx.AllowFAQ = false
@@ -509,9 +509,6 @@ func (c *Conv) resolveQuotedFreeText(step string, cfg map[string]any, opts Route
 			if n := fieldString(product, "name"); n != "" {
 				ctx.QuotedChoices[id] = n
 			}
-		}
-		if colName := collectionNameByID(c.session().SessionData, id); colName != "" {
-			ctx.Collections[id] = colName
 		}
 	}
 
@@ -665,16 +662,16 @@ func BuildQuotedReplyIntentPrompt(message string, ctx IntentContext) string {
 	if len(ctx.QuotedChoices) == 0 {
 		choices.WriteString("(none)")
 	} else {
-		for id, title := range ctx.QuotedChoices {
-			fmt.Fprintf(&choices, "\n- %s (%s)", id, title)
+		for _, id := range sortedStringMapKeys(ctx.QuotedChoices) {
+			fmt.Fprintf(&choices, "\n- %s (%s)", id, ctx.QuotedChoices[id])
 		}
 	}
 	var collections strings.Builder
 	if len(ctx.Collections) == 0 {
 		collections.WriteString("(none)")
 	} else {
-		for id, name := range ctx.Collections {
-			fmt.Fprintf(&collections, "\n- %s (id %s)", name, id)
+		for _, id := range sortedStringMapKeys(ctx.Collections) {
+			fmt.Fprintf(&collections, "\n- %s (id %s)", ctx.Collections[id], id)
 		}
 	}
 	var faqs strings.Builder
@@ -682,8 +679,8 @@ func BuildQuotedReplyIntentPrompt(message string, ctx IntentContext) string {
 	if len(ctx.FAQs) == 0 {
 		faqs.WriteString("(none)")
 	} else {
-		for id, question := range ctx.FAQs {
-			fmt.Fprintf(&faqs, "\n- %s (id %s)", question, id)
+		for _, id := range sortedStringMapKeys(ctx.FAQs) {
+			fmt.Fprintf(&faqs, "\n- %s (id %s)", ctx.FAQs[id], id)
 		}
 		faqRoute = "route faq: they ask a question that one of the loaded FAQs already answers, including a paraphrase. Set faq_id. Leave other ids empty.\n"
 	}
@@ -717,6 +714,8 @@ What the current step is doing:
 
 What a valid reply to the current step looks like:
 %s
+
+When the customer says "buy …", "I want …", "I need …", "show me …", or a close variant, they are almost always naming a collection or a product. If the name matches a loaded collection, use route collection. If it does not, use route product with product_query from their words.
 
 route current: their words answer the current question on screen, not the quoted message. Leave ids empty.
 route choice: they picked one of the quoted selectable ids that is a menu or action button (for example buy_products). Set choice_id.

@@ -364,7 +364,7 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 			}
 			continue
 		}
-		_, ok = askProducts(c, products)
+		picked, ok := askProducts(c, products)
 		if !ok {
 			cont, err := continueAfterAskFail(c)
 			if err != nil || c.Ended || c.Stop {
@@ -375,6 +375,10 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 				continue
 			}
 			return nil
+		}
+		if picked.Kind != "" && picked.Kind != codedflow.RouteChoice {
+			first = picked
+			continue
 		}
 		if product := selectedProductMap(c); product != nil {
 			if col := earlyHandoffCollectionForProduct(c, product); col != nil {
@@ -1063,11 +1067,13 @@ func productsForRoute(c *Conv, route codedflow.Route) ([]any, bool) {
 
 // askProducts shows one product as an image reply with Add to cart. WhatsApp
 // carousels need at least two cards, and several collections have one product.
-func askProducts(c *Conv, products []any) (codedflow.Choice, bool) {
+// Free text may divert to another collection, product search, or checkout.
+func askProducts(c *Conv, products []any) (codedflow.Route, bool) {
+	opts := codedflow.RouteOptions{AllowCatalog: true}
 	if len(products) < 2 {
-		return c.AskImageButtons("product", products, SingleProductCTA())
+		return c.AskRouteImageButtons("product", products, SingleProductCTA(), opts)
 	}
-	return c.AskCarousel("product", enrichProductsForCarousel(c.Session(), products), productCards())
+	return c.AskRouteCarousel("product", enrichProductsForCarousel(c.Session(), products), productCards(), opts)
 }
 
 func SingleProductCTA() codedflow.ImageButtonPrompt {

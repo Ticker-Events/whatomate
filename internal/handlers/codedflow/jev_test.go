@@ -173,23 +173,22 @@ func TestBuildJevIntentRequest_NoFAQOrProductSpanOnRouteCall(t *testing.T) {
 	assert.False(t, hasFAQ)
 }
 
-func TestBuildJevIntentRequest_OmitsCollectionsAlreadyChoices(t *testing.T) {
+func TestBuildJevIntentRequest_IncludesCollectionsAlreadyChoices(t *testing.T) {
 	state, questions := buildJevIntentRequest("Cakes", IntentContext{
 		AllowCatalog: true,
 		ChoiceIDs:    map[string]string{"1": "Cakes", "2": "Sweets"},
 		Collections:  map[string]string{"1": "Cakes", "2": "Sweets"},
 	})
-	_, hasCollections := state["collections"]
-	assert.False(t, hasCollections)
+	cols, ok := state["collections"].([]map[string]string)
+	require.True(t, ok)
+	require.Len(t, cols, 2)
 	route, ok := questions["route"].(map[string]any)
 	require.True(t, ok)
 	criteria, ok := route["criteria"].(map[string]any)
 	require.True(t, ok)
-	_, hasCollectionRoute := criteria["collection"]
-	assert.False(t, hasCollectionRoute)
+	assert.Contains(t, criteria, "collection")
 	assert.Contains(t, criteria, "product")
-	_, hasCollectionID := questions["collection_id"]
-	assert.False(t, hasCollectionID)
+	assert.Contains(t, questions, "collection_id")
 	assert.Contains(t, questions, "names_product")
 }
 

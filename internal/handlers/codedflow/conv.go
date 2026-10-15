@@ -296,6 +296,10 @@ func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
 		if !callOK(rec) {
 			return "", false
 		}
+		if route, ok := catalogDivertFromCall(rec); ok {
+			c.SetReplyRoute(route)
+			return "", false
+		}
 		return asString(c.session().SessionData[name]), true
 	}
 	body := c.text(prompt.Body)
@@ -316,17 +320,22 @@ func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
 		return "", false
 	}
 	input := strings.TrimSpace(c.chat.UserInput())
+	catalogOpts := RouteOptions{AllowCatalog: true}
 	if !re.MatchString(input) {
 		if c.skipIntent {
 			c.skipIntent = false
 			return "", false
 		}
 		cfg := numberConfig(body, prompt)
-		if c.tryQuotedReply(name, cfg, RouteOptions{}) {
+		if c.tryQuotedReply(name, cfg, catalogOpts) {
 			return "", false
 		}
-		route, ok := c.resolveFreeText(name, cfg, RouteOptions{})
+		route, ok := c.resolveFreeText(name, cfg, catalogOpts)
 		if ok && route.Kind == codedRouteCheckout {
+			return "", false
+		}
+		if ok && isCatalogDivertRoute(route.Kind) {
+			c.SetReplyRoute(route)
 			return "", false
 		}
 		if !ok || route.Kind != codedRouteAnswer {
@@ -339,7 +348,7 @@ func (c *Conv) AskNumber(name string, prompt NumberPrompt) (string, bool) {
 		}
 	} else if c.chat.QuotedMessage() != nil && !c.chat.QuotedMessage().IsLatestOutgoing {
 		cfg := numberConfig(body, prompt)
-		if c.tryQuotedReply(name, cfg, RouteOptions{}) {
+		if c.tryQuotedReply(name, cfg, catalogOpts) {
 			return "", false
 		}
 	}
@@ -687,7 +696,26 @@ func (c *Conv) replayChoice() (Choice, bool, bool) {
 	if !callOK(rec) {
 		return Choice{}, true, false
 	}
+	if route, ok := catalogDivertFromCall(rec); ok {
+		c.SetReplyRoute(route)
+		return Choice{}, true, false
+	}
 	return Choice{ID: asString(rec["id"]), Title: asString(rec["title"])}, true, true
+}
+
+func catalogDivertFromCall(rec map[string]any) (Route, bool) {
+	kind := strings.TrimSpace(asString(rec["route"]))
+	switch kind {
+	case codedRouteCollection, codedRouteProduct, RouteSelectProduct, codedRouteCheckout, codedRouteHandoff:
+		return Route{
+			Kind:  kind,
+			ID:    asString(rec["id"]),
+			Query: asString(rec["query"]),
+			Title: asString(rec["title"]),
+		}, true
+	default:
+		return Route{}, false
+	}
 }
 
 func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
@@ -702,7 +730,8 @@ func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 		c.chat.SetButtonID(id)
 		return c.acceptButton(name, cfg)
 	}
-	if c.tryQuotedReply(name, cfg, RouteOptions{}) {
+	catalogOpts := RouteOptions{AllowCatalog: true}
+	if c.tryQuotedReply(name, cfg, catalogOpts) {
 		return Choice{}, false
 	}
 	// Free-text quote handling may restore a product and set the button id.
@@ -735,15 +764,28 @@ func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 		}
 		return Choice{}, false
 	}
-	route, ok := c.resolveFreeText(name, cfg, RouteOptions{})
+	route, ok := c.resolveFreeText(name, cfg, catalogOpts)
 	if ok && route.Kind == RouteShowMore {
 		c.resendShowMore(name, cfg, true)
 		return Choice{}, false
 	}
-	if !ok || route.Kind != codedRouteChoice {
+	if ok && route.Kind == codedRouteChoice {
+		return Choice{ID: route.ID, Title: route.Title}, true
+	}
+	if ok && isCatalogDivertRoute(route.Kind) {
+		c.SetReplyRoute(route)
 		return Choice{}, false
 	}
-	return Choice{ID: route.ID, Title: route.Title}, true
+	return Choice{}, false
+}
+
+func isCatalogDivertRoute(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case codedRouteCollection, codedRouteProduct, RouteSelectProduct, codedRouteCheckout, codedRouteHandoff:
+		return true
+	default:
+		return false
+	}
 }
 
 // resendShowMore pages a list or carousel and sends the next page.

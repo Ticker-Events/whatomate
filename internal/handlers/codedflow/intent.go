@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -44,7 +45,8 @@ type Route struct {
 
 // RouteOptions controls which catalog routes the intent role may return.
 type RouteOptions struct {
-	// AllowCatalog enables collection and product routes using loaded collections.
+	// AllowCatalog enables the product-search route. Collection routes use
+	// every collection already loaded on the session, in every prompt.
 	AllowCatalog bool
 	// AllowFAQ enables the faq route using loaded store FAQ questions.
 	AllowFAQ bool
@@ -143,6 +145,20 @@ func (c *Conv) AskRouteCarousel(name string, items []any, prompt CarouselPrompt,
 		}
 	}
 	return c.askRoute(name, c.carouselConfig(prompt), opts)
+}
+
+// AskRouteImageButtons accepts a free-text or button route from an image-header prompt.
+func (c *Conv) AskRouteImageButtons(name string, items []any, prompt ImageButtonPrompt, opts RouteOptions) (Route, bool) {
+	if route, done, ok := c.replayRoute(); done {
+		return route, ok
+	}
+	if prompt.ItemsKey != "" && items != nil {
+		c.session().SessionData[prompt.ItemsKey] = items
+		if prompt.ItemsKey == "products" {
+			MergeShownProducts(c.session().SessionData, items)
+		}
+	}
+	return c.askRoute(name, c.imageButtonConfig(prompt), opts)
 }
 
 func (c *Conv) replayRoute() (Route, bool, bool) {
@@ -501,23 +517,21 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) IntentContex
 			ctx.ChoiceIDs[id] = choiceLabel(button)
 		}
 	}
-	if opts.AllowCatalog {
-		items, _ := anySlice(c.session().SessionData["collections"])
-		for _, item := range items {
-			row, ok := asStringMap(item)
-			if !ok {
-				continue
-			}
-			id := fieldString(row, "id")
-			if id == "" {
-				continue
-			}
-			name := fieldString(row, "name")
-			if name == "" {
-				name = fieldString(row, "title")
-			}
-			ctx.Collections[id] = name
+	items, _ := anySlice(c.session().SessionData["collections"])
+	for _, item := range items {
+		row, ok := asStringMap(item)
+		if !ok {
+			continue
 		}
+		id := fieldString(row, "id")
+		if id == "" {
+			continue
+		}
+		name := fieldString(row, "name")
+		if name == "" {
+			name = fieldString(row, "title")
+		}
+		ctx.Collections[id] = name
 	}
 	if opts.AllowFAQ {
 		faqItems, _ := anySlice(c.session().SessionData["faqs"])
@@ -555,18 +569,14 @@ func matchLocalIntent(message string, ctx IntentContext) (IntentResult, bool) {
 			}, true
 		}
 	}
-	if ctx.AllowCatalog {
-		for id, name := range ctx.Collections {
-			if normalizeIntentText(name) == norm {
-				return IntentResult{
-					Language:     normalizeDetectedLanguage("", ctx.SupportedLanguages),
-					Route:        codedRouteCollection,
-					CollectionID: id,
-					Confidence:   1,
-					Reasoning:    "local exact collection name",
-				}, true
-			}
-		}
+	if id, ok := matchLocalCollectionID(norm, ctx); ok {
+		return IntentResult{
+			Language:     normalizeDetectedLanguage("", ctx.SupportedLanguages),
+			Route:        codedRouteCollection,
+			CollectionID: id,
+			Confidence:   1,
+			Reasoning:    "local collection name",
+		}, true
 	}
 	if ctx.AllowFAQ {
 		for id, question := range ctx.FAQs {
@@ -582,6 +592,72 @@ func matchLocalIntent(message string, ctx IntentContext) (IntentResult, bool) {
 		}
 	}
 	return IntentResult{}, false
+}
+
+// matchLocalCollectionID returns a loaded collection id when the normalized
+// message is that collection's name, or a shopping phrase whose leftover words
+// are exactly one loaded collection name (for example "buy fried collection").
+func matchLocalCollectionID(norm string, ctx IntentContext) (string, bool) {
+	if norm == "" || len(ctx.Collections) == 0 {
+		return "", false
+	}
+	if id, ok := uniqueCollectionIDByName(norm, ctx.Collections); ok {
+		return id, true
+	}
+	rest := stripShoppingCollectionQuery(norm)
+	if rest == "" || rest == norm {
+		return "", false
+	}
+	return uniqueCollectionIDByName(rest, ctx.Collections)
+}
+
+func uniqueCollectionIDByName(normName string, collections map[string]string) (string, bool) {
+	if normName == "" {
+		return "", false
+	}
+	var match string
+	for id, name := range collections {
+		if normalizeIntentText(name) != normName {
+			continue
+		}
+		if match != "" && match != id {
+			return "", false
+		}
+		match = id
+	}
+	return match, match != ""
+}
+
+var collectionQueryTrailWords = map[string]struct{}{
+	"collection":  {},
+	"collections": {},
+	"menu":        {},
+	"items":       {},
+}
+
+func stripShoppingCollectionQuery(norm string) string {
+	rest := strings.TrimSpace(norm)
+	for _, prefix := range shoppingQueryPrefixes {
+		p := normalizeIntentText(prefix)
+		if p == "" {
+			continue
+		}
+		if rest == p {
+			return ""
+		}
+		if strings.HasPrefix(rest, p+" ") {
+			rest = strings.TrimSpace(rest[len(p):])
+			break
+		}
+	}
+	words := strings.Fields(rest)
+	for len(words) > 0 {
+		if _, ok := collectionQueryTrailWords[words[len(words)-1]]; !ok {
+			break
+		}
+		words = words[:len(words)-1]
+	}
+	return strings.Join(words, " ")
 }
 
 func normalizeIntentText(s string) string {
@@ -725,7 +801,7 @@ func ValidateCodedIntent(raw IntentResult, ctx IntentContext) (IntentResult, boo
 		}
 		return raw, true
 	case codedRouteCollection:
-		if !ctx.AllowCatalog {
+		if len(ctx.Collections) == 0 {
 			return raw, false
 		}
 		if raw.CollectionID == "" || raw.ChoiceID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
@@ -850,17 +926,16 @@ func BuildIntentPrompt(message string, ctx IntentContext) string {
 	if len(ctx.ChoiceIDs) == 0 {
 		choices.WriteString("(none)")
 	} else {
-		for id, title := range ctx.ChoiceIDs {
-			fmt.Fprintf(&choices, "\n- %s (%s)", id, title)
+		for _, id := range sortedStringMapKeys(ctx.ChoiceIDs) {
+			fmt.Fprintf(&choices, "\n- %s (%s)", id, ctx.ChoiceIDs[id])
 		}
 	}
 	var collections strings.Builder
-	extraCollections := collectionsNotInChoices(ctx)
-	if !ctx.AllowCatalog || len(extraCollections) == 0 {
+	if len(ctx.Collections) == 0 {
 		collections.WriteString("(none)")
 	} else {
-		for id, name := range extraCollections {
-			fmt.Fprintf(&collections, "\n- %s (id %s)", name, id)
+		for _, id := range sortedStringMapKeys(ctx.Collections) {
+			fmt.Fprintf(&collections, "\n- %s (id %s)", ctx.Collections[id], id)
 		}
 	}
 	var faqs strings.Builder
@@ -912,6 +987,8 @@ Collections already loaded, use only these ids. If this list is empty, do not us
 Store FAQs already loaded, use only these ids. If this list is empty, do not use the faq route:
 %s
 
+When the customer says "buy …", "I want …", "I need …", "show me …", or a close variant, they are almost always naming a collection or a product. Do not use unclear just because that name is not the item currently on screen. If the name matches a loaded collection (including a typo, "buy <name>", or "<name> collection"), use route collection and set collection_id from the list above. If it does not match a loaded collection, use route product and set product_query to the short name taken from their words; code searches the catalog. Do not invent an id.
+
 route choice: they picked one of the choices above (including a misspelled title), or they want to buy or check an order when those are choices. Set choice_id. Do not use this for a request to talk to a person unless talk_to_agent is in the allowed choices and that is what they picked.
 route collection: they want the items in one collection, or they ask what is available in that collection. Set collection_id from the list above. Do not use this for a single product name.
 route product: they name a product or ask to buy a specific item. Set product_query to a short search string taken from their words. Leave both ids empty.
@@ -933,8 +1010,8 @@ Customer message:
 
 func buildGuidePrompt(message, lang string, ctx IntentContext) string {
 	names := make([]string, 0, len(ctx.Collections))
-	for _, name := range ctx.Collections {
-		if name != "" {
+	for _, id := range sortedStringMapKeys(ctx.Collections) {
+		if name := ctx.Collections[id]; name != "" {
 			names = append(names, name)
 		}
 	}
@@ -956,6 +1033,7 @@ func buildGuidePrompt(message, lang string, ctx IntentContext) string {
 	}
 	return fmt.Sprintf(`The customer has not chosen a path yet. Ask one short question so their next reply can be matched to a path.
 You do not invent products, collections, prices, or ids. You may mention only these collection names: %s.
+If they named one of those collection names, treat it as that collection. Do not ask whether they want to buy that name as an unknown item.
 
 Current question shown to the customer:
 %s
@@ -967,11 +1045,20 @@ What a valid reply looks like:
 %s
 
 Paths: Buy products, Check order status, Checkout, Talk to staff.
-If they named an item, ask whether they want to buy that item, see a collection, check out, check an order, or talk to staff. Do not say the item is available.
+If they named an item that is not one of the collection names above, ask whether they want to buy that item, see a collection, check out, check an order, or talk to staff. Do not say the item is available.
 Write the question in %s, matching how the customer is writing. Return only the question.
 
 Customer message:
 %s`, collectionNames, question, doing, expect, lang, message)
+}
+
+func sortedStringMapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func LimitWords(text string, max int) string {

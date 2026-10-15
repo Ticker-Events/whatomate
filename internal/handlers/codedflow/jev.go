@@ -143,14 +143,11 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 	}
 	sort.Slice(choices, func(i, j int) bool { return choices[i]["id"] < choices[j]["id"] })
 
-	extraCollections := collectionsNotInChoices(ctx)
-	collections := make([]map[string]string, 0, len(extraCollections))
-	if ctx.AllowCatalog {
-		for id, name := range extraCollections {
-			collections = append(collections, map[string]string{"id": id, "name": name})
-		}
-		sort.Slice(collections, func(i, j int) bool { return collections[i]["id"] < collections[j]["id"] })
+	collections := make([]map[string]string, 0, len(ctx.Collections))
+	for id, name := range ctx.Collections {
+		collections = append(collections, map[string]string{"id": id, "name": name})
 	}
+	sort.Slice(collections, func(i, j int) bool { return collections[i]["id"] < collections[j]["id"] })
 
 	state := map[string]any{
 		"message":  message,
@@ -181,16 +178,16 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 			"what": "More than one shopping route fits, or none of them fit, and they are not asking for a person.",
 		},
 	}
-	includeCollectionRoute := ctx.AllowCatalog && len(extraCollections) > 0
+	includeCollectionRoute := len(collections) > 0
 	if includeCollectionRoute {
 		routeCriteria["collection"] = map[string]any{
-			"what":    "They want the items in one loaded collection, or ask what is available in that collection.",
+			"what":    "They want the items in one loaded collection, or ask what is available in that collection. Phrases like buy, I want, I need, or show me usually name a collection or a product.",
 			"not_for": "A single product name to search.",
 		}
 	}
 	if ctx.AllowCatalog {
 		routeCriteria["product"] = map[string]any{
-			"what":    "They name a product or ask to buy a specific item.",
+			"what":    "They name a product or ask to buy a specific item. Phrases like buy, I want, I need, or show me usually name a collection or a product.",
 			"not_for": "The Buy products button, or browsing a whole collection.",
 		}
 	}
@@ -257,7 +254,7 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 		collectionCriteria := map[string]any{
 			"none": "None of the loaded collections match.",
 		}
-		for id, name := range extraCollections {
+		for id, name := range ctx.Collections {
 			collectionCriteria[id] = name
 		}
 		questions["collection_id"] = map[string]any{
@@ -333,20 +330,6 @@ func buildJevFAQRequest(message string, faqs map[string]string) (map[string]any,
 		},
 	}
 	return state, questions
-}
-
-func collectionsNotInChoices(ctx IntentContext) map[string]string {
-	if len(ctx.Collections) == 0 {
-		return nil
-	}
-	out := make(map[string]string)
-	for id, name := range ctx.Collections {
-		if _, ok := ctx.ChoiceIDs[id]; ok {
-			continue
-		}
-		out[id] = name
-	}
-	return out
 }
 
 func exactFAQMatch(message string, faqs map[string]string) string {

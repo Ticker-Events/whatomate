@@ -2682,6 +2682,75 @@ func TestTiqrEcommerce_CollectionTypoSelectsChoice(t *testing.T) {
 	assert.Equal(t, "product", session.CurrentStep)
 }
 
+func oneProduct(options []any) []any {
+	if options == nil {
+		options = []any{map[string]any{"id": "1", "name": "Default", "price": "10"}}
+	}
+	return []any{
+		map[string]any{
+			"id": "101", "name": "Kunafa", "min_price": "120", "options": options,
+		},
+	}
+}
+
+func startEcommerceAtProduct(t *testing.T, products []any) (*App, *models.WhatsAppAccount, *models.Contact, *models.ChatbotSession, *codedflow.CodedFlow) {
+	t.Helper()
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{"id": "64", "name": "Cakes", "description": "Cakes"},
+			map[string]any{"id": "66", "name": "Fried", "description": "Fried"},
+		},
+	}, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Cakes", "64", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "product", session.CurrentStep)
+	require.Equal(t, "64", asString(session.SessionData["collection_id"]))
+	return app, account, contact, session, flow
+}
+
+func TestTiqrEcommerce_ProductStepLocalCollectionName(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	app, account, contact, session, flow := startEcommerceAtProduct(t, oneProduct(nil))
+	for _, msg := range []string{"Fried", "Buy fried", "Buy fried collection"} {
+		require.NoError(t, app.runCodedFlow(account, contact, session, flow, msg, "", nil))
+		reloadSession(t, app, session)
+		assert.Equal(t, "66", asString(session.SessionData["collection_id"]), msg)
+		assert.Equal(t, "Fried", asString(session.SessionData["collection_name"]), msg)
+		assert.Equal(t, "product", session.CurrentStep, msg)
+		assert.Equal(t, models.SessionStatusActive, session.Status, msg)
+	}
+	_ = contact
+}
+
+func TestTiqrEcommerce_ProductStepCollectionParaphrase(t *testing.T) {
+	var saw codedflow.IntentContext
+	useCodedIntent(t, func(message string, ctx codedflow.IntentContext) (codedflow.IntentResult, error) {
+		saw = ctx
+		assert.Equal(t, "the fried ones", message)
+		return codedflow.IntentResult{
+			Language:     "en",
+			Route:        codedflow.RouteCollection,
+			CollectionID: "66",
+			Confidence:   0.91,
+		}, nil
+	}, nil)
+	app, account, contact, session, flow := startEcommerceAtProduct(t, oneProduct(nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "the fried ones", "", nil))
+	reloadSession(t, app, session)
+	assert.True(t, saw.AllowCatalog)
+	assert.Equal(t, "Fried", saw.Collections["66"])
+	assert.Equal(t, "66", asString(session.SessionData["collection_id"]))
+	assert.Equal(t, "Fried", asString(session.SessionData["collection_name"]))
+	assert.Equal(t, "product", session.CurrentStep)
+	assert.NotContains(t, outgoingBlob(t, app, session), "Do you want to buy Fried")
+	_ = contact
+}
+
 // A step that records a call must not hand that record to the next step in
 // the same turn. Otherwise the collections lookup is replayed as the menu
 // answer and an empty choice transfers the chat.
