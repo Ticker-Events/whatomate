@@ -1067,7 +1067,7 @@ func askProducts(c *Conv, products []any) (codedflow.Choice, bool) {
 	if len(products) < 2 {
 		return c.AskImageButtons("product", products, SingleProductCTA())
 	}
-	return c.AskCarousel("product", products, productCards())
+	return c.AskCarousel("product", enrichProductsForCarousel(c.Session(), products), productCards())
 }
 
 func SingleProductCTA() codedflow.ImageButtonPrompt {
@@ -1098,7 +1098,7 @@ func productCards() codedflow.CarouselPrompt {
 		ItemsKey:      "products",
 		IDField:       "{{id}}",
 		StoreAs:       "product_selected",
-		BodyField:     "{{name}} ({{currency_symbol}}{{min_price}})",
+		BodyField:     "{{card_body}}",
 		MediaField:    "{{images[0].original_url}}",
 		Title:         "Add to cart",
 		FallbackMedia: FallbackMedia,
@@ -1130,15 +1130,16 @@ func addPickedProduct(c *Conv) bool {
 			return false
 		}
 	default:
-		_, ok := c.AskList("option", nil, codedflow.ListPrompt{
+		options, _ := anySlice(c.Session().SessionData["options"])
+		_, ok := c.AskList("option", enrichOptionsForList(c.Session(), options), codedflow.ListPrompt{
 			Body:        "This item comes in more than one option. Please choose the one you'd like.",
 			Header:      "Choose an option",
 			Button:      "Choose",
 			Section:     "Options",
 			ItemsKey:    "options",
 			IDField:     "id",
-			Title:       "{{name}} ({{currency_symbol}}{{price}})",
-			Description: "{{description}}",
+			Title:       "{{row_title}}",
+			Description: "{{row_description}}",
 			Select: map[string]string{
 				"option_id":   "id",
 				"option_name": "name",

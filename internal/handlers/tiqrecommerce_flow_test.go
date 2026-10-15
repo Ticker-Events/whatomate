@@ -73,10 +73,18 @@ func TestCodedPaymentCTAContent(t *testing.T) {
 	}, "INR")
 	assert.Contains(t, body, "Order placed!")
 	assert.Contains(t, body, "TQ-1")
-	assert.Contains(t, body, "Total:")
+	assert.Contains(t, body, "Total: ₹40.00")
 	assert.Equal(t, "https://pay.example/go", paymentURL)
 	assert.NotContains(t, body, "https://pay.example/go")
 	assert.NotContains(t, body, "order is confirmed")
+
+	body, paymentURL = codedflow.PaymentCTAForTest(map[string]any{
+		"display_uid": "TQ-USD",
+		"amount":      12.5,
+		"payment_url": "https://pay.example/usd",
+	}, "USD")
+	assert.Contains(t, body, "Total: $12.50")
+	assert.Equal(t, "https://pay.example/usd", paymentURL)
 
 	body, paymentURL = codedflow.PaymentCTAForTest(map[string]any{
 		"display_uid": "TQ-MOCK",
@@ -891,7 +899,9 @@ func twoProducts(options []any) []any {
 func TestSingleProductCTA_Config(t *testing.T) {
 	prompt := tiqrecommerce.SingleProductCTA()
 	assert.Contains(t, prompt.Body, "{{products[0].name}}")
+	assert.Contains(t, prompt.Body, "({{currency_symbol}}{{products[0].min_price}})")
 	assert.Contains(t, prompt.Body, "{{products[0].description}}")
+	assert.NotContains(t, prompt.Body, "{{currency_symbol}}{{products[0].min_price}} — {{products[0].description}}")
 	assert.Equal(t, "{{products[0].images[0].original_url}}", prompt.HeaderImage)
 	assert.Equal(t, "Add to cart", prompt.Title)
 	assert.Equal(t, "product_selected", prompt.StoreAs)
@@ -911,6 +921,65 @@ func TestSingleProductCTA_Config(t *testing.T) {
 	assert.Equal(t, tiqrecommerce.FallbackMedia, cfg["fallback_media_url"])
 	assert.Equal(t, "Add to cart", cfg["title_field"])
 	assert.Equal(t, prompt.BodyField, cfg["body_field"])
+}
+
+func TestEcommercePriceTemplatesSurviveTruncation(t *testing.T) {
+	t.Parallel()
+
+	longOptionName := "Extra Long Option Name That Exceeds Limit"
+	optionButtons, err := dynamicButtonsFromSession(map[string]any{
+		"source":            "dynamic",
+		"items_var":         "options",
+		"id_field":          "id",
+		"title_field":       "{{row_title}}",
+		"description_field": "{{row_description}}",
+	}, models.JSONB{
+		"options": []map[string]any{
+			{
+				"id":              "9",
+				"name":            longOptionName,
+				"row_title":       longOptionName,
+				"row_description": "₹120 — Crispy pastry",
+			},
+		},
+	}, "list")
+	require.NoError(t, err)
+	require.Len(t, optionButtons, 1)
+
+	title := optionButtons[0]["title"].(string)
+	desc := optionButtons[0]["description"].(string)
+	assert.Equal(t, longOptionName, title)
+	assert.NotContains(t, title, "₹120")
+	assert.Equal(t, "₹120 — Crispy pastry", desc)
+
+	cards, err := carouselCardsForNode(map[string]any{
+		"mode":        "carousel",
+		"source":      "dynamic",
+		"items_var":   "products",
+		"id_field":    "id",
+		"body_field":  "{{card_body}}",
+		"title_field": "Add to cart",
+		"media_field": "image",
+	}, models.JSONB{
+		"products": []map[string]any{
+			{
+				"id":        "101",
+				"card_body": "Shortened product name\n₹499 — Rich chocolate layers",
+				"image":     "https://cdn.example.com/cake.jpg",
+			},
+			{
+				"id":        "102",
+				"card_body": "Cupcake (₹80)",
+				"image":     "https://cdn.example.com/cupcake.jpg",
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, cards, 2)
+	body := cards[0]["body"].(string)
+	assert.Equal(t, 1, strings.Count(body, "₹499"))
+	assert.Contains(t, body, "\n₹499 — Rich chocolate layers")
+	assert.NotContains(t, strings.Split(body, "\n")[0], "₹499")
 }
 
 func TestTiqrEcommerce_SingleProductImageCTA(t *testing.T) {
@@ -937,7 +1006,7 @@ func TestTiqrEcommerce_SingleProductImageCTA(t *testing.T) {
 
 	blob := outgoingBlob(t, app, session)
 	assert.Contains(t, blob, "Kunafa")
-	assert.Contains(t, blob, "120")
+	assert.Contains(t, blob, "₹120")
 	assert.Contains(t, blob, "Crispy shredded pastry")
 	assert.Contains(t, blob, "Add to cart")
 	assert.Contains(t, blob, "https://cdn.example.com/kunafa.jpg")

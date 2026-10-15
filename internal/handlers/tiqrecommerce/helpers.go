@@ -3,9 +3,16 @@ package tiqrecommerce
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
+)
+
+// WhatsApp interactive limits that can hide a trailing price on the name line.
+const (
+	listTitleMaxRunes     = 24
+	carouselBodyMaxRunes  = 160
 )
 
 func asString(v any) string { return codedflow.AsString(v) }
@@ -44,9 +51,27 @@ func stashSessionCurrency(session *models.ChatbotSession, currency string) {
 	}
 	code := strings.ToUpper(strings.TrimSpace(currency))
 	if code == "" {
-		return
+		code = "INR"
 	}
 	session.SessionData["currency"] = code
+	session.SessionData["currency_symbol"] = currencySymbol(code)
+}
+
+// currencySymbol returns the display symbol for a store ISO currency code.
+func currencySymbol(currency string) string {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	switch currency {
+	case "INR", "":
+		return "₹"
+	case "USD":
+		return "$"
+	case "EUR":
+		return "€"
+	case "GBP":
+		return "£"
+	default:
+		return currency + " "
+	}
 }
 
 func sessionCurrencyCode(session *models.ChatbotSession) string {
@@ -58,6 +83,118 @@ func sessionCurrencyCode(session *models.ChatbotSession) string {
 		return "INR"
 	}
 	return code
+}
+
+func sessionCurrencySymbol(session *models.ChatbotSession) string {
+	if session != nil && session.SessionData != nil {
+		if s := strings.TrimSpace(asString(session.SessionData["currency_symbol"])); s != "" {
+			return s
+		}
+	}
+	return currencySymbol(sessionCurrencyCode(session))
+}
+
+func pricedName(name, symbol, amount string) string {
+	name = strings.TrimSpace(name)
+	amount = strings.TrimSpace(amount)
+	if amount == "" {
+		return name
+	}
+	return name + " (" + symbol + amount + ")"
+}
+
+func priceInDescription(symbol, amount, description string) string {
+	amount = strings.TrimSpace(amount)
+	if amount == "" {
+		return strings.TrimSpace(description)
+	}
+	price := symbol + amount
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return price
+	}
+	return price + " — " + description
+}
+
+// enrichOptionsForList sets row_title / row_description so the currency price
+// appears once: on the title when name+price fits in 24 runes, otherwise only
+// in the description (where WhatsApp allows 72 runes).
+func enrichOptionsForList(session *models.ChatbotSession, options []any) []any {
+	symbol := sessionCurrencySymbol(session)
+	out := make([]any, 0, len(options))
+	for _, entry := range options {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		row := cloneJSONMap(item)
+		name := asString(row["name"])
+		amount := asString(row["price"])
+		desc := asString(row["description"])
+		priced := pricedName(name, symbol, amount)
+		if amount == "" || utf8.RuneCountInString(priced) <= listTitleMaxRunes {
+			row["row_title"] = priced
+			row["row_description"] = desc
+		} else {
+			row["row_title"] = name
+			row["row_description"] = priceInDescription(symbol, amount, desc)
+		}
+		out = append(out, map[string]any(row))
+	}
+	return out
+}
+
+// enrichProductsForCarousel sets card_body so the currency price appears once:
+// on the name line when it fits in 160 runes, otherwise only on the second line.
+func enrichProductsForCarousel(session *models.ChatbotSession, products []any) []any {
+	symbol := sessionCurrencySymbol(session)
+	out := make([]any, 0, len(products))
+	for _, entry := range products {
+		item, ok := asStringMap(entry)
+		if !ok {
+			continue
+		}
+		row := cloneJSONMap(item)
+		row["card_body"] = productCardBody(
+			asString(row["name"]),
+			symbol,
+			asString(row["min_price"]),
+			asString(row["description"]),
+		)
+		out = append(out, map[string]any(row))
+	}
+	return out
+}
+
+func productCardBody(name, symbol, amount, description string) string {
+	name = strings.TrimSpace(name)
+	amount = strings.TrimSpace(amount)
+	description = strings.TrimSpace(description)
+	priced := pricedName(name, symbol, amount)
+	if amount == "" {
+		if description == "" {
+			return name
+		}
+		return name + "\n" + description
+	}
+	if utf8.RuneCountInString(priced) <= carouselBodyMaxRunes {
+		if description == "" {
+			return priced
+		}
+		withDesc := priced + "\n" + description
+		if utf8.RuneCountInString(withDesc) <= carouselBodyMaxRunes {
+			return withDesc
+		}
+		return priced
+	}
+	// Name+price exceeds the body limit: put price only on the second line and
+	// shorten the name so a 160-rune truncate cannot drop the price.
+	priceLine := priceInDescription(symbol, amount, description)
+	nameBudget := carouselBodyMaxRunes - utf8.RuneCountInString(priceLine) - 1
+	if nameBudget < 1 {
+		return priceLine
+	}
+	return codedflow.TruncateRunes(name, nameBudget) + "\n" + priceLine
 }
 
 func jsonMapFromSession(session *models.ChatbotSession, key string) models.JSONB {
