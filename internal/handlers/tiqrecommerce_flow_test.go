@@ -3570,6 +3570,94 @@ func TestTiqrEcommerce_ProductCarouselPagesWithShowMore(t *testing.T) {
 	assert.Equal(t, []string{"209", "210", "211"}, ids)
 }
 
+func TestTiqrEcommerce_EarlierPageAddToCartAfterShowMore(t *testing.T) {
+	products := make([]any, 12)
+	for i := 0; i < len(products); i++ {
+		products[i] = map[string]any{
+			"id":        strconv.Itoa(200 + i),
+			"name":      fmt.Sprintf("Item %02d", i+1),
+			"min_price": "10",
+			"options":   []any{map[string]any{"id": "1", "name": "Default", "price": "10"}},
+		}
+	}
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "product", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, codedflow.ShowMoreTitle, codedflow.ShowMoreID, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "product", session.CurrentStep)
+	ids := lastCarouselButtonIDs(t, app, session)
+	require.Equal(t, []string{"209", "210", "211"}, ids)
+
+	// Bare button id from the first carousel page (no quote context).
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "200", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "quantity", session.CurrentStep)
+	assert.Equal(t, "200", asString(session.SessionData["product_id"]))
+	assert.Equal(t, "Item 01", asString(session.SessionData["product_name"]))
+	_ = contact
+}
+
+func TestTiqrEcommerce_QuotedEarlierPageAddToCartAfterShowMore(t *testing.T) {
+	products := make([]any, 12)
+	for i := 0; i < len(products); i++ {
+		products[i] = map[string]any{
+			"id":        strconv.Itoa(200 + i),
+			"name":      fmt.Sprintf("Item %02d", i+1),
+			"min_price": "10",
+			"options":   []any{map[string]any{"id": "1", "name": "Default", "price": "10"}},
+		}
+	}
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "product", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, codedflow.ShowMoreTitle, codedflow.ShowMoreID, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "product", session.CurrentStep)
+
+	// Quote the first carousel and tap Add to cart on its first card.
+	stashQuotedProductCarousel(t, app, session, "200", "Item 01 (₹10)")
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "200", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "quantity", session.CurrentStep)
+	assert.Equal(t, "200", asString(session.SessionData["product_id"]))
+	assert.Equal(t, "Item 01", asString(session.SessionData["product_name"]))
+	_ = contact
+}
+
+func TestTiqrEcommerce_SecondPageAddToCartStillWorks(t *testing.T) {
+	products := make([]any, 12)
+	for i := 0; i < len(products); i++ {
+		products[i] = map[string]any{
+			"id":        strconv.Itoa(200 + i),
+			"name":      fmt.Sprintf("Item %02d", i+1),
+			"min_price": "10",
+			"options":   []any{map[string]any{"id": "1", "name": "Default", "price": "10"}},
+		}
+	}
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, codedflow.ShowMoreTitle, codedflow.ShowMoreID, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add to cart", "211", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "quantity", session.CurrentStep)
+	assert.Equal(t, "211", asString(session.SessionData["product_id"]))
+	_ = contact
+}
+
 func TestTiqrEcommerce_OptionListPagesWithShowMore(t *testing.T) {
 	options := make([]any, 12)
 	for i := 0; i < len(options); i++ {

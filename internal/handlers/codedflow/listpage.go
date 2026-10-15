@@ -14,7 +14,9 @@ const (
 	// ShowMoreTitle is the customer-facing label for the next page.
 	ShowMoreTitle = "Show more"
 	// ShowMoreDescription is the list-row description under Show more.
-	ShowMoreDescription = "See the next items"
+	ShowMoreDescription = "Browse the next page of items"
+	// ShowMoreBody is the carousel card body for the next-page card.
+	ShowMoreBody = "More items are available. Tap Show more to browse the next page."
 
 	// WhatsAppChoiceCap is the most rows or cards WhatsApp accepts in one message.
 	WhatsAppChoiceCap = 10
@@ -145,6 +147,41 @@ func AdvanceCursor(data models.JSONB, itemsVar string) {
 		step = ListPageSize
 	}
 	SetCursor(data, itemsVar, Cursor(data, itemsVar)+step)
+}
+
+// FocusItemCursor moves the list cursor so itemID is on the current WhatsApp
+// page when that id is in the full list but not on the page the cursor points
+// at. Used when the customer taps a button from an earlier carousel or list
+// page after Show more. Returns true when the cursor changed.
+func FocusItemCursor(data models.JSONB, itemsVar, itemID string) bool {
+	itemID = strings.TrimSpace(itemID)
+	if data == nil || itemsVar == "" || itemID == "" || IsShowMoreID(itemID) {
+		return false
+	}
+	items, ok := anySlice(data[itemsVar])
+	if !ok || len(items) == 0 {
+		return false
+	}
+	index := -1
+	for i, entry := range items {
+		if itemKey(entry) == itemID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return false
+	}
+	page := ReadPage(data, itemsVar)
+	cursor := Cursor(data, itemsVar)
+	window, _ := Window(items, cursor, page)
+	for _, entry := range window {
+		if itemKey(entry) == itemID {
+			return false
+		}
+	}
+	SetCursor(data, itemsVar, index)
+	return true
 }
 
 // ClearListCursor forgets paging for a list whose rows were just replaced.

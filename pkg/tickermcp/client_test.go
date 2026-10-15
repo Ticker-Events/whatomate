@@ -118,8 +118,9 @@ func TestCompactStore(t *testing.T) {
 			"fulfillment_slots": false,
 		},
 		"supported_languages": []any{"en", "hi"},
+		"logo":                "https://example.com/logo.png",
 	}, out)
-	assert.NotContains(t, out, "logo")
+	assert.NotContains(t, out, "cover_image")
 }
 
 func TestCompactCategory(t *testing.T) {

@@ -1,6 +1,7 @@
 package codedflow
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -113,6 +114,29 @@ func TestAdvanceCursor_UsesShownCount(t *testing.T) {
 	SetShown(data, "options", 3)
 	AdvanceCursor(data, "options")
 	assert.Equal(t, 12, Cursor(data, "options"))
+}
+
+func TestFocusItemCursor_MovesOntoEarlierPageItem(t *testing.T) {
+	items := make([]any, 12)
+	for i := range items {
+		items[i] = map[string]any{"id": strconv.Itoa(200 + i)}
+	}
+	data := models.JSONB{"products": items}
+	WritePage(data, "products", ListPage{Count: 12})
+	SetCursor(data, "products", ListPageSize)
+	SetShown(data, "products", 3)
+
+	assert.True(t, FocusItemCursor(data, "products", "200"))
+	assert.Equal(t, 0, Cursor(data, "products"))
+
+	assert.False(t, FocusItemCursor(data, "products", "200"))
+	assert.Equal(t, 0, Cursor(data, "products"))
+
+	SetCursor(data, "products", ListPageSize)
+	assert.False(t, FocusItemCursor(data, "products", ShowMoreID))
+	assert.Equal(t, ListPageSize, Cursor(data, "products"))
+	assert.False(t, FocusItemCursor(data, "products", "999"))
+	assert.Equal(t, ListPageSize, Cursor(data, "products"))
 }
 
 func asStringMapMust(item any) map[string]any {

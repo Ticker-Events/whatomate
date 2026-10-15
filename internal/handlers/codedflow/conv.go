@@ -847,15 +847,23 @@ func (c *Conv) matchingButton(cfg map[string]any) bool {
 // offeredButtonID returns the primary id of a button offered by this step
 // when the inbound reply matches by id (exact after trim) or by title
 // (case-insensitive). Empty means no match.
+//
+// When the button id is a real item from an earlier list or carousel page
+// (for example after Show more), the list cursor is moved onto that item
+// before matching so selection mapping still applies. A shared title such as
+// "Add to cart" is only used when the inbound has no button id.
 func (c *Conv) offeredButtonID(cfg map[string]any) string {
 	if c.chat.Consumed() {
 		return ""
+	}
+	buttonID := strings.TrimSpace(c.chat.ButtonID())
+	if buttonID != "" {
+		FocusItemCursor(c.session().SessionData, ItemsVar(cfg), buttonID)
 	}
 	buttons, err := c.app.ButtonsForNode(cfg, c.session().SessionData)
 	if err != nil || len(buttons) == 0 {
 		return ""
 	}
-	buttonID := strings.TrimSpace(c.chat.ButtonID())
 	userInput := strings.TrimSpace(c.chat.UserInput())
 	titleMatch := ""
 	for _, button := range buttons {
@@ -868,7 +876,9 @@ func (c *Conv) offeredButtonID(cfg map[string]any) string {
 		if buttonID != "" && (buttonID == id || buttonID == id2) {
 			return primary
 		}
-		if titleMatch == "" && userInput != "" && strings.EqualFold(userInput, fieldString(button, "title")) {
+		// Shared labels (every product card says "Add to cart") must not
+		// steal a tap meant for a different card when a button id is present.
+		if buttonID == "" && titleMatch == "" && userInput != "" && strings.EqualFold(userInput, fieldString(button, "title")) {
 			titleMatch = primary
 		}
 	}

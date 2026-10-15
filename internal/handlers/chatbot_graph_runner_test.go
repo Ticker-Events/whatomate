@@ -1894,6 +1894,44 @@ func TestDynamicButtonsFromSession_ShowMoreAfterNine(t *testing.T) {
 	assert.Equal(t, "11", buttons[1]["id"])
 }
 
+func TestCarouselCardsForNode_ShowMoreUsesStoreLogo(t *testing.T) {
+	products := make([]any, 11)
+	for i := range products {
+		products[i] = map[string]any{
+			"id":    strconv.Itoa(i + 1),
+			"name":  fmt.Sprintf("Item %02d", i+1),
+			"image": fmt.Sprintf("https://example.com/product-%d.jpg", i+1),
+		}
+	}
+	cards, err := carouselCardsForNode(map[string]any{
+		"mode":               "carousel",
+		"source":             "dynamic",
+		"items_var":          "products",
+		"media_field":        "image",
+		"title_field":        "Add to cart",
+		"id_field":           "id",
+		"body_field":         "name",
+		"fallback_media_url": "https://example.com/fallback.jpg",
+	}, models.JSONB{
+		"products": products,
+		"store": map[string]any{
+			"id": 42,
+			"name": "Demo",
+			"logo": map[string]any{
+				"original_url": "https://cdn.example.com/store-logo.jpg",
+				"image":        "https://cdn.example.com/store-logo.webp",
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, cards, 10)
+	assert.Equal(t, codedflow.ShowMoreID, cards[9]["id"])
+	assert.Equal(t, codedflow.ShowMoreTitle, cards[9]["title"])
+	assert.Equal(t, codedflow.ShowMoreBody, cards[9]["body"])
+	assert.Equal(t, "https://cdn.example.com/store-logo.jpg", cards[9]["media_url"])
+	assert.NotEqual(t, "https://example.com/product-1.jpg", cards[9]["media_url"])
+}
+
 func TestApplyButtonSelection_MapsFields(t *testing.T) {
 	session := models.JSONB{
 		"collections": []map[string]any{

@@ -1810,7 +1810,7 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string, sessio
 		out = append(out, card)
 	}
 	if showMore {
-		if card := showMoreCarouselCard(out, action, fallbackMedia); card != nil {
+		if card := showMoreCarouselCard(out, action, fallbackMedia, session); card != nil {
 			out = append(out, card)
 		}
 	}
@@ -1829,10 +1829,11 @@ func listPageItems(cfg map[string]any, data models.JSONB, items []any) ([]any, b
 	return window, showMore
 }
 
-func showMoreCarouselCard(cards []map[string]any, action, fallbackMedia string) map[string]any {
-	media := strings.TrimSpace(fallbackMedia)
-	if media == "" && len(cards) > 0 {
-		media = fieldString(cards[0], "media_url")
+func showMoreCarouselCard(cards []map[string]any, action, fallbackMedia string, session models.JSONB) map[string]any {
+	// Prefer the store logo so Show more is not mistaken for another product.
+	media := storeLogoMediaURL(session)
+	if media == "" {
+		media = strings.TrimSpace(fallbackMedia)
 	}
 	if media == "" {
 		media = tiqrecommerce.FallbackMedia
@@ -1841,7 +1842,7 @@ func showMoreCarouselCard(cards []map[string]any, action, fallbackMedia string) 
 		"type":       action,
 		"media_type": "image",
 		"media_url":  media,
-		"body":       "There are more items.",
+		"body":       codedflow.ShowMoreBody,
 		"title":      codedflow.ShowMoreTitle,
 		"id":         codedflow.ShowMoreID,
 	}
@@ -1853,6 +1854,39 @@ func showMoreCarouselCard(cards []map[string]any, action, fallbackMedia string) 
 		return nil
 	}
 	return card
+}
+
+// storeLogoMediaURL reads the store logo from session data when present.
+// REST get_store returns logo as an object; MCP CompactStore may keep a URL
+// string. Prefer original_url (JPEG/PNG) over optimized WebP fields.
+func storeLogoMediaURL(session models.JSONB) string {
+	if session == nil {
+		return ""
+	}
+	store, ok := asStringMap(session["store"])
+	if !ok {
+		return ""
+	}
+	return httpMediaURL(store["logo"])
+}
+
+func httpMediaURL(value any) string {
+	switch v := value.(type) {
+	case string:
+		url := strings.TrimSpace(v)
+		if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+			return url
+		}
+	case map[string]any:
+		for _, key := range []string{"original_url", "image", "url"} {
+			if url := httpMediaURL(v[key]); url != "" {
+				return url
+			}
+		}
+	case models.JSONB:
+		return httpMediaURL(map[string]any(v))
+	}
+	return ""
 }
 
 func nestedFieldString(obj map[string]any, path string) string {
