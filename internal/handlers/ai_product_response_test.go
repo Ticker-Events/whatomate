@@ -29,9 +29,10 @@ func TestFormatMoney(t *testing.T) {
 func TestIsWhatsAppHeaderImageURL(t *testing.T) {
 	assert.True(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.jpg"))
 	assert.True(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.PNG?x=1"))
-	assert.False(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.webp"))
-	assert.False(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.WEBP"))
+	assert.True(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.webp"))
+	assert.True(t, isWhatsAppHeaderImageURL("https://cdn.example.com/a.WEBP"))
 	assert.False(t, isWhatsAppHeaderImageURL(""))
+	assert.False(t, isWhatsAppHeaderImageURL("not-a-url"))
 }
 
 func TestReachablePublicMediaURLRejectsLoopbackBeforeProbe(t *testing.T) {

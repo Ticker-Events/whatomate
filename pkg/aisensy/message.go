@@ -175,10 +175,8 @@ func (c *Client) SendInteractiveButtons(ctx context.Context, account *whatsapp.A
 
 	if len(headerImageURL) > 0 && headerImageURL[0] != "" {
 		interactive["header"] = map[string]any{
-			"type": "image",
-			"image": map[string]any{
-				"link": headerImageURL[0],
-			},
+			"type":  "image",
+			"image": whatsapp.MediaLinkOrID(headerImageURL[0]),
 		}
 	}
 

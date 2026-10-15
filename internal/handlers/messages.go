@@ -278,7 +278,8 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 				// SendInteractiveButtons, which picks the generic list shape.
 				// The buttons node sets ExplicitList for a configured list message.
 				if !req.ExplicitList {
-					return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, req.HeaderImageURL)
+					headerImage := a.prepareInteractiveHeaderImage(sendCtx, req.Account, req.HeaderImageURL)
+					return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, headerImage)
 				}
 				rows := make([]whatsapp.ListRow, 0, len(req.Buttons))
 				for _, btn := range req.Buttons {
@@ -292,9 +293,14 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 					Rows:         rows,
 				})
 			case "carousel":
-				return client.SendInteractiveCarousel(sendCtx, waAccount, rcpt, req.BodyText, req.Carousel)
+				carousel, err := a.prepareCarouselImages(sendCtx, req.Account, req.Carousel)
+				if err != nil {
+					return "", err
+				}
+				return client.SendInteractiveCarousel(sendCtx, waAccount, rcpt, req.BodyText, carousel)
 			default: // "button"
-				return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, req.HeaderImageURL)
+				headerImage := a.prepareInteractiveHeaderImage(sendCtx, req.Account, req.HeaderImageURL)
+				return client.SendInteractiveButtons(sendCtx, waAccount, rcpt, req.BodyText, req.Buttons, headerImage)
 			}
 
 		case models.MessageTypeTemplate:

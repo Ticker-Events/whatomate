@@ -5,9 +5,11 @@ go 1.25.0
 require (
 	cloud.google.com/go/firestore v1.18.0
 	firebase.google.com/go/v4 v4.15.2
+	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.10
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.99.0
+	github.com/aws/smithy-go v1.24.2
 	github.com/dop251/goja v0.0.0-20260106131823-651366fbe6e3
 	github.com/expr-lang/expr v1.17.8
 	github.com/fasthttp/websocket v1.5.12
@@ -26,9 +28,11 @@ require (
 	github.com/zerodha/fastglue v1.8.0
 	github.com/zerodha/logf v0.5.5
 	golang.org/x/crypto v0.48.0
+	golang.org/x/image v0.25.0
 	golang.org/x/oauth2 v0.35.0
 	google.golang.org/api v0.215.0
 	gorm.io/driver/postgres v1.5.6
+	gorm.io/driver/sqlite v1.5.7
 	gorm.io/gorm v1.25.7
 )
 
@@ -46,7 +50,6 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.48.1 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.48.1 // indirect
 	github.com/MicahParks/keyfunc v1.9.0 // indirect
-	github.com/alicebob/miniredis/v2 v2.35.0 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
@@ -56,7 +59,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.21 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.21 // indirect
-	github.com/aws/smithy-go v1.24.2 // indirect
 	github.com/census-instrumentation/opencensus-proto v0.4.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20240905190251-b4127c9b8d78 // indirect
@@ -135,5 +137,4 @@ require (
 	google.golang.org/grpc v1.67.3 // indirect
 	google.golang.org/protobuf v1.36.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gorm.io/driver/sqlite v1.5.7 // indirect
 )

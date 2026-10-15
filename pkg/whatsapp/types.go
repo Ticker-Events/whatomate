@@ -155,6 +155,16 @@ type CarouselCard struct {
 	Replies   []CarouselQuickReply
 }
 
+// MediaLinkOrID builds an image/video/document object for WhatsApp Cloud API.
+// HTTPS/HTTP refs use "link"; everything else is treated as an uploaded media ID.
+func MediaLinkOrID(ref string) map[string]any {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "http://") {
+		return map[string]any{"link": ref}
+	}
+	return map[string]any{"id": ref}
+}
+
 // CarouselMessageParams is an interactive media carousel (2–10 cards).
 type CarouselMessageParams struct {
 	Cards []CarouselCard
@@ -233,10 +243,8 @@ func CarouselMessageInteractive(bodyText string, params CarouselMessageParams) (
 			"card_index": len(cards),
 			"type":       "cta_url",
 			"header": map[string]any{
-				"type": mediaType,
-				mediaType: map[string]any{
-					"link": mediaURL,
-				},
+				"type":    mediaType,
+				mediaType: MediaLinkOrID(mediaURL),
 			},
 		}
 		if body := strings.TrimSpace(card.Body); body != "" {

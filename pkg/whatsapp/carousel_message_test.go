@@ -85,3 +85,32 @@ func TestCarouselMessageInteractiveRequiresTwoMatchingCards(t *testing.T) {
 	}})
 	require.Error(t, err)
 }
+
+func TestCarouselMessageInteractiveMediaID(t *testing.T) {
+	t.Parallel()
+
+	interactive, err := CarouselMessageInteractive("Picks", CarouselMessageParams{Cards: []CarouselCard{
+		{MediaURL: "https://example.com/a.jpg", Action: "reply", Replies: []CarouselQuickReply{{ID: "a", Title: "A"}}},
+		{MediaURL: "media-id-123", Action: "reply", Replies: []CarouselQuickReply{{ID: "b", Title: "B"}}},
+	}})
+	require.NoError(t, err)
+	got := interactive["action"].(map[string]any)["cards"].([]map[string]any)
+	require.Len(t, got, 2)
+
+	linkHeader := got[0]["header"].(map[string]any)["image"].(map[string]any)
+	assert.Equal(t, "https://example.com/a.jpg", linkHeader["link"])
+	_, hasID := linkHeader["id"]
+	assert.False(t, hasID)
+
+	idHeader := got[1]["header"].(map[string]any)["image"].(map[string]any)
+	assert.Equal(t, "media-id-123", idHeader["id"])
+	_, hasLink := idHeader["link"]
+	assert.False(t, hasLink)
+}
+
+func TestMediaLinkOrID(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, map[string]any{"link": "https://cdn.example/a.jpg"}, MediaLinkOrID("https://cdn.example/a.jpg"))
+	assert.Equal(t, map[string]any{"link": "http://cdn.example/a.jpg"}, MediaLinkOrID("http://cdn.example/a.jpg"))
+	assert.Equal(t, map[string]any{"id": "abc123"}, MediaLinkOrID("abc123"))
+}

@@ -656,7 +656,7 @@ func (a *App) resolveProductCardImage(ctx context.Context, account *models.Whats
 	}
 
 	// Prefer commerce original (JPEG/PNG). LLM-provided URLs are often the
-	// optimized WebP display URL, which WhatsApp interactive headers reject.
+	// optimized WebP display URL; send-time converts WebP, but originals avoid that work.
 	if resolved, ok := pick(commerce); ok {
 		return resolved
 	}
@@ -679,14 +679,16 @@ func (a *App) resolveProductCardImage(ctx context.Context, account *models.Whats
 	return ""
 }
 
-// isWhatsAppHeaderImageURL reports whether a media URL is usable as an
-// interactive message header image (WhatsApp rejects WebP uploads).
+// isWhatsAppHeaderImageURL reports whether a media URL can be used as an
+// interactive message header image. WebP URLs are allowed — send time
+// converts them to JPEG before calling WhatsApp.
 func isWhatsAppHeaderImageURL(mediaURL string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(mediaURL))
 	if err != nil || parsed.Path == "" {
 		return false
 	}
-	return !strings.HasSuffix(strings.ToLower(parsed.Path), ".webp")
+	scheme := strings.ToLower(parsed.Scheme)
+	return scheme == "https" || scheme == "http"
 }
 
 func (a *App) lookupCommerceProductImage(ctx context.Context, account *models.WhatsAppAccount, session *models.ChatbotSession, productID string) string {

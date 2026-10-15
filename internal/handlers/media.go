@@ -38,7 +38,14 @@ func (a *App) ensureMediaDir(subdir string) error {
 // resolveOutgoingMediaRef prepares media for sending via the account's provider.
 // Meta accounts upload bytes and return a media ID. AiSensy requires a publicly
 // accessible HTTPS URL, so we host the file on S3/Spaces and return a presigned link.
+// WebP is transcoded to JPEG first — WhatsApp rejects image/webp for images and headers.
 func (a *App) resolveOutgoingMediaRef(ctx context.Context, account *models.WhatsAppAccount, data []byte, mimeType, filename string) (string, error) {
+	converted, outMIME, outName, err := ensureJPEGForWhatsApp(data, mimeType, filename)
+	if err != nil {
+		return "", fmt.Errorf("convert webp for whatsapp: %w", err)
+	}
+	data, mimeType, filename = converted, outMIME, outName
+
 	if account != nil && account.IsAiSensy() {
 		return a.uploadAiSensyMediaLink(ctx, data, mimeType, filename)
 	}
