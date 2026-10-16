@@ -359,7 +359,7 @@ Interactive option labels (reply button titles, list opener, section title, head
 
 When the customer language is not English and the message has fewer than `ExplainInteractiveOptionsBelow` options (default `4`, defined in `codedflow`), a short legend is appended under the body. Each unique label is explained as `English label — translation`. WhatsApp reply menus (at most 3 buttons) always get the legend. A list or carousel page of 4 or more rows does not. Identical labels (for example “Add to cart” on every card) are explained once. “Show more” counts toward the option total. The final body is capped at 1024 characters.
 
-Catalog text on the buttons themselves stays as the store sent it: collection names, product names, option names, and prices. Placeholders, asterisks, numbers, prices, and line breaks are supposed to be kept. Results are cached on the session under `_translations`. A translation error sends the English source.
+Catalog text on the buttons themselves stays as the store sent it: collection names, product names, option names, and prices. Body translation covers the whole message in one language and one script (native script, or ASCII-only Latin for Manglish). Placeholders, asterisks, numbers, prices, and line breaks are kept. IDs and API-sourced names (products, collections, options, and similar) inside a translated body stay unchanged. Results are cached on the session under `_translations`. A translation error sends the English source.
 
 ### Order recovery
 

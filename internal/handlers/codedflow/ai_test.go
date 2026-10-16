@@ -39,6 +39,17 @@ func (c *legendTestChat) Archive() *PreviewSink                      { return ni
 func (c *legendTestChat) SetArchive(*PreviewSink)                    {}
 func (c *legendTestChat) Native() any                                { return nil }
 
+func TestTranslationPromptRules(t *testing.T) {
+	got := translationPrompt("manglish", "Hello {{name}}")
+	assert.Contains(t, got, "Translate the entire message into manglish")
+	assert.Contains(t, got, "Hello {{name}}")
+	assert.Contains(t, got, "never leave part of the message untranslated")
+	assert.Contains(t, got, "exactly one language and one script")
+	assert.Contains(t, got, "only English letters a-z and A-Z")
+	assert.Contains(t, got, "Never translate IDs, product names, collection names, option names")
+	assert.Contains(t, got, "Return only the translation")
+}
+
 func TestLimitDoesNotTranslate(t *testing.T) {
 	prev := TranslateCodedLine
 	TranslateCodedLine = func(_ Host, _ *models.ChatbotSession, _, text string) (string, error) {

@@ -16,7 +16,7 @@ func (c *Conv) text(src string) string {
 		return hit
 	}
 	lang := asString(c.session().SessionData[customerLanguageKey])
-	prompt := "Translate the message into " + lang + ", matching how the customer writes that language. Keep {{placeholders}}, asterisks, numbers, prices, and line breaks unchanged. Do not add products, prices, or ids. Return only the translation.\n\n" + src
+	prompt := translationPrompt(lang, src)
 	translated, err := TranslateCodedLine(c.app, c.session(), lang, src)
 	call := CodedPreviewAICall{
 		Role:     "translate",
@@ -81,9 +81,25 @@ func englishLanguage(lang string) bool {
 	return lang == "" || lang == "en" || strings.HasPrefix(lang, "en-")
 }
 
+func translationPrompt(lang, text string) string {
+	return "Translate the entire message into " + lang + ", matching how the customer writes that language.\n" +
+		"Preserve the full meaning. Do not drop, shorten, or invent content.\n" +
+		"Translate every sentence; never leave part of the message untranslated.\n" +
+		"Use exactly one language and one script for the whole reply " +
+		"(never mix Malayalam script with Manglish, or any native script with Latin romanization).\n" +
+		"For native-script languages, write every word in that language's own characters " +
+		"(for example Malayalam in Malayalam script, Hindi in Devanagari).\n" +
+		"For Manglish or other Latin romanizations, use only English letters a-z and A-Z; " +
+		"digits, punctuation, and symbols are fine; never use native-script characters or diacritics " +
+		"(write \"namaskaram\" not \"namaskāraṃ\" or Malayalam script).\n" +
+		"Keep {{placeholders}}, asterisks, numbers, prices, and line breaks unchanged.\n" +
+		"Never translate IDs, product names, collection names, option names, or other values from the store/API; " +
+		"leave them exactly as in the source and only translate the surrounding authored copy.\n" +
+		"Do not add products, prices, or ids. Return only the translation.\n\n" + text
+}
+
 func defaultTranslateCodedLine(a Host, session *models.ChatbotSession, lang, text string) (string, error) {
-	prompt := "Translate the message into " + lang + ", matching how the customer writes that language. Keep {{placeholders}}, asterisks, numbers, prices, and line breaks unchanged. Do not add products, prices, or ids. Return only the translation.\n\n" + text
-	return a.CompleteCodedRoleText(session, codedFlowRoleTranslate, prompt)
+	return a.CompleteCodedRoleText(session, codedFlowRoleTranslate, translationPrompt(lang, text))
 }
 
 

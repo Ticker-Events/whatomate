@@ -115,11 +115,11 @@ When a TiQR fetch fails (store, collections, products), the recover role writes 
 
 ### Language
 
-The preferred language is stored as `customer_language` only when the intent role returns it on a free-text reply, and only if the session does not already have one. English button taps never call that role, so the language stays empty and messages are sent as written. English (`en` or `en-*`) is also sent as written. Any other label (Hindi, Tamil, Manglish, and so on) is translated before send. `{{placeholders}}`, asterisks, numbers, prices, and line breaks are kept. Translations are cached on the session in `_translations`, so the same line is not translated again on the next turn.
+The preferred language is stored as `customer_language` only when the intent role returns it on a free-text reply, and only if the session does not already have one. English button taps never call that role, so the language stays empty and messages are sent as written. English (`en` or `en-*`) is also sent as written. Any other label (Hindi, Tamil, Manglish, and so on) is translated before send. Translation covers the whole message (no half-translated replies) and uses one language and one script throughout: native script for native-language codes, or — for Manglish-style Latin romanization — only English letters `a–z` / `A–Z` (digits, punctuation, and symbols are fine; no diacritics or native letters). `{{placeholders}}`, asterisks, numbers, prices, and line breaks are kept. IDs and API-sourced catalog values (product names, collection names, option names, and similar) stay exactly as the store sent them; only surrounding authored copy is translated. Translations are cached on the session in `_translations`, so the same line is not translated again on the next turn.
 
 Each TiQR Flow can limit detection with **Supported languages** on the TiQR Flows page. Leave **All languages** for open detection, or pick from English, Arabic, Manglish, and the Indian languages in the catalog. When a list is set, intent may only choose those codes; anything else continues in English.
 
-Catalog text is not translated. Collection names, product names, option names, and prices stay as the store sent them. Button titles are limited to 20 characters after translation, list buttons to 20, section titles to 24, and list headers and footers to 60.
+Catalog chrome on buttons and lists is not translated. Collection names, product names, option names, and prices stay as the store sent them. Button titles are limited to 20 characters (truncation only), list buttons to 20, section titles to 24, and list headers and footers to 60.
 
 ### Preview
 
