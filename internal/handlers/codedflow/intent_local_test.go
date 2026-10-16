@@ -63,6 +63,36 @@ func TestValidateCodedIntent_CollectionWithoutAllowCatalog(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestParseCodedIntent_AcceptsNumericIDs(t *testing.T) {
+	raw := `{"language":"en","route":"collection","choice_id":"","collection_id":79,"product_query":"","answer":"","faq_id":"","confidence":0.95,"reasoning":"matches Themed Cakes"}`
+	got, err := parseCodedIntent(raw)
+	require.NoError(t, err)
+	assert.Equal(t, RouteCollection, got.Route)
+	assert.Equal(t, "79", got.CollectionID)
+	assert.Equal(t, "", got.ChoiceID)
+	assert.Equal(t, 0.95, got.Confidence)
+
+	raw = `{"language":"en","route":"choice","choice_id":76,"collection_id":"","faq_id":40,"answer":2,"confidence":0.9,"reasoning":"picked a choice"}`
+	got, err = parseCodedIntent(raw)
+	require.NoError(t, err)
+	assert.Equal(t, "76", got.ChoiceID)
+	assert.Equal(t, "40", got.FaqID)
+	assert.Equal(t, "2", got.Answer)
+
+	raw = `{"language":"en","route":"collection","collection_id":"79","confidence":0.9}`
+	got, err = parseCodedIntent(raw)
+	require.NoError(t, err)
+	assert.Equal(t, "79", got.CollectionID)
+
+	raw = `{"language":"en","route":"collection","collection_id":79.0,"confidence":1}`
+	got, err = parseCodedIntent(raw)
+	require.NoError(t, err)
+	assert.Equal(t, "79", got.CollectionID)
+
+	_, err = parseCodedIntent(`{"collection_id":{"id":79}}`)
+	require.Error(t, err)
+}
+
 func TestBuildQuotedReplyIntentPrompt_ListsLoadedCollections(t *testing.T) {
 	prompt := BuildQuotedReplyIntentPrompt("Fried", IntentContext{
 		QuotedContent: "Choose a collection",

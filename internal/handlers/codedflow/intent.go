@@ -3,8 +3,10 @@ package codedflow
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -1080,12 +1082,73 @@ func parseCodedIntent(raw string) (IntentResult, error) {
 			raw = raw[start : end+1]
 		}
 	}
-	var body IntentResult
+	var body codedIntentWire
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		return IntentResult{}, err
 	}
-	body.Reasoning = LimitWords(body.Reasoning, 200)
-	return body, nil
+	return IntentResult{
+		Language:     body.Language,
+		Route:        body.Route,
+		ChoiceID:     string(body.ChoiceID),
+		CollectionID: string(body.CollectionID),
+		ProductQuery: body.ProductQuery,
+		Answer:       string(body.Answer),
+		FaqID:        string(body.FaqID),
+		Confidence:   body.Confidence,
+		Reasoning:    LimitWords(body.Reasoning, 200),
+	}, nil
+}
+
+// codedIntentWire accepts ids as JSON strings or numbers. Models often emit
+// collection_id: 79 even though the prompt asks for a string.
+type codedIntentWire struct {
+	Language     string     `json:"language"`
+	Route        string     `json:"route"`
+	ChoiceID     flexString `json:"choice_id"`
+	CollectionID flexString `json:"collection_id"`
+	ProductQuery string     `json:"product_query"`
+	Answer       flexString `json:"answer"`
+	FaqID        flexString `json:"faq_id"`
+	Confidence   float64    `json:"confidence"`
+	Reasoning    string     `json:"reasoning"`
+}
+
+type flexString string
+
+func (f *flexString) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*f = ""
+		return nil
+	}
+	if data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		*f = flexString(strings.TrimSpace(s))
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err != nil {
+		return fmt.Errorf("expected string or number")
+	}
+	*f = flexString(normalizeJSONNumber(n))
+	return nil
+}
+
+func normalizeJSONNumber(n json.Number) string {
+	s := strings.TrimSpace(n.String())
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return strconv.FormatInt(i, 10)
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsInf(f, 0) || math.IsNaN(f) || f != math.Trunc(f) {
+		return s
+	}
+	if f < math.MinInt64 || f > math.MaxInt64 {
+		return s
+	}
+	return strconv.FormatInt(int64(f), 10)
 }
 
 // MaxGuideTurns is the guide-attempt limit before handoff.
