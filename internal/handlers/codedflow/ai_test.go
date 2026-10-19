@@ -48,8 +48,14 @@ func TestTranslationPromptRules(t *testing.T) {
 	assert.Contains(t, got, "simple translation of the source text only")
 	assert.Contains(t, got, "do not paste, summarize, or restate that context")
 	assert.Contains(t, got, "never leave part of it untranslated")
-	assert.Contains(t, got, "Never translate IDs, product names, collection names, option names")
+	assert.Contains(t, got, "Keep every line of the source, including numbered lists")
+	assert.Contains(t, got, "never omit a line")
+	assert.Contains(t, got, "addon names")
+	assert.Contains(t, got, "verbatim from the source")
+	assert.Contains(t, got, "do not translate or drop them")
+	assert.Contains(t, got, "Do not invent products, prices, or ids that are not already in the source")
 	assert.Contains(t, got, "Return only the translation")
+	assert.NotContains(t, got, "Do not add products, prices, or ids")
 	assert.NotContains(t, got, "only English letters a-z and A-Z")
 }
 

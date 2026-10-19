@@ -91,11 +91,13 @@ func translationPrompt(lang, text string) string {
 		"If any other context appears in this prompt, use it only to keep the wording valid — " +
 		"do not paste, summarize, or restate that context in the output.\n" +
 		"Preserve the full meaning of the source. Do not invent content or add extra sentences.\n" +
+		"Keep every line of the source, including numbered lists; never omit a line.\n" +
 		"Translate every sentence of the source; never leave part of it untranslated.\n" +
-		"Keep {{placeholders}}, asterisks, numbers, prices, and line breaks unchanged.\n" +
-		"Never translate IDs, product names, collection names, option names, or other values from the store/API; " +
-		"leave them exactly as in the source and only translate the surrounding authored copy.\n" +
-		"Do not add products, prices, or ids. Return only the translation.\n\n" + text
+		"Keep {{placeholders}}, asterisks, numbers, prices, currency symbols, and line breaks unchanged.\n" +
+		"Copy product names, collection names, option names, addon names, prices, currency symbols, and ids " +
+		"verbatim from the source — do not translate or drop them. " +
+		"Translate only the surrounding instructional prose into the target native script.\n" +
+		"Do not invent products, prices, or ids that are not already in the source. Return only the translation.\n\n" + text
 }
 
 func defaultTranslateCodedLine(a Host, session *models.ChatbotSession, lang, text string) (string, error) {
