@@ -9,13 +9,12 @@ import (
 )
 
 const (
-	// ArchiveKey holds the preview-shaped session log on SessionData.
+	// ArchiveKey holds the session-archive marker on SessionData (no turns).
 	ArchiveKey = "coded_session_archive"
-	// archiveByteBudget caps Postgres session_data size for the archive.
-	archiveByteBudget = 180_000
 )
 
-// SessionArchive is the versioned log Copy Log / Import session log share.
+// SessionArchive is the versioned log metadata. Full turns live in Firestore;
+// session_data keeps only this marker (turn_count, ids, status).
 type SessionArchive struct {
 	Version        int                  `json:"version"`
 	FlowKey        string               `json:"flow_key"`
@@ -25,7 +24,9 @@ type SessionArchive struct {
 	StartedAt      string               `json:"started_at"`
 	EndedAt        string               `json:"ended_at,omitempty"`
 	Status         string               `json:"status"`
-	Turns          []SessionArchiveTurn `json:"turns"`
+	TurnCount      int                  `json:"turn_count"`
+	// Turns is legacy-only (old Postgres blobs). Not written to session_data.
+	Turns []SessionArchiveTurn `json:"turns,omitempty"`
 }
 
 // SessionArchiveTurn is one inbound + outbound preview-shaped turn.
@@ -40,7 +41,14 @@ type SessionArchiveTurn struct {
 	Status   string                `json:"status,omitempty"`
 }
 
-// LoadSessionArchive reads the archive from session_data, or nil.
+// CommittedArchiveTurn is one turn ready for Firestore, with its stable index.
+type CommittedArchiveTurn struct {
+	Index int
+	Turn  SessionArchiveTurn
+	Meta  *SessionArchive
+}
+
+// LoadSessionArchive reads the archive marker from session_data, or nil.
 func LoadSessionArchive(session *models.ChatbotSession) *SessionArchive {
 	if session == nil || session.SessionData == nil {
 		return nil
@@ -60,10 +68,24 @@ func LoadSessionArchive(session *models.ChatbotSession) *SessionArchive {
 	if archive.Version == 0 {
 		archive.Version = 1
 	}
+	if archive.TurnCount == 0 && len(archive.Turns) > 0 {
+		archive.TurnCount = len(archive.Turns)
+	}
 	return &archive
 }
 
-// SaveSessionArchive writes archive onto session_data (size-capped).
+// HasSessionArchive reports whether the marker (or legacy turns) indicates an archive.
+func HasSessionArchive(archive *SessionArchive) bool {
+	if archive == nil {
+		return false
+	}
+	if archive.TurnCount > 0 {
+		return true
+	}
+	return len(archive.Turns) > 0
+}
+
+// SaveSessionArchive writes the metadata marker onto session_data (no turns).
 func SaveSessionArchive(session *models.ChatbotSession, archive *SessionArchive) {
 	if session == nil || archive == nil {
 		return
@@ -71,47 +93,40 @@ func SaveSessionArchive(session *models.ChatbotSession, archive *SessionArchive)
 	if session.SessionData == nil {
 		session.SessionData = models.JSONB{}
 	}
-	trimArchiveToBudget(archive)
-	session.SessionData[ArchiveKey] = archiveToMap(archive)
+	session.SessionData[ArchiveKey] = archiveMarkerToMap(archive)
 }
 
-func archiveToMap(archive *SessionArchive) map[string]any {
-	b, err := json.Marshal(archive)
-	if err != nil {
-		return map[string]any{"version": 1, "turns": []any{}}
+func archiveMarkerToMap(archive *SessionArchive) map[string]any {
+	if archive == nil {
+		return map[string]any{"version": 1, "turn_count": 0}
 	}
-	out := map[string]any{}
-	if err := json.Unmarshal(b, &out); err != nil {
-		return map[string]any{"version": 1, "turns": []any{}}
+	out := map[string]any{
+		"version":         archive.Version,
+		"flow_key":        archive.FlowKey,
+		"session_id":      archive.SessionID,
+		"contact_id":      archive.ContactID,
+		"organization_id": archive.OrganizationID,
+		"started_at":      archive.StartedAt,
+		"status":          archive.Status,
+		"turn_count":      archive.TurnCount,
+	}
+	if archive.EndedAt != "" {
+		out["ended_at"] = archive.EndedAt
 	}
 	return out
-}
-
-func trimArchiveToBudget(archive *SessionArchive) {
-	if archive == nil {
-		return
-	}
-	for len(archive.Turns) > 1 {
-		b, err := json.Marshal(archive)
-		if err != nil || len(b) <= archiveByteBudget {
-			return
-		}
-		archive.Turns = archive.Turns[1:]
-	}
 }
 
 // EnsureSessionArchive seeds metadata for a live session archive.
 func EnsureSessionArchive(session *models.ChatbotSession, flowKey string) *SessionArchive {
 	if session == nil {
-		return &SessionArchive{Version: 1, Turns: []SessionArchiveTurn{}}
+		return &SessionArchive{Version: 1}
 	}
 	archive := LoadSessionArchive(session)
 	if archive == nil {
-		archive = &SessionArchive{
-			Version: 1,
-			Turns:   []SessionArchiveTurn{},
-		}
+		archive = &SessionArchive{Version: 1}
 	}
+	// Drop any legacy turns loaded from old blobs; Firestore holds the log.
+	archive.Turns = nil
 	archive.Version = 1
 	if flowKey != "" {
 		archive.FlowKey = flowKey
@@ -132,15 +147,16 @@ func EnsureSessionArchive(session *models.ChatbotSession, flowKey string) *Sessi
 	return archive
 }
 
-// CommitArchiveTurn appends one turn from a live archive sink.
+// CommitArchiveTurn builds one full turn, bumps the marker turn_count, and
+// returns that turn with its stable index. Turns are not stored on session_data.
 func CommitArchiveTurn(
 	session *models.ChatbotSession,
 	flowKey string,
 	sink *PreviewSink,
 	inbound map[string]any,
-) *SessionArchive {
+) *CommittedArchiveTurn {
 	if session == nil || sink == nil {
-		return LoadSessionArchive(session)
+		return nil
 	}
 	sink.FlushPendingAIDebug()
 	archive := EnsureSessionArchive(session, flowKey)
@@ -148,6 +164,7 @@ func CommitArchiveTurn(
 	for i := range messages {
 		messages[i].Context = SanitizeArchiveContext(messages[i].Context)
 	}
+	index := archive.TurnCount
 	turn := SessionArchiveTurn{
 		At:       time.Now().UTC().Format(time.RFC3339),
 		Inbound:  sanitizeInbound(inbound),
@@ -158,7 +175,7 @@ func CommitArchiveTurn(
 		Step:     strings.TrimSpace(session.CurrentStep),
 		Status:   string(session.Status),
 	}
-	archive.Turns = append(archive.Turns, turn)
+	archive.TurnCount = index + 1
 	archive.Status = string(session.Status)
 	if session.Status == models.SessionStatusCompleted ||
 		session.Status == models.SessionStatusCancelled ||
@@ -170,7 +187,7 @@ func CommitArchiveTurn(
 		}
 	}
 	SaveSessionArchive(session, archive)
-	return archive
+	return &CommittedArchiveTurn{Index: index, Turn: turn, Meta: archive}
 }
 
 func sanitizeInbound(inbound map[string]any) map[string]any {
@@ -214,12 +231,13 @@ func SanitizeArchiveContext(ctx map[string]any) map[string]any {
 	return out
 }
 
-// MarkArchiveEnded sets ended_at/status on the in-session archive.
+// MarkArchiveEnded sets ended_at/status on the in-session archive marker.
 func MarkArchiveEnded(session *models.ChatbotSession) *SessionArchive {
 	archive := LoadSessionArchive(session)
 	if archive == nil || session == nil {
 		return archive
 	}
+	archive.Turns = nil
 	archive.Status = string(session.Status)
 	if session.CompletedAt != nil {
 		archive.EndedAt = session.CompletedAt.UTC().Format(time.RFC3339)
@@ -228,6 +246,19 @@ func MarkArchiveEnded(session *models.ChatbotSession) *SessionArchive {
 	}
 	SaveSessionArchive(session, archive)
 	return archive
+}
+
+// TurnToMap converts a turn to a Firestore-safe map.
+func TurnToMap(turn SessionArchiveTurn) (map[string]any, error) {
+	b, err := json.Marshal(turn)
+	if err != nil {
+		return nil, err
+	}
+	row := map[string]any{}
+	if err := json.Unmarshal(b, &row); err != nil {
+		return nil, err
+	}
+	return row, nil
 }
 
 // ArchiveInboundFromChat builds the inbound map for a turn.

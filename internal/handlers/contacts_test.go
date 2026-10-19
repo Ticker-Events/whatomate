@@ -1857,15 +1857,10 @@ func TestApp_ListContactCommerceSessions_PerSessionHandoff(t *testing.T) {
 		LastActivityAt:  time.Now(),
 		SessionData: models.JSONB{
 			"coded_session_archive": map[string]any{
-				"version":   1,
-				"flow_key":  "tiqr_ecommerce",
+				"version":    1,
+				"flow_key":   "tiqr_ecommerce",
 				"session_id": archiveSessionID.String(),
-				"turns": []any{
-					map[string]any{
-						"at":       time.Now().UTC().Format(time.RFC3339),
-						"messages": []any{map[string]any{"type": "bot", "content": "hi"}},
-					},
-				},
+				"turn_count": 1,
 			},
 		},
 	}

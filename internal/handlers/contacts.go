@@ -1339,7 +1339,7 @@ func sessionHasCommerceHandoffData(data models.JSONB) bool {
 
 func sessionHasCodedArchive(data models.JSONB) bool {
 	archive := codedflow.LoadSessionArchive(&models.ChatbotSession{SessionData: data})
-	return archive != nil && len(archive.Turns) > 0
+	return codedflow.HasSessionArchive(archive)
 }
 
 func sessionArchiveFlowKey(data models.JSONB) string {

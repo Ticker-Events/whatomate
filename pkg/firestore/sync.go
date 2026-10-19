@@ -139,20 +139,12 @@ type SessionArchiveDoc struct {
 	TurnCount      int    `json:"turn_count"`
 }
 
-// SyncSessionArchive writes archive metadata plus one document per turn under
-// contacts/{contactId}/sessionArchives/{sessionId}/turns/{index}.
-func (c *Client) SyncSessionArchive(ctx context.Context, meta SessionArchiveDoc, turns []map[string]any) error {
-	if !c.Enabled() {
-		return nil
-	}
-	contactID := strings.TrimSpace(meta.ContactID)
-	sessionID := strings.TrimSpace(meta.SessionID)
-	if contactID == "" || sessionID == "" {
-		return fmt.Errorf("firestore sync session archive: missing contact or session id")
-	}
-	parent := c.firestore.Collection(collectionContacts).Doc(contactID).
+func sessionArchiveParent(c *Client, contactID, sessionID string) *firestore.DocumentRef {
+	return c.firestore.Collection(collectionContacts).Doc(contactID).
 		Collection(collectionSessionArchives).Doc(sessionID)
+}
 
+func sessionArchiveMetaData(meta SessionArchiveDoc) map[string]any {
 	data := map[string]any{
 		"version":         meta.Version,
 		"flow_key":        meta.FlowKey,
@@ -169,7 +161,87 @@ func (c *Client) SyncSessionArchive(ctx context.Context, meta SessionArchiveDoc,
 	if meta.EndedAt != "" {
 		data["ended_at"] = meta.EndedAt
 	}
-	if _, err := parent.Set(ctx, data); err != nil {
+	return data
+}
+
+// AppendSessionArchiveTurn merges parent metadata and writes one turn document
+// under contacts/{contactId}/sessionArchives/{sessionId}/turns/{index}.
+func (c *Client) AppendSessionArchiveTurn(
+	ctx context.Context,
+	meta SessionArchiveDoc,
+	turnIndex int,
+	turn map[string]any,
+) error {
+	if !c.Enabled() {
+		return nil
+	}
+	contactID := strings.TrimSpace(meta.ContactID)
+	sessionID := strings.TrimSpace(meta.SessionID)
+	if contactID == "" || sessionID == "" {
+		return fmt.Errorf("firestore append session archive turn: missing contact or session id")
+	}
+	if turnIndex < 0 {
+		return fmt.Errorf("firestore append session archive turn: invalid index %d", turnIndex)
+	}
+	parent := sessionArchiveParent(c, contactID, sessionID)
+	if _, err := parent.Set(ctx, sessionArchiveMetaData(meta), firestore.MergeAll); err != nil {
+		return fmt.Errorf("firestore append session archive meta %s: %w", sessionID, err)
+	}
+	docID := fmt.Sprintf("%04d", turnIndex)
+	payload := map[string]any{}
+	for key, value := range turn {
+		payload[key] = value
+	}
+	payload["index"] = turnIndex
+	if _, err := parent.Collection(collectionArchiveTurns).Doc(docID).Set(ctx, payload); err != nil {
+		return fmt.Errorf("firestore append session archive turn %s/%s: %w", sessionID, docID, err)
+	}
+	return nil
+}
+
+// FinalizeSessionArchive merges ended_at and status on the parent document only.
+func (c *Client) FinalizeSessionArchive(ctx context.Context, meta SessionArchiveDoc) error {
+	if !c.Enabled() {
+		return nil
+	}
+	contactID := strings.TrimSpace(meta.ContactID)
+	sessionID := strings.TrimSpace(meta.SessionID)
+	if contactID == "" || sessionID == "" {
+		return fmt.Errorf("firestore finalize session archive: missing contact or session id")
+	}
+	data := map[string]any{
+		"status":     meta.Status,
+		"turn_count": meta.TurnCount,
+		"updated_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	if meta.EndedAt != "" {
+		data["ended_at"] = meta.EndedAt
+	}
+	if meta.FlowKey != "" {
+		data["flow_key"] = meta.FlowKey
+	}
+	parent := sessionArchiveParent(c, contactID, sessionID)
+	if _, err := parent.Set(ctx, data, firestore.MergeAll); err != nil {
+		return fmt.Errorf("firestore finalize session archive %s: %w", sessionID, err)
+	}
+	return nil
+}
+
+// SyncSessionArchive writes archive metadata plus one document per turn under
+// contacts/{contactId}/sessionArchives/{sessionId}/turns/{index}.
+// Prefer AppendSessionArchiveTurn for live turns; this remains for bulk/backfill use.
+func (c *Client) SyncSessionArchive(ctx context.Context, meta SessionArchiveDoc, turns []map[string]any) error {
+	if !c.Enabled() {
+		return nil
+	}
+	contactID := strings.TrimSpace(meta.ContactID)
+	sessionID := strings.TrimSpace(meta.SessionID)
+	if contactID == "" || sessionID == "" {
+		return fmt.Errorf("firestore sync session archive: missing contact or session id")
+	}
+	parent := sessionArchiveParent(c, contactID, sessionID)
+
+	if _, err := parent.Set(ctx, sessionArchiveMetaData(meta)); err != nil {
 		return fmt.Errorf("firestore sync session archive %s: %w", sessionID, err)
 	}
 	for i, turn := range turns {

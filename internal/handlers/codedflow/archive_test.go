@@ -1,7 +1,6 @@
 package codedflow
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -26,12 +25,12 @@ func TestCommitArchiveTurnCapturesMessageAIAndAPI(t *testing.T) {
 	sink.NoteAI(CodedPreviewAICall{Role: "intent", Response: "buy"})
 	sink.NoteAPI(CodedPreviewAPICall{Name: "list_products", Path: "/products", HTTPStatus: 200})
 
-	archive := CommitArchiveTurn(session, "tiqr_ecommerce", sink, map[string]any{
+	committed := CommitArchiveTurn(session, "tiqr_ecommerce", sink, map[string]any{
 		"text": "hi",
 	})
-	require.NotNil(t, archive)
-	require.Len(t, archive.Turns, 1)
-	turn := archive.Turns[0]
+	require.NotNil(t, committed)
+	assert.Equal(t, 0, committed.Index)
+	turn := committed.Turn
 	assert.Equal(t, "hi", turn.Inbound["text"])
 	require.NotEmpty(t, turn.Messages)
 	assert.Equal(t, "Hello", turn.Messages[0].Content)
@@ -39,21 +38,57 @@ func TestCommitArchiveTurnCapturesMessageAIAndAPI(t *testing.T) {
 	assert.Equal(t, "intent", turn.AICalls[0].Role)
 	require.Len(t, turn.APICalls, 1)
 	assert.Equal(t, "list_products", turn.APICalls[0].Name)
-	assert.Equal(t, 1, archive.Version)
-	assert.Equal(t, "tiqr_ecommerce", archive.FlowKey)
+	require.NotNil(t, committed.Meta)
+	assert.Equal(t, 1, committed.Meta.Version)
+	assert.Equal(t, "tiqr_ecommerce", committed.Meta.FlowKey)
+	assert.Equal(t, 1, committed.Meta.TurnCount)
 
 	loaded := LoadSessionArchive(session)
 	require.NotNil(t, loaded)
-	require.Len(t, loaded.Turns, 1)
+	assert.Equal(t, 1, loaded.TurnCount)
+	assert.Empty(t, loaded.Turns)
+	raw, ok := session.SessionData[ArchiveKey].(map[string]any)
+	require.True(t, ok)
+	_, hasTurns := raw["turns"]
+	assert.False(t, hasTurns)
+}
+
+func TestCommitArchiveTurnIncrementsIndexWithoutStoringTurns(t *testing.T) {
+	session := &models.ChatbotSession{
+		ContactID:      uuid.New(),
+		OrganizationID: uuid.New(),
+		Status:         models.SessionStatusActive,
+		CurrentStep:    "buy",
+		StartedAt:      time.Now().UTC(),
+		SessionData:    models.JSONB{"_coded_flow": "tiqr_ecommerce"},
+	}
+	session.ID = uuid.New()
+
+	for i := 0; i < 3; i++ {
+		sink := &PreviewSink{Session: session}
+		sink.Text("buy", "msg")
+		committed := CommitArchiveTurn(session, "tiqr_ecommerce", sink, map[string]any{
+			"text": "hi",
+		})
+		require.NotNil(t, committed)
+		assert.Equal(t, i, committed.Index)
+		assert.Equal(t, i+1, committed.Meta.TurnCount)
+	}
+
+	loaded := LoadSessionArchive(session)
+	require.NotNil(t, loaded)
+	assert.Equal(t, 3, loaded.TurnCount)
+	assert.Empty(t, loaded.Turns)
+	assert.True(t, HasSessionArchive(loaded))
 }
 
 func TestSanitizeArchiveContextDropsPrivateKeys(t *testing.T) {
 	out := SanitizeArchiveContext(map[string]any{
-		"cart":                 []any{},
-		"agent_instruction":    "secret",
-		"api_token":            "x",
-		ArchiveKey:             map[string]any{"version": 1},
-		"commerce_handoff":     map[string]any{"summary": "ok"},
+		"cart":              []any{},
+		"agent_instruction": "secret",
+		"api_token":         "x",
+		ArchiveKey:          map[string]any{"version": 1},
+		"commerce_handoff":  map[string]any{"summary": "ok"},
 	})
 	assert.Contains(t, out, "cart")
 	assert.Contains(t, out, "commerce_handoff")
@@ -62,25 +97,31 @@ func TestSanitizeArchiveContextDropsPrivateKeys(t *testing.T) {
 	assert.NotContains(t, out, ArchiveKey)
 }
 
-func TestTrimArchiveToBudgetDropsOldestTurns(t *testing.T) {
-	archive := &SessionArchive{Version: 1, Turns: nil}
-	for i := 0; i < 40; i++ {
-		payload := make([]byte, 8_000)
-		for j := range payload {
-			payload[j] = 'a'
-		}
-		archive.Turns = append(archive.Turns, SessionArchiveTurn{
-			At: time.Now().UTC().Format(time.RFC3339),
-			Messages: []CodedPreviewMessage{{
-				Type:    "bot",
-				Content: string(payload),
-			}},
-		})
+func TestHasSessionArchiveFromTurnCountAndLegacyTurns(t *testing.T) {
+	assert.False(t, HasSessionArchive(nil))
+	assert.False(t, HasSessionArchive(&SessionArchive{Version: 1}))
+	assert.True(t, HasSessionArchive(&SessionArchive{TurnCount: 2}))
+	assert.True(t, HasSessionArchive(&SessionArchive{
+		Turns: []SessionArchiveTurn{{At: time.Now().UTC().Format(time.RFC3339)}},
+	}))
+}
+
+func TestLoadSessionArchiveLegacyTurnsSetsTurnCount(t *testing.T) {
+	session := &models.ChatbotSession{
+		SessionData: models.JSONB{
+			ArchiveKey: map[string]any{
+				"version":  1,
+				"flow_key": "tiqr_ecommerce",
+				"turns": []any{
+					map[string]any{"at": "2020-01-01T00:00:00Z", "messages": []any{}},
+					map[string]any{"at": "2020-01-01T00:01:00Z", "messages": []any{}},
+				},
+			},
+		},
 	}
-	trimArchiveToBudget(archive)
-	b, err := json.Marshal(archive)
-	require.NoError(t, err)
-	assert.LessOrEqual(t, len(b), archiveByteBudget+50_000)
-	assert.GreaterOrEqual(t, len(archive.Turns), 1)
-	assert.Less(t, len(archive.Turns), 40)
+	loaded := LoadSessionArchive(session)
+	require.NotNil(t, loaded)
+	assert.Equal(t, 2, loaded.TurnCount)
+	assert.Len(t, loaded.Turns, 2)
+	assert.True(t, HasSessionArchive(loaded))
 }

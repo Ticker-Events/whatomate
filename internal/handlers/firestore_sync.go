@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -152,20 +151,11 @@ func (a *App) syncCommerceHandoffToFirestore(orgID, contactID uuid.UUID, transfe
 	}()
 }
 
-// flushSessionArchiveToFirestore writes the preview-shaped coded-flow archive
-// to contacts/{id}/sessionArchives/{sessionId} with turn chunking.
-func (a *App) flushSessionArchiveToFirestore(session *models.ChatbotSession) {
-	if a == nil || a.Firestore == nil || !a.Firestore.Enabled() || session == nil {
-		return
+func sessionArchiveDocFromMeta(archive *codedflow.SessionArchive) fs.SessionArchiveDoc {
+	if archive == nil {
+		return fs.SessionArchiveDoc{}
 	}
-	archive := codedflow.MarkArchiveEnded(session)
-	if archive == nil || len(archive.Turns) == 0 {
-		archive = codedflow.LoadSessionArchive(session)
-	}
-	if archive == nil || len(archive.Turns) == 0 {
-		return
-	}
-	meta := fs.SessionArchiveDoc{
+	return fs.SessionArchiveDoc{
 		Version:        archive.Version,
 		FlowKey:        archive.FlowKey,
 		SessionID:      archive.SessionID,
@@ -174,22 +164,48 @@ func (a *App) flushSessionArchiveToFirestore(session *models.ChatbotSession) {
 		StartedAt:      archive.StartedAt,
 		EndedAt:        archive.EndedAt,
 		Status:         archive.Status,
-		TurnCount:      len(archive.Turns),
+		TurnCount:      archive.TurnCount,
 	}
-	turns := make([]map[string]any, 0, len(archive.Turns))
-	for _, turn := range archive.Turns {
-		b, err := json.Marshal(turn)
-		if err != nil {
-			continue
-		}
-		row := map[string]any{}
-		if err := json.Unmarshal(b, &row); err != nil {
-			continue
-		}
-		turns = append(turns, row)
+}
+
+// appendSessionArchiveTurnToFirestore writes one full turn and merges parent metadata.
+func (a *App) appendSessionArchiveTurnToFirestore(committed *codedflow.CommittedArchiveTurn) {
+	if a == nil || a.Firestore == nil || !a.Firestore.Enabled() || committed == nil || committed.Meta == nil {
+		return
 	}
+	turnMap, err := codedflow.TurnToMap(committed.Turn)
+	if err != nil {
+		a.Log.Error("Failed to marshal session archive turn",
+			"error", err, "session_id", committed.Meta.SessionID)
+		return
+	}
+	meta := sessionArchiveDocFromMeta(committed.Meta)
+	index := committed.Index
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := a.Firestore.AppendSessionArchiveTurn(ctx, meta, index, turnMap); err != nil {
+			a.Log.Error("Failed to append session archive turn to Firestore",
+				"error", err, "session_id", meta.SessionID, "turn_index", index)
+		}
+	}()
+}
+
+// flushSessionArchiveToFirestore updates ended_at and status on the parent
+// document only. Turns were written per-turn via appendSessionArchiveTurnToFirestore.
+func (a *App) flushSessionArchiveToFirestore(session *models.ChatbotSession) {
+	if a == nil || a.Firestore == nil || !a.Firestore.Enabled() || session == nil {
+		return
+	}
+	archive := codedflow.MarkArchiveEnded(session)
+	if !codedflow.HasSessionArchive(archive) {
+		return
+	}
+	meta := sessionArchiveDocFromMeta(archive)
 	if err := a.persistSessionData(session); err != nil {
-		a.Log.Warn("persist session archive before Firestore flush failed",
+		a.Log.Warn("persist session archive marker before Firestore finalize failed",
 			"error", err, "session_id", session.ID)
 	}
 	a.wg.Add(1)
@@ -197,8 +213,8 @@ func (a *App) flushSessionArchiveToFirestore(session *models.ChatbotSession) {
 		defer a.wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := a.Firestore.SyncSessionArchive(ctx, meta, turns); err != nil {
-			a.Log.Error("Failed to sync session archive to Firestore",
+		if err := a.Firestore.FinalizeSessionArchive(ctx, meta); err != nil {
+			a.Log.Error("Failed to finalize session archive in Firestore",
 				"error", err, "session_id", session.ID)
 		}
 	}()
