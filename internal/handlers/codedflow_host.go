@@ -342,6 +342,9 @@ func (a *App) CompleteCodedText(settings *models.ChatbotSettings, session *model
 	}
 }
 
+const codedRoleSystemPrompt = "Follow the user instructions exactly. Use any context only to produce a valid reply. " +
+	"Do not restate that context in the output. Return only what was asked (a simple translation or short question)."
+
 func (a *App) CompleteCodedRoleText(session *models.ChatbotSession, role, prompt string) (string, error) {
 	if a == nil || session == nil {
 		return "", fmt.Errorf("ai is not configured")
@@ -359,8 +362,38 @@ func (a *App) CompleteCodedRoleText(session *models.ChatbotSession, role, prompt
 		if !settings.AI.Enabled || settings.AI.Provider == "" || strings.TrimSpace(settings.AI.APIKey) == "" {
 			return "", fmt.Errorf("ai is not configured")
 		}
-		return a.CompleteCodedText(settings, session, prompt, "")
+		return a.completeCodedRoleAccountText(settings, session, prompt)
 	}
+}
+
+// codedRoleAccountSettings copies settings for an Account AI role call.
+// History text may be included for a valid reply; media is skipped via
+// skipCodedRoleAIMedia (keyed off codedRoleSystemPrompt).
+func codedRoleAccountSettings(settings *models.ChatbotSettings) *models.ChatbotSettings {
+	if settings == nil {
+		return nil
+	}
+	out := *settings
+	out.AI.IncludeHistory = true
+	out.AI.SystemPrompt = codedRoleSystemPrompt
+	return &out
+}
+
+// skipCodedRoleAIMedia reports whether Account AI should omit image/file parts.
+// Coded-flow roles set SystemPrompt to codedRoleSystemPrompt so replies stay
+// simple translations/questions without analyzing attached media.
+func skipCodedRoleAIMedia(settings *models.ChatbotSettings) bool {
+	return settings != nil && settings.AI.SystemPrompt == codedRoleSystemPrompt
+}
+
+// completeCodedRoleAccountText runs translate/guide/recover on Account AI.
+// Session text history is passed for context; media attachments are omitted.
+func (a *App) completeCodedRoleAccountText(settings *models.ChatbotSettings, session *models.ChatbotSession, prompt string) (string, error) {
+	roleSettings := codedRoleAccountSettings(settings)
+	if roleSettings == nil {
+		return "", fmt.Errorf("ai is not configured")
+	}
+	return a.CompleteCodedText(roleSettings, session, prompt, "")
 }
 
 func codedFlowRoleProvider(settings *models.ChatbotSettings, role string) models.IntentProvider {

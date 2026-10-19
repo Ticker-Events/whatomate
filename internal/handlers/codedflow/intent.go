@@ -1048,10 +1048,10 @@ What a valid reply looks like:
 
 Paths: Buy products, Check order status, Checkout, Talk to staff.
 If they named an item that is not one of the collection names above, ask whether they want to buy that item, see a collection, check out, check an order, or talk to staff. Do not say the item is available.
-Write the question in %s, matching how the customer is writing. Return only the question.
+Use the context above to ask a valid clarifying question. Write one short question in %s using that language's native script only (never Manglish or Latin romanization). At most 1–2 sentences. Do not paste, summarize, or restate the context, prior messages, images, dates, or already-confirmed details in the reply — return only the simple question.
 
 Customer message:
-%s`, collectionNames, question, doing, expect, lang, message)
+%s`, collectionNames, question, doing, expect, replyLanguageLabel(lang), message)
 }
 
 func sortedStringMapKeys(m map[string]string) []string {

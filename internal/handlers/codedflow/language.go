@@ -62,6 +62,30 @@ func jevLanguageCriteria(supported []string) map[string]any {
 	return out
 }
 
+// replyLanguage maps a detected customer language onto the language used for
+// outbound translate/guide text. Manglish replies use Malayalam native script.
+func replyLanguage(lang string) string {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	switch lang {
+	case "manglish":
+		return "ml"
+	default:
+		return lang
+	}
+}
+
+// replyLanguageLabel is a human name for replyLanguage(lang), for prompts.
+func replyLanguageLabel(lang string) string {
+	code := replyLanguage(lang)
+	if name := models.CodedFlowLanguageName(code); name != "" {
+		return name
+	}
+	if code == "" {
+		return "English"
+	}
+	return code
+}
+
 // normalizeDetectedLanguage maps an AI language label onto the allowed set.
 // When supported is empty, empty labels become en and other values are kept.
 // When supported is set, labels outside the set (including "other") become en.

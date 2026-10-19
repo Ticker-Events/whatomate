@@ -7,6 +7,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestReplyLanguage_ManglishToMalayalam(t *testing.T) {
+	assert.Equal(t, "ml", replyLanguage("manglish"))
+	assert.Equal(t, "ml", replyLanguage("Manglish"))
+	assert.Equal(t, "hi", replyLanguage("hi"))
+	assert.Equal(t, "en", replyLanguage("en"))
+	assert.Equal(t, "Malayalam", replyLanguageLabel("manglish"))
+	assert.Equal(t, "Hindi", replyLanguageLabel("hi"))
+}
+
 func TestNormalizeDetectedLanguage_Open(t *testing.T) {
 	assert.Equal(t, "en", normalizeDetectedLanguage("", nil))
 	assert.Equal(t, "hi", normalizeDetectedLanguage("hi", nil))

@@ -603,7 +603,7 @@ func (c *Conv) askQuotedReplyGuide(step string, ctx IntentContext) (Route, bool)
 		lang = "en"
 	}
 	prompt := buildQuotedReplyGuidePrompt(c.chat.UserInput(), lang, ctx)
-	question, err := GuideCodedIntent(c.app, c.session(), c.chat.UserInput(), lang, ctx)
+	question, err := c.app.CompleteCodedRoleText(c.session(), codedFlowRoleGuide, prompt)
 	call := CodedPreviewAICall{Role: "guide", Prompt: prompt, Language: lang}
 	if err != nil || strings.TrimSpace(question) == "" {
 		if err != nil {
@@ -760,10 +760,10 @@ You do not invent products, collections, prices, or ids. You may mention only th
 Quoted message:
 %s
 
-Write the question in %s, matching how the customer is writing. Return only the question.
+Use the quoted message and labels above to ask a valid clarifying question. Write one short question in %s using that language's native script only (never Manglish or Latin romanization). At most 1–2 sentences. Do not paste, summarize, or restate the context, quoted message, images, dates, or already-confirmed details in the reply — return only the simple question.
 
 Customer message:
-%s`, hint, quoted, lang, message)
+%s`, hint, quoted, replyLanguageLabel(lang), message)
 }
 
 // ValidateQuotedReplyIntent grounds a quote-reply intent result.

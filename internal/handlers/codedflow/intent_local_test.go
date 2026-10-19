@@ -53,6 +53,31 @@ func TestBuildGuidePrompt_ListsLoadedCollections(t *testing.T) {
 	assert.Contains(t, prompt, "treat it as that collection")
 }
 
+func TestBuildGuidePrompt_NativeScriptShortNoContext(t *testing.T) {
+	prompt := buildGuidePrompt("Candle 1", "manglish", IntentContext{
+		Collections: map[string]string{"66": "Fried"},
+	})
+	assert.Contains(t, prompt, "Use the context above to ask a valid clarifying question")
+	assert.Contains(t, prompt, "Write one short question in Malayalam")
+	assert.Contains(t, prompt, "native script only")
+	assert.Contains(t, prompt, "never Manglish")
+	assert.Contains(t, prompt, "Do not paste, summarize, or restate the context")
+	assert.NotContains(t, prompt, "matching how the customer is writing")
+}
+
+func TestBuildQuotedReplyGuidePrompt_NativeScriptShortNoContext(t *testing.T) {
+	prompt := buildQuotedReplyGuidePrompt("yes", "manglish", IntentContext{
+		QuotedContent: "How many Candles?",
+		QuotedChoices: map[string]string{"1": "Candle 1"},
+	})
+	assert.Contains(t, prompt, "Use the quoted message and labels above to ask a valid clarifying question")
+	assert.Contains(t, prompt, "Write one short question in Malayalam")
+	assert.Contains(t, prompt, "native script only")
+	assert.Contains(t, prompt, "never Manglish")
+	assert.Contains(t, prompt, "Do not paste, summarize, or restate the context")
+	assert.Contains(t, prompt, "Candle 1")
+}
+
 func TestValidateCodedIntent_CollectionWithoutAllowCatalog(t *testing.T) {
 	ctx := IntentContext{Collections: map[string]string{"66": "Fried"}}
 	got, ok := ValidateCodedIntent(IntentResult{Route: RouteCollection, CollectionID: "66", Confidence: 0.9}, ctx)

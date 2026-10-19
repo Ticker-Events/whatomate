@@ -41,13 +41,16 @@ func (c *legendTestChat) Native() any                                { return ni
 
 func TestTranslationPromptRules(t *testing.T) {
 	got := translationPrompt("manglish", "Hello {{name}}")
-	assert.Contains(t, got, "Translate the entire message into manglish")
+	assert.Contains(t, got, "Translate the source message into Malayalam")
 	assert.Contains(t, got, "Hello {{name}}")
-	assert.Contains(t, got, "never leave part of the message untranslated")
-	assert.Contains(t, got, "exactly one language and one script")
-	assert.Contains(t, got, "only English letters a-z and A-Z")
+	assert.Contains(t, got, "native script only")
+	assert.Contains(t, got, "Never use Manglish")
+	assert.Contains(t, got, "simple translation of the source text only")
+	assert.Contains(t, got, "do not paste, summarize, or restate that context")
+	assert.Contains(t, got, "never leave part of it untranslated")
 	assert.Contains(t, got, "Never translate IDs, product names, collection names, option names")
 	assert.Contains(t, got, "Return only the translation")
+	assert.NotContains(t, got, "only English letters a-z and A-Z")
 }
 
 func TestLimitDoesNotTranslate(t *testing.T) {

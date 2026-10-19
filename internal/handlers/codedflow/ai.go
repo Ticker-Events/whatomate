@@ -82,16 +82,16 @@ func englishLanguage(lang string) bool {
 }
 
 func translationPrompt(lang, text string) string {
-	return "Translate the entire message into " + lang + ", matching how the customer writes that language.\n" +
-		"Preserve the full meaning. Do not drop, shorten, or invent content.\n" +
-		"Translate every sentence; never leave part of the message untranslated.\n" +
-		"Use exactly one language and one script for the whole reply " +
-		"(never mix Malayalam script with Manglish, or any native script with Latin romanization).\n" +
-		"For native-script languages, write every word in that language's own characters " +
-		"(for example Malayalam in Malayalam script, Hindi in Devanagari).\n" +
-		"For Manglish or other Latin romanizations, use only English letters a-z and A-Z; " +
-		"digits, punctuation, and symbols are fine; never use native-script characters or diacritics " +
-		"(write \"namaskaram\" not \"namaskāraṃ\" or Malayalam script).\n" +
+	target := replyLanguageLabel(lang)
+	return "Translate the source message into " + target + ".\n" +
+		"Write every word in " + target + "'s native script only " +
+		"(for example Malayalam in Malayalam script, Hindi in Devanagari). " +
+		"Never use Manglish, Latin romanization, or a mix of scripts.\n" +
+		"Return a simple translation of the source text only. " +
+		"If any other context appears in this prompt, use it only to keep the wording valid — " +
+		"do not paste, summarize, or restate that context in the output.\n" +
+		"Preserve the full meaning of the source. Do not invent content or add extra sentences.\n" +
+		"Translate every sentence of the source; never leave part of it untranslated.\n" +
 		"Keep {{placeholders}}, asterisks, numbers, prices, and line breaks unchanged.\n" +
 		"Never translate IDs, product names, collection names, option names, or other values from the store/API; " +
 		"leave them exactly as in the source and only translate the surrounding authored copy.\n" +

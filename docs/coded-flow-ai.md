@@ -36,6 +36,8 @@ Language models such as Gemini may answer through structured output without nati
 
 Structured intent (`jev` / `gateway` with System One) does not require “Enable AI responses”. Guide, translation, and recovery on Account AI do. Gateway chat completions for those roles use the Gateway key and model only.
 
+Account AI free-text roles (translation, guide, recovery) send the role prompt with recent text history for context, but omit media attachments and the store system prompt. That context is for a valid reply only; the customer-facing output is a simple translation or short question and must not restate it. Outbound replies use the language’s native script (Manglish detection maps to Malayalam script).
+
 ## Jev request shape (intent)
 
 Intent uses one or two System One requests so FAQ and catalog lists are not pasted into every turn.

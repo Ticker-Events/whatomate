@@ -1512,17 +1512,25 @@ func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *
 			if msg.Direction == models.DirectionOutgoing {
 				role = "assistant"
 			}
+			var atts []AIAttachment
+			if !skipCodedRoleAIMedia(settings) {
+				atts = attachmentsFromJSON(msg.Attachments)
+			}
 			messages = append(messages, map[string]any{
 				"role":    role,
-				"content": a.openAIContent(msg.Message, attachmentsFromJSON(msg.Attachments)),
+				"content": a.openAIContent(msg.Message, atts),
 			})
 		}
 	}
 
 	// Add current user message
+	var currentAtts []AIAttachment
+	if !skipCodedRoleAIMedia(settings) {
+		currentAtts = a.currentAIAttachments(session, userMessage)
+	}
 	messages = append(messages, map[string]any{
 		"role":    "user",
-		"content": a.openAIContent(userMessage, a.currentAIAttachments(session, userMessage)),
+		"content": a.openAIContent(userMessage, currentAtts),
 	})
 
 	payload := map[string]any{
@@ -1599,17 +1607,25 @@ func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, sessio
 			if msg.Direction == models.DirectionOutgoing {
 				role = "assistant"
 			}
+			var atts []AIAttachment
+			if !skipCodedRoleAIMedia(settings) {
+				atts = attachmentsFromJSON(msg.Attachments)
+			}
 			messages = append(messages, map[string]any{
 				"role":    role,
-				"content": a.anthropicContent(msg.Message, attachmentsFromJSON(msg.Attachments)),
+				"content": a.anthropicContent(msg.Message, atts),
 			})
 		}
 	}
 
 	// Add current user message
+	var currentAtts []AIAttachment
+	if !skipCodedRoleAIMedia(settings) {
+		currentAtts = a.currentAIAttachments(session, userMessage)
+	}
 	messages = append(messages, map[string]any{
 		"role":    "user",
-		"content": a.anthropicContent(userMessage, a.currentAIAttachments(session, userMessage)),
+		"content": a.anthropicContent(userMessage, currentAtts),
 	})
 
 	payload := map[string]any{
@@ -1704,12 +1720,20 @@ func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *
 			if msg.Direction == models.DirectionOutgoing {
 				role = "model"
 			}
-			contents = append(contents, map[string]any{"role": role, "parts": a.geminiParts(msg.Message, attachmentsFromJSON(msg.Attachments))})
+			var atts []AIAttachment
+			if !skipCodedRoleAIMedia(settings) {
+				atts = attachmentsFromJSON(msg.Attachments)
+			}
+			contents = append(contents, map[string]any{"role": role, "parts": a.geminiParts(msg.Message, atts)})
 		}
 	}
 
 	// Add current user message
-	contents = append(contents, map[string]any{"role": "user", "parts": a.geminiParts(userMessage, a.currentAIAttachments(session, userMessage))})
+	var currentAtts []AIAttachment
+	if !skipCodedRoleAIMedia(settings) {
+		currentAtts = a.currentAIAttachments(session, userMessage)
+	}
+	contents = append(contents, map[string]any{"role": "user", "parts": a.geminiParts(userMessage, currentAtts)})
 
 	payload := map[string]any{
 		"contents": contents,
