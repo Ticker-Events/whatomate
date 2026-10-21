@@ -1764,7 +1764,7 @@ func dynamicCarouselCards(cfg map[string]any, items []any, action string, sessio
 		card := map[string]any{
 			"type":       action,
 			"media_type": mediaType,
-			"media_url":  carouselMediaURL(nestedFieldString(obj, mediaField), fallbackMedia),
+			"media_url":  carouselMediaURL(itemMediaURL(mediaField, obj, session), fallbackMedia),
 			"_item":      obj,
 		}
 		if bodyField != "" {
@@ -2007,6 +2007,21 @@ func itemID(template string, item map[string]any, session models.JSONB) string {
 		return nestedFieldString(item, template)
 	}
 	return fieldString(item, template)
+}
+
+// itemMediaURL resolves a carousel card media URL. Templates
+// ("{{images[0].original_url}}") render like body/id fields. Bare columns and
+// nested paths use nestedFieldString so non-string values (e.g. image maps)
+// stay empty and fall back to fallback_media_url.
+func itemMediaURL(template string, item map[string]any, session models.JSONB) string {
+	template = strings.TrimSpace(template)
+	if template == "" {
+		return ""
+	}
+	if strings.Contains(template, "{{") {
+		return strings.TrimSpace(itemDisplayText(template, item, session))
+	}
+	return nestedFieldString(item, template)
 }
 
 func fieldString(obj map[string]any, key string) string {

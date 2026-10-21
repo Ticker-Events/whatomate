@@ -2026,6 +2026,31 @@ func TestCarouselCardsForNode_NestedMediaPath(t *testing.T) {
 	assert.Equal(t, "https://example.com/fallback.jpg", cards[1]["media_url"])
 }
 
+func TestCarouselCardsForNode_TemplatedMediaField(t *testing.T) {
+	// TIQR productCards uses MediaField "{{images[0].original_url}}"; templates
+	// must resolve per row so cards do not all fall back to the same image.
+	cards, err := carouselCardsForNode(map[string]any{
+		"mode":               "carousel",
+		"source":             "dynamic",
+		"items_var":          "products",
+		"media_field":        "{{images[0].original_url}}",
+		"title_field":        "name",
+		"id_field":           "id",
+		"fallback_media_url": "https://example.com/fallback.jpg",
+	}, models.JSONB{
+		"products": []map[string]any{
+			{"id": "p1", "name": "Aloe", "images": []any{map[string]any{"original_url": "https://example.com/a.jpg"}}},
+			{"id": "p2", "name": "Fern", "images": []any{map[string]any{"original_url": "https://example.com/b.jpg"}}},
+			{"id": "p3", "name": "Moss", "images": []map[string]any{}},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, cards, 3)
+	assert.Equal(t, "https://example.com/a.jpg", cards[0]["media_url"])
+	assert.Equal(t, "https://example.com/b.jpg", cards[1]["media_url"])
+	assert.Equal(t, "https://example.com/fallback.jpg", cards[2]["media_url"])
+}
+
 func TestCarouselCardsForNode_LiteralButtonTitle(t *testing.T) {
 	cards, err := carouselCardsForNode(map[string]any{
 		"mode":               "carousel",
