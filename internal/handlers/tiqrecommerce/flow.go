@@ -125,7 +125,13 @@ func runTiqrEcommerce(c *Conv) error {
 	if c.Stop {
 		return nil
 	}
-	route, ok := c.AskRouteButtons("intent", menuButtons(c, store), codedflow.RouteOptions{AllowCatalog: true, AllowFAQ: true})
+	menu := menuButtons(c, store)
+	c.RememberMenuChoices(map[string]string{
+		tiqrBuyProducts:      "Buy products",
+		tiqrCheckOrderStatus: "Check order status",
+		tiqrTalkToAgent:      "Talk to staff",
+	})
+	route, ok := c.AskRouteButtons("intent", menu, codedflow.RouteOptions{AllowCatalog: true, AllowFAQ: true})
 	if !ok {
 		if c.HasReplyRoute() {
 			return buyProducts(c, collections, c.TakeReplyRoute())
@@ -209,7 +215,24 @@ func MenuWelcomeBody(store map[string]any, welcome string) string {
 
 func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 	if !resolveFulfillment(c) {
-		return nil
+		if c.HasReplyRoute() {
+			route := c.TakeReplyRoute()
+			if handled, err := handleBuyReplyRoute(c, route); handled {
+				if err != nil || c.Ended || c.Stop {
+					return err
+				}
+				// Pickup switch mid-location: fulfillment is done, continue browsing.
+				if asString(c.Session().SessionData["delivery_mode"]) != tiqrModePickup {
+					return nil
+				}
+			} else if route.Kind != "" {
+				first = route
+			} else {
+				return nil
+			}
+		} else if first.Kind == "" {
+			return nil
+		}
 	}
 	for {
 		route := first
@@ -453,6 +476,15 @@ func handleBuyReplyRoute(c *Conv, route codedflow.Route) (handled bool, err erro
 	switch route.Kind {
 	case codedflow.RouteHandoff:
 		return true, c.Transfer(codedflow.AgentHandoff)
+	case codedflow.RoutePrevious:
+		if strings.TrimSpace(route.ID) == tiqrPickupMode {
+			c.Session().SessionData["delivery_mode"] = tiqrModePickup
+			c.Once("pickup_from_location_switch", func() {
+				c.Say("Got it — we'll prepare this as a store pickup order.")
+			})
+			return true, nil
+		}
+		return false, nil
 	case codedflow.RouteChoice:
 		switch strings.TrimSpace(route.ID) {
 		case tiqrTalkToAgent:
@@ -641,6 +673,24 @@ func resolveDeliveryLocation(c *Conv, pickupAllowed bool) bool {
 		})
 		if !ok {
 			return false
+		}
+		if choiceID := strings.TrimSpace(pin.ChoiceID); choiceID != "" {
+			switch choiceID {
+			case tiqrPickupMode:
+				if !pickupAllowed {
+					c.Say(tiqrEcommerceLocationPrompt)
+					continue
+				}
+				c.Session().SessionData["delivery_mode"] = tiqrModePickup
+				c.Once("pickup_from_location_switch", func() {
+					c.Say("Got it — we'll prepare this as a store pickup order.")
+				})
+				return true
+			case tiqrDeliveryMode:
+				continue
+			default:
+				return false
+			}
 		}
 		result := evaluateStoreDelivery(store, pin.Latitude, pin.Longitude)
 		c.Once(fmt.Sprintf("delivery_check_%d", attempt), func() {

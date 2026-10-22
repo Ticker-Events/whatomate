@@ -163,8 +163,8 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 
 	routeCriteria := map[string]any{
 		"choice": map[string]any{
-			"what":    "They picked one of the shown choices, including a close misspelling of a shown title.",
-			"not_for": "Naming a product to search, naming a collection as a group, asking for checkout, or asking for a person when Talk to staff is not a shown choice.",
+			"what":    "They picked one of the shown choices or a welcome-menu choice, including a close misspelling of a shown title.",
+			"not_for": "Naming a product to search, naming a collection as a group, asking for checkout, or answering the previous question.",
 		},
 		"checkout": map[string]any{
 			"what":    "They want to check out, place the order, pay, or finish shopping with what is already in the cart.",
@@ -172,11 +172,17 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 		},
 		"handoff": map[string]any{
 			"what":    "They ask for a human, agent, or staff, or they seem stuck and no shown choice matches.",
-			"not_for": "Picking Talk to staff when that id is in the shown choices.",
+			"not_for": "Picking Talk to staff when that id is in the shown or welcome-menu choices.",
 		},
 		"unclear": map[string]any{
 			"what": "More than one shopping route fits, or none of them fit, and they are not asking for a person.",
 		},
+	}
+	if len(ctx.PreviousChoices) > 0 {
+		routeCriteria["previous"] = map[string]any{
+			"what":    "They are answering or changing the previous question instead of the current one, including a close misspelling of a previous choice title.",
+			"not_for": "Answering the current question, or picking a welcome-menu action.",
+		}
 	}
 	includeCollectionRoute := len(collections) > 0
 	if includeCollectionRoute {
@@ -224,17 +230,27 @@ func buildJevIntentRequest(message string, ctx codedIntentContext) (map[string]a
 		},
 	}
 
-	if len(ctx.ChoiceIDs) > 0 {
-		choiceCriteria := map[string]any{
-			"none": "None of the shown choices match.",
-		}
-		for id, title := range ctx.ChoiceIDs {
+	choiceCriteria := map[string]any{
+		"none": "None of the shown, previous, or welcome-menu choices match.",
+	}
+	for id, title := range ctx.ChoiceIDs {
+		choiceCriteria[id] = title
+	}
+	for id, title := range ctx.MenuChoices {
+		if _, exists := choiceCriteria[id]; !exists {
 			choiceCriteria[id] = title
 		}
+	}
+	for id, title := range ctx.PreviousChoices {
+		if _, exists := choiceCriteria[id]; !exists {
+			choiceCriteria[id] = "Previous: " + title
+		}
+	}
+	if len(choiceCriteria) > 1 {
 		questions["choice_id"] = map[string]any{
 			"type": "choice",
 			"instructions": map[string]any{
-				"question": "Which shown choice id matches `message`?",
+				"question": "Which choice id matches `message` (current, previous, or welcome menu)?",
 			},
 			"criteria": choiceCriteria,
 		}
@@ -497,7 +513,9 @@ func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentC
 		switch {
 		case asksPerson >= jevJudgeYes:
 			if choiceAns.Choice != "" && choiceAns.Choice != "none" && choiceConfidenceUsable(choiceAns) {
-				if _, ok := ctx.ChoiceIDs[choiceAns.Choice]; ok && isTalkToStaffChoice(choiceAns.Choice, ctx) {
+				_, onStep := ctx.ChoiceIDs[choiceAns.Choice]
+				_, onMenu := ctx.MenuChoices[choiceAns.Choice]
+				if (onStep || onMenu) && isTalkToStaffChoice(choiceAns.Choice, ctx) {
 					result.Route = codedRouteChoice
 					result.ChoiceID = choiceAns.Choice
 					result.Confidence = choiceAns.Confidence
@@ -547,6 +565,22 @@ func composeJevIntent(raw JevSystemOneResponse, message string, ctx codedIntentC
 					if choiceAns.Confidence > 0 {
 						result.Confidence = choiceAns.Confidence
 					}
+				} else if _, ok := ctx.MenuChoices[choiceAns.Choice]; ok {
+					result.ChoiceID = choiceAns.Choice
+					if choiceAns.Confidence > 0 {
+						result.Confidence = choiceAns.Confidence
+					}
+				}
+			}
+		}
+	case codedRoutePrevious:
+		if result.ChoiceID == "" {
+			if choiceAns.Choice != "" && choiceAns.Choice != "none" && choiceConfidenceUsable(choiceAns) {
+				if _, ok := ctx.PreviousChoices[choiceAns.Choice]; ok {
+					result.ChoiceID = choiceAns.Choice
+					if choiceAns.Confidence > 0 {
+						result.Confidence = choiceAns.Confidence
+					}
 				}
 			}
 		}
@@ -586,6 +620,9 @@ func isTalkToStaffChoice(id string, ctx codedIntentContext) bool {
 		return true
 	}
 	title := strings.ToLower(strings.TrimSpace(ctx.ChoiceIDs[id]))
+	if title == "" {
+		title = strings.ToLower(strings.TrimSpace(ctx.MenuChoices[id]))
+	}
 	return strings.Contains(title, "talk to") || strings.Contains(title, "staff") || strings.Contains(title, "agent")
 }
 

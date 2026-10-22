@@ -126,11 +126,14 @@ type LocationPrompt struct {
 }
 
 // LocationPin is a shared WhatsApp location.
+// ChoiceID is set when the customer answered a previous or menu choice
+// instead of sharing a pin (for example switching to store pickup).
 type LocationPin struct {
 	Latitude  float64
 	Longitude float64
 	Name      string
 	Address   string
+	ChoiceID  string
 }
 
 // Conv is one replay of a coded flow. Finished calls return their saved
@@ -397,6 +400,7 @@ func (c *Conv) AskText(name, body string, step StepNote) (string, bool) {
 }
 
 // AskLocation sends a WhatsApp location request and accepts a pin reply.
+// A previous-step or welcome-menu choice is accepted when it is not a pin.
 func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, bool) {
 	if c.Stop {
 		return LocationPin{}, false
@@ -405,10 +409,28 @@ func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, boo
 		if !callOK(rec) {
 			return LocationPin{}, false
 		}
+		if route, ok := catalogDivertFromCall(rec); ok {
+			if route.Kind == RoutePrevious {
+				pin := locationPinFromSession(c.session().SessionData, name)
+				if pin.ChoiceID == "" {
+					pin.ChoiceID = route.ID
+				}
+				return pin, true
+			}
+			c.SetReplyRoute(route)
+			return LocationPin{}, false
+		}
+		if asString(rec["choice_id"]) != "" {
+			pin := locationPinFromSession(c.session().SessionData, name)
+			if pin.ChoiceID == "" {
+				pin.ChoiceID = asString(rec["choice_id"])
+			}
+			return pin, true
+		}
 		return locationPinFromSession(c.session().SessionData, name), true
 	}
 	body := c.text(prompt.Body)
-	if c.chat.Consumed() || strings.TrimSpace(c.chat.UserInput()) == "" {
+	if c.chat.Consumed() || (strings.TrimSpace(c.chat.UserInput()) == "" && strings.TrimSpace(c.chat.ButtonID()) == "") {
 		if err := c.app.DeliverCodedLocationRequest(c.chat, name, body); err != nil {
 			c.fail(err)
 			return LocationPin{}, false
@@ -424,8 +446,11 @@ func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, boo
 		}
 		cfg := map[string]any{"body": body, "mode": "location"}
 		putStepNote(cfg, prompt.Step)
-		_, _ = c.resolveFreeText(name, cfg, RouteOptions{})
-		return LocationPin{}, false
+		route, routed := c.resolveFreeText(name, cfg, RouteOptions{})
+		if !routed {
+			return LocationPin{}, false
+		}
+		return c.applyLocationDivert(name, body, prompt, route)
 	}
 	c.chat.SetConsumed(true)
 	c.session().SessionData[name] = map[string]any{
@@ -447,6 +472,40 @@ func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, boo
 	})
 	_ = prompt.Step
 	return pin, true
+}
+
+// applyLocationDivert handles a previous-step or menu answer while asking for a pin.
+// resolveFreeText already recorded completed diverts; this only applies them.
+func (c *Conv) applyLocationDivert(name, body string, prompt LocationPrompt, route Route) (LocationPin, bool) {
+	_ = prompt.Step
+	switch route.Kind {
+	case RouteCurrent:
+		if err := c.app.DeliverCodedLocationRequest(c.chat, name, body); err != nil {
+			c.fail(err)
+			return LocationPin{}, false
+		}
+		c.wait(name)
+		return LocationPin{}, false
+	case RoutePrevious:
+		c.session().SessionData[name] = map[string]any{"choice_id": route.ID}
+		return LocationPin{ChoiceID: route.ID}, true
+	case codedRouteChoice:
+		if isWelcomeMenuChoice(route.ID) && route.ID == "buy_products" {
+			if err := c.app.DeliverCodedLocationRequest(c.chat, name, body); err != nil {
+				c.fail(err)
+				return LocationPin{}, false
+			}
+			c.wait(name)
+			return LocationPin{}, false
+		}
+		c.SetReplyRoute(route)
+		return LocationPin{}, false
+	case codedRouteCheckout, codedRouteHandoff, codedRouteCollection, codedRouteProduct, RouteSelectProduct:
+		c.SetReplyRoute(route)
+		return LocationPin{}, false
+	default:
+		return LocationPin{}, false
+	}
 }
 
 // AskFlow accepts a WhatsApp Flow submission. Free text is a diversion.
@@ -706,15 +765,30 @@ func (c *Conv) replayChoice() (Choice, bool, bool) {
 func catalogDivertFromCall(rec map[string]any) (Route, bool) {
 	kind := strings.TrimSpace(asString(rec["route"]))
 	switch kind {
-	case codedRouteCollection, codedRouteProduct, RouteSelectProduct, codedRouteCheckout, codedRouteHandoff:
+	case codedRouteCollection, codedRouteProduct, RouteSelectProduct, codedRouteCheckout, codedRouteHandoff, RoutePrevious:
 		return Route{
 			Kind:  kind,
 			ID:    asString(rec["id"]),
 			Query: asString(rec["query"]),
 			Title: asString(rec["title"]),
 		}, true
+	case codedRouteChoice:
+		id := asString(rec["id"])
+		if !isWelcomeMenuChoice(id) {
+			return Route{}, false
+		}
+		return Route{Kind: kind, ID: id, Title: asString(rec["title"])}, true
 	default:
 		return Route{}, false
+	}
+}
+
+func isWelcomeMenuChoice(id string) bool {
+	switch strings.TrimSpace(id) {
+	case "buy_products", "check_order_status", "talk_to_agent":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -739,9 +813,13 @@ func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 		c.chat.SetButtonID(id)
 		return c.acceptButton(name, cfg)
 	}
-	// A button tap that is not one of this step's choices is not a request
-	// for an agent. Show the choices again.
+	// A button tap that is not one of this step's choices may answer the
+	// previous question or the welcome menu. Try that before re-prompting.
 	if !c.noAnswerYet() && strings.TrimSpace(c.chat.ButtonID()) != "" {
+		route, ok := c.resolveFreeText(name, cfg, catalogOpts)
+		if choice, handled := c.applyChoiceDivert(name, cfg, route, ok); handled {
+			return choice, choice.ID != ""
+		}
 		c.app.LogWarn("Coded flow button did not match this step",
 			"step", name,
 			"button_id", c.chat.ButtonID(),
@@ -765,16 +843,51 @@ func (c *Conv) askChoice(name string, cfg map[string]any) (Choice, bool) {
 		return Choice{}, false
 	}
 	route, ok := c.resolveFreeText(name, cfg, catalogOpts)
-	if ok && route.Kind == RouteShowMore {
+	if choice, handled := c.applyChoiceDivert(name, cfg, route, ok); handled {
+		return choice, choice.ID != ""
+	}
+	return Choice{}, false
+}
+
+// applyChoiceDivert applies a free-text route on a button/list ask.
+// handled=true means the caller should return (choice may be empty when diverting).
+func (c *Conv) applyChoiceDivert(name string, cfg map[string]any, route Route, ok bool) (Choice, bool) {
+	if !ok {
+		return Choice{}, false
+	}
+	switch route.Kind {
+	case RouteShowMore:
 		c.resendShowMore(name, cfg, true)
-		return Choice{}, false
-	}
-	if ok && route.Kind == codedRouteChoice {
-		return Choice{ID: route.ID, Title: route.Title}, true
-	}
-	if ok && isCatalogDivertRoute(route.Kind) {
+		return Choice{}, true
+	case RouteCurrent:
+		c.chat.SetButtonID("")
+		c.chat.SetUserInput("")
+		c.chat.SetConsumed(false)
+		c.chat.SetFlowResponseData(nil)
+		c.applyOptionLegend(cfg)
+		out, err := c.app.ExecChatButtons(c.chat, name, cfg)
+		if err != nil {
+			c.fail(err)
+			return Choice{}, true
+		}
+		if out.Yield {
+			c.wait(name)
+		}
+		return Choice{}, true
+	case codedRouteChoice:
+		if _, onStep := choiceMapFromConfig(c, cfg)[route.ID]; onStep {
+			return Choice{ID: route.ID, Title: route.Title}, true
+		}
 		c.SetReplyRoute(route)
-		return Choice{}, false
+		return Choice{}, true
+	case RoutePrevious:
+		c.SetReplyRoute(route)
+		return Choice{}, true
+	default:
+		if isCatalogDivertRoute(route.Kind) {
+			c.SetReplyRoute(route)
+			return Choice{}, true
+		}
 	}
 	return Choice{}, false
 }
@@ -897,6 +1010,7 @@ func (c *Conv) acceptButton(name string, cfg map[string]any) (Choice, bool) {
 		return Choice{}, false
 	}
 	choice := Choice{ID: c.chat.ButtonID(), Title: c.chat.UserInput()}
+	c.rememberPreviousStep(cfg, choice)
 	c.appendCall(map[string]any{
 		"name":   name,
 		"ok":     true,
@@ -981,6 +1095,7 @@ func locationPinFromSession(data models.JSONB, name string) LocationPin {
 		Longitude: lng,
 		Name:      asString(raw["name"]),
 		Address:   asString(raw["address"]),
+		ChoiceID:  asString(raw["choice_id"]),
 	}
 }
 

@@ -124,6 +124,37 @@ Delivery asks for a WhatsApp location pin (`AskLocation`). Distance is computed 
 
 A deliverable pin stores `delivery_mode`, `delivery_zone`, `delivery_distance_km`, and `shipping_fee_paise` when the fee is greater than 0. The pin itself is stored by `AskLocation` as `delivery_latitude` and `delivery_longitude`.
 
+#### Answering the previous step / welcome menu mid-flow
+
+When a button or list step accepts a choice, the engine stores that question and its choices as `_coded_previous_step` (question body, id→title map, and the accepted id). Only the immediately previous interactive step is kept. The next ask exposes those ids to intent as route `previous`.
+
+When the welcome menu is shown, the three menu ids are stored for the rest of the session as `_coded_menu_choices`:
+
+| Id | Title |
+| --- | --- |
+| `buy_products` | Buy products |
+| `check_order_status` | Check order status |
+| `talk_to_agent` | Talk to staff |
+
+Every later intent call includes them, including location, cart, quantity, and order status. They are separate from the current step's choices and from the previous step.
+
+Before the model, `matchLocalIntent` matches in this order: a valid answer to the current step, then a previous-step id or exact title, then a welcome-menu id or exact title. A local match does not call the model. The intent prompt lists the previous question and the three menu choices so a typo or paraphrase can still return `previous` or `choice` with that id. Do not use `unclear` only because the reply does not fit the current step.
+
+Repeating the choice already accepted (for example tapping Delivery again while the pin step is waiting) is route `current`: the location request is sent again. There is no handoff.
+
+On the location pin step specifically:
+
+| Reply | Result |
+| --- | --- |
+| Previous `pickup`, and the store offers pickup | Set `delivery_mode` to `PICKUP_FROM_STORE`, say one short confirmation, continue into collections in the same turn. Replay restores the switch (choice id), not a pin at lat/long 0 |
+| Previous `delivery` while already asking for a pin | Re-send the location request |
+| Menu `check_order_status` | Leave the pin ask and run order status |
+| Menu `talk_to_agent` | Transfer to staff |
+| Menu `buy_products` | Stay on the pin ask (they are already buying; delivery still needs the pin) |
+| Delivery-only store (no pickup on the previous step) | `Store pickup` does not switch mode |
+
+A place name such as a city is not a previous choice. A real location pin is still accepted first.
+
 ### 4. Collections and products
 
 The collection list uses header `Our collections`, button `Browse`, row title `{{name}}`, description `{{description}}`. A chosen row saves `collection_id` from `id` and `collection_name` from the rendered title.
@@ -327,9 +358,10 @@ Steps in this flow that can reach it:
 | Location pin, if the message is not a pin | `AskLocation` | no |
 | Details form, if the message is not the flow submission | `AskFlow` | no |
 
-The model must return one route and leave the other slots empty. Go then checks the allow-list (`validateCodedIntent`):
+The model must return one route and leave the other slots empty. Go then checks the allow-list (`ValidateCodedIntent`):
 
-- `choice` id must be a button on this step
+- `choice` id must be a button on this step, or one of the saved welcome-menu ids
+- `previous` id must be one of the saved previous-step choices
 - `collection` id must be in the loaded collections, and only when catalog is allowed
 - `product` is a non-empty query, only when catalog is allowed. No product id is trusted
 - `answer` must match the step pattern
@@ -337,7 +369,7 @@ The model must return one route and leave the other slots empty. Go then checks 
 - `checkout` and `handoff` must not carry ids
 - anything else, including a product route on a step that does not allow catalog, is ungrounded
 
-At or above 0.75 and grounded: the route is applied in the same turn. `checkout` sets `c.divert` and does not record a shopping call, so the script can leave the step. `faq` sends the stored FAQ answer (translated when the session language is not English) and stays on the same step without recording a shopping call, so buttons already on screen stay usable. Below 0.75, or route `unclear`: one guide question, staying on the same step.
+At or above 0.75 and grounded: the route is applied in the same turn. A confident `previous` or welcome-menu result does not go to the guide. `checkout` sets `c.divert` and does not record a shopping call, so the script can leave the step. `faq` sends the stored FAQ answer (translated when the session language is not English) and stays on the same step without recording a shopping call, so buttons already on screen stay usable. Below 0.75, or route `unclear`: one guide question, staying on the same step.
 
 Ungrounded output, a grounded `handoff`, or an intent error transfers immediately with `codedAgentHandoff`. The customer does not get a guide question in those cases.
 

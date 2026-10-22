@@ -25,6 +25,7 @@ const (
 	RouteUnclear    = "unclear"
 	RouteShowMore   = "show_more"
 	RouteFAQ        = "faq"
+	RoutePrevious   = "previous"
 
 	codedRouteChoice     = RouteChoice
 	codedRouteCollection = RouteCollection
@@ -34,6 +35,7 @@ const (
 	codedRouteHandoff    = RouteHandoff
 	codedRouteUnclear    = RouteUnclear
 	codedRouteFAQ        = RouteFAQ
+	codedRoutePrevious   = RoutePrevious
 )
 
 // Route is one accepted free-text or exact answer from AskRoute.
@@ -104,6 +106,14 @@ type IntentContext struct {
 	// SupportedLanguages limits language labels the AI may return.
 	// Empty means open detection (existing behavior).
 	SupportedLanguages []string
+
+	// Previous step the customer may be answering instead of the current one.
+	PreviousQuestion string
+	PreviousChoices  map[string]string // id -> title
+	PreviousAccepted string
+
+	// MenuChoices are the welcome-menu ids kept for the whole session.
+	MenuChoices map[string]string // id -> title
 
 	// Quoted reply context (set only when classifying a quote-reply).
 	QuotedContent string
@@ -216,6 +226,14 @@ func (c *Conv) askRoute(name string, cfg map[string]any, opts RouteOptions) (Rou
 		return Route{Kind: codedRouteChoice, ID: choice.ID, Title: choice.Title}, true
 	}
 	if !c.noAnswerYet() && strings.TrimSpace(c.chat.ButtonID()) != "" {
+		route, ok := c.resolveFreeText(name, cfg, opts)
+		if ok && route.Kind == RouteShowMore {
+			c.resendShowMore(name, cfg, true)
+			return Route{}, false
+		}
+		if ok {
+			return route, true
+		}
 		c.app.LogWarn("Coded flow button did not match this step",
 			"step", name,
 			"button_id", c.chat.ButtonID(),
@@ -251,7 +269,7 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 	c.session().CurrentStep = name
 	ctx := c.intentContext(cfg, opts)
 	message := c.chat.UserInput()
-	if local, ok := matchLocalIntent(message, ctx); ok {
+	if local, ok := c.matchLocalIntent(message, ctx); ok {
 		call := CodedPreviewAICall{
 			Role:       "intent",
 			Prompt:     "(local exact match)",
@@ -358,8 +376,30 @@ func (c *Conv) acceptIntentResult(name string, cfg map[string]any, ctx IntentCon
 		if IsShowMoreID(result.ChoiceID) {
 			return Route{Kind: RouteShowMore, ID: result.ChoiceID, Title: ShowMoreTitle}, true
 		}
-		route := Route{Kind: codedRouteChoice, ID: result.ChoiceID, Title: ctx.ChoiceIDs[result.ChoiceID]}
-		c.applyRouteSelection(cfg, route)
+		title := ctx.ChoiceIDs[result.ChoiceID]
+		if title == "" {
+			title = ctx.MenuChoices[result.ChoiceID]
+		}
+		route := Route{Kind: codedRouteChoice, ID: result.ChoiceID, Title: title}
+		if _, onStep := ctx.ChoiceIDs[result.ChoiceID]; onStep {
+			c.applyRouteSelection(cfg, route)
+			c.appendRouteCall(name, route, cfg)
+		} else if result.ChoiceID == "buy_products" && asString(cfg["mode"]) == "location" {
+			// Already in Buy products; the pin is still required — caller re-asks.
+			return route, true
+		} else {
+			// Welcome-menu jump from a later step — caller applies via ReplyRoute.
+			c.appendRouteCall(name, route, cfg)
+		}
+		return route, true
+	case codedRoutePrevious:
+		c.clearGuide()
+		title := ctx.PreviousChoices[result.ChoiceID]
+		// Repeating the choice that led here is not a change of mind.
+		if result.ChoiceID != "" && result.ChoiceID == ctx.PreviousAccepted {
+			return Route{Kind: RouteCurrent, ID: result.ChoiceID, Title: title}, true
+		}
+		route := Route{Kind: RoutePrevious, ID: result.ChoiceID, Title: title}
 		c.appendRouteCall(name, route, cfg)
 		return route, true
 	case codedRouteCollection:
@@ -506,6 +546,11 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) IntentContex
 		FAQs:               map[string]string{},
 		SupportedLanguages: c.supportedLanguages(),
 	}
+	prev := previousStepFromSession(c.session().SessionData)
+	ctx.PreviousQuestion = prev.Question
+	ctx.PreviousChoices = prev.Choices
+	ctx.PreviousAccepted = prev.AcceptedID
+	ctx.MenuChoices = menuChoicesFromSession(c.session().SessionData)
 	buttons, err := c.app.ButtonsForNode(cfg, c.session().SessionData)
 	if err == nil {
 		for _, button := range buttons {
@@ -553,9 +598,34 @@ func (c *Conv) intentContext(cfg map[string]any, opts RouteOptions) IntentContex
 	return ctx
 }
 
-// matchLocalIntent returns a high-confidence route when the message exactly
-// matches an on-screen choice title, a loaded collection name, or an FAQ question.
-func matchLocalIntent(message string, ctx IntentContext) (IntentResult, bool) {
+// matchLocalIntent returns a high-confidence route when the inbound button id
+// or message exactly matches a current choice, the previous step, the welcome
+// menu, a loaded collection name, or an FAQ question.
+func (c *Conv) matchLocalIntent(message string, ctx IntentContext) (IntentResult, bool) {
+	lang := normalizeDetectedLanguage("", ctx.SupportedLanguages)
+	if c != nil && c.chat != nil {
+		buttonID := strings.TrimSpace(c.chat.ButtonID())
+		if buttonID != "" {
+			if _, ok := ctx.ChoiceIDs[buttonID]; ok {
+				return IntentResult{
+					Language: lang, Route: codedRouteChoice, ChoiceID: buttonID,
+					Confidence: 1, Reasoning: "local current choice button id",
+				}, true
+			}
+			if _, ok := ctx.PreviousChoices[buttonID]; ok {
+				return IntentResult{
+					Language: lang, Route: codedRoutePrevious, ChoiceID: buttonID,
+					Confidence: 1, Reasoning: "local previous choice button id",
+				}, true
+			}
+			if _, ok := ctx.MenuChoices[buttonID]; ok {
+				return IntentResult{
+					Language: lang, Route: codedRouteChoice, ChoiceID: buttonID,
+					Confidence: 1, Reasoning: "local welcome menu button id",
+				}, true
+			}
+		}
+	}
 	norm := normalizeIntentText(message)
 	if norm == "" {
 		return IntentResult{}, false
@@ -563,37 +633,50 @@ func matchLocalIntent(message string, ctx IntentContext) (IntentResult, bool) {
 	for id, title := range ctx.ChoiceIDs {
 		if normalizeIntentText(title) == norm {
 			return IntentResult{
-				Language:   normalizeDetectedLanguage("", ctx.SupportedLanguages),
-				Route:      codedRouteChoice,
-				ChoiceID:   id,
-				Confidence: 1,
-				Reasoning:  "local exact choice title",
+				Language: lang, Route: codedRouteChoice, ChoiceID: id,
+				Confidence: 1, Reasoning: "local exact choice title",
+			}, true
+		}
+	}
+	for id, title := range ctx.PreviousChoices {
+		if normalizeIntentText(title) == norm {
+			return IntentResult{
+				Language: lang, Route: codedRoutePrevious, ChoiceID: id,
+				Confidence: 1, Reasoning: "local previous choice title",
+			}, true
+		}
+	}
+	for id, title := range ctx.MenuChoices {
+		if normalizeIntentText(title) == norm {
+			return IntentResult{
+				Language: lang, Route: codedRouteChoice, ChoiceID: id,
+				Confidence: 1, Reasoning: "local welcome menu title",
 			}, true
 		}
 	}
 	if id, ok := matchLocalCollectionID(norm, ctx); ok {
 		return IntentResult{
-			Language:     normalizeDetectedLanguage("", ctx.SupportedLanguages),
-			Route:        codedRouteCollection,
-			CollectionID: id,
-			Confidence:   1,
-			Reasoning:    "local collection name",
+			Language: lang, Route: codedRouteCollection, CollectionID: id,
+			Confidence: 1, Reasoning: "local collection name",
 		}, true
 	}
 	if ctx.AllowFAQ {
 		for id, question := range ctx.FAQs {
 			if normalizeIntentText(question) == norm {
 				return IntentResult{
-					Language:   normalizeDetectedLanguage("", ctx.SupportedLanguages),
-					Route:      codedRouteFAQ,
-					FaqID:      id,
-					Confidence: 1,
-					Reasoning:  "local exact FAQ question",
+					Language: lang, Route: codedRouteFAQ, FaqID: id,
+					Confidence: 1, Reasoning: "local exact FAQ question",
 				}, true
 			}
 		}
 	}
 	return IntentResult{}, false
+}
+
+// matchLocalIntent is the package-level helper used by unit tests (no button id).
+func matchLocalIntent(message string, ctx IntentContext) (IntentResult, bool) {
+	var c Conv
+	return c.matchLocalIntent(message, ctx)
 }
 
 // matchLocalCollectionID returns a loaded collection id when the normalized
@@ -798,7 +881,18 @@ func ValidateCodedIntent(raw IntentResult, ctx IntentContext) (IntentResult, boo
 		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
 			return raw, false
 		}
-		if _, ok := ctx.ChoiceIDs[raw.ChoiceID]; !ok {
+		if _, ok := ctx.ChoiceIDs[raw.ChoiceID]; ok {
+			return raw, true
+		}
+		if _, ok := ctx.MenuChoices[raw.ChoiceID]; ok {
+			return raw, true
+		}
+		return raw, false
+	case codedRoutePrevious:
+		if raw.ChoiceID == "" || raw.CollectionID != "" || raw.ProductQuery != "" || raw.Answer != "" || raw.FaqID != "" {
+			return raw, false
+		}
+		if _, ok := ctx.PreviousChoices[raw.ChoiceID]; !ok {
 			return raw, false
 		}
 		return raw, true
@@ -966,6 +1060,27 @@ func BuildIntentPrompt(message string, ctx IntentContext) string {
 	if p := strings.TrimSpace(ctx.Pattern); p != "" {
 		patternLine = p
 	}
+	var previous strings.Builder
+	if len(ctx.PreviousChoices) == 0 {
+		previous.WriteString("(none)")
+	} else {
+		prevQ := strings.TrimSpace(ctx.PreviousQuestion)
+		if prevQ == "" {
+			prevQ = "(not available)"
+		}
+		fmt.Fprintf(&previous, "\nPrevious question: %s", prevQ)
+		for _, id := range sortedStringMapKeys(ctx.PreviousChoices) {
+			fmt.Fprintf(&previous, "\n- %s (%s)", id, ctx.PreviousChoices[id])
+		}
+	}
+	var menu strings.Builder
+	if len(ctx.MenuChoices) == 0 {
+		menu.WriteString("(none)")
+	} else {
+		for _, id := range sortedStringMapKeys(ctx.MenuChoices) {
+			fmt.Fprintf(&menu, "\n- %s (%s)", id, ctx.MenuChoices[id])
+		}
+	}
 	return fmt.Sprintf(`You map one customer message onto one route. You do not reply to the customer. You do not invent ids, products, collections, prices, or stock. You do not write FAQ answers; code sends the stored answer for a faq_id.
 
 Current question shown to the customer:
@@ -980,7 +1095,13 @@ What a valid reply looks like:
 If this step accepts a free-text value (not a button id), the value must match this pattern after you normalize it:
 %s
 
-Allowed choices, use only these ids. A typo or paraphrase of one of these titles is still route choice with that id:
+Allowed choices for the current question, use only these ids. A typo or paraphrase of one of these titles is still route choice with that id:
+%s
+
+Previous question choices (the customer may change their mind and answer that instead). A typo or paraphrase of one of these titles is route previous with that id:
+%s
+
+Welcome menu choices available from any step. A typo or paraphrase of one of these titles is route choice with that id:
 %s
 
 Collections already loaded, use only these ids. If this list is empty, do not use the collection route:
@@ -991,15 +1112,18 @@ Store FAQs already loaded, use only these ids. If this list is empty, do not use
 
 When the customer says "buy …", "I want …", "I need …", "show me …", or a close variant, they are almost always naming a collection or a product. Do not use unclear just because that name is not the item currently on screen. If the name matches a loaded collection (including a typo, "buy <name>", or "<name> collection"), use route collection and set collection_id from the list above. If it does not match a loaded collection, use route product and set product_query to the short name taken from their words; code searches the catalog. Do not invent an id.
 
-route choice: they picked one of the choices above (including a misspelled title), or they want to buy or check an order when those are choices. Set choice_id. Do not use this for a request to talk to a person unless talk_to_agent is in the allowed choices and that is what they picked.
+Prefer the current question when the reply clearly answers it. Prefer previous when they are changing an earlier choice. Prefer a welcome menu choice when they want to buy, check an order, or talk to staff from mid-flow. Do not use unclear only because the reply does not fit the current question.
+
+route choice: they picked one of the current choices or a welcome menu choice (including a misspelled title). Set choice_id.
+route previous: they answered the previous question instead, or changed that choice (including a misspelled title). Set choice_id from the previous list. Leave collection_id, product_query, and answer empty.
 route collection: they want the items in one collection, or they ask what is available in that collection. Set collection_id from the list above. Do not use this for a single product name.
 route product: they name a product or ask to buy a specific item. Set product_query to a short search string taken from their words. Leave both ids empty.
 route answer: their reply is a valid answer to the current question but is not one of the choice ids. Set answer to the normalized value that satisfies the pattern and expected reply (for example "Two" becomes "2"). Leave both ids and product_query empty. Only use this when a pattern is listed above.
 route checkout: they want to check out, place the order, pay, or finish shopping with what is already in the cart. Leave both ids, product_query, and answer empty. Do not use this for checking an existing order status.
-%sroute handoff: they ask for a human, agent, or staff, they seem confused or stuck, or you would have to invent a product, collection, price, or id to help them. Leave both ids empty.
+%sroute handoff: they ask for a human, agent, or staff, they seem confused or stuck, or you would have to invent a product, collection, price, or id to help them. Leave both ids empty. Prefer talk_to_agent as route choice when that welcome menu id is listed.
 route unclear: more than one shopping route fits, or none of them fit, and they are not asking for a person and do not seem stuck.
 
-confidence is from 0 to 1. Use 0.9 or higher for an obvious route, including a clear request for a person, a clearly confused customer, a clear typo of an allowed choice, a clear checkout request, a clear FAQ match, and a clear normalized answer. Use a value below 0.75 when you are unsure. If you are unsure whether a catalog or FAQ id exists, use handoff instead of guessing an id.
+confidence is from 0 to 1. Use 0.9 or higher for an obvious route, including a clear request for a person, a clearly confused customer, a clear typo of an allowed choice, a clear previous-step change of mind, a clear checkout request, a clear FAQ match, and a clear normalized answer. Use a value below 0.75 when you are unsure. If you are unsure whether a catalog or FAQ id exists, use handoff instead of guessing an id.
 %s
 reasoning explains why you chose this route, for an operator debugging the flow. At most 200 words. Do not address the customer.
 
@@ -1007,7 +1131,7 @@ Reply with JSON only:
 {"language":"en","route":"unclear","choice_id":"","collection_id":"","product_query":"","answer":"","faq_id":"","confidence":0,"reasoning":""}
 
 Customer message:
-%s`, question, doing, expect, patternLine, choices.String(), collections.String(), faqs.String(), faqRoute, languagePromptInstruction(ctx.SupportedLanguages), message)
+%s`, question, doing, expect, patternLine, choices.String(), previous.String(), menu.String(), collections.String(), faqs.String(), faqRoute, languagePromptInstruction(ctx.SupportedLanguages), message)
 }
 
 func buildGuidePrompt(message, lang string, ctx IntentContext) string {

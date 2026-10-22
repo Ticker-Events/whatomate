@@ -7,6 +7,63 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMatchLocalIntent_PreviousAndMenu(t *testing.T) {
+	ctx := IntentContext{
+		ChoiceIDs:        map[string]string{},
+		PreviousChoices:  map[string]string{"pickup": "Store pickup", "delivery": "Delivery"},
+		PreviousAccepted: "delivery",
+		MenuChoices: map[string]string{
+			"buy_products":       "Buy products",
+			"check_order_status": "Check order status",
+			"talk_to_agent":      "Talk to staff",
+		},
+	}
+	got, ok := matchLocalIntent("Store pickup", ctx)
+	require.True(t, ok)
+	assert.Equal(t, RoutePrevious, got.Route)
+	assert.Equal(t, "pickup", got.ChoiceID)
+
+	got, ok = matchLocalIntent("Check order status", ctx)
+	require.True(t, ok)
+	assert.Equal(t, RouteChoice, got.Route)
+	assert.Equal(t, "check_order_status", got.ChoiceID)
+}
+
+func TestValidateCodedIntent_PreviousAndMenu(t *testing.T) {
+	ctx := IntentContext{
+		PreviousChoices: map[string]string{"pickup": "Store pickup"},
+		MenuChoices:     map[string]string{"talk_to_agent": "Talk to staff"},
+	}
+	got, ok := ValidateCodedIntent(IntentResult{Route: RoutePrevious, ChoiceID: "pickup", Confidence: 0.9}, ctx)
+	require.True(t, ok)
+	assert.Equal(t, "pickup", got.ChoiceID)
+
+	_, ok = ValidateCodedIntent(IntentResult{Route: RoutePrevious, ChoiceID: "delivery", Confidence: 0.9}, ctx)
+	assert.False(t, ok)
+
+	got, ok = ValidateCodedIntent(IntentResult{Route: RouteChoice, ChoiceID: "talk_to_agent", Confidence: 0.9}, ctx)
+	require.True(t, ok)
+	assert.Equal(t, "talk_to_agent", got.ChoiceID)
+}
+
+func TestBuildIntentPrompt_ListsPreviousAndMenu(t *testing.T) {
+	prompt := BuildIntentPrompt("Store pickup", IntentContext{
+		Question:         "Share your delivery location",
+		PreviousQuestion: "Pickup or delivery?",
+		PreviousChoices:  map[string]string{"pickup": "Store pickup", "delivery": "Delivery"},
+		MenuChoices: map[string]string{
+			"buy_products":       "Buy products",
+			"check_order_status": "Check order status",
+			"talk_to_agent":      "Talk to staff",
+		},
+	})
+	assert.Contains(t, prompt, "Previous question: Pickup or delivery?")
+	assert.Contains(t, prompt, "pickup (Store pickup)")
+	assert.Contains(t, prompt, "route previous:")
+	assert.Contains(t, prompt, "Welcome menu choices")
+	assert.Contains(t, prompt, "talk_to_agent (Talk to staff)")
+}
+
 func TestMatchLocalIntent_CollectionPhrases(t *testing.T) {
 	ctx := IntentContext{
 		ChoiceIDs:   map[string]string{"1118": "Ada Tacos (1) — Add to cart"},

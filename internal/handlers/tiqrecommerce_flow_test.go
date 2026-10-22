@@ -3463,6 +3463,197 @@ func TestTiqrEcommerce_DeliveryOnlyOutOfRangeAsksAgain(t *testing.T) {
 	assert.NotContains(t, blob, `"id":"pickup"`)
 }
 
+func bothModesDeliveryStore() map[string]any {
+	return map[string]any{
+		"id":                      42,
+		"name":                    "Demo",
+		"address":                 "Vadakara",
+		"latitude":                "11.2",
+		"longitude":               "75.8",
+		"location_based_delivery": true,
+		"free_delivery_radius":    8,
+		"delivery_radius":         16,
+		"delivery_modes": []any{
+			"PICKUP_FROM_STORE",
+			"DELIVERY_TO_LOCATION",
+		},
+	}
+}
+
+func TestTiqrEcommerce_LocationStepPickupButtonSwitchesMode(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, bothModesDeliveryStore(), nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Delivery", tiqrecommerce.DeliveryMode, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Store pickup", tiqrecommerce.PickupMode, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
+	assert.Nil(t, session.SessionData["delivery_latitude"])
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "store pickup")
+	assert.NotContains(t, blob, codedflow.AgentHandoff)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "product", session.CurrentStep)
+	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
+	assert.NotEqual(t, "delivery_location_1", session.CurrentStep)
+	assert.NotEqual(t, "delivery_location_2", session.CurrentStep)
+}
+
+func TestTiqrEcommerce_LocationStepPickupParaphraseSwitchesMode(t *testing.T) {
+	useCodedIntent(t, func(message string, ctx codedflow.IntentContext) (codedflow.IntentResult, error) {
+		assert.Contains(t, ctx.PreviousChoices, tiqrecommerce.PickupMode)
+		return codedflow.IntentResult{
+			Language:   "en",
+			Route:      codedflow.RoutePrevious,
+			ChoiceID:   tiqrecommerce.PickupMode,
+			Confidence: 0.95,
+			Reasoning:  "change of mind to pickup",
+		}, nil
+	}, nil)
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, bothModesDeliveryStore(), nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Delivery", tiqrecommerce.DeliveryMode, nil))
+	reloadSession(t, app, session)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I'd rather pick up from the store", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
+	assert.NotContains(t, outgoingBlob(t, app, session), codedflow.AgentHandoff)
+}
+
+func TestTiqrEcommerce_LocationStepRepeatDeliveryAsksPinAgain(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, bothModesDeliveryStore(), nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Delivery", tiqrecommerce.DeliveryMode, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Delivery", tiqrecommerce.DeliveryMode, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+	assert.Equal(t, "DELIVERY_TO_LOCATION", session.SessionData["delivery_mode"])
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(0), transfers)
+}
+
+func TestTiqrEcommerce_DeliveryOnlyStorePickupDoesNotSwitch(t *testing.T) {
+	useCodedIntent(t, func(message string, ctx codedflow.IntentContext) (codedflow.IntentResult, error) {
+		assert.NotContains(t, ctx.PreviousChoices, tiqrecommerce.PickupMode)
+		return codedflow.IntentResult{
+			Language:   "en",
+			Route:      codedflow.RoutePrevious,
+			ChoiceID:   tiqrecommerce.PickupMode,
+			Confidence: 0.95,
+		}, nil
+	}, nil)
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
+		"id":                      42,
+		"name":                    "Demo",
+		"latitude":                "11.2",
+		"longitude":               "75.8",
+		"location_based_delivery": true,
+		"delivery_radius":         16,
+		"delivery_modes":          []any{"DELIVERY_TO_LOCATION"},
+	}, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Store pickup", tiqrecommerce.PickupMode, nil))
+	reloadSession(t, app, session)
+	assert.NotEqual(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
+	assert.NotEqual(t, "collection", session.CurrentStep)
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(1), transfers)
+}
+
+func TestTiqrEcommerce_LocationStepMenuOrderStatus(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	store := orderStatusStoreFixture()
+	store["delivery_modes"] = []any{"PICKUP_FROM_STORE", "DELIVERY_TO_LOCATION"}
+	store["latitude"] = "11.2"
+	store["longitude"] = "75.8"
+	store["location_based_delivery"] = true
+	store["delivery_radius"] = 16
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Delivery", tiqrecommerce.DeliveryMode, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Check order status", tiqrecommerce.CheckOrderStatus, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "pick_order", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "ORD-1")
+}
+
+func TestTiqrEcommerce_LocationStepMenuTalkToStaff(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, bothModesDeliveryStore(), nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Delivery", tiqrecommerce.DeliveryMode, nil))
+	reloadSession(t, app, session)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Talk to staff", tiqrecommerce.TalkToAgent, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(1), transfers)
+}
+
+func TestTiqrEcommerce_LocationStepBuyProductsStaysOnPin(t *testing.T) {
+	useCodedIntent(t, nil, nil)
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, bothModesDeliveryStore(), nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Delivery", tiqrecommerce.DeliveryMode, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+	assert.Equal(t, "DELIVERY_TO_LOCATION", session.SessionData["delivery_mode"])
+	assert.NotEqual(t, "collection", session.CurrentStep)
+}
+
 func TestTiqrEcommerce_CollectionListPagesWithShowMore(t *testing.T) {
 	collections := make([]any, 12)
 	for i := 0; i < len(collections); i++ {
