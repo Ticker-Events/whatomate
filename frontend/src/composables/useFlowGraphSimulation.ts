@@ -21,12 +21,36 @@ function delay(ms: number): Promise<void> {
 
 const FOR_OPEN_RE = /\{\{\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}/
 const FOR_CLOSE_RE = /\{\{\s*endfor\s*\}\}/
+const DATE_RE = /\{\{\s*date\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*(?:"([^"]*)"|'([^']*)')?\s*\}\}/g
 const VAR_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*\}\}/g
 const MAX_LOOP_ITEMS = 50
 const MAX_FOR_NEST_DEPTH = 5
+const DEFAULT_MOMENT_FORMAT = 'D MMMM YYYY'
+const MOMENT_TOKENS = [
+  'YYYY', 'YY',
+  'MMMM', 'MMM', 'MM', 'M',
+  'dddd', 'ddd',
+  'DD', 'D',
+  'HH', 'H',
+  'mm', 'ss',
+] as const
+const MOMENT_MONTHS_LONG = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+const MOMENT_MONTHS_SHORT = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]
+const MOMENT_WEEKDAYS_LONG = [
+  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+]
+const MOMENT_WEEKDAYS_SHORT = [
+  'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat',
+]
 
 // Mirrors the backend processTemplate: nested {{for}}…{{endfor}},
-// then {{variable}} / {{object.field}} / {{items[0].name}}.
+// {{date path "DD/MM/YYYY"}}, then {{variable}} / {{object.field}}.
 function lookupPath(vars: Record<string, any>, path: string): unknown {
   let current: unknown = vars
   for (const part of path.trim().split('.')) {
@@ -43,8 +67,113 @@ function lookupPath(vars: Record<string, any>, path: string): unknown {
   return current
 }
 
+type ParsedTemplateTime = { date: Date; utc: boolean }
+
+function parseTemplateTime(raw: string): ParsedTemplateTime | null {
+  const s = raw.trim()
+  if (!s) return null
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (dateOnly) {
+    const y = Number(dateOnly[1])
+    const m = Number(dateOnly[2]) - 1
+    const d = Number(dateOnly[3])
+    const local = new Date(y, m, d)
+    if (local.getFullYear() === y && local.getMonth() === m && local.getDate() === d) {
+      return { date: local, utc: false }
+    }
+    return null
+  }
+  const naive = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(s)
+  if (naive) {
+    const y = Number(naive[1])
+    const m = Number(naive[2]) - 1
+    const d = Number(naive[3])
+    const hh = Number(naive[4])
+    const mm = Number(naive[5])
+    const ss = Number(naive[6])
+    return { date: new Date(y, m, d, hh, mm, ss), utc: false }
+  }
+  // RFC3339 with offset/Z — format in UTC to match Go time.Parse + Format.
+  if (/[Zz]|[+-]\d{2}:?\d{2}$/.test(s)) {
+    const parsed = new Date(s)
+    if (Number.isNaN(parsed.getTime())) return null
+    return { date: parsed, utc: true }
+  }
+  const parsed = new Date(s)
+  if (Number.isNaN(parsed.getTime())) return null
+  return { date: parsed, utc: false }
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n)
+}
+
+function momentTokenValue(d: Date, tok: string, utc: boolean): string {
+  const year = utc ? d.getUTCFullYear() : d.getFullYear()
+  const month = utc ? d.getUTCMonth() : d.getMonth()
+  const day = utc ? d.getUTCDate() : d.getDate()
+  const weekday = utc ? d.getUTCDay() : d.getDay()
+  const hour = utc ? d.getUTCHours() : d.getHours()
+  const minute = utc ? d.getUTCMinutes() : d.getMinutes()
+  const second = utc ? d.getUTCSeconds() : d.getSeconds()
+  switch (tok) {
+    case 'YYYY': return String(year)
+    case 'YY': return pad2(year % 100)
+    case 'MMMM': return MOMENT_MONTHS_LONG[month]
+    case 'MMM': return MOMENT_MONTHS_SHORT[month]
+    case 'MM': return pad2(month + 1)
+    case 'M': return String(month + 1)
+    case 'dddd': return MOMENT_WEEKDAYS_LONG[weekday]
+    case 'ddd': return MOMENT_WEEKDAYS_SHORT[weekday]
+    case 'DD': return pad2(day)
+    case 'D': return String(day)
+    case 'HH': return pad2(hour)
+    case 'H': return String(hour)
+    case 'mm': return pad2(minute)
+    case 'ss': return pad2(second)
+    default: return tok
+  }
+}
+
+function formatMoment(parsed: ParsedTemplateTime, pattern: string): string {
+  const fmt = pattern || DEFAULT_MOMENT_FORMAT
+  let out = ''
+  let i = 0
+  while (i < fmt.length) {
+    let matched = false
+    for (const tok of MOMENT_TOKENS) {
+      if (fmt.startsWith(tok, i)) {
+        out += momentTokenValue(parsed.date, tok, parsed.utc)
+        i += tok.length
+        matched = true
+        break
+      }
+    }
+    if (!matched) {
+      out += fmt[i]
+      i++
+    }
+  }
+  return out
+}
+
+function replaceDateFormats(template: string, vars: Record<string, any>): string {
+  return template.replace(DATE_RE, (_match, path: string, dbl?: string, sgl?: string) => {
+    const pattern = dbl || sgl || DEFAULT_MOMENT_FORMAT
+    const value = lookupPath(vars, path)
+    if (value == null) return ''
+    if (typeof value === 'object') return ''
+    const raw = String(value)
+    if (!raw) return ''
+    const parsed = parseTemplateTime(raw)
+    if (!parsed) return raw
+    return formatMoment(parsed, pattern)
+  })
+}
+
 function replaceVariables(template: string, vars: Record<string, any>): string {
-  return template.replace(VAR_RE, (_, path: string) => {
+  const withDates = replaceDateFormats(template, vars)
+  return withDates.replace(VAR_RE, (_, path: string) => {
     const value = lookupPath(vars, path)
     if (value == null) return ''
     if (typeof value === 'object') return ''
