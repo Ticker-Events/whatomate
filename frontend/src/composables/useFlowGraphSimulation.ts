@@ -19,11 +19,13 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-const FOR_RE = /\{\{\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}([\s\S]*?)\{\{\s*endfor\s*\}\}/
+const FOR_OPEN_RE = /\{\{\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}/
+const FOR_CLOSE_RE = /\{\{\s*endfor\s*\}\}/
 const VAR_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*\}\}/g
 const MAX_LOOP_ITEMS = 50
+const MAX_FOR_NEST_DEPTH = 5
 
-// Mirrors the backend processTemplate: {{for item in items}}...{{endfor}},
+// Mirrors the backend processTemplate: nested {{for}}…{{endfor}},
 // then {{variable}} / {{object.field}} / {{items[0].name}}.
 function lookupPath(vars: Record<string, any>, path: string): unknown {
   let current: unknown = vars
@@ -50,29 +52,72 @@ function replaceVariables(template: string, vars: Record<string, any>): string {
   })
 }
 
-function interpolate(template: string, vars: Record<string, any>): string {
+type ForLoopSpan = {
+  start: number
+  end: number
+  itemVar: string
+  arrayPath: string
+  body: string
+}
+
+/** First {{for}}…{{endfor}} whose endfor matches the opening for (inners stay in body). */
+function findBalancedForLoop(s: string): ForLoopSpan | null {
+  const open = FOR_OPEN_RE.exec(s)
+  if (!open || open.index === undefined) return null
+  const itemVar = open[1]
+  const arrayPath = open[2]
+  const bodyStart = open.index + open[0].length
+  let depth = 1
+  let pos = bodyStart
+  while (depth > 0) {
+    const rest = s.slice(pos)
+    const nextOpen = FOR_OPEN_RE.exec(rest)
+    const nextClose = FOR_CLOSE_RE.exec(rest)
+    if (!nextClose || nextClose.index === undefined) return null
+    const closeAt = pos + nextClose.index
+    const closeEnd = closeAt + nextClose[0].length
+    if (nextOpen && nextOpen.index !== undefined && pos + nextOpen.index < closeAt) {
+      depth++
+      pos = pos + nextOpen.index + nextOpen[0].length
+      continue
+    }
+    depth--
+    if (depth === 0) {
+      return {
+        start: open.index,
+        end: closeEnd,
+        itemVar,
+        arrayPath,
+        body: s.slice(bodyStart, closeAt),
+      }
+    }
+    pos = closeEnd
+  }
+  return null
+}
+
+function interpolate(template: string, vars: Record<string, any>, depth = 0): string {
   if (!template) return ''
+  if (depth > MAX_FOR_NEST_DEPTH) return template
   let result = template
   for (let pass = 0; pass < MAX_LOOP_ITEMS; pass++) {
-    const match = FOR_RE.exec(result)
+    const match = findBalancedForLoop(result)
     if (!match) break
-    const itemVar = match[1]
-    const body = match[3]
-    const arrayValue = lookupPath(vars, match[2])
+    const arrayValue = lookupPath(vars, match.arrayPath)
     let rendered = ''
     if (Array.isArray(arrayValue)) {
       const parts: string[] = []
       const limit = Math.min(arrayValue.length, MAX_LOOP_ITEMS)
       for (let i = 0; i < limit; i++) {
-        parts.push(replaceVariables(body, {
+        parts.push(interpolate(match.body, {
           ...vars,
-          [itemVar]: arrayValue[i],
-          [`${itemVar}_index`]: i,
-        }))
+          [match.itemVar]: arrayValue[i],
+          [`${match.itemVar}_index`]: i,
+        }, depth + 1))
       }
       rendered = parts.join('')
     }
-    result = result.slice(0, match.index) + rendered + result.slice(match.index + match[0].length)
+    result = result.slice(0, match.start) + rendered + result.slice(match.end)
   }
   return replaceVariables(result, vars)
 }

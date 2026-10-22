@@ -96,6 +96,58 @@ func TestProcessTemplate_NestedLoopsWithConditionals(t *testing.T) {
 	assert.Equal(t, "*Alice* (Bob) ", result)
 }
 
+func TestProcessTemplate_NestedForLoops_PitchesAndSlots(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{
+		"booking_date": "23 November 2026",
+		"pitches": []any{
+			map[string]any{
+				"name": "beta",
+				"slots": []any{
+					map[string]any{"start": "17:00", "end": "18:00"},
+					map[string]any{"start": "18:00", "end": "19:00"},
+				},
+			},
+			map[string]any{
+				"name": "Pitch B",
+				"slots": []any{
+					map[string]any{"start": "17:00", "end": "18:00"},
+				},
+			},
+		},
+	}
+	tmpl := "Available pitches\n{{booking_date}}\n\n{{for pitch in pitches}}\n{{pitch.name}}\n{{for slot in pitch.slots}}{{slot.start}}–{{slot.end}}, {{endfor}}\n{{endfor}}"
+	result := processTemplate(tmpl, data)
+	assert.Equal(t, "Available pitches\n23 November 2026\n\n\nbeta\n17:00–18:00, 18:00–19:00, \n\nPitch B\n17:00–18:00, \n", result)
+}
+
+func TestProcessTemplate_NestedForLoops_EmptyInner(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{
+		"pitches": []any{
+			map[string]any{"name": "alpha", "slots": []any{}},
+		},
+	}
+	result := processTemplate("{{for pitch in pitches}}{{pitch.name}}[{{for slot in pitch.slots}}{{slot.start}}{{endfor}}]{{endfor}}", data)
+	assert.Equal(t, "alpha[]", result)
+}
+
+func TestProcessTemplate_NestedForLoops_SpacesInsideBraces(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{
+		"pitches": []any{
+			map[string]any{
+				"name": "A",
+				"slots": []any{
+					map[string]any{"start": "09:00", "end": "10:00"},
+				},
+			},
+		},
+	}
+	result := processTemplate("{{ for pitch in pitches }}{{ pitch.name }}:{{ for slot in pitch.slots }}{{ slot.start }}{{ endfor }}{{ endfor }}", data)
+	assert.Equal(t, "A:09:00", result)
+}
+
 // --- processForLoops ---
 
 func TestProcessForLoops_EmptyArray(t *testing.T) {

@@ -13,9 +13,10 @@ import (
 
 // Template syntax patterns
 var (
-	// {{for item in items}}...{{endfor}}
-	// Spaces inside the braces are allowed: {{ for item in items }} ... {{ endfor }}
-	forLoopPattern = regexp.MustCompile(`\{\{\s*for\s+(\w+)\s+in\s+(\w+(?:\.\w+)*)\s*\}\}([\s\S]*?)\{\{\s*endfor\s*\}\}`)
+	// {{for item in items}} — spaces inside braces allowed.
+	// Bodies are matched with findBalancedForLoop so nested fors work.
+	forOpenPattern = regexp.MustCompile(`\{\{\s*for\s+(\w+)\s+in\s+(\w+(?:\.\w+)*)\s*\}\}`)
+	forClosePattern = regexp.MustCompile(`\{\{\s*endfor\s*\}\}`)
 
 	// {{if condition}}...{{else}}...{{endif}} or {{if condition}}...{{endif}}
 	ifElsePattern = regexp.MustCompile(`\{\{if\s+([^}]+)\}\}([\s\S]*?)\{\{endif\}\}`)
@@ -29,7 +30,18 @@ var (
 	conditionPattern = regexp.MustCompile(`^(\w+(?:\.\w+)*)\s*(==|!=|>=|<=|>|<)?\s*(.*)$`)
 )
 
-const maxLoopIterations = 50
+const (
+	maxLoopIterations = 50
+	maxForNestDepth   = 5
+)
+
+// forLoopSpan is one balanced {{for}}...{{endfor}} region in a template.
+type forLoopSpan struct {
+	start, end       int
+	itemVar          string
+	arrayPath        string
+	body             string
+}
 
 type valueFormatter func(any) string
 
@@ -60,79 +72,115 @@ func renderTemplate(template string, data map[string]any, format valueFormatter)
 	return processVariables(result, data, format)
 }
 
-// processForLoops handles {{for item in items}}...{{endfor}} blocks.
-// Message templates call this with formatValue.
+// processForLoops handles {{for item in items}}...{{endfor}} blocks,
+// including nested fors (e.g. pitches → slots). Message templates use formatValue.
 func processForLoops(template string, data map[string]any, format ...valueFormatter) string {
 	formatter := formatValue
 	if len(format) > 0 && format[0] != nil {
 		formatter = format[0]
 	}
-	return processForLoopsFormatted(template, data, formatter)
+	return processForLoopsDepth(template, data, formatter, 0)
 }
 
-func processForLoopsFormatted(template string, data map[string]any, format valueFormatter) string {
-	result := template
+// findBalancedForLoop returns the first {{for}}…{{endfor}} span whose endfor
+// matches the opening for (inner fors are included in the body).
+func findBalancedForLoop(s string) *forLoopSpan {
+	open := forOpenPattern.FindStringSubmatchIndex(s)
+	if open == nil {
+		return nil
+	}
+	itemVar := s[open[2]:open[3]]
+	arrayPath := s[open[4]:open[5]]
+	bodyStart := open[1]
+	depth := 1
+	pos := bodyStart
 
+	for depth > 0 {
+		nextOpen := forOpenPattern.FindStringSubmatchIndex(s[pos:])
+		nextClose := forClosePattern.FindStringIndex(s[pos:])
+		if nextClose == nil {
+			return nil
+		}
+		closeAt := pos + nextClose[0]
+		closeEnd := pos + nextClose[1]
+		if nextOpen != nil {
+			openAt := pos + nextOpen[0]
+			if openAt < closeAt {
+				depth++
+				pos = pos + nextOpen[1]
+				continue
+			}
+		}
+		depth--
+		if depth == 0 {
+			return &forLoopSpan{
+				start:     open[0],
+				end:       closeEnd,
+				itemVar:   itemVar,
+				arrayPath: arrayPath,
+				body:      s[bodyStart:closeAt],
+			}
+		}
+		pos = closeEnd
+	}
+	return nil
+}
+
+func processForLoopsDepth(template string, data map[string]any, format valueFormatter, depth int) string {
+	if depth > maxForNestDepth {
+		return template
+	}
+	result := template
 	for {
-		match := forLoopPattern.FindStringSubmatchIndex(result)
+		match := findBalancedForLoop(result)
 		if match == nil {
 			break
 		}
-
-		// Extract loop parts
-		fullMatch := result[match[0]:match[1]]
-		itemVar := result[match[2]:match[3]]
-		arrayPath := result[match[4]:match[5]]
-		loopBody := result[match[6]:match[7]]
-
-		// Get the array from data
-		arrayValue := getNestedValue(data, arrayPath)
-
-		var output strings.Builder
-
-		// Process each item in the array
-		switch arr := arrayValue.(type) {
-		case []any:
-			iterations := len(arr)
-			if iterations > maxLoopIterations {
-				iterations = maxLoopIterations
-			}
-			for i := 0; i < iterations; i++ {
-				// Create a new data context with the loop variable
-				loopData := copyMap(data)
-				loopData[itemVar] = arr[i]
-				loopData[itemVar+"_index"] = i
-
-				// Process the loop body with the loop context
-				processedBody := processConditionals(loopBody, loopData)
-				processedBody = processVariables(processedBody, loopData, format)
-				output.WriteString(processedBody)
-			}
-
-		case []map[string]any:
-			iterations := len(arr)
-			if iterations > maxLoopIterations {
-				iterations = maxLoopIterations
-			}
-			for i := 0; i < iterations; i++ {
-				loopData := copyMap(data)
-				loopData[itemVar] = arr[i]
-				loopData[itemVar+"_index"] = i
-
-				processedBody := processConditionals(loopBody, loopData)
-				processedBody = processVariables(processedBody, loopData, format)
-				output.WriteString(processedBody)
-			}
-		}
-
-		// Replace the for block with the output
-		result = result[:match[0]] + output.String() + result[match[1]:]
-
-		// If no output was generated (empty or non-array), the block is just removed
-		_ = fullMatch // used for debugging
+		output := renderForLoopBody(match, data, format, depth)
+		result = result[:match.start] + output + result[match.end:]
 	}
-
 	return result
+}
+
+func renderForLoopBody(match *forLoopSpan, data map[string]any, format valueFormatter, depth int) string {
+	items := loopItems(getNestedValue(data, match.arrayPath))
+	if len(items) == 0 {
+		return ""
+	}
+	iterations := len(items)
+	if iterations > maxLoopIterations {
+		iterations = maxLoopIterations
+	}
+	var output strings.Builder
+	for i := 0; i < iterations; i++ {
+		loopData := copyMap(data)
+		loopData[match.itemVar] = items[i]
+		loopData[match.itemVar+"_index"] = i
+
+		processed := processForLoopsDepth(match.body, loopData, format, depth+1)
+		processed = processConditionals(processed, loopData)
+		processed = processVariables(processed, loopData, format)
+		output.WriteString(processed)
+	}
+	return output.String()
+}
+
+// loopItems normalizes array shapes that land in session / API JSON.
+func loopItems(arrayValue any) []any {
+	switch arr := arrayValue.(type) {
+	case []any:
+		return arr
+	case []map[string]any:
+		out := make([]any, len(arr))
+		for i := range arr {
+			out[i] = arr[i]
+		}
+		return out
+	case models.JSONBArray:
+		return []any(arr)
+	default:
+		return nil
+	}
 }
 
 // processConditionals handles {{if condition}}...{{else}}...{{endif}} blocks
