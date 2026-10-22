@@ -29,10 +29,11 @@ func GetOrCreateContact(db *gorm.DB, orgID uuid.UUID, phoneNumber, profileName s
 	}
 
 	contact := models.Contact{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: orgID,
-		PhoneNumber:    normalizedPhone,
-		ProfileName:    profileName,
+		BaseModel:         models.BaseModel{ID: uuid.New()},
+		OrganizationID:    orgID,
+		PhoneNumber:       normalizedPhone,
+		ProfileName:        profileName,
+		StaffAIAssistance: true,
 	}
 
 	result := db.Clauses(clause.OnConflict{

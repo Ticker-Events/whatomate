@@ -903,9 +903,10 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		if err != nil {
 			// Contact not found, create new one
 			c = models.Contact{
-				BaseModel:      models.BaseModel{ID: uuid.New()},
-				OrganizationID: orgID,
-				PhoneNumber:    phoneNumber,
+				BaseModel:         models.BaseModel{ID: uuid.New()},
+				OrganizationID:    orgID,
+				PhoneNumber:       phoneNumber,
+				StaffAIAssistance: true,
 			}
 			if err := a.DB.Create(&c).Error; err != nil {
 				a.Log.Error("Failed to create contact", "error", err, "phone", phoneNumber)

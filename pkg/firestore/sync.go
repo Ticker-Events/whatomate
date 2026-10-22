@@ -316,11 +316,12 @@ func (c *Client) SyncContact(ctx context.Context, orgID uuid.UUID, contact *mode
 	}
 
 	contactData := map[string]any{
-		"organizationId":  orgID.String(),
-		"phoneNumber":     phoneNumber,
-		"profileName":     profileName,
-		"whatsappAccount": contact.WhatsAppAccount,
-		"tags":            stringTags(contact.Tags),
+		"organizationId":     orgID.String(),
+		"phoneNumber":        phoneNumber,
+		"profileName":        profileName,
+		"whatsappAccount":    contact.WhatsAppAccount,
+		"tags":               stringTags(contact.Tags),
+		"staffAiAssistance":  contact.StaffAIAssistance,
 	}
 	applyAssignedUserField(contactData, contact)
 	if contact.LastMessageAt != nil {

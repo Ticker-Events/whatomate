@@ -1830,6 +1830,40 @@ func TestApp_UpdateContact_ReopensWithoutChangingClock(t *testing.T) {
 	assert.True(t, clock.Equal(dbContact.AwaitingReplySince.UTC()))
 }
 
+func TestApp_UpdateContact_TogglesStaffAIAssistance(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	assert.True(t, contact.StaffAIAssistance)
+
+	turnOff := testutil.NewJSONRequest(t, map[string]any{"staff_ai_assistance": false})
+	testutil.SetAuthContext(turnOff, org.ID, user.ID)
+	testutil.SetPathParam(turnOff, "id", contact.ID.String())
+	require.NoError(t, app.UpdateContact(turnOff))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(turnOff))
+
+	var resp struct {
+		Data handlers.ContactResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(turnOff), &resp))
+	assert.False(t, resp.Data.StaffAIAssistance)
+
+	var dbContact models.Contact
+	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)
+	assert.False(t, dbContact.StaffAIAssistance)
+
+	turnOn := testutil.NewJSONRequest(t, map[string]any{"staff_ai_assistance": true})
+	testutil.SetAuthContext(turnOn, org.ID, user.ID)
+	testutil.SetPathParam(turnOn, "id", contact.ID.String())
+	require.NoError(t, app.UpdateContact(turnOn))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(turnOn))
+
+	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)
+	assert.True(t, dbContact.StaffAIAssistance)
+}
+
 func TestApp_UpdateContactTags_AtomicOperationsPreserveOtherTags(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)

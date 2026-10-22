@@ -208,10 +208,11 @@ func CreateTestContact(t *testing.T, db *gorm.DB, orgID uuid.UUID) *models.Conta
 
 	uniqueID := uuid.New().String()[:8]
 	contact := &models.Contact{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: orgID,
-		PhoneNumber:    "+1234567890" + uniqueID[:4],
-		ProfileName:    "Test Contact " + uniqueID,
+		BaseModel:         models.BaseModel{ID: uuid.New()},
+		OrganizationID:    orgID,
+		PhoneNumber:       "+1234567890" + uniqueID[:4],
+		ProfileName:        "Test Contact " + uniqueID,
+		StaffAIAssistance: true,
 	}
 	require.NoError(t, db.Create(contact).Error)
 	return contact
@@ -240,10 +241,11 @@ func CreateTestContactWith(t *testing.T, db *gorm.DB, orgID uuid.UUID, opts ...C
 
 	uniqueID := uuid.New().String()[:8]
 	contact := &models.Contact{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: orgID,
-		PhoneNumber:    "+1234567890" + uniqueID[:4],
-		ProfileName:    "Test Contact " + uniqueID,
+		BaseModel:         models.BaseModel{ID: uuid.New()},
+		OrganizationID:    orgID,
+		PhoneNumber:       "+1234567890" + uniqueID[:4],
+		ProfileName:        "Test Contact " + uniqueID,
+		StaffAIAssistance: true,
 	}
 
 	for _, opt := range opts {

@@ -394,6 +394,9 @@ type Contact struct {
 	IsClosed           bool       `gorm:"default:false" json:"is_closed"`
 	AwaitingReplySince *time.Time `json:"awaiting_reply_since,omitempty"`
 
+	// Staff AI tone assist for this contact (store gate still required on the storefront).
+	StaffAIAssistance bool `gorm:"default:true" json:"staff_ai_assistance"`
+
 	// Marketing opt-out (from Meta user_preferences webhook)
 	MarketingOptOut bool `gorm:"default:false" json:"marketing_opt_out"`
 
