@@ -859,7 +859,7 @@ func TestProcessIncomingMessageFull_LiveLocationWhilePendingReasks(t *testing.T)
 		Status:          models.MessageStatusSent,
 		InteractiveData: models.JSONB{
 			"type": "location_request",
-			"body": "Please tap Send location to share your delivery pin so we can check if we deliver to you.",
+			"body": codedflow.DeliveryLocationRequestBody,
 		},
 	}
 	require.NoError(t, app.DB.Create(&pending).Error)
@@ -898,7 +898,7 @@ func TestProcessIncomingMessageFull_UnsupportedWithoutNestedTypeWhilePendingReas
 		Status:          models.MessageStatusSent,
 		InteractiveData: models.JSONB{
 			"type": "location_request",
-			"body": "Please tap Send location to share your delivery pin so we can check if we deliver to you.",
+			"body": codedflow.DeliveryLocationRequestBody,
 		},
 	}
 	require.NoError(t, app.DB.Create(&pending).Error)
@@ -960,7 +960,7 @@ func TestProcessIncomingMessageFull_UnsupportedWhileLatestInteractiveIsButtonSki
 		Status:          models.MessageStatusSent,
 		InteractiveData: models.JSONB{
 			"type": "location_request",
-			"body": "Please tap Send location to share your delivery pin so we can check if we deliver to you.",
+			"body": codedflow.DeliveryLocationRequestBody,
 		},
 	}
 	latestButton := models.Message{

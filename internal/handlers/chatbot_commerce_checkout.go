@@ -40,12 +40,14 @@ const (
 	checkoutFlowCheckout         = "checkout"
 	checkoutFlowPostCart         = "post_cart"
 	checkoutFlowEarlyHandoff     = "early_handoff"
-	checkoutLocationPrompt       = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
 	checkoutAddressPrompt        = "Please provide your full delivery address, including your name, phone number, street address, city, state, country, and pincode."
 	checkoutAddressMessageBody   = "Thanks for your order! Tell us what address you'd like this order delivered to."
 	checkoutExploreAck           = "No problem — keep browsing. Your cart is saved. Tap Checkout when you're ready."
 	whatsappAddressIncapableCode = 1026
 )
+
+// checkoutLocationPrompt is the outbound location_request body for checkout.
+var checkoutLocationPrompt = codedflow.DeliveryLocationRequestBody
 
 var (
 	simpleEmailRE  = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)

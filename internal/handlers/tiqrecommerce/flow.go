@@ -77,9 +77,10 @@ const (
 	tiqrEcommercePickupOnly = "This store offers store pickup only.\n\nYou can browse products and place an order for pickup when you're ready."
 
 	tiqrEcommerceChooseMode = "How would you like to receive your order?"
-
-	tiqrEcommerceLocationPrompt = "Please tap Send location to share your delivery pin so we can check if we deliver to you."
 )
+
+// tiqrEcommerceLocationPrompt is the outbound location_request body for delivery.
+var tiqrEcommerceLocationPrompt = codedflow.DeliveryLocationRequestBody
 
 func init() {
 	codedflow.Register(newTiqrEcommerceFlow())

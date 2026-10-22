@@ -36,6 +36,11 @@ const (
 	// live location share that Cloud API cannot decode).
 	LocationRequestUnsupportedMessage = "Live locations are not supported. Please share a fixed location pin by tapping Send location, or use Attach > Location > Share your location."
 
+	// DeliveryLocationRequestBody is the outbound location_request body for
+	// ecommerce and checkout delivery pin asks. It includes the live-location note.
+	DeliveryLocationRequestBody = "Please tap Send location to share your delivery pin so we can check if we deliver to you.\n\n" +
+		LocationRequestUnsupportedMessage
+
 	// UnsupportedWhileAwaitingMessage is sent when any other waiting step receives
 	// an unsupported WhatsApp message type. The previous prompt is re-sent after.
 	UnsupportedWhileAwaitingMessage = "That message type isn't supported here. Please reply again using the previous instructions."
