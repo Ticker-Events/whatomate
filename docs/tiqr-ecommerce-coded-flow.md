@@ -146,6 +146,9 @@ On the location pin step specifically:
 
 | Reply | Result |
 | --- | --- |
+| WhatsApp location pin (Send location button or attachment) | Accept latitude / longitude and run delivery eligibility |
+| Google Maps link that embeds coordinates (`@lat,lng`, `q=lat,lng`, `!3d…!4d…`) | Same as a location pin |
+| Live location, or a Maps short link with no coordinates | Explain that the pin could not be read, re-send the Send location button, stay on the same step |
 | Previous `pickup`, and the store offers pickup | Set `delivery_mode` to `PICKUP_FROM_STORE`, say one short confirmation, continue into collections in the same turn. Replay restores the switch (choice id), not a pin at lat/long 0 |
 | Previous `delivery` while already asking for a pin | Re-send the location request |
 | Menu `check_order_status` | Leave the pin ask and run order status |
@@ -153,7 +156,7 @@ On the location pin step specifically:
 | Menu `buy_products` | Stay on the pin ask (they are already buying; delivery still needs the pin) |
 | Delivery-only store (no pickup on the previous step) | `Store pickup` does not switch mode |
 
-A place name such as a city is not a previous choice. A real location pin is still accepted first.
+A place name such as a city is not a previous choice. A location pin or a Maps URL with coordinates is accepted first.
 
 ### 4. Collections and products
 

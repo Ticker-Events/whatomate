@@ -178,6 +178,9 @@ type WebhookPayload struct {
 						Name      string  `json:"name,omitempty"`
 						Address   string  `json:"address,omitempty"`
 					} `json:"location,omitempty"`
+					Unsupported *struct {
+						Type string `json:"type"`
+					} `json:"unsupported,omitempty"`
 					Contacts []struct {
 						Name struct {
 							FormattedName string `json:"formatted_name"`

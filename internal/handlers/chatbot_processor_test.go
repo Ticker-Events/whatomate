@@ -822,6 +822,82 @@ func TestHandleInboundAudioUnsupported_CreatesTransfer(t *testing.T) {
 	assert.Equal(t, models.TransferStatusActive, transfers[0].Status)
 }
 
+func TestProcessIncomingMessageFull_LiveLocationWhilePendingReasks(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+
+	pending := models.Message{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		ContactID:       contact.ID,
+		Direction:       models.DirectionOutgoing,
+		MessageType:     models.MessageTypeInteractive,
+		Content:         "Please tap Send location",
+		Status:          models.MessageStatusSent,
+		InteractiveData: models.JSONB{
+			"type": "location_request",
+			"body": "Please tap Send location to share your delivery pin so we can check if we deliver to you.",
+		},
+	}
+	require.NoError(t, app.DB.Create(&pending).Error)
+
+	app.processIncomingMessageFull(account.PhoneID, IncomingTextMessage{
+		From:      contact.PhoneNumber,
+		ID:        "wamid.live_location_1",
+		Timestamp: "1710000000",
+		Type:      "unsupported",
+		Unsupported: &struct {
+			Type string `json:"type"`
+		}{Type: "location"},
+	}, "Tester")
+
+	var outs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).
+		Order("created_at ASC").Find(&outs).Error)
+	require.GreaterOrEqual(t, len(outs), 3) // pending + notice + new location request
+	foundNotice := false
+	foundResend := false
+	for _, msg := range outs {
+		if strings.Contains(msg.Content, "couldn’t read a location pin") {
+			foundNotice = true
+		}
+		if msg.MessageType == models.MessageTypeInteractive &&
+			msg.InteractiveData != nil &&
+			msg.InteractiveData["type"] == "location_request" &&
+			msg.ID != pending.ID {
+			foundResend = true
+		}
+	}
+	assert.True(t, foundNotice, "customer should receive the unreadable-location notice")
+	assert.True(t, foundResend, "customer should receive a new location request")
+}
+
+func TestProcessIncomingMessageFull_LiveLocationWithoutPendingSkips(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+
+	app.processIncomingMessageFull(account.PhoneID, IncomingTextMessage{
+		From:      contact.PhoneNumber,
+		ID:        "wamid.live_location_2",
+		Timestamp: "1710000000",
+		Type:      "unsupported",
+		Unsupported: &struct {
+			Type string `json:"type"`
+		}{Type: "location"},
+	}, "Tester")
+
+	var outs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).Find(&outs).Error)
+	for _, msg := range outs {
+		assert.NotContains(t, msg.Content, "couldn’t read a location pin")
+	}
+}
+
 func TestProcessIncomingMessageFull_AudioWithActiveTransferSkipsHandoff(t *testing.T) {
 	app := newProcessorTestApp(t)
 	org, account := createProcessorTestOrg(t, app)

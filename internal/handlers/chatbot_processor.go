@@ -112,6 +112,9 @@ type IncomingTextMessage struct {
 		Name      string  `json:"name,omitempty"`
 		Address   string  `json:"address,omitempty"`
 	} `json:"location,omitempty"`
+	Unsupported *struct {
+		Type string `json:"type"`
+	} `json:"unsupported,omitempty"`
 	Button *struct {
 		Text    string `json:"text"`
 		Payload string `json:"payload"`
@@ -425,6 +428,15 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		}
 	}
 
+	// Live location arrives as unsupported/location with no coordinates. When
+	// a Send location request is pending, ask again instead of staying silent.
+	if msg.Type == "unsupported" && msg.Unsupported != nil &&
+		strings.EqualFold(strings.TrimSpace(msg.Unsupported.Type), "location") {
+		if a.handleUnreadableLocationWhilePending(account, contact, settings) {
+			return
+		}
+	}
+
 	// Only process text and interactive messages for chatbot
 	if messageText == "" {
 		a.Log.Debug("Skipping message with no text content for chatbot", "type", msg.Type)
@@ -689,6 +701,67 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	} else if !isNewSession {
 		a.Log.Info("No fallback message configured for existing session")
 	}
+}
+
+// handleUnreadableLocationWhilePending sends a notice and re-asks for a
+// WhatsApp location pin when the latest outgoing message was a location
+// request and the inbound message had no usable coordinates (live location).
+func (a *App) handleUnreadableLocationWhilePending(account *models.WhatsAppAccount, contact *models.Contact, settings *models.ChatbotSettings) bool {
+	if account == nil || contact == nil {
+		return false
+	}
+	body, ok := a.latestPendingLocationRequestBody(account, contact)
+	if !ok {
+		return false
+	}
+	notice := codedflow.LocationPinUnreadableMessage
+	timeoutMins := 30
+	if settings != nil && settings.SessionTimeoutMins > 0 {
+		timeoutMins = settings.SessionTimeoutMins
+	}
+	session := a.findActiveSession(account.OrganizationID, contact.ID, account.Name, timeoutMins)
+	if session != nil && session.SessionData != nil {
+		lang := asString(session.SessionData[codedflow.CustomerLanguageKey])
+		if !codedflow.EnglishLanguage(lang) {
+			if translated, err := codedflow.TranslateCodedLine(a, session, lang, notice); err == nil {
+				if t := strings.TrimSpace(translated); t != "" {
+					notice = t
+				}
+			}
+		}
+	}
+	if err := a.sendAndSaveTextMessage(account, contact, notice); err != nil {
+		a.Log.Error("Failed to send unreadable-location notice", "error", err, "contact", contact.PhoneNumber)
+	}
+	if err := a.sendAndSaveLocationRequest(account, contact, body); err != nil {
+		a.Log.Error("Failed to re-send location request after unreadable share", "error", err, "contact", contact.PhoneNumber)
+	}
+	return true
+}
+
+// latestPendingLocationRequestBody returns the body of the latest outgoing
+// interactive location_request for this contact, when that is still the most
+// recent outbound interactive message.
+func (a *App) latestPendingLocationRequestBody(account *models.WhatsAppAccount, contact *models.Contact) (string, bool) {
+	if a.DB == nil || account == nil || contact == nil {
+		return "", false
+	}
+	var msg models.Message
+	err := a.DB.Where(
+		"organization_id = ? AND contact_id = ? AND whats_app_account = ? AND direction = ? AND message_type = ?",
+		account.OrganizationID, contact.ID, account.Name, models.DirectionOutgoing, models.MessageTypeInteractive,
+	).Order("created_at DESC").First(&msg).Error
+	if err != nil || msg.InteractiveData == nil {
+		return "", false
+	}
+	if !strings.EqualFold(asString(msg.InteractiveData["type"]), "location_request") {
+		return "", false
+	}
+	body := strings.TrimSpace(asString(msg.InteractiveData["body"]))
+	if body == "" {
+		body = checkoutLocationPrompt
+	}
+	return body, true
 }
 
 // handleInboundAudioUnsupported tells the customer voice notes are unsupported

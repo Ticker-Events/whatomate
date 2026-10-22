@@ -3,6 +3,7 @@ package codedflow
 import (
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -25,6 +26,11 @@ const (
 
 	// VoiceUnsupportedMessage is sent when the customer sends a voice note.
 	VoiceUnsupportedMessage = "I'm unable to handle voice messages right now. I'm connecting you with a team member who can help."
+
+	// LocationPinUnreadableMessage is sent when a location pin was requested but
+	// the reply had no usable latitude/longitude (live location or a Maps link
+	// without coordinates).
+	LocationPinUnreadableMessage = "Please tap Send location on the next message. I couldn’t read a location pin from that message."
 )
 
 // Choice is one accepted answer. ID is the button or row id, never a translated title.
@@ -438,8 +444,23 @@ func (c *Conv) AskLocation(name string, prompt LocationPrompt) (LocationPin, boo
 		c.wait(name)
 		return LocationPin{}, false
 	}
-	pin, ok := parseLocationInput(c.chat.UserInput())
+	input := c.chat.UserInput()
+	pin, ok := ParseLocationPin(input)
 	if !ok {
+		if LooksLikeMapsLink(input) {
+			c.chat.SetConsumed(true)
+			notice := c.text(LocationPinUnreadableMessage)
+			if err := c.app.DeliverCodedText(c.chat, name+"_unreadable", notice); err != nil {
+				c.fail(err)
+				return LocationPin{}, false
+			}
+			if err := c.app.DeliverCodedLocationRequest(c.chat, name, body); err != nil {
+				c.fail(err)
+				return LocationPin{}, false
+			}
+			c.wait(name)
+			return LocationPin{}, false
+		}
 		if c.skipIntent {
 			c.skipIntent = false
 			return LocationPin{}, false
@@ -1055,6 +1076,15 @@ func (c *Conv) tiqr(name, operation, apiType string, params map[string]string) (
 	return out.Outcome == "http:2xx", nil
 }
 
+// ParseLocationPin accepts a WhatsApp location JSON pin or a Maps URL that
+// embeds latitude and longitude in the link text.
+func ParseLocationPin(raw string) (LocationPin, bool) {
+	if pin, ok := parseLocationInput(raw); ok {
+		return pin, true
+	}
+	return parseMapsLocationInput(raw)
+}
+
 func parseLocationInput(raw string) (LocationPin, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw[0] != '{' {
@@ -1078,6 +1108,61 @@ func parseLocationInput(raw string) (LocationPin, bool) {
 		Name:      payload.Name,
 		Address:   payload.Address,
 	}, true
+}
+
+var (
+	mapsAtLatLng    = regexp.MustCompile(`@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)`)
+	mapsQueryLatLng = regexp.MustCompile(`(?:[?&#](?:q|query|ll)=)(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)`)
+	mapsBangLatLng  = regexp.MustCompile(`!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)`)
+)
+
+// LooksLikeMapsLink reports whether the text is a Google Maps URL (with or
+// without embedded coordinates). Short links have no lat/lng in the URL.
+func LooksLikeMapsLink(raw string) bool {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	if lower == "" {
+		return false
+	}
+	switch {
+	case strings.Contains(lower, "maps.google."):
+		return true
+	case strings.Contains(lower, "google.com/maps"), strings.Contains(lower, "google.co.") && strings.Contains(lower, "/maps"):
+		return true
+	case strings.Contains(lower, "maps.app.goo.gl"), strings.Contains(lower, "goo.gl/maps"):
+		return true
+	default:
+		return false
+	}
+}
+
+func parseMapsLocationInput(raw string) (LocationPin, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !LooksLikeMapsLink(raw) {
+		return LocationPin{}, false
+	}
+	for _, re := range []*regexp.Regexp{mapsAtLatLng, mapsQueryLatLng, mapsBangLatLng} {
+		m := re.FindStringSubmatch(raw)
+		if len(m) != 3 {
+			continue
+		}
+		lat, errLat := strconv.ParseFloat(m[1], 64)
+		lng, errLng := strconv.ParseFloat(m[2], 64)
+		if errLat != nil || errLng != nil {
+			continue
+		}
+		if !validLatLng(lat, lng) {
+			continue
+		}
+		return LocationPin{Latitude: lat, Longitude: lng}, true
+	}
+	return LocationPin{}, false
+}
+
+func validLatLng(lat, lng float64) bool {
+	if lat == 0 && lng == 0 {
+		return false
+	}
+	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
 }
 
 func locationPinFromSession(data models.JSONB, name string) LocationPin {

@@ -1343,7 +1343,14 @@ func (a *App) handleCheckoutConversation(account *models.WhatsAppAccount, contac
 		a.handleCheckoutSlotText(account, contact, session, settings, st, text)
 		return true
 	case "location":
-		_ = a.sendAndSaveTextMessage(account, contact, "Please use the Send location button to share your delivery pin.")
+		if pin, ok := codedflow.ParseLocationPin(text); ok {
+			return a.handleCheckoutLocationPin(account, contact, session, settings, pin.Latitude, pin.Longitude)
+		}
+		notice := "Please use the Send location button to share your delivery pin."
+		if codedflow.LooksLikeMapsLink(text) {
+			notice = codedflow.LocationPinUnreadableMessage
+		}
+		_ = a.sendAndSaveTextMessage(account, contact, notice)
 		_ = a.sendAndSaveLocationRequest(account, contact, checkoutLocationPrompt)
 		return true
 	case "address", "address_line_1", "city", "state", "pincode":

@@ -3401,6 +3401,59 @@ func TestTiqrEcommerce_DeliveryInRangeContinuesToCollections(t *testing.T) {
 	assert.Contains(t, blob, "16 km")
 }
 
+func TestTiqrEcommerce_DeliveryMapsLinkWithCoordsAccepted(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
+		"id":                      42,
+		"name":                    "Demo",
+		"address":                 "Vadakara",
+		"latitude":                "11.2",
+		"longitude":               "75.8",
+		"location_based_delivery": true,
+		"free_delivery_radius":    8,
+		"delivery_radius":         16,
+		"delivery_modes":          []any{"DELIVERY_TO_LOCATION"},
+	}, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+
+	mapsURL := "https://www.google.com/maps/@11.2,75.8,17z"
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, mapsURL, "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "collection", session.CurrentStep)
+	assert.Equal(t, 11.2, session.SessionData["delivery_latitude"])
+	assert.Equal(t, 75.8, session.SessionData["delivery_longitude"])
+	assert.Equal(t, "free", session.SessionData["delivery_zone"])
+}
+
+func TestTiqrEcommerce_DeliveryShortMapsLinkAsksAgain(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
+		"id":                      42,
+		"name":                    "Demo",
+		"latitude":                "11.2",
+		"longitude":               "75.8",
+		"location_based_delivery": true,
+		"delivery_modes":          []any{"DELIVERY_TO_LOCATION"},
+		"delivery_radius":         16,
+	}, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "https://maps.app.goo.gl/abc123", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "delivery_location_1", session.CurrentStep)
+	assert.Nil(t, session.SessionData["delivery_latitude"])
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "couldn’t read a location pin")
+}
+
 func TestTiqrEcommerce_DeliveryOutOfRangeOffersPickup(t *testing.T) {
 	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
 	app, account, contact, session := startEcommerceWithStore(t, products, nil, map[string]any{
