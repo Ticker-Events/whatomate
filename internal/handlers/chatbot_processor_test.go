@@ -566,7 +566,7 @@ func TestSaveIncomingMessage_TextMessage(t *testing.T) {
 	contact := testutil.CreateTestContact(t, app.DB, org.ID)
 
 	waMsgID := "wamid." + uuid.New().String()[:16]
-	app.saveIncomingMessage(account, contact, waMsgID, "text", "Hello from test", nil, "")
+	app.saveIncomingMessage(account, contact, waMsgID, "text", "Hello from test", nil, "", "")
 
 	// Verify message was saved
 	var msg models.Message
@@ -599,7 +599,7 @@ func TestSaveIncomingMessage_DoesNotResetExistingClock(t *testing.T) {
 	}).Error)
 	require.NoError(t, app.DB.First(contact, contact.ID).Error)
 
-	app.saveIncomingMessage(account, contact, "wamid."+uuid.New().String()[:16], "text", "follow up", nil, "")
+	app.saveIncomingMessage(account, contact, "wamid."+uuid.New().String()[:16], "text", "follow up", nil, "", "")
 
 	var dbContact models.Contact
 	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)
@@ -620,7 +620,7 @@ func TestSaveIncomingMessage_ReopensClosedWithFreshClock(t *testing.T) {
 	require.NoError(t, app.DB.First(contact, contact.ID).Error)
 
 	before := time.Now()
-	app.saveIncomingMessage(account, contact, "wamid."+uuid.New().String()[:16], "text", "new question", nil, "")
+	app.saveIncomingMessage(account, contact, "wamid."+uuid.New().String()[:16], "text", "new question", nil, "", "")
 
 	var dbContact models.Contact
 	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)
@@ -641,7 +641,7 @@ func TestSaveIncomingMessage_WithMedia(t *testing.T) {
 		MediaMimeType: "image/jpeg",
 		MediaFilename: "photo.jpg",
 	}
-	app.saveIncomingMessage(account, contact, waMsgID, "image", "Look at this", media, "")
+	app.saveIncomingMessage(account, contact, waMsgID, "image", "Look at this", media, "", "")
 
 	var msg models.Message
 	require.NoError(t, app.DB.Where("whats_app_message_id = ?", waMsgID).First(&msg).Error)
@@ -677,7 +677,7 @@ func TestSaveIncomingMessage_WithReplyContext(t *testing.T) {
 
 	// Save reply message
 	replyWAMID := "wamid.reply_" + uuid.New().String()[:8]
-	app.saveIncomingMessage(account, contact, replyWAMID, "text", "Reply to your message", nil, originalWAMID)
+	app.saveIncomingMessage(account, contact, replyWAMID, "text", "Reply to your message", nil, originalWAMID, "")
 
 	var replyMsg models.Message
 	require.NoError(t, app.DB.Where("whats_app_message_id = ?", replyWAMID).First(&replyMsg).Error)
@@ -697,7 +697,7 @@ func TestSaveIncomingMessage_LongContent(t *testing.T) {
 		longContent += "x"
 	}
 	waMsgID := "wamid." + uuid.New().String()[:16]
-	app.saveIncomingMessage(account, contact, waMsgID, "text", longContent, nil, "")
+	app.saveIncomingMessage(account, contact, waMsgID, "text", longContent, nil, "", "")
 
 	var dbContact models.Contact
 	require.NoError(t, app.DB.First(&dbContact, contact.ID).Error)

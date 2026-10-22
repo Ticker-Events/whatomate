@@ -133,6 +133,12 @@ test.describe('Chat message bubbles', () => {
       replyToId: carouselMsgId,
       minutesAgo: 7,
       messageType: 'button_reply',
+      interactiveData: {
+        button_id: 'buy-blue',
+        title: 'Buy now',
+        card_body: 'Blue Echeveria',
+        card_media_url: 'https://cdn.example.com/blue.jpeg',
+      },
     })
     buttonInteractiveId = await seed('outgoing', 'Pick an option', 'delivered', {
       minutesAgo: 6,
@@ -264,7 +270,7 @@ test.describe('Chat message bubbles', () => {
     await expect(bubble).toContainText('Buy now')
   })
 
-  test('reply to a carousel shows a carousel quote preview', async ({ page }) => {
+  test('reply to a carousel shows the tapped card in the quote preview', async ({ page }) => {
     const chatPage = new ChatPage(page)
     await chatPage.goto(contactId)
 
@@ -272,8 +278,13 @@ test.describe('Chat message bubbles', () => {
     await expect(bubble).toBeVisible({ timeout: 10_000 })
     const preview = bubble.locator('[data-testid="chat-reply-preview"]')
     await expect(preview).toBeVisible()
-    await expect(preview).toContainText('Here are our latest picks')
     await expect(preview).toContainText('Blue Echeveria')
+    await expect(preview).not.toContainText('Here are our latest picks')
+    await expect(preview.locator('img')).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/blue.jpeg',
+    )
+    await expect(bubble).toContainText('Buy now')
   })
 
   test('button interactive message has no carousel rail', async ({ page }) => {

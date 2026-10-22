@@ -355,7 +355,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if msg.Context != nil && msg.Context.ID != "" {
 		replyToWAMID = msg.Context.ID
 	}
-	persistedMessage := a.saveIncomingMessage(account, contact, msg.ID, messageType, messageText, mediaInfo, replyToWAMID)
+	persistedMessage := a.saveIncomingMessage(account, contact, msg.ID, messageType, messageText, mediaInfo, replyToWAMID, buttonID)
 
 	// Clear chatbot tracking since client has replied
 	a.ClearContactChatbotTracking(contact.ID)
@@ -2149,8 +2149,133 @@ func (a *App) loadQuotedInbound(incoming *models.Message) *codedflow.QuotedMessa
 	return out
 }
 
-// saveIncomingMessage saves an incoming message to the messages table
-func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo, replyToWAMID string) *models.Message {
+// buttonReplyInteractiveData stores the tapped button id and, when the quote is
+// a media carousel, a snapshot of the matched card so chat can show which product
+// was selected even if the carousel scrolls out of the loaded thread.
+func buttonReplyInteractiveData(title, buttonID string, quoted *models.Message) models.JSONB {
+	out := models.JSONB{}
+	if strings.TrimSpace(title) != "" {
+		out["title"] = strings.TrimSpace(title)
+	}
+	if strings.TrimSpace(buttonID) != "" {
+		out["button_id"] = strings.TrimSpace(buttonID)
+	}
+	if quoted == nil || quoted.InteractiveData == nil {
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	typ, _ := quoted.InteractiveData["type"].(string)
+	if !strings.EqualFold(strings.TrimSpace(typ), "carousel") {
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+
+	quotedMsg := &codedflow.QuotedMessage{InteractiveData: map[string]any(quoted.InteractiveData)}
+	choices := codedflow.QuotedChoices(quotedMsg)
+	var matched *codedflow.QuotedChoice
+	buttonID = strings.TrimSpace(buttonID)
+	title = strings.TrimSpace(title)
+	for i := range choices {
+		choice := &choices[i]
+		if buttonID != "" && choice.ID == buttonID {
+			matched = choice
+			break
+		}
+	}
+	// Fall back to a unique title match when the button id is missing.
+	if matched == nil && title != "" {
+		var unique *codedflow.QuotedChoice
+		for i := range choices {
+			if choices[i].Title != title {
+				continue
+			}
+			if unique != nil {
+				unique = nil
+				break
+			}
+			unique = &choices[i]
+		}
+		matched = unique
+	}
+	if matched == nil {
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	if buttonID == "" && matched.ID != "" {
+		out["button_id"] = matched.ID
+	}
+	if body := firstLinePreview(matched.Body); body != "" {
+		out["card_body"] = body
+	}
+	if mediaURL := carouselCardMediaURL(quoted.InteractiveData, matched.ID); mediaURL != "" {
+		out["card_media_url"] = mediaURL
+	}
+	return out
+}
+
+func firstLinePreview(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		text = strings.TrimSpace(text[:i])
+	}
+	return text
+}
+
+func carouselCardMediaURL(interactive models.JSONB, buttonID string) string {
+	if interactive == nil || strings.TrimSpace(buttonID) == "" {
+		return ""
+	}
+	cards, ok := interactive["cards"].([]any)
+	if !ok {
+		return ""
+	}
+	for _, entry := range cards {
+		card, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		buttons, _ := card["buttons"].([]any)
+		matched := false
+		for _, b := range buttons {
+			btn, ok := b.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := btn["id"].(string)
+			if strings.TrimSpace(id) == buttonID {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		mediaType, _ := card["media_type"].(string)
+		if strings.EqualFold(strings.TrimSpace(mediaType), "video") {
+			return ""
+		}
+		mediaURL, _ := card["media_url"].(string)
+		mediaURL = strings.TrimSpace(mediaURL)
+		if strings.HasPrefix(mediaURL, "http://") || strings.HasPrefix(mediaURL, "https://") {
+			return mediaURL
+		}
+		return ""
+	}
+	return ""
+}
+
+// saveIncomingMessage saves an incoming message to the messages table.
+// buttonID is the WhatsApp interactive button/list id when msgType is button_reply.
+func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo, replyToWAMID, buttonID string) *models.Message {
 	now := time.Now()
 
 	message := models.Message{
@@ -2165,15 +2290,21 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		Status:            models.MessageStatusReceived,
 	}
 
+	var quotedMessage *models.Message
 	// Handle reply context - look up the original message by WhatsApp message ID
 	if replyToWAMID != "" {
 		var replyToMsg models.Message
 		if err := a.DB.Where("whats_app_message_id = ?", replyToWAMID).First(&replyToMsg).Error; err == nil {
 			message.IsReply = true
 			message.ReplyToMessageID = &replyToMsg.ID
+			quotedMessage = &replyToMsg
 		} else {
 			a.Log.Warn("Reply-to message not found", "reply_to_wamid", replyToWAMID)
 		}
+	}
+
+	if msgType == "button_reply" {
+		message.InteractiveData = buttonReplyInteractiveData(content, buttonID, quotedMessage)
 	}
 
 	// Add media fields if present
@@ -2200,6 +2331,14 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 
 	// Update contact's last message info
 	preview := content
+	if msgType == "button_reply" && message.InteractiveData != nil {
+		if cardBody, _ := message.InteractiveData["card_body"].(string); strings.TrimSpace(cardBody) != "" {
+			preview = strings.TrimSpace(cardBody)
+			if strings.TrimSpace(content) != "" {
+				preview = preview + " — " + strings.TrimSpace(content)
+			}
+		}
+	}
 	if len(preview) > 100 {
 		preview = preview[:97] + "..."
 	}

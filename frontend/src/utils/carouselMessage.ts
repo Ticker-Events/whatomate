@@ -19,6 +19,18 @@ function contentBody(content: unknown): string {
   return ''
 }
 
+function firstLine(text: string): string {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  return trimmed.split('\n')[0]!.trim()
+}
+
+function truncatePreview(text: string, max = 80): string {
+  const trimmed = text.trim()
+  if (trimmed.length <= max) return trimmed
+  return `${trimmed.slice(0, max - 1)}…`
+}
+
 export function isPublicMediaUrl(url: string | undefined): boolean {
   if (!url || typeof url !== 'string') return false
   return /^https?:\/\//i.test(url.trim())
@@ -38,6 +50,50 @@ export function getCarouselCards(message: Message): CarouselCard[] {
   return data.cards.filter((card): card is CarouselCard => Boolean(card) && typeof card === 'object')
 }
 
+function replyButtonId(message: Message): string {
+  const id = (message.interactive_data as any)?.button_id
+  return typeof id === 'string' ? id.trim() : ''
+}
+
+function replyButtonTitle(message: Message): string {
+  const title = (message.interactive_data as any)?.title
+  if (typeof title === 'string' && title.trim()) return title.trim()
+  return contentBody(message.content).trim()
+}
+
+/** Card the user tapped on a quoted carousel (by button id, or a saved snapshot). */
+export function getMatchedCarouselCard(message: Message): CarouselCard | null {
+  const data = message.interactive_data as any
+  const snapshotBody = typeof data?.card_body === 'string' ? data.card_body.trim() : ''
+  const snapshotMedia = typeof data?.card_media_url === 'string' ? data.card_media_url.trim() : ''
+  if (snapshotBody || isPublicMediaUrl(snapshotMedia)) {
+    return {
+      body: snapshotBody || undefined,
+      media_url: snapshotMedia || undefined,
+      media_type: 'image',
+    }
+  }
+
+  const quoted = message.reply_to_message
+  if (!quoted || quoted.message_type !== 'interactive') return null
+  const cards = getCarouselCards({
+    message_type: 'interactive',
+    interactive_data: quoted.interactive_data,
+  } as Message)
+  if (cards.length === 0) return null
+
+  const buttonId = replyButtonId(message)
+  if (buttonId) {
+    const byId = cards.find(card => card.buttons?.some(button => button.id === buttonId))
+    if (byId) return byId
+  }
+
+  const title = replyButtonTitle(message)
+  if (!title) return null
+  const byTitle = cards.filter(card => card.buttons?.some(button => button.title === title))
+  return byTitle.length === 1 ? byTitle[0]! : null
+}
+
 export function getCarouselPreviewImage(interactiveData: any): string | undefined {
   if (interactiveData?.type !== 'carousel' || !Array.isArray(interactiveData.cards)) {
     return undefined
@@ -54,29 +110,10 @@ export function getCarouselPreviewImage(interactiveData: any): string | undefine
   return undefined
 }
 
-function truncatePreview(text: string, max = 80): string {
-  const trimmed = text.trim()
-  if (trimmed.length <= max) return trimmed
-  return `${trimmed.slice(0, max - 1)}…`
-}
-
 export function getCarouselReplyPreviewText(interactiveData: any): string {
   if (!interactiveData || interactiveData.type !== 'carousel') return ''
-  const body = typeof interactiveData.body === 'string' ? interactiveData.body.trim() : ''
-  const cardLabels: string[] = []
-  if (Array.isArray(interactiveData.cards)) {
-    for (const card of interactiveData.cards) {
-      const label =
-        (typeof card?.body === 'string' && card.body.trim()) ||
-        (typeof card?.buttons?.[0]?.title === 'string' && card.buttons[0].title.trim()) ||
-        ''
-      if (label) cardLabels.push(label.split('\n')[0]!.trim())
-      if (cardLabels.length >= 3) break
-    }
-  }
-  const cardsPart = cardLabels.join(' · ')
-  if (body && cardsPart) return truncatePreview(`${body} — ${cardsPart}`)
-  return truncatePreview(body || cardsPart || '[Carousel]')
+  const body = typeof interactiveData.body === 'string' ? firstLine(interactiveData.body) : ''
+  return truncatePreview(body || '[Carousel]')
 }
 
 export function buildReplyPreviewFromMessage(message: Message): ReplyPreview {
@@ -102,6 +139,33 @@ export function resolveReplyPreviews(messages: Message[]): Message[] {
       reply_to_message: buildReplyPreviewFromMessage(quoted),
     }
   })
+}
+
+export function replyPreviewTextFromMessage(message: Message): string {
+  const matchedCard = getMatchedCarouselCard(message)
+  if (matchedCard) {
+    const cardLabel = firstLine(matchedCard.body || '')
+    if (cardLabel) return truncatePreview(cardLabel)
+  }
+  if (!message.reply_to_message) return ''
+  return replyPreviewTextFromQuote(message.reply_to_message)
+}
+
+export function replyPreviewImageFromMessage(message: Message): string | undefined {
+  if (!message.reply_to_message) return undefined
+  const matchedCard = getMatchedCarouselCard(message)
+  if (matchedCard) {
+    const url = matchedCard.media_url
+    if (
+      isPublicMediaUrl(url) &&
+      String(matchedCard.media_type || 'image').toLowerCase() !== 'video'
+    ) {
+      return String(url).trim()
+    }
+    return undefined
+  }
+  if (message.message_type === 'button_reply') return undefined
+  return getCarouselPreviewImage(message.reply_to_message.interactive_data)
 }
 
 export function replyPreviewTextFromQuote(reply: ReplyPreview): string {

@@ -15,9 +15,9 @@ import { getTagColorClass } from '@/lib/constants'
 import { getErrorMessage } from '@/lib/api-utils'
 import {
   getCarouselCards,
-  getCarouselPreviewImage,
   isPublicMediaUrl,
-  replyPreviewTextFromQuote,
+  replyPreviewImageFromMessage,
+  replyPreviewTextFromMessage,
   type CarouselCard,
 } from '@/utils/carouselMessage'
 import { Button } from '@/components/ui/button'
@@ -778,13 +778,11 @@ function resetTextareaHeight() {
 }
 
 function getReplyPreviewContent(message: Message): string {
-  if (!message.reply_to_message) return ''
-  return replyPreviewTextFromQuote(message.reply_to_message)
+  return replyPreviewTextFromMessage(message)
 }
 
 function getReplyPreviewImage(message: Message): string | undefined {
-  if (!message.reply_to_message) return undefined
-  return getCarouselPreviewImage(message.reply_to_message.interactive_data)
+  return replyPreviewImageFromMessage(message)
 }
 
 function carouselCardIsUrl(card: CarouselCard): boolean {
