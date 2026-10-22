@@ -39,6 +39,9 @@ test.describe('Chat message bubbles', () => {
   let incomingTextId: string
   let failedOutgoingId: string
   let replyTextId: string
+  let carouselMsgId: string
+  let carouselReplyId: string
+  let buttonInteractiveId: string
 
   test.beforeAll(async () => {
     const ctx = await playwrightRequest.newContext()
@@ -61,21 +64,31 @@ test.describe('Chat message bubbles', () => {
       direction: 'incoming' | 'outgoing',
       text: string,
       status: string,
-      extra: { errorMessage?: string; replyToId?: string; minutesAgo?: number } = {},
+      extra: {
+        errorMessage?: string
+        replyToId?: string
+        minutesAgo?: number
+        messageType?: string
+        interactiveData?: Record<string, unknown>
+      } = {},
     ): Promise<string> => {
       const minutesAgo = extra.minutesAgo ?? 5
+      const messageType = extra.messageType ?? 'text'
       const errorClause = extra.errorMessage
         ? `, error_message = '${extra.errorMessage.replace(/'/g, "''")}'`
         : ''
       const replyCols = extra.replyToId ? `, is_reply = true, reply_to_message_id = '${extra.replyToId}'` : ''
+      const interactiveClause = extra.interactiveData
+        ? `, interactive_data = '${JSON.stringify(extra.interactiveData).replace(/'/g, "''")}'::jsonb`
+        : ''
       const rows = await execSQL(`
         INSERT INTO messages (id, organization_id, whats_app_account, contact_id, direction, message_type, content, status, created_at, updated_at)
-        VALUES (gen_random_uuid(), '${orgId}', 'test-account', '${contactId}', '${direction}', 'text', '${text.replace(/'/g, "''")}', '${status}', NOW() - INTERVAL '${minutesAgo} minutes', NOW())
+        VALUES (gen_random_uuid(), '${orgId}', 'test-account', '${contactId}', '${direction}', '${messageType}', '${text.replace(/'/g, "''")}', '${status}', NOW() - INTERVAL '${minutesAgo} minutes', NOW())
         RETURNING id::text AS id
       `)
       const id = rows[0]!.id as string
-      if (errorClause || replyCols) {
-        await execSQL(`UPDATE messages SET id = '${id}'${errorClause}${replyCols} WHERE id = '${id}'`)
+      if (errorClause || replyCols || interactiveClause) {
+        await execSQL(`UPDATE messages SET id = '${id}'${errorClause}${replyCols}${interactiveClause} WHERE id = '${id}'`)
       }
       return id
     }
@@ -89,6 +102,49 @@ test.describe('Chat message bubbles', () => {
     replyTextId = await seed('outgoing', 'Replying to your earlier message', 'delivered', {
       replyToId: incomingTextId,
       minutesAgo: 10,
+    })
+    carouselMsgId = await seed('outgoing', 'Here are our latest picks', 'delivered', {
+      minutesAgo: 8,
+      messageType: 'interactive',
+      interactiveData: {
+        type: 'carousel',
+        body: 'Here are our latest picks',
+        cards: [
+          {
+            media_type: 'image',
+            media_url: 'https://cdn.example.com/blue.jpeg',
+            action: 'url',
+            body: 'Blue Echeveria',
+            url: 'https://shop.example.com/blue',
+            buttons: [{ id: 'buy-blue', title: 'Buy now' }],
+          },
+          {
+            media_type: 'image',
+            media_url: 'https://cdn.example.com/zebra.jpeg',
+            action: 'url',
+            body: 'Zebra Haworthia',
+            url: 'https://shop.example.com/zebra',
+            buttons: [{ id: 'buy-zebra', title: 'Buy now' }],
+          },
+        ],
+      },
+    })
+    carouselReplyId = await seed('incoming', 'Buy now', 'delivered', {
+      replyToId: carouselMsgId,
+      minutesAgo: 7,
+      messageType: 'button_reply',
+    })
+    buttonInteractiveId = await seed('outgoing', 'Pick an option', 'delivered', {
+      minutesAgo: 6,
+      messageType: 'interactive',
+      interactiveData: {
+        type: 'button',
+        body: 'Pick an option',
+        buttons: [
+          { id: 'yes', title: 'Yes' },
+          { id: 'no', title: 'No' },
+        ],
+      },
     })
 
     await ctx.dispose()
@@ -172,7 +228,15 @@ test.describe('Chat message bubbles', () => {
     // Wait for at least one seeded bubble to mount before counting.
     await expect(page.locator(`#message-${incomingTextId}`)).toBeVisible({ timeout: 10_000 })
 
-    const ids = [incomingTextId, outgoingTextId, failedOutgoingId, replyTextId]
+    const ids = [
+      incomingTextId,
+      outgoingTextId,
+      failedOutgoingId,
+      replyTextId,
+      carouselMsgId,
+      carouselReplyId,
+      buttonInteractiveId,
+    ]
     const positions = await Promise.all(
       ids.map(async id => {
         const box = await page.locator(`#message-${id}`).boundingBox()
@@ -185,6 +249,42 @@ test.describe('Chat message bubbles', () => {
     for (let i = 1; i < positions.length; i++) {
       expect(positions[i]).toBeGreaterThan(positions[i - 1])
     }
+  })
+
+  test('carousel interactive message renders a card rail', async ({ page }) => {
+    const chatPage = new ChatPage(page)
+    await chatPage.goto(contactId)
+
+    const bubble = page.locator(`#message-${carouselMsgId} .chat-bubble`)
+    await expect(bubble).toBeVisible({ timeout: 10_000 })
+    await expect(bubble).toContainText('Here are our latest picks')
+    await expect(bubble.locator('[data-testid="chat-carousel-rail"]')).toBeVisible()
+    await expect(bubble.locator('[data-testid="chat-carousel-card"]')).toHaveCount(2)
+    await expect(bubble).toContainText('Blue Echeveria')
+    await expect(bubble).toContainText('Buy now')
+  })
+
+  test('reply to a carousel shows a carousel quote preview', async ({ page }) => {
+    const chatPage = new ChatPage(page)
+    await chatPage.goto(contactId)
+
+    const bubble = page.locator(`#message-${carouselReplyId} .chat-bubble`)
+    await expect(bubble).toBeVisible({ timeout: 10_000 })
+    const preview = bubble.locator('[data-testid="chat-reply-preview"]')
+    await expect(preview).toBeVisible()
+    await expect(preview).toContainText('Here are our latest picks')
+    await expect(preview).toContainText('Blue Echeveria')
+  })
+
+  test('button interactive message has no carousel rail', async ({ page }) => {
+    const chatPage = new ChatPage(page)
+    await chatPage.goto(contactId)
+
+    const bubble = page.locator(`#message-${buttonInteractiveId} .chat-bubble`)
+    await expect(bubble).toBeVisible({ timeout: 10_000 })
+    await expect(bubble).toContainText('Pick an option')
+    await expect(bubble).toContainText('Yes')
+    await expect(bubble.locator('[data-testid="chat-carousel-rail"]')).toHaveCount(0)
   })
 })
 

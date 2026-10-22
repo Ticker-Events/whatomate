@@ -281,6 +281,10 @@
   border-radius: 1rem;
 }
 
+.chat-bubble-carousel {
+  max-width: min(100%, 22rem);
+}
+
 /* Incoming bubble - glass effect */
 .chat-bubble-incoming {
   background-color: rgba(255, 255, 255, 0.08);

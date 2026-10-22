@@ -692,6 +692,93 @@ func TestApp_GetMessages(t *testing.T) {
 		assert.Empty(t, resp.Data.Messages)
 	})
 
+	t.Run("reply to carousel includes interactive_data preview", func(t *testing.T) {
+		t.Parallel()
+		app := newTestApp(t)
+		org := testutil.CreateTestOrganization(t, app.DB)
+		adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+		user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+		account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+		contact := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+
+		carouselID := uuid.New()
+		carousel := &models.Message{
+			BaseModel:       models.BaseModel{ID: carouselID, CreatedAt: time.Now().Add(-2 * time.Minute)},
+			OrganizationID:  org.ID,
+			WhatsAppAccount: account.Name,
+			ContactID:       contact.ID,
+			Direction:       models.DirectionOutgoing,
+			MessageType:     models.MessageTypeInteractive,
+			Content:         "Here are our picks",
+			Status:          models.MessageStatusDelivered,
+			InteractiveData: models.JSONB{
+				"type": "carousel",
+				"body": "Here are our picks",
+				"cards": []any{
+					map[string]any{
+						"media_type": "image",
+						"media_url":  "https://cdn.example.com/a.jpg",
+						"action":     "reply",
+						"body":       "Blue Echeveria",
+						"buttons":    []any{map[string]string{"id": "learn-a", "title": "Learn more"}},
+					},
+					map[string]any{
+						"media_type": "image",
+						"media_url":  "https://cdn.example.com/b.jpg",
+						"action":     "reply",
+						"body":       "Zebra Haworthia",
+						"buttons":    []any{map[string]string{"id": "learn-b", "title": "Learn more"}},
+					},
+				},
+			},
+		}
+		require.NoError(t, app.DB.Create(carousel).Error)
+
+		reply := &models.Message{
+			BaseModel:        models.BaseModel{ID: uuid.New(), CreatedAt: time.Now().Add(-1 * time.Minute)},
+			OrganizationID:   org.ID,
+			WhatsAppAccount:  account.Name,
+			ContactID:        contact.ID,
+			Direction:        models.DirectionIncoming,
+			MessageType:      models.MessageType("button_reply"),
+			Content:          "Learn more",
+			Status:           models.MessageStatusReceived,
+			IsReply:          true,
+			ReplyToMessageID: &carouselID,
+		}
+		require.NoError(t, app.DB.Create(reply).Error)
+
+		req := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", contact.ID.String())
+		testutil.SetQueryParam(req, "limit", 50)
+
+		err := app.GetMessages(req)
+		require.NoError(t, err)
+		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+		var resp struct {
+			Data struct {
+				Messages []handlers.MessageResponse `json:"messages"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+		require.Len(t, resp.Data.Messages, 2)
+
+		var found *handlers.MessageResponse
+		for i := range resp.Data.Messages {
+			if resp.Data.Messages[i].ID == reply.ID {
+				found = &resp.Data.Messages[i]
+				break
+			}
+		}
+		require.NotNil(t, found)
+		require.NotNil(t, found.ReplyToMessage)
+		require.NotNil(t, found.ReplyToMessage.InteractiveData)
+		assert.Equal(t, "carousel", found.ReplyToMessage.InteractiveData["type"])
+		assert.Equal(t, models.MessageTypeInteractive, found.ReplyToMessage.MessageType)
+	})
+
 	t.Run("contact not found", func(t *testing.T) {
 		t.Parallel()
 		app := newTestApp(t)

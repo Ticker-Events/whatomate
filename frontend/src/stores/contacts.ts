@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
+import { resolveReplyPreviews } from '@/utils/carouselMessage'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -39,6 +40,7 @@ export interface ReplyPreview {
   content: any
   message_type: string
   direction: 'incoming' | 'outgoing'
+  interactive_data?: any
 }
 
 export interface Reaction {
@@ -68,6 +70,14 @@ export interface Message {
     rows?: Array<{
       id?: string
       title?: string
+    }>
+    cards?: Array<{
+      media_type?: string
+      media_url?: string
+      action?: string
+      body?: string
+      url?: string
+      buttons?: Array<{ id?: string; title?: string }>
     }>
   }
   status: string
@@ -193,7 +203,7 @@ export const useContactsStore = defineStore('contacts', () => {
       const response = await messagesService.list(contactId, params)
       // API returns { status: "success", data: { messages: [...], has_more: boolean } }
       const data = response.data.data || response.data
-      messages.value = data.messages || []
+      messages.value = resolveReplyPreviews(data.messages || [])
       hasMoreMessages.value = data.has_more === true
     } catch (error) {
       console.error('Failed to fetch messages:', error)
@@ -217,7 +227,7 @@ export const useContactsStore = defineStore('contacts', () => {
 
       if (olderMessages.length > 0) {
         // Prepend older messages (they come in chronological order, oldest first)
-        messages.value = [...olderMessages, ...messages.value]
+        messages.value = resolveReplyPreviews([...olderMessages, ...messages.value])
       }
       hasMoreMessages.value = data.has_more === true
     } catch (error) {
@@ -315,7 +325,7 @@ export const useContactsStore = defineStore('contacts', () => {
     // Check if message already exists
     const exists = messages.value.some(m => m.id === message.id)
     if (!exists) {
-      messages.value.push(message)
+      messages.value = resolveReplyPreviews([...messages.value, message])
     }
   }
 

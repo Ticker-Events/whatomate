@@ -75,10 +75,24 @@ type MessageResponse struct {
 
 // ReplyPreview contains a preview of the replied-to message
 type ReplyPreview struct {
-	ID          string             `json:"id"`
-	Content     any                `json:"content"`
-	MessageType models.MessageType `json:"message_type"`
-	Direction   models.Direction   `json:"direction"`
+	ID              string             `json:"id"`
+	Content         any                `json:"content"`
+	MessageType     models.MessageType `json:"message_type"`
+	Direction       models.Direction   `json:"direction"`
+	InteractiveData models.JSONB       `json:"interactive_data,omitempty"`
+}
+
+func replyPreviewFromMessage(m *models.Message) *ReplyPreview {
+	if m == nil {
+		return nil
+	}
+	return &ReplyPreview{
+		ID:              m.ID.String(),
+		Content:         map[string]string{"body": m.Content},
+		MessageType:     m.MessageType,
+		Direction:       m.Direction,
+		InteractiveData: m.InteractiveData,
+	}
 }
 
 // ReactionInfo represents a reaction on a message
@@ -452,12 +466,7 @@ func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse
 			replyToID := m.ReplyToMessageID.String()
 			msgResp.ReplyToMessageID = &replyToID
 			if m.ReplyToMessage != nil {
-				msgResp.ReplyToMessage = &ReplyPreview{
-					ID:          m.ReplyToMessage.ID.String(),
-					Content:     map[string]string{"body": m.ReplyToMessage.Content},
-					MessageType: m.ReplyToMessage.MessageType,
-					Direction:   m.ReplyToMessage.Direction,
-				}
+				msgResp.ReplyToMessage = replyPreviewFromMessage(m.ReplyToMessage)
 			}
 		}
 
@@ -718,12 +727,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	if message.IsReply && message.ReplyToMessageID != nil && replyToMessage != nil {
 		replyToID := message.ReplyToMessageID.String()
 		response.ReplyToMessageID = &replyToID
-		response.ReplyToMessage = &ReplyPreview{
-			ID:          replyToMessage.ID.String(),
-			Content:     map[string]string{"body": replyToMessage.Content},
-			MessageType: replyToMessage.MessageType,
-			Direction:   replyToMessage.Direction,
-		}
+		response.ReplyToMessage = replyPreviewFromMessage(replyToMessage)
 	}
 
 	return r.SendEnvelope(response)

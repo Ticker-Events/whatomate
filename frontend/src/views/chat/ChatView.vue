@@ -13,6 +13,13 @@ import { useTagsStore } from '@/stores/tags'
 import { TagBadge } from '@/components/ui/tag-badge'
 import { getTagColorClass } from '@/lib/constants'
 import { getErrorMessage } from '@/lib/api-utils'
+import {
+  getCarouselCards,
+  getCarouselPreviewImage,
+  isPublicMediaUrl,
+  replyPreviewTextFromQuote,
+  type CarouselCard,
+} from '@/utils/carouselMessage'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -772,31 +779,20 @@ function resetTextareaHeight() {
 
 function getReplyPreviewContent(message: Message): string {
   if (!message.reply_to_message) return ''
-  const reply = message.reply_to_message
-  if (reply.message_type === 'text') {
-    const body = reply.content?.body || ''
-    return body.length > 50 ? body.substring(0, 50) + '...' : body
-  }
-  if (reply.message_type === 'button_reply') {
-    const body = typeof reply.content === 'string' ? reply.content : (reply.content?.body || '')
-    return body.length > 50 ? body.substring(0, 50) + '...' : body
-  }
-  if (reply.message_type === 'interactive') {
-    const body = typeof reply.content === 'string' ? reply.content : ((reply as any).interactive_data?.body || reply.content?.body || '')
-    return body.length > 50 ? body.substring(0, 50) + '...' : body
-  }
-  if (reply.message_type === 'template') {
-    const body = reply.content?.body || ''
-    return body.length > 50 ? body.substring(0, 50) + '...' : body
-  }
-  if (reply.message_type === 'image') return '[Photo]'
-  if (reply.message_type === 'video') return '[Video]'
-  if (reply.message_type === 'audio') return '[Audio]'
-  if (reply.message_type === 'document') return '[Document]'
-  if (reply.message_type === 'location') return '[Location]'
-  if (reply.message_type === 'contacts') return '[Contact]'
-  if (reply.message_type === 'sticker') return '[Sticker]'
-  return '[Message]'
+  return replyPreviewTextFromQuote(message.reply_to_message)
+}
+
+function getReplyPreviewImage(message: Message): string | undefined {
+  if (!message.reply_to_message) return undefined
+  return getCarouselPreviewImage(message.reply_to_message.interactive_data)
+}
+
+function carouselCardIsUrl(card: CarouselCard): boolean {
+  return card.action === 'url' || Boolean(card.url && !card.buttons?.length)
+}
+
+function carouselCardMediaUrl(card: CarouselCard): string {
+  return isPublicMediaUrl(card.media_url) ? String(card.media_url).trim() : ''
 }
 
 function scrollToMessage(messageId: string | undefined) {
@@ -1442,6 +1438,9 @@ function getInteractiveButtons(message: Message): Array<{ id: string; title: str
   if (message.message_type !== 'interactive' && message.message_type !== 'template') {
     return []
   }
+  if (message.interactive_data.type === 'carousel') {
+    return []
+  }
   // Handle both "buttons" (<=3) and "rows" (>3 list format)
   const items = message.interactive_data.buttons || message.interactive_data.rows
   if (!items || !Array.isArray(items)) {
@@ -2028,21 +2027,31 @@ async function sendMediaMessage() {
               <div
                 :class="[
                   'chat-bubble',
-                  message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming'
+                  message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming',
+                  getCarouselCards(message).length > 0 ? 'chat-bubble-carousel' : ''
                 ]"
               >
                 <!-- Reply preview (if this message is replying to another) -->
                 <div
                   v-if="message.is_reply && message.reply_to_message"
                   class="reply-preview cursor-pointer text-xs"
+                  data-testid="chat-reply-preview"
                   @click="scrollToMessage(message.reply_to_message_id)"
                 >
                   <p class="font-medium">
                     {{ message.reply_to_message.direction === 'incoming' ? (contactsStore.currentContact?.profile_name || contactsStore.currentContact?.name || 'Customer') : 'You' }}
                   </p>
-                  <p class="truncate">
-                    {{ getReplyPreviewContent(message) }}
-                  </p>
+                  <div class="flex items-start gap-2 min-w-0">
+                    <img
+                      v-if="getReplyPreviewImage(message)"
+                      :src="getReplyPreviewImage(message)"
+                      alt=""
+                      class="h-10 w-10 rounded object-cover shrink-0"
+                    />
+                    <p class="truncate min-w-0">
+                      {{ getReplyPreviewContent(message) }}
+                    </p>
+                  </div>
                 </div>
                 <!-- Template header media (image/video/document shown above template text) -->
                 <div v-if="message.message_type === 'template' && message.media_url" class="mb-2">
@@ -2179,9 +2188,68 @@ async function sendMediaMessage() {
                   <span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span></span>
                 </div>
                 <!-- Text content (for text messages or captions) -->
-                <span v-else-if="getMessageContent(message)" class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                <span v-else-if="getMessageContent(message)" class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}<span v-if="getCarouselCards(message).length === 0" class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
                 <!-- Fallback for media without URL -->
                 <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                <!-- Media carousel cards -->
+                <div
+                  v-if="getCarouselCards(message).length > 0"
+                  data-testid="chat-carousel-rail"
+                  class="mt-2 -mx-1 flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1"
+                >
+                  <div
+                    v-for="(card, cardIndex) in getCarouselCards(message)"
+                    :key="`${message.id}-card-${cardIndex}`"
+                    data-testid="chat-carousel-card"
+                    class="snap-start shrink-0 w-[168px] rounded-lg border border-white/10 light:border-black/10 bg-white/5 light:bg-white/70 overflow-hidden"
+                  >
+                    <video
+                      v-if="carouselCardMediaUrl(card) && String(card.media_type || '').toLowerCase() === 'video'"
+                      :src="carouselCardMediaUrl(card)"
+                      controls
+                      class="w-full h-[112px] object-cover bg-black/20"
+                    />
+                    <img
+                      v-else-if="carouselCardMediaUrl(card)"
+                      :src="carouselCardMediaUrl(card)"
+                      :alt="card.body || 'Carousel card'"
+                      class="w-full h-[112px] object-cover bg-black/20"
+                    />
+                    <p v-if="card.body" class="px-2 pt-2 text-xs whitespace-pre-wrap break-words line-clamp-4">
+                      {{ card.body }}
+                    </p>
+                    <a
+                      v-if="carouselCardIsUrl(card) && card.url"
+                      :href="card.url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="mt-1 flex items-center justify-center gap-1 border-t border-white/10 light:border-black/10 px-2 py-1.5 text-xs font-medium"
+                    >
+                      <ExternalLink class="h-3 w-3" />
+                      {{ card.buttons?.[0]?.title || 'Open' }}
+                    </a>
+                    <div v-else-if="!carouselCardIsUrl(card) && card.buttons?.length" class="mt-1 border-t border-white/10 light:border-black/10">
+                      <div
+                        v-for="(btn, btnIndex) in card.buttons"
+                        :key="btn.id || `${message.id}-card-${cardIndex}-btn-${btnIndex}`"
+                        :class="['px-2 py-1.5 text-xs text-center font-medium', btnIndex > 0 && 'border-t border-white/10 light:border-black/10']"
+                      >
+                        {{ btn.title }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <span
+                  v-if="getCarouselCards(message).length > 0"
+                  class="chat-bubble-time block clear-both mt-1"
+                >
+                  <span>{{ formatMessageTime(message.created_at) }}</span>
+                  <component
+                    v-if="message.direction === 'outgoing'"
+                    :is="getMessageStatusIcon(message.status)"
+                    :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]"
+                  />
+                </span>
                 <!-- Interactive buttons - WhatsApp style -->
                 <div
                   v-if="getInteractiveButtons(message).length > 0"
