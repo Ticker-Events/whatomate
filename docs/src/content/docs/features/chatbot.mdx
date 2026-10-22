@@ -445,11 +445,18 @@ Supported operators:
 
 #### Loops
 
-Iterate over arrays from API responses:
+Iterate over arrays from API responses. Nested loops are supported (for example pitches → slots). Each loop is capped at 50 items; nesting depth is capped at 5.
 
 ```
 {{for item in items}}
 - {{item.name}}: {{item.quantity}} @ ₹{{item.price}}
+{{endfor}}
+```
+
+```
+{{for pitch in pitches}}
+{{pitch.name}}
+{{for slot in pitch.slots}}{{slot.start}}–{{slot.end}}, {{endfor}}
 {{endfor}}
 ```
 
