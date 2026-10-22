@@ -753,8 +753,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Messages
 	g.GET("/api/contacts/{id}/messages", app.GetMessages)
 	g.POST("/api/contacts/{id}/messages", app.SendMessage)
+	g.POST("/api/contacts/{id}/commerce-catalog", app.SendCommerceCatalog)
 	g.POST("/api/contacts/{id}/mark-read", app.MarkContactRead)
 	g.POST("/api/contacts/{id}/messages/{message_id}/reaction", app.SendReaction)
+
+	// Staff commerce catalog (TiQR Ecommerce drawer)
+	g.GET("/api/commerce-catalog", app.GetCommerceCatalogStatus)
+	g.GET("/api/commerce-catalog/collections", app.ListCommerceCatalogCollections)
+	g.GET("/api/commerce-catalog/collections/{collection_id}/products", app.ListCommerceCatalogProducts)
 	g.POST("/api/messages", app.SendMessage) // Legacy route
 	g.POST("/api/messages/template", app.SendTemplateMessage)
 	g.POST("/api/messages/media", app.SendMediaMessage)

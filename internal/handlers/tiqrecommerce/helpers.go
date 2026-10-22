@@ -42,6 +42,11 @@ func resolveEcommerceMetaFlowID(c *Conv, delivery bool) string {
 	return c.App().ResolveEcommerceMetaFlowID(c.Session().OrganizationID, c.Session().WhatsAppAccount, delivery)
 }
 
+// StashSessionCurrency stores the store currency and display symbol on the session.
+func StashSessionCurrency(session *models.ChatbotSession, currency string) {
+	stashSessionCurrency(session, currency)
+}
+
 func stashSessionCurrency(session *models.ChatbotSession, currency string) {
 	if session == nil {
 		return
@@ -142,6 +147,12 @@ func enrichOptionsForList(session *models.ChatbotSession, options []any) []any {
 		out = append(out, map[string]any(row))
 	}
 	return out
+}
+
+// EnrichProductsForCarousel sets card_body so the currency price appears once:
+// on the name line when it fits in 160 runes, otherwise only on the second line.
+func EnrichProductsForCarousel(session *models.ChatbotSession, products []any) []any {
+	return enrichProductsForCarousel(session, products)
 }
 
 // enrichProductsForCarousel sets card_body so the currency price appears once:
