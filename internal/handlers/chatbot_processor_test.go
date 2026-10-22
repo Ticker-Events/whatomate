@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -822,6 +823,25 @@ func TestHandleInboundAudioUnsupported_CreatesTransfer(t *testing.T) {
 	assert.Equal(t, models.TransferStatusActive, transfers[0].Status)
 }
 
+func assertUnsupportedLocationReask(t *testing.T, outs []models.Message, pendingID uuid.UUID) {
+	t.Helper()
+	foundNotice := false
+	foundResend := false
+	for _, msg := range outs {
+		if strings.Contains(msg.Content, "Live locations are not supported") {
+			foundNotice = true
+		}
+		if msg.MessageType == models.MessageTypeInteractive &&
+			msg.InteractiveData != nil &&
+			msg.InteractiveData["type"] == "location_request" &&
+			msg.ID != pendingID {
+			foundResend = true
+		}
+	}
+	assert.True(t, foundNotice, "customer should receive the unsupported-location notice")
+	assert.True(t, foundResend, "customer should receive a new location request")
+}
+
 func TestProcessIncomingMessageFull_LiveLocationWhilePendingReasks(t *testing.T) {
 	app := newProcessorTestApp(t)
 	org, account := createProcessorTestOrg(t, app)
@@ -858,21 +878,44 @@ func TestProcessIncomingMessageFull_LiveLocationWhilePendingReasks(t *testing.T)
 	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).
 		Order("created_at ASC").Find(&outs).Error)
 	require.GreaterOrEqual(t, len(outs), 3) // pending + notice + new location request
-	foundNotice := false
-	foundResend := false
-	for _, msg := range outs {
-		if strings.Contains(msg.Content, "couldn’t read a location pin") {
-			foundNotice = true
-		}
-		if msg.MessageType == models.MessageTypeInteractive &&
-			msg.InteractiveData != nil &&
-			msg.InteractiveData["type"] == "location_request" &&
-			msg.ID != pending.ID {
-			foundResend = true
-		}
+	assertUnsupportedLocationReask(t, outs, pending.ID)
+}
+
+func TestProcessIncomingMessageFull_UnsupportedWithoutNestedTypeWhilePendingReasks(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+
+	pending := models.Message{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		ContactID:       contact.ID,
+		Direction:       models.DirectionOutgoing,
+		MessageType:     models.MessageTypeInteractive,
+		Content:         "Please tap Send location",
+		Status:          models.MessageStatusSent,
+		InteractiveData: models.JSONB{
+			"type": "location_request",
+			"body": "Please tap Send location to share your delivery pin so we can check if we deliver to you.",
+		},
 	}
-	assert.True(t, foundNotice, "customer should receive the unreadable-location notice")
-	assert.True(t, foundResend, "customer should receive a new location request")
+	require.NoError(t, app.DB.Create(&pending).Error)
+
+	// Real Cloud API live-location webhooks often omit the nested unsupported object.
+	app.processIncomingMessageFull(account.PhoneID, IncomingTextMessage{
+		From:      contact.PhoneNumber,
+		ID:        "wamid.live_location_bare",
+		Timestamp: "1710000000",
+		Type:      "unsupported",
+	}, "Tester")
+
+	var outs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).
+		Order("created_at ASC").Find(&outs).Error)
+	require.GreaterOrEqual(t, len(outs), 3)
+	assertUnsupportedLocationReask(t, outs, pending.ID)
 }
 
 func TestProcessIncomingMessageFull_LiveLocationWithoutPendingSkips(t *testing.T) {
@@ -894,8 +937,220 @@ func TestProcessIncomingMessageFull_LiveLocationWithoutPendingSkips(t *testing.T
 	var outs []models.Message
 	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).Find(&outs).Error)
 	for _, msg := range outs {
+		assert.NotContains(t, msg.Content, "Live locations are not supported")
 		assert.NotContains(t, msg.Content, "couldn’t read a location pin")
+		assert.NotContains(t, msg.Content, "That message type isn't supported here")
 	}
+}
+
+func TestProcessIncomingMessageFull_UnsupportedWhileLatestInteractiveIsButtonSkips(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+
+	olderLocation := models.Message{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		ContactID:       contact.ID,
+		Direction:       models.DirectionOutgoing,
+		MessageType:     models.MessageTypeInteractive,
+		Content:         "Please tap Send location",
+		Status:          models.MessageStatusSent,
+		InteractiveData: models.JSONB{
+			"type": "location_request",
+			"body": "Please tap Send location to share your delivery pin so we can check if we deliver to you.",
+		},
+	}
+	latestButton := models.Message{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		ContactID:       contact.ID,
+		Direction:       models.DirectionOutgoing,
+		MessageType:     models.MessageTypeInteractive,
+		Content:         "Would you like to pick up instead?",
+		Status:          models.MessageStatusSent,
+		InteractiveData: models.JSONB{
+			"type": "button",
+			"body": "Would you like to pick up instead?",
+			"buttons": []any{
+				map[string]any{"id": "pickup", "title": "Store pickup"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(&olderLocation).Error)
+	require.NoError(t, app.DB.Create(&latestButton).Error)
+	require.NoError(t, app.DB.Model(&olderLocation).Update("created_at", time.Now().Add(-2*time.Minute)).Error)
+	require.NoError(t, app.DB.Model(&latestButton).Update("created_at", time.Now().Add(-1*time.Minute)).Error)
+
+	app.processIncomingMessageFull(account.PhoneID, IncomingTextMessage{
+		From:      contact.PhoneNumber,
+		ID:        "wamid.unsupported_after_button",
+		Timestamp: "1710000000",
+		Type:      "unsupported",
+	}, "Tester")
+
+	var outs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).Find(&outs).Error)
+	for _, msg := range outs {
+		assert.NotContains(t, msg.Content, "Live locations are not supported")
+		assert.NotContains(t, msg.Content, "That message type isn't supported here")
+		if msg.MessageType == models.MessageTypeInteractive &&
+			msg.InteractiveData != nil &&
+			msg.InteractiveData["type"] == "location_request" {
+			assert.Equal(t, olderLocation.ID, msg.ID, "must not send a new location request when latest interactive is a button")
+		}
+	}
+}
+
+var registerUnsupportedAwaitCodedFlow sync.Once
+
+const unsupportedAwaitCodedFlowKey = "test_unsupported_await_buttons"
+
+func ensureUnsupportedAwaitCodedFlow() {
+	registerUnsupportedAwaitCodedFlow.Do(func() {
+		codedflow.Register(codedflow.NewFlow(
+			unsupportedAwaitCodedFlowKey,
+			"Unsupported await test",
+			"Test flow parked on reply buttons",
+			[]codedflow.CodedStep{{Name: "wait_buttons", Label: "Pick one"}},
+			func(c *codedflow.Conv) error {
+				_, _ = c.AskButtons("wait_buttons", codedflow.ButtonPrompt{
+					Body: "Pick one",
+					Buttons: []codedflow.Button{
+						{ID: "opt_a", Title: "A"},
+						{ID: "opt_b", Title: "B"},
+					},
+				})
+				return nil
+			},
+		))
+	})
+}
+
+func TestProcessIncomingMessageFull_UnsupportedWhileCodedWaitReasks(t *testing.T) {
+	ensureUnsupportedAwaitCodedFlow()
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+
+	session := models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusActive,
+		CurrentStep:     "wait_buttons",
+		SessionData: models.JSONB{
+			codedflow.DataKey: unsupportedAwaitCodedFlowKey,
+		},
+		StartedAt:      time.Now(),
+		LastActivityAt: time.Now(),
+	}
+	require.NoError(t, app.DB.Create(&session).Error)
+
+	prior := models.Message{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		ContactID:       contact.ID,
+		Direction:       models.DirectionOutgoing,
+		MessageType:     models.MessageTypeInteractive,
+		Content:         "Pick one",
+		Status:          models.MessageStatusSent,
+		InteractiveData: models.JSONB{
+			"type": "button",
+			"body": "Pick one",
+			"buttons": []any{
+				map[string]any{"id": "opt_a", "title": "A"},
+				map[string]any{"id": "opt_b", "title": "B"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(&prior).Error)
+
+	app.processIncomingMessageFull(account.PhoneID, IncomingTextMessage{
+		From:      contact.PhoneNumber,
+		ID:        "wamid.unsupported_coded_wait",
+		Timestamp: "1710000000",
+		Type:      "unsupported",
+	}, "Tester")
+
+	var outs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).
+		Order("created_at ASC").Find(&outs).Error)
+	foundNotice := false
+	foundReprompt := false
+	for _, msg := range outs {
+		if strings.Contains(msg.Content, "That message type isn't supported here") {
+			foundNotice = true
+		}
+		if msg.ID != prior.ID &&
+			msg.MessageType == models.MessageTypeInteractive &&
+			msg.InteractiveData != nil &&
+			msg.InteractiveData["type"] == "button" {
+			foundReprompt = true
+		}
+	}
+	assert.True(t, foundNotice, "customer should receive the generic unsupported notice")
+	assert.True(t, foundReprompt, "customer should receive the buttons prompt again")
+
+	var dbSession models.ChatbotSession
+	require.NoError(t, app.DB.First(&dbSession, session.ID).Error)
+	assert.Equal(t, "wait_buttons", dbSession.CurrentStep)
+	assert.Equal(t, models.SessionStatusActive, dbSession.Status)
+}
+
+func TestProcessIncomingMessageFull_UnsupportedWhileCheckoutEmailReasks(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+
+	session := models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusActive,
+		SessionData: models.JSONB{
+			"checkout": map[string]any{
+				"step": "email",
+				"flow": "checkout",
+			},
+		},
+		StartedAt:      time.Now(),
+		LastActivityAt: time.Now(),
+	}
+	require.NoError(t, app.DB.Create(&session).Error)
+
+	app.processIncomingMessageFull(account.PhoneID, IncomingTextMessage{
+		From:      contact.PhoneNumber,
+		ID:        "wamid.unsupported_checkout_email",
+		Timestamp: "1710000000",
+		Type:      "unsupported",
+	}, "Tester")
+
+	var outs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).
+		Order("created_at ASC").Find(&outs).Error)
+	foundNotice := false
+	foundEmailPrompt := false
+	for _, msg := range outs {
+		if strings.Contains(msg.Content, "That message type isn't supported here") {
+			foundNotice = true
+		}
+		if strings.Contains(msg.Content, "Please share your email address") {
+			foundEmailPrompt = true
+		}
+	}
+	assert.True(t, foundNotice, "customer should receive the generic unsupported notice")
+	assert.True(t, foundEmailPrompt, "customer should receive the email prompt again")
 }
 
 func TestProcessIncomingMessageFull_AudioWithActiveTransferSkipsHandoff(t *testing.T) {

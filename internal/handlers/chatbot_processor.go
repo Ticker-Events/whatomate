@@ -428,11 +428,10 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		}
 	}
 
-	// Live location arrives as unsupported/location with no coordinates. When
-	// a Send location request is pending, ask again instead of staying silent.
-	if msg.Type == "unsupported" && msg.Unsupported != nil &&
-		strings.EqualFold(strings.TrimSpace(msg.Unsupported.Type), "location") {
-		if a.handleUnreadableLocationWhilePending(account, contact, settings) {
+	// Unsupported inbound (live location, etc.) has no usable content. When the
+	// contact is waiting on a prompt, explain and re-ask instead of staying silent.
+	if msg.Type == "unsupported" {
+		if a.handleUnsupportedWhileAwaitingInput(account, contact, settings) {
 			return
 		}
 	}
@@ -703,23 +702,64 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	}
 }
 
-// handleUnreadableLocationWhilePending sends a notice and re-asks for a
-// WhatsApp location pin when the latest outgoing message was a location
-// request and the inbound message had no usable coordinates (live location).
-func (a *App) handleUnreadableLocationWhilePending(account *models.WhatsAppAccount, contact *models.Contact, settings *models.ChatbotSettings) bool {
+// handleUnsupportedWhileAwaitingInput sends a notice and re-prompts when an
+// unsupported inbound arrives while a coded flow, graph node, checkout step, or
+// location request is waiting for a reply.
+func (a *App) handleUnsupportedWhileAwaitingInput(account *models.WhatsAppAccount, contact *models.Contact, settings *models.ChatbotSettings) bool {
 	if account == nil || contact == nil {
 		return false
 	}
-	body, ok := a.latestPendingLocationRequestBody(account, contact)
-	if !ok {
-		return false
-	}
-	notice := codedflow.LocationPinUnreadableMessage
 	timeoutMins := 30
 	if settings != nil && settings.SessionTimeoutMins > 0 {
 		timeoutMins = settings.SessionTimeoutMins
 	}
 	session := a.findActiveSession(account.OrganizationID, contact.ID, account.Name, timeoutMins)
+	locBody, locPending := a.latestPendingLocationRequestBody(account, contact)
+
+	if session != nil && codedflow.SessionKey(session) != "" && strings.TrimSpace(session.CurrentStep) != "" {
+		a.sendUnsupportedAwaitingNotice(account, contact, session, locPending)
+		a.resumeCodedFlow(account, contact, session, "", "", nil)
+		return true
+	}
+	if session != nil && session.CurrentFlowID != nil && strings.TrimSpace(session.CurrentStep) != "" {
+		flow, err := a.getChatbotFlowByIDCached(account.OrganizationID, *session.CurrentFlowID)
+		if err != nil || flow == nil || flow.Graph == nil {
+			a.Log.Error("Unsupported wait: active graph flow not loadable",
+				"error", err, "session", session.ID, "flow", session.CurrentFlowID)
+			return false
+		}
+		a.sendUnsupportedAwaitingNotice(account, contact, session, locPending)
+		if err := a.runChatGraph(account, contact, session, flow, "", "", nil); err != nil {
+			a.Log.Error("Unsupported wait: graph re-prompt failed",
+				"error", err, "session", session.ID, "flow", flow.ID)
+		}
+		return true
+	}
+	if session != nil {
+		if st := getCheckoutState(session); st != nil {
+			a.sendUnsupportedAwaitingNotice(account, contact, session, locPending || st.Step == "location")
+			a.repromptCheckoutStep(account, contact, session, settings, st)
+			return true
+		}
+	}
+	if locPending {
+		a.sendUnsupportedAwaitingNotice(account, contact, session, true)
+		if err := a.sendAndSaveLocationRequest(account, contact, locBody); err != nil {
+			a.Log.Error("Failed to re-send location request after unsupported share",
+				"error", err, "contact", contact.PhoneNumber)
+		}
+		return true
+	}
+	return false
+}
+
+// sendUnsupportedAwaitingNotice tells the customer their reply could not be read.
+// preferLocation uses the live-location copy; otherwise the generic waiting copy.
+func (a *App) sendUnsupportedAwaitingNotice(account *models.WhatsAppAccount, contact *models.Contact, session *models.ChatbotSession, preferLocation bool) {
+	notice := codedflow.UnsupportedWhileAwaitingMessage
+	if preferLocation {
+		notice = codedflow.LocationRequestUnsupportedMessage
+	}
 	if session != nil && session.SessionData != nil {
 		lang := asString(session.SessionData[codedflow.CustomerLanguageKey])
 		if !codedflow.EnglishLanguage(lang) {
@@ -731,12 +771,8 @@ func (a *App) handleUnreadableLocationWhilePending(account *models.WhatsAppAccou
 		}
 	}
 	if err := a.sendAndSaveTextMessage(account, contact, notice); err != nil {
-		a.Log.Error("Failed to send unreadable-location notice", "error", err, "contact", contact.PhoneNumber)
+		a.Log.Error("Failed to send unsupported-awaiting notice", "error", err, "contact", contact.PhoneNumber)
 	}
-	if err := a.sendAndSaveLocationRequest(account, contact, body); err != nil {
-		a.Log.Error("Failed to re-send location request after unreadable share", "error", err, "contact", contact.PhoneNumber)
-	}
-	return true
 }
 
 // latestPendingLocationRequestBody returns the body of the latest outgoing

@@ -28,9 +28,17 @@ const (
 	VoiceUnsupportedMessage = "I'm unable to handle voice messages right now. I'm connecting you with a team member who can help."
 
 	// LocationPinUnreadableMessage is sent when a location pin was requested but
-	// the reply had no usable latitude/longitude (live location or a Maps link
-	// without coordinates).
+	// the reply had no usable latitude/longitude (a Maps link without coordinates).
 	LocationPinUnreadableMessage = "Please tap Send location on the next message. I couldn’t read a location pin from that message."
+
+	// LocationRequestUnsupportedMessage is sent when a location pin was requested
+	// and the customer replies with an unsupported WhatsApp message (typically a
+	// live location share that Cloud API cannot decode).
+	LocationRequestUnsupportedMessage = "Live locations are not supported. Please share a fixed location pin by tapping Send location, or use Attach > Location > Share your location."
+
+	// UnsupportedWhileAwaitingMessage is sent when any other waiting step receives
+	// an unsupported WhatsApp message type. The previous prompt is re-sent after.
+	UnsupportedWhileAwaitingMessage = "That message type isn't supported here. Please reply again using the previous instructions."
 )
 
 // Choice is one accepted answer. ID is the button or row id, never a translated title.
