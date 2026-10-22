@@ -48,6 +48,49 @@ func TestGetCommerceCatalogStatus_ActiveWhenEnabled(t *testing.T) {
 	assert.True(t, resp.Data.Active)
 }
 
+func TestGetCommerceCatalogStatus_ActiveWithoutAccountQuery(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	role := commerceCatalogChatRole(t, app, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID,
+		testutil.WithEmail(testutil.UniqueEmail("catalog-status-default")),
+		testutil.WithRoleID(&role.ID),
+	)
+	enableTiqrEcommerce(t, app, org.ID, account.Name, "shop", true)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	// No account query: resolveWhatsAppAccount falls back to default/any account.
+
+	require.NoError(t, app.GetCommerceCatalogStatus(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data struct {
+			Active bool `json:"active"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	assert.True(t, resp.Data.Active)
+}
+
+func TestGetCommerceCatalogStatus_UnknownAccountNotFound(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, _ := createProcessorTestOrg(t, app)
+	role := commerceCatalogChatRole(t, app, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID,
+		testutil.WithEmail(testutil.UniqueEmail("catalog-status-unknown")),
+		testutil.WithRoleID(&role.ID),
+	)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetQueryParam(req, "account", "does-not-exist")
+
+	require.NoError(t, app.GetCommerceCatalogStatus(req))
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+}
+
 func TestGetCommerceCatalogStatus_InactiveWhenDisabled(t *testing.T) {
 	app := newProcessorTestApp(t)
 	org, account := createProcessorTestOrg(t, app)
@@ -117,6 +160,42 @@ func TestListCommerceCatalogCollections_ReturnsPage(t *testing.T) {
 	assert.Equal(t, 1, resp.Data.Page)
 	assert.Equal(t, 10, resp.Data.PageSize)
 	assert.Len(t, resp.Data.Results, 10)
+}
+
+func TestListCommerceCatalogCollections_WithoutAccountQuery(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	role := commerceCatalogChatRole(t, app, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID,
+		testutil.WithEmail(testutil.UniqueEmail("catalog-list-default")),
+		testutil.WithRoleID(&role.ID),
+	)
+	enableTiqrEcommerce(t, app, org.ID, account.Name, "shop", true)
+
+	srv := newStoreServerWith(t, nil, nil, map[string]any{
+		"id":       42,
+		"name":     "Demo",
+		"currency": "INR",
+	})
+	useStoreREST(t, srv)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{
+		CommerceRESTURL: srv.URL,
+		CommerceStoreID: "42",
+	})
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetQueryParam(req, "page", "1")
+
+	require.NoError(t, app.ListCommerceCatalogCollections(req))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data commerceCatalogPageResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	assert.Equal(t, 2, resp.Data.Count)
+	assert.Len(t, resp.Data.Results, 2)
 }
 
 func TestSendCommerceCatalog_Collections_SendsListWithoutTouchingSession(t *testing.T) {

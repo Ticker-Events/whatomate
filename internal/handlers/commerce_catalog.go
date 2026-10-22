@@ -471,15 +471,20 @@ func (a *App) commerceCatalogListContext(r *fastglue.Request) (orgID, userID uui
 
 func (a *App) commerceCatalogAccount(r *fastglue.Request, orgID uuid.UUID) (string, error) {
 	accountName := strings.TrimSpace(string(r.RequestCtx.QueryArgs().Peek("account")))
-	if accountName == "" {
+	if accountName != "" {
+		if !a.whatsAppAccountInOrg(orgID, accountName) {
+			_ = r.SendErrorEnvelope(fasthttp.StatusNotFound, "WhatsApp account not found", nil, "")
+			return "", errEnvelopeSent
+		}
+		return accountName, nil
+	}
+	// Match contact sends: fall back to default outgoing, then any account.
+	account, err := a.resolveWhatsAppAccount(orgID, "")
+	if err != nil {
 		_ = r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account is required", nil, "")
 		return "", errEnvelopeSent
 	}
-	if !a.whatsAppAccountInOrg(orgID, accountName) {
-		_ = r.SendErrorEnvelope(fasthttp.StatusNotFound, "WhatsApp account not found", nil, "")
-		return "", errEnvelopeSent
-	}
-	return accountName, nil
+	return account.Name, nil
 }
 
 func (a *App) tiqrEcommerceEnabled(orgID uuid.UUID, accountName string) bool {
