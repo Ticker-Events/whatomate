@@ -104,13 +104,14 @@ import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 import PreviewButtonGroup from '@/components/chatbot/flow-preview/PreviewButtonGroup.vue'
 import TemplatePicker from '@/components/chat/TemplatePicker.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
+import ChatFlowDebugPanel from '@/components/chat/ChatFlowDebugPanel.vue'
 import ConversationNotes from '@/components/chat/ConversationNotes.vue'
 import CallButton from '@/components/calling/CallButton.vue'
 import { useNotesStore } from '@/stores/notes'
 import { useHeaderMedia } from '@/composables/useHeaderMedia'
 import { CreateContactDialog } from '@/components/shared'
 import HeaderMediaUpload from '@/components/shared/HeaderMediaUpload.vue'
-import { Info } from 'lucide-vue-next'
+import { Bug, Info } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -142,7 +143,51 @@ const isAtBottom = ref(true)
 const SCROLL_BOTTOM_THRESHOLD = 80
 const isInfoPanelOpen = ref(false)
 const isNotesPanelOpen = ref(false)
+const DEBUG_PREF_KEY = 'whatomate.chat.flowDebug'
+const isDebugPanelOpen = ref(
+  typeof localStorage !== 'undefined' && localStorage.getItem(DEBUG_PREF_KEY) === '1',
+)
+const debugSelectedMessageId = ref<string | null>(null)
+const debugMatchedMessageIds = ref<string[]>([])
 const contactSessionData = ref<any>(null)
+
+watch(isDebugPanelOpen, (open) => {
+  try {
+    localStorage.setItem(DEBUG_PREF_KEY, open ? '1' : '0')
+  } catch {
+    /* ignore quota / private mode */
+  }
+  if (!open) {
+    debugSelectedMessageId.value = null
+    debugMatchedMessageIds.value = []
+  }
+})
+
+function toggleDebugPanel() {
+  isDebugPanelOpen.value = !isDebugPanelOpen.value
+  if (isDebugPanelOpen.value) {
+    isInfoPanelOpen.value = false
+  }
+}
+
+function toggleInfoPanel() {
+  isInfoPanelOpen.value = !isInfoPanelOpen.value
+  if (isInfoPanelOpen.value) {
+    isDebugPanelOpen.value = false
+  }
+}
+
+function selectDebugMessage(messageId: string) {
+  if (!isDebugPanelOpen.value) {
+    isDebugPanelOpen.value = true
+    isInfoPanelOpen.value = false
+  }
+  debugSelectedMessageId.value = messageId
+}
+
+function isDebugMatchedMessage(messageId: string) {
+  return debugMatchedMessageIds.value.includes(messageId)
+}
 
 // Multi-account state
 const selectedAccount = ref<string | null>(null)
@@ -580,6 +625,8 @@ async function selectContact(id: string) {
     contactsStore.setAccountFilter(null)
 
     contactsStore.setCurrentContact(contact)
+    debugSelectedMessageId.value = null
+    debugMatchedMessageIds.value = []
     await contactsStore.fetchMessages(id)
 
     // Discover distinct accounts from the unfiltered message set
@@ -1640,9 +1687,9 @@ async function sendMediaMessage() {
 </script>
 
 <template>
-  <div class="flex h-full bg-[#0a0a0b] light:bg-gray-50">
+  <div class="flex h-full min-h-0 overflow-hidden bg-[#0a0a0b] light:bg-gray-50">
     <!-- Contacts List -->
-    <div class="w-80 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white">
+    <div class="w-80 shrink-0 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white">
       <!-- Search Header -->
       <div class="p-2 border-b border-white/[0.08] light:border-gray-200">
         <div class="flex items-center gap-2">
@@ -1792,7 +1839,7 @@ async function sendMediaMessage() {
     </div>
 
     <!-- Chat Area -->
-    <div class="flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50">
+    <div class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[#0f0f10] light:bg-gray-50">
       <!-- No Contact Selected -->
       <div
         v-if="!contactsStore.currentContact"
@@ -1902,10 +1949,25 @@ async function sendMediaMessage() {
                 <Button
                   variant="ghost"
                   size="icon"
+                  id="debug-button"
+                  class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
+                  :class="isDebugPanelOpen && 'bg-sky-500/10 text-sky-400 light:bg-sky-50 light:text-sky-600'"
+                  @click="toggleDebugPanel"
+                >
+                  <Bug class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ $t('chat.debugToggle') }}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   id="info-button"
                   class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
                   :class="isInfoPanelOpen && 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'"
-                  @click="isInfoPanelOpen = !isInfoPanelOpen"
+                  @click="toggleInfoPanel"
                 >
                   <Info class="h-4 w-4" />
                 </Button>
@@ -2018,15 +2080,28 @@ async function sendMediaMessage() {
               <div
                 :id="`message-${message.id}`"
                 :class="[
-                  'flex group',
+                  'flex group items-end gap-1',
                   message.direction === 'outgoing' ? 'justify-end' : 'justify-start'
                 ]"
               >
+              <button
+                v-if="isDebugPanelOpen && isDebugMatchedMessage(message.id)"
+                type="button"
+                class="mb-1 h-6 w-6 shrink-0 rounded-full flex items-center justify-center border transition-colors"
+                :class="debugSelectedMessageId === message.id
+                  ? 'bg-sky-500/20 border-sky-500/40 text-sky-400'
+                  : 'bg-white/[0.06] border-white/10 text-white/40 hover:text-sky-300 light:bg-gray-100 light:border-gray-200 light:text-gray-500'"
+                :title="$t('chat.debugMessageHint')"
+                @click="selectDebugMessage(message.id)"
+              >
+                <Bug class="h-3 w-3" />
+              </button>
               <div
                 :class="[
                   'chat-bubble',
                   message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming',
-                  getCarouselCards(message).length > 0 ? 'chat-bubble-carousel' : ''
+                  getCarouselCards(message).length > 0 ? 'chat-bubble-carousel' : '',
+                  isDebugPanelOpen && debugSelectedMessageId === message.id ? 'ring-2 ring-sky-500/50' : ''
                 ]"
               >
                 <!-- Reply preview (if this message is replying to another) -->
@@ -2548,6 +2623,17 @@ async function sendMediaMessage() {
       :session-data="contactSessionData"
       @close="isInfoPanelOpen = false"
       @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
+    />
+
+    <!-- Coded-flow debug panel -->
+    <ChatFlowDebugPanel
+      v-if="contactsStore.currentContact && isDebugPanelOpen"
+      :contact-id="contactsStore.currentContact.id"
+      :messages="contactsStore.messages"
+      :selected-message-id="debugSelectedMessageId"
+      @close="isDebugPanelOpen = false"
+      @update:matched-message-ids="debugMatchedMessageIds = $event"
+      @update:selected-message-id="debugSelectedMessageId = $event"
     />
 
     <!-- Template Params Dialog -->

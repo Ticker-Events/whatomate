@@ -737,6 +737,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/contacts/{id}/tags/remove", app.RemoveContactTag)
 	g.GET("/api/contacts/{id}/session-data", app.GetContactSessionData)
 	g.GET("/api/contacts/{id}/commerce-sessions", app.ListContactCommerceSessions)
+	g.GET("/api/contacts/{id}/session-archives/{sessionId}", app.GetContactSessionArchive)
 
 	// Generic Import/Export
 	g.POST("/api/export", app.ExportData)

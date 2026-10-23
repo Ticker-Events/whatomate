@@ -125,3 +125,31 @@ func TestLoadSessionArchiveLegacyTurnsSetsTurnCount(t *testing.T) {
 	assert.Len(t, loaded.Turns, 2)
 	assert.True(t, HasSessionArchive(loaded))
 }
+
+func TestTurnsFromMapsIgnoresIndex(t *testing.T) {
+	turns, err := TurnsFromMaps([]map[string]any{
+		{
+			"index": 0,
+			"at":    "2020-01-01T00:00:00Z",
+			"step":  "buy",
+			"messages": []any{
+				map[string]any{"type": "text", "content": "hi"},
+			},
+			"ai_calls": []any{
+				map[string]any{"role": "intent", "route": "buy", "reasoning": "shop"},
+			},
+			"api_calls": []any{
+				map[string]any{"name": "list", "path": "/x", "curl": "curl"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, turns, 1)
+	assert.Equal(t, "buy", turns[0].Step)
+	require.Len(t, turns[0].Messages, 1)
+	assert.Equal(t, "hi", turns[0].Messages[0].Content)
+	require.Len(t, turns[0].AICalls, 1)
+	assert.Equal(t, "shop", turns[0].AICalls[0].Reasoning)
+	require.Len(t, turns[0].APICalls, 1)
+	assert.Equal(t, "list", turns[0].APICalls[0].Name)
+}

@@ -1516,6 +1516,152 @@ func (a *App) ListContactCommerceSessions(r *fastglue.Request) error {
 	return r.SendEnvelope(ListContactCommerceSessionsResponse{Sessions: items})
 }
 
+// ContactSessionArchiveResponse is the coded-flow session archive for chat debug.
+// Shape matches Preview "Load session log" / SessionArchive with turns populated.
+type ContactSessionArchiveResponse struct {
+	Version        int                            `json:"version"`
+	FlowKey        string                         `json:"flow_key"`
+	SessionID      string                         `json:"session_id"`
+	ContactID      string                         `json:"contact_id"`
+	OrganizationID string                         `json:"organization_id,omitempty"`
+	StartedAt      string                         `json:"started_at,omitempty"`
+	EndedAt        string                         `json:"ended_at,omitempty"`
+	Status         string                         `json:"status,omitempty"`
+	TurnCount      int                            `json:"turn_count"`
+	Turns          []codedflow.SessionArchiveTurn `json:"turns"`
+}
+
+// GetContactSessionArchive returns the full flow archive for one chatbot session
+// (visual graph or coded). Prefers Firestore turns; falls back to legacy marker
+// turns and local SessionData turns when Firestore is disabled.
+func (a *App) GetContactSessionArchive(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	contactID, err := parsePathUUID(r, "id", "contact")
+	if err != nil {
+		return nil
+	}
+	sessionID, err := parsePathUUID(r, "sessionId", "session")
+	if err != nil {
+		return nil
+	}
+
+	var contact models.Contact
+	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
+	if !a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID) {
+		query = query.Where("assigned_user_id = ?", userID)
+	}
+	if err := query.First(&contact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+
+	var session models.ChatbotSession
+	if err := a.DB.Where(
+		"id = ? AND contact_id = ? AND organization_id = ?",
+		sessionID, contactID, orgID,
+	).First(&session).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Session not found", nil, "")
+	}
+
+	marker := codedflow.LoadSessionArchive(&session)
+	if !codedflow.HasSessionArchive(marker) {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Session archive not found", nil, "")
+	}
+
+	resp := ContactSessionArchiveResponse{
+		Version:        marker.Version,
+		FlowKey:        marker.FlowKey,
+		SessionID:      marker.SessionID,
+		ContactID:      marker.ContactID,
+		OrganizationID: marker.OrganizationID,
+		StartedAt:      marker.StartedAt,
+		EndedAt:        marker.EndedAt,
+		Status:         marker.Status,
+		TurnCount:      marker.TurnCount,
+		Turns:          []codedflow.SessionArchiveTurn{},
+	}
+	if resp.SessionID == "" {
+		resp.SessionID = session.ID.String()
+	}
+	if resp.ContactID == "" {
+		resp.ContactID = contactID.String()
+	}
+	if resp.OrganizationID == "" {
+		resp.OrganizationID = orgID.String()
+	}
+	if resp.FlowKey == "" {
+		resp.FlowKey = sessionArchiveFlowKey(session.SessionData)
+	}
+	if resp.Version == 0 {
+		resp.Version = 1
+	}
+
+	if a.Firestore != nil && a.Firestore.Enabled() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		meta, turnMaps, ok, fsErr := a.Firestore.GetSessionArchive(ctx, contactID.String(), sessionID.String())
+		if fsErr != nil {
+			a.Log.Error("Failed to load session archive from Firestore",
+				"error", fsErr, "contact_id", contactID, "session_id", sessionID)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load session archive", nil, "")
+		}
+		if ok {
+			if meta.Version != 0 {
+				resp.Version = meta.Version
+			}
+			if meta.FlowKey != "" {
+				resp.FlowKey = meta.FlowKey
+			}
+			if meta.StartedAt != "" {
+				resp.StartedAt = meta.StartedAt
+			}
+			if meta.EndedAt != "" {
+				resp.EndedAt = meta.EndedAt
+			}
+			if meta.Status != "" {
+				resp.Status = meta.Status
+			}
+			if meta.TurnCount > 0 {
+				resp.TurnCount = meta.TurnCount
+			}
+			turns, convErr := codedflow.TurnsFromMaps(turnMaps)
+			if convErr != nil {
+				a.Log.Error("Failed to decode session archive turns",
+					"error", convErr, "session_id", sessionID)
+				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load session archive", nil, "")
+			}
+			resp.Turns = turns
+			if resp.TurnCount == 0 {
+				resp.TurnCount = len(turns)
+			}
+			return r.SendEnvelope(resp)
+		}
+	}
+
+	// Legacy Postgres blob: turns may still live on the marker.
+	if len(marker.Turns) > 0 {
+		resp.Turns = marker.Turns
+		if resp.TurnCount == 0 {
+			resp.TurnCount = len(marker.Turns)
+		}
+		return r.SendEnvelope(resp)
+	}
+
+	// Local/dev: turns stored on SessionData when Firestore is disabled.
+	if localTurns := codedflow.LoadLocalArchiveTurns(&session); len(localTurns) > 0 {
+		resp.Turns = localTurns
+		if resp.TurnCount == 0 {
+			resp.TurnCount = len(localTurns)
+		}
+		return r.SendEnvelope(resp)
+	}
+
+	// Marker says archive exists but turns are only in Firestore and unavailable.
+	return r.SendEnvelope(resp)
+}
+
 // UpdateContactTagsRequest represents the request body for updating contact tags
 type UpdateContactTagsRequest struct {
 	Tags      []string `json:"tags"`
