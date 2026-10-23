@@ -38,7 +38,9 @@ import {
   Trash2,
   Play,
   ShoppingBag,
+  LayoutGrid,
 } from 'lucide-vue-next'
+import { layoutFlowNodes } from '@/utils/layoutFlow'
 
 import AuditLogPanel from '@/components/shared/AuditLogPanel.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
@@ -335,6 +337,14 @@ function spreadParallelLabels() {
       group[i].labelBgPadding = [0, 0] as [number, number]
     }
   }
+}
+
+function beautifyLayout() {
+  if (nodes.value.length === 0) return
+  layoutFlowNodes(nodes.value, edges.value)
+  spreadParallelLabels()
+  hasUnsavedChanges.value = true
+  setTimeout(() => fitView({ padding: 0.2 }), 50)
 }
 
 function onEdgeClick({ edge }: EdgeMouseEvent) {
@@ -730,6 +740,10 @@ onMounted(async () => {
             <span class="text-sm">{{ enabled ? $t('flowBuilder.enabled') : $t('flowBuilder.disabled') }}</span>
           </div>
 
+          <Button variant="outline" size="sm" @click="beautifyLayout" :disabled="nodes.length === 0">
+            <LayoutGrid class="h-4 w-4 mr-1" />
+            {{ $t('flowBuilder.beautify', 'Beautify') }}
+          </Button>
           <Button variant="outline" size="sm" @click="showPreview = true" :disabled="nodes.length === 0">
             <Play class="h-4 w-4 mr-1" />
             {{ $t('flowBuilder.preview', 'Preview') }}

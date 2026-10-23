@@ -2455,6 +2455,7 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "cancel": "Cancel",
+    "beautify": "Beautify",
     "saveFlow": "Save Flow",
     "saving": "Saving",
     "loading": "Loading",
@@ -2609,7 +2610,8 @@
     "deleteNodeConfirmTitle": "Delete Node",
     "deleteNodeConfirmDesc": "Are you sure you want to delete this node? All connected edges will also be removed.",
     "flowSaving": "Saving...",
-    "flowSave": "Save"
+    "flowSave": "Save",
+    "flowBeautify": "Beautify"
   },
   "callTransfers": {
     "title": "Call Transfers",

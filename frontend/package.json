@@ -17,6 +17,7 @@
     "test:report": "playwright show-report"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
     "@radix-icons/vue": "^1.0.0",
     "@tanstack/vue-query": "^5.17.0",
     "@vee-validate/zod": "^4.15.1",
