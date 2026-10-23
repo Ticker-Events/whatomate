@@ -11,6 +11,9 @@ import (
 const (
 	// ArchiveKey holds the session-archive marker on SessionData (no turns).
 	ArchiveKey = "coded_session_archive"
+	// LocalArchiveTurnsKey holds turns on SessionData when Firestore is disabled
+	// (local/dev debug). Production keeps turns in Firestore only.
+	LocalArchiveTurnsKey = "_archive_turns"
 )
 
 // SessionArchive is the versioned log metadata. Full turns live in Firestore;
@@ -216,6 +219,7 @@ func SanitizeArchiveContext(ctx map[string]any) map[string]any {
 	for key, value := range ctx {
 		lower := strings.ToLower(key)
 		if key == ArchiveKey ||
+			key == LocalArchiveTurnsKey ||
 			strings.Contains(lower, "instruction") ||
 			strings.Contains(lower, "secret") ||
 			strings.Contains(lower, "token") ||
@@ -259,6 +263,79 @@ func TurnToMap(turn SessionArchiveTurn) (map[string]any, error) {
 		return nil, err
 	}
 	return row, nil
+}
+
+// TurnFromMap converts a Firestore turn document back to SessionArchiveTurn.
+// Extra keys such as "index" are ignored.
+func TurnFromMap(row map[string]any) (SessionArchiveTurn, error) {
+	var turn SessionArchiveTurn
+	if len(row) == 0 {
+		return turn, nil
+	}
+	b, err := json.Marshal(row)
+	if err != nil {
+		return turn, err
+	}
+	if err := json.Unmarshal(b, &turn); err != nil {
+		return turn, err
+	}
+	return turn, nil
+}
+
+// TurnsFromMaps converts Firestore turn documents to SessionArchiveTurn values.
+func TurnsFromMaps(rows []map[string]any) ([]SessionArchiveTurn, error) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	out := make([]SessionArchiveTurn, 0, len(rows))
+	for _, row := range rows {
+		turn, err := TurnFromMap(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, turn)
+	}
+	return out, nil
+}
+
+// AppendLocalArchiveTurn stores a turn on SessionData for debug when Firestore is off.
+func AppendLocalArchiveTurn(session *models.ChatbotSession, turn SessionArchiveTurn) {
+	if session == nil {
+		return
+	}
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
+	row, err := TurnToMap(turn)
+	if err != nil {
+		return
+	}
+	existing, _ := session.SessionData[LocalArchiveTurnsKey].([]any)
+	session.SessionData[LocalArchiveTurnsKey] = append(existing, row)
+}
+
+// LoadLocalArchiveTurns reads turns stored under LocalArchiveTurnsKey.
+func LoadLocalArchiveTurns(session *models.ChatbotSession) []SessionArchiveTurn {
+	if session == nil || session.SessionData == nil {
+		return nil
+	}
+	raw, ok := session.SessionData[LocalArchiveTurnsKey].([]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	rows := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	turns, err := TurnsFromMaps(rows)
+	if err != nil {
+		return nil
+	}
+	return turns
 }
 
 // ArchiveInboundFromChat builds the inbound map for a turn.

@@ -2077,3 +2077,171 @@ func TestApp_ListContactCommerceSessions_PerSessionHandoff(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "111", oldLine["product_option"])
 }
+
+func TestApp_GetContactSessionArchive_LegacyTurns(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	sessionID := uuid.New()
+	session := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: sessionID},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusCompleted,
+		StartedAt:       time.Now().Add(-time.Hour),
+		LastActivityAt:  time.Now(),
+		SessionData: models.JSONB{
+			"coded_session_archive": map[string]any{
+				"version":         1,
+				"flow_key":        "tiqr_ecommerce",
+				"session_id":      sessionID.String(),
+				"contact_id":      contact.ID.String(),
+				"organization_id": org.ID.String(),
+				"started_at":      time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+				"status":          "completed",
+				"turn_count":      1,
+				"turns": []any{
+					map[string]any{
+						"at": time.Now().UTC().Format(time.RFC3339),
+						"inbound": map[string]any{
+							"text": "hi",
+						},
+						"messages": []any{
+							map[string]any{
+								"type":    "text",
+								"content": "Welcome",
+								"step":    "greet",
+							},
+						},
+						"ai_calls": []any{
+							map[string]any{
+								"role":      "intent",
+								"route":     "buy",
+								"reasoning": "customer wants to shop",
+							},
+						},
+						"api_calls": []any{
+							map[string]any{
+								"name":        "list_collections",
+								"path":        "/collections",
+								"curl":        "curl ...",
+								"http_status": 200,
+							},
+						},
+						"step":   "greet",
+						"status": "active",
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(session).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+	testutil.SetPathParam(req, "sessionId", sessionID.String())
+
+	err := app.GetContactSessionArchive(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data handlers.ContactSessionArchiveResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	assert.Equal(t, "tiqr_ecommerce", resp.Data.FlowKey)
+	assert.Equal(t, sessionID.String(), resp.Data.SessionID)
+	assert.Equal(t, 1, resp.Data.TurnCount)
+	require.Len(t, resp.Data.Turns, 1)
+	assert.Equal(t, "greet", resp.Data.Turns[0].Step)
+	require.Len(t, resp.Data.Turns[0].Messages, 1)
+	assert.Equal(t, "Welcome", resp.Data.Turns[0].Messages[0].Content)
+	require.Len(t, resp.Data.Turns[0].AICalls, 1)
+	assert.Equal(t, "buy", resp.Data.Turns[0].AICalls[0].Route)
+	require.Len(t, resp.Data.Turns[0].APICalls, 1)
+	assert.Equal(t, "list_collections", resp.Data.Turns[0].APICalls[0].Name)
+}
+
+func TestApp_GetContactSessionArchive_NotFound(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	plain := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusCompleted,
+		StartedAt:       time.Now(),
+		LastActivityAt:  time.Now(),
+		SessionData:     models.JSONB{"name": "no archive"},
+	}
+	require.NoError(t, app.DB.Create(plain).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+	testutil.SetPathParam(req, "sessionId", plain.ID.String())
+
+	err := app.GetContactSessionArchive(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+}
+
+func TestApp_GetContactSessionArchive_WrongOrg(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	otherOrg := testutil.CreateTestOrganization(t, app.DB)
+	adminRole := testutil.CreateAdminRole(t, app.DB, org.ID)
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&adminRole.ID))
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, otherOrg.ID)
+	contact := testutil.CreateTestContact(t, app.DB, otherOrg.ID)
+
+	sessionID := uuid.New()
+	session := &models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: sessionID},
+		OrganizationID:  otherOrg.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusCompleted,
+		StartedAt:       time.Now(),
+		LastActivityAt:  time.Now(),
+		SessionData: models.JSONB{
+			"coded_session_archive": map[string]any{
+				"version":    1,
+				"flow_key":   "tiqr_ecommerce",
+				"session_id": sessionID.String(),
+				"turn_count": 1,
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(session).Error)
+
+	req := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", contact.ID.String())
+	testutil.SetPathParam(req, "sessionId", sessionID.String())
+
+	err := app.GetContactSessionArchive(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+}

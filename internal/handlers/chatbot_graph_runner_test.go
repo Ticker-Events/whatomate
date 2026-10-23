@@ -819,6 +819,43 @@ func TestRunChatGraph_Condition_ExpressionAndOr(t *testing.T) {
 	assert.Equal(t, "true", path[0]["outcome"], "premium-or-high-amount AND active should be true")
 }
 
+func TestRunChatGraph_CommitsArchiveWithConditionExpression(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	expr := `status == "active"`
+	flow := newConditionFlowExpr(t, app, org, account, expr)
+	session.SessionData = models.JSONB{
+		"_flow_id":   flow.ID.String(),
+		"_flow_name": flow.Name,
+		"status":     "active",
+	}
+	require.NoError(t, app.DB.Save(session).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+
+	path := chatGraphPath(t, session)
+	require.NotEmpty(t, path)
+	assert.Equal(t, "condition", path[0]["type"])
+	assert.Equal(t, "true", path[0]["outcome"])
+	assert.Equal(t, expr, path[0]["expression"])
+
+	archive := codedflow.LoadSessionArchive(session)
+	require.NotNil(t, archive)
+	assert.True(t, codedflow.HasSessionArchive(archive))
+	assert.Equal(t, flow.Name, archive.FlowKey)
+	assert.GreaterOrEqual(t, archive.TurnCount, 1)
+
+	localTurns := codedflow.LoadLocalArchiveTurns(session)
+	require.NotEmpty(t, localTurns, "Firestore-disabled runs should keep turns on SessionData")
+	require.NotNil(t, localTurns[0].Context)
+	rawPath, ok := localTurns[0].Context["__path__"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, rawPath)
+	first, ok := rawPath[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, expr, first["expression"])
+}
+
 func TestRunChatGraph_Condition_ExpressionNot(t *testing.T) {
 	app, org, account, contact, session := newGraphTestFixtures(t)
 	flow := newConditionFlowExpr(t, app, org, account, `not banned and status == "active"`)

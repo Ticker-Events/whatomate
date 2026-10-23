@@ -83,7 +83,7 @@ func (a *App) runChatGraph(
 	userInput string,
 	buttonID string,
 	flowResponseData map[string]any,
-) error {
+) (err error) {
 	graph, err := parseChatGraph(flow.Graph)
 	if err != nil {
 		return fmt.Errorf("parse chat graph: %w", err)
@@ -92,6 +92,7 @@ func (a *App) runChatGraph(
 		return errors.New("flow has no v2 graph; legacy executor should have run")
 	}
 
+	archive := &codedflow.PreviewSink{Session: session}
 	ctx := &chatNodeCtx{
 		account:          account,
 		contact:          contact,
@@ -99,6 +100,18 @@ func (a *App) runChatGraph(
 		userInput:        userInput,
 		buttonID:         buttonID,
 		flowResponseData: flowResponseData,
+		archive:          archive,
+	}
+	// Capture inbound before clearing trigger input on entry.
+	inbound := codedflow.ArchiveInboundFromChat(newCodedChat(ctx))
+	flowKey := graphArchiveFlowKey(session, flow)
+
+	finish := func(runErr error) error {
+		if perr := a.persistChatSession(session); perr != nil && runErr == nil {
+			runErr = perr
+		}
+		a.commitGraphArchiveTurn(session, flowKey, archive, inbound)
+		return runErr
 	}
 
 	// Seed built-in template variables so {{phone_number}} / {{contact_name}}
@@ -124,40 +137,42 @@ func (a *App) runChatGraph(
 		if node == nil {
 			a.Log.Error("chat graph node not found",
 				"session", session.ID, "node_id", session.CurrentStep, "flow", flow.ID)
-			return fmt.Errorf("node %q not found", session.CurrentStep)
+			return finish(fmt.Errorf("node %q not found", session.CurrentStep))
 		}
 
 		// Skip condition: if the node config has a truthy expression,
 		// short-circuit through the default edge without executing the
 		// node. Authored from the editor's per-node Advanced section.
 		if expr := stringFromConfig(node.Config, "skip_condition"); expr != "" {
-			matched, err := evaluateConditionExpression(expr, session.SessionData)
-			if err != nil {
+			matched, evalErr := evaluateConditionExpression(expr, session.SessionData)
+			if evalErr != nil {
 				a.Log.Warn("skip_condition failed; ignoring",
-					"node", node.ID, "session", session.ID, "expression", expr, "error", err)
+					"node", node.ID, "session", session.ID, "expression", expr, "error", evalErr)
 			} else if matched {
-				appendChatPath(session, node, "skipped")
+				appendChatPath(session, node, "skipped", map[string]any{
+					"expression":     expr,
+					"skip_condition": true,
+				})
 				next := graph.resolveEdge(node.ID, "default")
 				if next == "" {
 					session.Status = models.SessionStatusCompleted
-					return a.persistChatSession(session)
+					return finish(nil)
 				}
 				session.CurrentStep = next
 				continue
 			}
 		}
 
-		res, err := a.executeChatNode(node, ctx)
-		if err != nil {
-			_ = a.persistChatSession(session)
-			return err
+		res, execErr := a.executeChatNode(node, ctx)
+		if execErr != nil {
+			return finish(execErr)
 		}
 
-		appendChatPath(session, node, res.outcome)
+		appendChatPath(session, node, res.outcome, pathExtraForNode(node))
 
 		if res.yield {
 			// Stay at this node; next inbound resumes here.
-			return a.persistChatSession(session)
+			return finish(nil)
 		}
 
 		// goto_flow may have switched the session to a different flow.
@@ -165,22 +180,20 @@ func (a *App) runChatGraph(
 		// the same run, mirroring IVR's executeGotoFlow recursion. The
 		// outer loop's max-iteration guard prevents A→B→A pathologies.
 		if session.CurrentFlowID != nil && *session.CurrentFlowID != flow.ID {
-			newFlow, err := a.getChatbotFlowByIDCached(account.OrganizationID, *session.CurrentFlowID)
-			if err != nil {
-				_ = a.persistChatSession(session)
-				return fmt.Errorf("goto_flow: load target: %w", err)
+			newFlow, loadErr := a.getChatbotFlowByIDCached(account.OrganizationID, *session.CurrentFlowID)
+			if loadErr != nil {
+				return finish(fmt.Errorf("goto_flow: load target: %w", loadErr))
 			}
 			if newFlow.Graph == nil {
-				_ = a.persistChatSession(session)
-				return errors.New("goto_flow: target flow has no v2 graph")
+				return finish(errors.New("goto_flow: target flow has no v2 graph"))
 			}
-			newGraph, err := parseChatGraph(newFlow.Graph)
-			if err != nil {
-				_ = a.persistChatSession(session)
-				return fmt.Errorf("goto_flow: parse target graph: %w", err)
+			newGraph, parseErr := parseChatGraph(newFlow.Graph)
+			if parseErr != nil {
+				return finish(fmt.Errorf("goto_flow: parse target graph: %w", parseErr))
 			}
 			flow = newFlow
 			graph = newGraph
+			flowKey = graphArchiveFlowKey(session, flow)
 			session.CurrentStep = newGraph.EntryNode
 			continue
 		}
@@ -189,13 +202,70 @@ func (a *App) runChatGraph(
 		if next == "" {
 			// No matching edge → terminal.
 			session.Status = models.SessionStatusCompleted
-			return a.persistChatSession(session)
+			return finish(nil)
 		}
 		session.CurrentStep = next
 	}
 
-	_ = a.persistChatSession(session)
-	return errChatGraphRunaway
+	return finish(errChatGraphRunaway)
+}
+
+// graphArchiveFlowKey picks the archive flow_key for a visual graph session.
+func graphArchiveFlowKey(session *models.ChatbotSession, flow *models.ChatbotFlow) string {
+	if session != nil && session.SessionData != nil {
+		if name, ok := session.SessionData["_flow_name"].(string); ok {
+			if name = strings.TrimSpace(name); name != "" {
+				return name
+			}
+		}
+	}
+	if flow != nil {
+		if name := strings.TrimSpace(flow.Name); name != "" {
+			return name
+		}
+		return "graph:" + flow.ID.String()
+	}
+	return "graph"
+}
+
+// commitGraphArchiveTurn writes one PreviewSink turn to the session marker + Firestore.
+// When Firestore is disabled, turns are also kept on SessionData for local debug.
+func (a *App) commitGraphArchiveTurn(
+	session *models.ChatbotSession,
+	flowKey string,
+	archive *codedflow.PreviewSink,
+	inbound map[string]any,
+) {
+	if a == nil || session == nil || archive == nil {
+		return
+	}
+	committed := codedflow.CommitArchiveTurn(session, flowKey, archive, inbound)
+	if committed != nil && (a.Firestore == nil || !a.Firestore.Enabled()) {
+		codedflow.AppendLocalArchiveTurn(session, committed.Turn)
+	}
+	if err := a.persistSessionData(session); err != nil {
+		a.Log.Warn("persist graph session archive marker failed",
+			"error", err, "session_id", session.ID)
+	}
+	if committed != nil {
+		a.appendSessionArchiveTurnToFirestore(committed)
+	}
+	if codedflow.SessionEnded(session) {
+		a.flushSessionArchiveToFirestore(session)
+	}
+}
+
+// pathExtraForNode adds debug fields for path entries (e.g. condition expression).
+func pathExtraForNode(node *ChatNode) map[string]any {
+	if node == nil {
+		return nil
+	}
+	if node.Type == ChatNodeCondition {
+		if expr := stringFromConfig(node.Config, "expression"); expr != "" {
+			return map[string]any{"expression": expr}
+		}
+	}
+	return nil
 }
 
 // executeChatNode dispatches by node type. Phase 1 implements only
@@ -488,6 +558,7 @@ func (a *App) execChatAPICall(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 
 	replaceVar := func(s string) string { return processTemplate(s, sessionData) }
 	respBody, statusCode, err := a.executeConfiguredAPI(cfgJSONB, replaceVar)
+	a.noteGraphAPICall(ctx, node, cfgJSONB, replaceVar, respBody, statusCode, err)
 	if err != nil {
 		a.Log.Error("api_call node request failed",
 			"node", node.ID, "session", ctx.session.ID, "error", err)
@@ -530,6 +601,66 @@ func (a *App) execChatAPICall(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 	}
 
 	return nodeOutcome{outcome: "http:2xx"}, nil
+}
+
+// noteGraphAPICall records a generic api_call node on the live session archive.
+func (a *App) noteGraphAPICall(
+	ctx *chatNodeCtx,
+	node *ChatNode,
+	cfg models.JSONB,
+	replaceVar func(string) string,
+	respBody []byte,
+	statusCode int,
+	callErr error,
+) {
+	if ctx == nil || ctx.archive == nil || node == nil {
+		return
+	}
+	rawURL, _ := cfg["url"].(string)
+	if replaceVar != nil {
+		rawURL = replaceVar(rawURL)
+	}
+	method := "GET"
+	if m, ok := cfg["method"].(string); ok && m != "" {
+		method = strings.ToUpper(m)
+	}
+	body := ""
+	if bodyTemplate, ok := cfg["body"].(string); ok && bodyTemplate != "" {
+		if replaceVar != nil {
+			body = replaceVar(bodyTemplate)
+		} else {
+			body = bodyTemplate
+		}
+	}
+	headers := map[string]string{"Accept": "application/json"}
+	if strings.EqualFold(method, "POST") || strings.EqualFold(method, "PUT") || strings.EqualFold(method, "PATCH") {
+		headers["Content-Type"] = "application/json"
+	}
+	curl := codedflow.FormatHTTPCurl(method, rawURL, headers, body)
+	errMsg := ""
+	if callErr != nil {
+		errMsg = callErr.Error()
+	}
+	var parsed any
+	if len(respBody) > 0 {
+		_ = json.Unmarshal(respBody, &parsed)
+		if parsed == nil {
+			parsed = string(respBody)
+		}
+	}
+	name := strings.TrimSpace(node.Label)
+	if name == "" {
+		name = node.ID
+	}
+	path := rawURL
+	ctx.archive.NoteAPI(codedflow.CodedPreviewAPICall{
+		Name:       name,
+		Path:       path,
+		Curl:       curl,
+		HTTPStatus: statusCode,
+		Response:   parsed,
+		Error:      errMsg,
+	})
 }
 
 // execChatCondition is a pure-branch node: evaluates a free-form
@@ -1194,8 +1325,9 @@ func (a *App) persistChatSession(s *models.ChatbotSession) error {
 
 // appendChatPath records the executed node + outcome in SessionData["__path__"].
 // The shape mirrors IVRContext.Path so frontends and audit tooling can
-// render either domain's trail with the same code.
-func appendChatPath(s *models.ChatbotSession, node *ChatNode, outcome string) {
+// render either domain's trail with the same code. Extra keys (e.g. expression)
+// are merged onto the entry for chat debug.
+func appendChatPath(s *models.ChatbotSession, node *ChatNode, outcome string, extra map[string]any) {
 	if s.SessionData == nil {
 		s.SessionData = models.JSONB{}
 	}
@@ -1204,6 +1336,12 @@ func appendChatPath(s *models.ChatbotSession, node *ChatNode, outcome string) {
 		"type":    string(node.Type),
 		"label":   node.Label,
 		"outcome": outcome,
+	}
+	for key, value := range extra {
+		if value == nil {
+			continue
+		}
+		entry[key] = value
 	}
 	path, _ := s.SessionData["__path__"].([]any)
 	path = append(path, entry)

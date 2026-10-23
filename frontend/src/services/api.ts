@@ -181,6 +181,10 @@ export const contactsService = {
   getSessionData: (id: string) => api.get(`/contacts/${id}/session-data`),
   getCommerceSessions: (id: string) =>
     api.get(`/contacts/${encodeURIComponent(id)}/commerce-sessions`),
+  getSessionArchive: (contactId: string, sessionId: string) =>
+    api.get(
+      `/contacts/${encodeURIComponent(contactId)}/session-archives/${encodeURIComponent(sessionId)}`,
+    ),
   markRead: (id: string) => api.post(`/contacts/${encodeURIComponent(id)}/mark-read`)
 }
 
@@ -419,6 +423,39 @@ export type CodedPreviewMessage = {
   list_button?: string
   context?: Record<string, unknown>
   ai?: CodedPreviewAICall[]
+}
+
+export type SessionArchiveTurn = {
+  at?: string
+  inbound?: Record<string, unknown>
+  messages?: CodedPreviewMessage[]
+  ai_calls?: CodedPreviewAICall[]
+  api_calls?: CodedPreviewAPICall[]
+  context?: Record<string, unknown>
+  step?: string
+  status?: string
+}
+
+export type ContactSessionArchive = {
+  version: number
+  flow_key: string
+  session_id: string
+  contact_id: string
+  organization_id?: string
+  started_at?: string
+  ended_at?: string
+  status?: string
+  turn_count: number
+  turns: SessionArchiveTurn[]
+}
+
+export type ContactCommerceSession = {
+  session_id: string
+  started_at: string
+  status: string
+  session_data?: Record<string, unknown>
+  archive_available?: boolean
+  flow_key?: string
 }
 
 export type CodedPreviewResponse = {

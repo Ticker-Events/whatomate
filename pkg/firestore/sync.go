@@ -10,6 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
+	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -225,6 +228,100 @@ func (c *Client) FinalizeSessionArchive(ctx context.Context, meta SessionArchive
 		return fmt.Errorf("firestore finalize session archive %s: %w", sessionID, err)
 	}
 	return nil
+}
+
+// GetSessionArchive loads parent metadata and ordered turn documents under
+// contacts/{contactId}/sessionArchives/{sessionId}/turns.
+// When Firestore is disabled, or the parent document is missing, ok is false
+// and the error is nil so callers can fall back to legacy Postgres turns.
+func (c *Client) GetSessionArchive(
+	ctx context.Context,
+	contactID, sessionID string,
+) (meta SessionArchiveDoc, turns []map[string]any, ok bool, err error) {
+	if !c.Enabled() {
+		return SessionArchiveDoc{}, nil, false, nil
+	}
+	contactID = strings.TrimSpace(contactID)
+	sessionID = strings.TrimSpace(sessionID)
+	if contactID == "" || sessionID == "" {
+		return SessionArchiveDoc{}, nil, false, fmt.Errorf("firestore get session archive: missing contact or session id")
+	}
+	parent := sessionArchiveParent(c, contactID, sessionID)
+	snap, err := parent.Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return SessionArchiveDoc{}, nil, false, nil
+		}
+		return SessionArchiveDoc{}, nil, false, fmt.Errorf("firestore get session archive meta %s: %w", sessionID, err)
+	}
+	meta = sessionArchiveDocFromData(snap.Data())
+	if meta.SessionID == "" {
+		meta.SessionID = sessionID
+	}
+	if meta.ContactID == "" {
+		meta.ContactID = contactID
+	}
+
+	iter := parent.Collection(collectionArchiveTurns).OrderBy("index", firestore.Asc).Documents(ctx)
+	defer iter.Stop()
+	for {
+		doc, iterErr := iter.Next()
+		if iterErr == iterator.Done {
+			break
+		}
+		if iterErr != nil {
+			return meta, nil, false, fmt.Errorf("firestore get session archive turns %s: %w", sessionID, iterErr)
+		}
+		data := doc.Data()
+		if data == nil {
+			data = map[string]any{}
+		}
+		turns = append(turns, data)
+	}
+	return meta, turns, true, nil
+}
+
+func sessionArchiveDocFromData(data map[string]any) SessionArchiveDoc {
+	if data == nil {
+		return SessionArchiveDoc{}
+	}
+	meta := SessionArchiveDoc{
+		Version:        intFromAny(data["version"]),
+		FlowKey:        stringFromAny(data["flow_key"]),
+		SessionID:      stringFromAny(data["session_id"]),
+		ContactID:      stringFromAny(data["contact_id"]),
+		OrganizationID: stringFromAny(data["organization_id"]),
+		StartedAt:      stringFromAny(data["started_at"]),
+		EndedAt:        stringFromAny(data["ended_at"]),
+		Status:         stringFromAny(data["status"]),
+		TurnCount:      intFromAny(data["turn_count"]),
+	}
+	if meta.OrganizationID == "" {
+		meta.OrganizationID = stringFromAny(data["organizationId"])
+	}
+	return meta
+}
+
+func stringFromAny(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	default:
+		return ""
+	}
+}
+
+func intFromAny(v any) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	default:
+		return 0
+	}
 }
 
 // SyncSessionArchive writes archive metadata plus one document per turn under
