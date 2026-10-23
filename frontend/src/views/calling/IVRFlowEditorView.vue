@@ -11,7 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { ArrowLeft, Save, Volume2, Grid3X3, Hash, Globe, Users, ExternalLink, Clock, PhoneOff } from 'lucide-vue-next'
+import { ArrowLeft, Save, Volume2, Grid3X3, Hash, Globe, Users, ExternalLink, Clock, PhoneOff, LayoutGrid } from 'lucide-vue-next'
+import { layoutFlowNodes } from '@/utils/layoutFlow'
 import AuditLogPanel from '@/components/shared/AuditLogPanel.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -178,6 +179,13 @@ function spreadParallelLabels() {
       group[i].labelBgPadding = [0, 0] as [number, number]
     }
   }
+}
+
+function beautifyLayout() {
+  if (nodes.value.length === 0) return
+  layoutFlowNodes(nodes.value, edges.value)
+  spreadParallelLabels()
+  setTimeout(() => fitView({ padding: 0.2 }), 50)
 }
 
 // Select edge on click (Backspace/Delete will remove it)
@@ -416,6 +424,10 @@ onMounted(() => {
         <Label class="text-xs whitespace-nowrap">Outgoing Post-Call</Label>
       </div>
       <div class="flex-1" />
+      <Button variant="outline" size="sm" :disabled="nodes.length === 0" @click="beautifyLayout">
+        <LayoutGrid class="h-4 w-4 mr-1" />
+        {{ t('calling.flowBeautify') }}
+      </Button>
       <Button :disabled="saving" size="sm" @click="saveFlow">
         <Save class="h-4 w-4 mr-1" />
         {{ saving ? t('calling.flowSaving') : t('calling.flowSave') }}

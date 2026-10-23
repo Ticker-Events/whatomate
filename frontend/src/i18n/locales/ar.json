@@ -2064,6 +2064,7 @@
     "enabled": "مفعّل",
     "disabled": "معطل",
     "cancel": "إلغاء",
+    "beautify": "تجميل",
     "saveFlow": "حفظ التدفق",
     "saving": "جاري الحفظ...",
     "loading": "جاري التحميل...",
@@ -2220,7 +2221,8 @@
     "deleteNodeConfirmTitle": "حذف العقدة",
     "deleteNodeConfirmDesc": "هل أنت متأكد أنك تريد حذف هذه العقدة؟ سيتم أيضاً إزالة جميع الروابط المتصلة بها.",
     "flowSaving": "جاري الحفظ...",
-    "flowSave": "حفظ"
+    "flowSave": "حفظ",
+    "flowBeautify": "تجميل"
   },
   "callTransfers": {
     "title": "تحويلات المكالمات",
