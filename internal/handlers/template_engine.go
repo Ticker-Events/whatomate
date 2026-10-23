@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shridarpatil/whatomate/internal/models"
 )
@@ -21,6 +22,11 @@ var (
 	// {{if condition}}...{{else}}...{{endif}} or {{if condition}}...{{endif}}
 	ifElsePattern = regexp.MustCompile(`\{\{if\s+([^}]+)\}\}([\s\S]*?)\{\{endif\}\}`)
 
+	// {{date path}} / {{date path "DD/MM/YYYY"}} — Moment-style format tokens.
+	datePattern = regexp.MustCompile(
+		`\{\{\s*date\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*(?:"([^"]*)"|'([^']*)')?\s*\}\}`,
+	)
+
 	// {{variable}} / {{ variable }} / {{object.nested.path}} / {{array[0].field}}.
 	// Whitespace inside the braces is tolerated to match the rest of the
 	// industry (`{{ name }}` is the common form authors expect).
@@ -28,11 +34,37 @@ var (
 
 	// Condition parsing: variable, variable == 'value', variable > 100, etc.
 	conditionPattern = regexp.MustCompile(`^(\w+(?:\.\w+)*)\s*(==|!=|>=|<=|>|<)?\s*(.*)$`)
+
+	// momentTokens are longest-first Moment/Day.js format tokens.
+	momentTokens = []string{
+		"YYYY", "YY",
+		"MMMM", "MMM", "MM", "M",
+		"dddd", "ddd",
+		"DD", "D",
+		"HH", "H",
+		"mm", "ss",
+	}
+
+	momentMonthsLong = []string{
+		"January", "February", "March", "April", "May", "June",
+		"July", "August", "September", "October", "November", "December",
+	}
+	momentMonthsShort = []string{
+		"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+		"Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+	}
+	momentWeekdaysLong = []string{
+		"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+	}
+	momentWeekdaysShort = []string{
+		"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
+	}
 )
 
 const (
-	maxLoopIterations = 50
-	maxForNestDepth   = 5
+	maxLoopIterations   = 50
+	maxForNestDepth     = 5
+	defaultMomentFormat = "D MMMM YYYY"
 )
 
 // forLoopSpan is one balanced {{for}}...{{endfor}} region in a template.
@@ -69,6 +101,7 @@ func renderTemplate(template string, data map[string]any, format valueFormatter)
 	result := template
 	result = processForLoops(result, data, format)
 	result = processConditionals(result, data)
+	result = processDateFormats(result, data, format)
 	return processVariables(result, data, format)
 }
 
@@ -159,10 +192,125 @@ func renderForLoopBody(match *forLoopSpan, data map[string]any, format valueForm
 
 		processed := processForLoopsDepth(match.body, loopData, format, depth+1)
 		processed = processConditionals(processed, loopData)
+		processed = processDateFormats(processed, loopData, format)
 		processed = processVariables(processed, loopData, format)
 		output.WriteString(processed)
 	}
 	return output.String()
+}
+
+// processDateFormats replaces {{date path}} / {{date path "DD/MM/YYYY"}} with
+// Moment-style formatted values. Unparseable or missing values stay as-is / empty.
+func processDateFormats(template string, data map[string]any, format ...valueFormatter) string {
+	formatter := formatValue
+	if len(format) > 0 && format[0] != nil {
+		formatter = format[0]
+	}
+	return datePattern.ReplaceAllStringFunc(template, func(match string) string {
+		parts := datePattern.FindStringSubmatch(match)
+		if parts == nil {
+			return match
+		}
+		path := parts[1]
+		pattern := parts[2]
+		if pattern == "" {
+			pattern = parts[3]
+		}
+		if pattern == "" {
+			pattern = defaultMomentFormat
+		}
+		raw := formatter(getNestedValue(data, path))
+		if raw == "" {
+			return ""
+		}
+		t, ok := parseTemplateTime(raw)
+		if !ok {
+			return raw
+		}
+		return formatMoment(t, pattern)
+	})
+}
+
+// parseTemplateTime parses common ISO / RFC3339 date strings from API payloads.
+func parseTemplateTime(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// formatMoment formats t using Moment.js / Day.js style tokens (YYYY, MM, DD, …).
+func formatMoment(t time.Time, pattern string) string {
+	if pattern == "" {
+		pattern = defaultMomentFormat
+	}
+	var b strings.Builder
+	i := 0
+	for i < len(pattern) {
+		matched := false
+		for _, tok := range momentTokens {
+			if strings.HasPrefix(pattern[i:], tok) {
+				b.WriteString(momentTokenValue(t, tok))
+				i += len(tok)
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+		b.WriteByte(pattern[i])
+		i++
+	}
+	return b.String()
+}
+
+func momentTokenValue(t time.Time, tok string) string {
+	switch tok {
+	case "YYYY":
+		return t.Format("2006")
+	case "YY":
+		return t.Format("06")
+	case "MMMM":
+		return momentMonthsLong[t.Month()-1]
+	case "MMM":
+		return momentMonthsShort[t.Month()-1]
+	case "MM":
+		return fmt.Sprintf("%02d", int(t.Month()))
+	case "M":
+		return strconv.Itoa(int(t.Month()))
+	case "dddd":
+		return momentWeekdaysLong[t.Weekday()]
+	case "ddd":
+		return momentWeekdaysShort[t.Weekday()]
+	case "DD":
+		return fmt.Sprintf("%02d", t.Day())
+	case "D":
+		return strconv.Itoa(t.Day())
+	case "HH":
+		return fmt.Sprintf("%02d", t.Hour())
+	case "H":
+		return strconv.Itoa(t.Hour())
+	case "mm":
+		return fmt.Sprintf("%02d", t.Minute())
+	case "ss":
+		return fmt.Sprintf("%02d", t.Second())
+	default:
+		return tok
+	}
 }
 
 // loopItems normalizes array shapes that land in session / API JSON.

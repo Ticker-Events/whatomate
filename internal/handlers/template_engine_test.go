@@ -148,6 +148,67 @@ func TestProcessTemplate_NestedForLoops_SpacesInsideBraces(t *testing.T) {
 	assert.Equal(t, "A:09:00", result)
 }
 
+// --- date formatting (Moment-style) ---
+
+func TestProcessTemplate_Date_DefaultFormat(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"booking_date": "2026-10-23"}
+	assert.Equal(t, "23 October 2026", processTemplate("{{date booking_date}}", data))
+}
+
+func TestProcessTemplate_Date_DDMMYYYY(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"booking_date": "2026-10-23"}
+	assert.Equal(t, "23/10/2026", processTemplate(`{{date booking_date "DD/MM/YYYY"}}`, data))
+}
+
+func TestProcessTemplate_Date_MMDDYYYY(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"booking_date": "2026-10-23"}
+	assert.Equal(t, "10/23/2026", processTemplate(`{{date booking_date "MM/DD/YYYY"}}`, data))
+}
+
+func TestProcessTemplate_Date_MediumMonth(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"booking_date": "2026-10-23"}
+	assert.Equal(t, "23 Oct 2026", processTemplate(`{{date booking_date "D MMM YYYY"}}`, data))
+}
+
+func TestProcessTemplate_Date_SpacesInsideBraces(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"booking_date": "2026-10-23"}
+	assert.Equal(t, "23/10/2026", processTemplate(`{{ date booking_date "DD/MM/YYYY" }}`, data))
+}
+
+func TestProcessTemplate_Date_RFC3339WithTime(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"start_at": "2026-10-23T17:05:09Z"}
+	assert.Equal(t, "23/10/2026 17:05", processTemplate(`{{date start_at "DD/MM/YYYY HH:mm"}}`, data))
+}
+
+func TestProcessTemplate_Date_NestedPathInLoop(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{
+		"events": []any{
+			map[string]any{"day": "2026-10-23"},
+			map[string]any{"day": "2026-11-01"},
+		},
+	}
+	result := processTemplate(`{{for e in events}}{{date e.day "DD/MM"}}, {{endfor}}`, data)
+	assert.Equal(t, "23/10, 01/11, ", result)
+}
+
+func TestProcessTemplate_Date_InvalidLeavesOriginal(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"booking_date": "not-a-date"}
+	assert.Equal(t, "not-a-date", processTemplate(`{{date booking_date "DD/MM/YYYY"}}`, data))
+}
+
+func TestProcessTemplate_Date_MissingIsEmpty(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "", processTemplate(`{{date booking_date "DD/MM/YYYY"}}`, map[string]any{}))
+}
+
 // --- processForLoops ---
 
 func TestProcessForLoops_EmptyArray(t *testing.T) {

@@ -460,6 +460,38 @@ Iterate over arrays from API responses. Nested loops are supported (for example 
 {{endfor}}
 ```
 
+#### Date formatting
+
+Format ISO / RFC3339 date strings with Moment.js-style tokens. Day/month order is chosen per template (useful when clients differ on `DD/MM` vs `MM/DD`).
+
+```
+🗓️ {{date booking_date}}
+🗓️ {{date booking_date "DD/MM/YYYY"}}
+🗓️ {{date booking_date "MM/DD/YYYY"}}
+🗓️ {{date event.start_at "DD MMM YYYY, HH:mm"}}
+```
+
+Default format (when omitted) is `D MMMM YYYY` → `23 October 2026`.
+
+| Token | Meaning | Example |
+|-------|---------|---------|
+| `YYYY` | 4-digit year | 2026 |
+| `YY` | 2-digit year | 26 |
+| `MMMM` | full month | October |
+| `MMM` | short month | Oct |
+| `MM` | month 01–12 | 10 |
+| `M` | month 1–12 | 10 |
+| `DD` | day 01–31 | 23 |
+| `D` | day 1–31 | 23 |
+| `dddd` | full weekday | Friday |
+| `ddd` | short weekday | Fri |
+| `HH` | hour 00–23 | 17 |
+| `H` | hour 0–23 | 17 |
+| `mm` | minute 00–59 | 05 |
+| `ss` | second 00–59 | 09 |
+
+Parsed inputs: `YYYY-MM-DD`, RFC3339, and naive `YYYY-MM-DDTHH:mm:ss` / `YYYY-MM-DD HH:mm:ss`. Unparseable values are left unchanged; missing values render empty.
+
 #### Example: Portfolio Message
 
 ```
