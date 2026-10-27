@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/zerodha/logf"
@@ -580,12 +581,20 @@ type TokenExchangeResponse struct {
 }
 
 // ExchangeCodeForToken exchanges a Facebook authorization code for a long-lived access token.
+// redirectURI must match the redirect_uri used in the FB.login / OAuth dialog (JS SDK uses the page URL).
 // expiresIn is seconds until expiry (0 if Meta omitted expires_in).
-func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecret, apiVersion string) (accessToken string, expiresIn int, err error) {
-	url := fmt.Sprintf("%s/%s/oauth/access_token?client_id=%s&client_secret=%s&code=%s",
-		c.getBaseURL(), apiVersion, appID, appSecret, code)
+func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecret, apiVersion, redirectURI string) (accessToken string, expiresIn int, err error) {
+	q := url.Values{}
+	q.Set("client_id", appID)
+	q.Set("client_secret", appSecret)
+	q.Set("code", code)
+	if redirectURI != "" {
+		q.Set("redirect_uri", redirectURI)
+	}
 
-	tokenResp, err := c.doOAuthTokenRequest(ctx, url)
+	tokenURL := fmt.Sprintf("%s/%s/oauth/access_token?%s", c.getBaseURL(), apiVersion, q.Encode())
+
+	tokenResp, err := c.doOAuthTokenRequest(ctx, tokenURL)
 	if err != nil {
 		return "", 0, err
 	}

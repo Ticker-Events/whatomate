@@ -202,10 +202,13 @@ function launchWhatsAppSignup(isCoexistence: boolean = true) {
 
 async function exchangeCodeForToken(code: string, phoneNumberId: string, wabaId: string) {
   try {
+    // Must match the redirect_uri the FB JS SDK used in the OAuth dialog
+    const redirectUri = `${window.location.origin}${window.location.pathname}`
     const response = await api.post('/accounts/exchange-token', {
       code,
       phone_id: phoneNumberId,
-      waba_id: wabaId
+      waba_id: wabaId,
+      redirect_uri: redirectUri
     })
 
     const account = response.data.data.account

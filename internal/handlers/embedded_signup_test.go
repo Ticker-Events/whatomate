@@ -37,7 +37,7 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 		path := r.URL.Path
 		switch {
 		case strings.Contains(path, "/oauth/access_token"):
-			// Token exchange (query parameters are in r.URL.RawQuery, not path)
+			assert.Equal(t, "https://agent.tiqr.store/settings/accounts", r.URL.Query().Get("redirect_uri"))
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "EAABwzLixnjYBO1234567890",
@@ -69,9 +69,10 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 	app.WhatsApp = whatsapp.NewWithBaseURL(app.Log, metaServer.URL)
 
 	req := testutil.NewJSONRequest(t, map[string]interface{}{
-		"code":     "test_auth_code_123",
-		"phone_id": phoneID,
-		"waba_id":  wabaID,
+		"code":         "test_auth_code_123",
+		"phone_id":     phoneID,
+		"waba_id":      wabaID,
+		"redirect_uri": "https://agent.tiqr.store/settings/accounts",
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
