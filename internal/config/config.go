@@ -191,6 +191,27 @@ type WhatsAppConfig struct {
 	AppID              string `koanf:"app_id"`   // WhatsApp App ID for frontend
 	AppSecret          string `koanf:"app_secret"`
 	ConfigID           string `koanf:"config_id"` // WhatsApp Config ID for frontend
+	// TokenRefreshDaysBefore is how many days before token_expires_at to attempt refresh.
+	// Default 10 when unset or <= 0.
+	TokenRefreshDaysBefore int `koanf:"token_refresh_days_before"`
+	// TokenRefreshIntervalMins is the processor tick interval. Default 60 when unset or <= 0.
+	TokenRefreshIntervalMins int `koanf:"token_refresh_interval_mins"`
+}
+
+// TokenRefreshDaysBeforeOrDefault returns days-before-expiry for refresh attempts.
+func (c WhatsAppConfig) TokenRefreshDaysBeforeOrDefault() int {
+	if c.TokenRefreshDaysBefore <= 0 {
+		return 10
+	}
+	return c.TokenRefreshDaysBefore
+}
+
+// TokenRefreshIntervalMinsOrDefault returns processor tick minutes.
+func (c WhatsAppConfig) TokenRefreshIntervalMinsOrDefault() int {
+	if c.TokenRefreshIntervalMins <= 0 {
+		return 60
+	}
+	return c.TokenRefreshIntervalMins
 }
 
 type AIConfig struct {

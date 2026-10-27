@@ -1284,7 +1284,11 @@
     "contacts": "संपर्क",
     "analytics": "एनालिटिक्स",
     "noWidgets": "कोई नहीं",
-    "noWidgetsDesc": "पहला विजेट बनाएं।"
+    "noWidgetsDesc": "पहला विजेट बनाएं।",
+    "tokenRefreshWarningTitle": "WhatsApp access token needs attention",
+    "tokenRefreshWarningDesc": "One or more WhatsApp accounts have an expired token or a failed automatic refresh. Reconnect the account under Settings → Accounts.",
+    "tokenRefreshWarningAction": "Open accounts",
+    "tokenRefreshWarningDismiss": "Dismiss"
   },
   "flows": {
     "title": "WhatsApp Flow",

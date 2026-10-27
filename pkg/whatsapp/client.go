@@ -576,50 +576,93 @@ func (c *Client) SubscribeApp(ctx context.Context, account *Account) error {
 type TokenExchangeResponse struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
+	ExpiresIn   int    `json:"expires_in"` // seconds until expiry; 0 if omitted / never
 }
 
-// ExchangeCodeForToken exchanges a Facebook authorization code for a permanent access token
-func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecret, apiVersion string) (string, error) {
+// ExchangeCodeForToken exchanges a Facebook authorization code for a long-lived access token.
+// expiresIn is seconds until expiry (0 if Meta omitted expires_in).
+func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecret, apiVersion string) (accessToken string, expiresIn int, err error) {
 	url := fmt.Sprintf("%s/%s/oauth/access_token?client_id=%s&client_secret=%s&code=%s",
 		c.getBaseURL(), apiVersion, appID, appSecret, code)
 
-	// OAuth endpoint doesn't require Authorization header, so we make a direct request
+	tokenResp, err := c.doOAuthTokenRequest(ctx, url)
+	if err != nil {
+		return "", 0, err
+	}
+
+	c.Log.Info("Token exchange successful", "expires_in", tokenResp.ExpiresIn)
+	return tokenResp.AccessToken, tokenResp.ExpiresIn, nil
+}
+
+// RefreshLongLivedToken exchanges a still-valid long-lived user token for a new one
+// via grant_type=fb_exchange_token. expiresIn is seconds until the new token expires.
+func (c *Client) RefreshLongLivedToken(ctx context.Context, token, appID, appSecret, apiVersion string) (accessToken string, expiresIn int, err error) {
+	url := fmt.Sprintf("%s/%s/oauth/access_token?grant_type=fb_exchange_token&client_id=%s&client_secret=%s&fb_exchange_token=%s",
+		c.getBaseURL(), apiVersion, appID, appSecret, token)
+
+	tokenResp, err := c.doOAuthTokenRequest(ctx, url)
+	if err != nil {
+		return "", 0, fmt.Errorf("token refresh failed: %w", err)
+	}
+
+	c.Log.Info("Long-lived token refresh successful", "expires_in", tokenResp.ExpiresIn)
+	return tokenResp.AccessToken, tokenResp.ExpiresIn, nil
+}
+
+func (c *Client) doOAuthTokenRequest(ctx context.Context, url string) (*TokenExchangeResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create token exchange request: %w", err)
+		return nil, fmt.Errorf("failed to create token request: %w", err)
 	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("token exchange request failed: %w", err)
+		return nil, fmt.Errorf("token request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read token response: %w", err)
+		return nil, fmt.Errorf("failed to read token response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		// Parse Meta error using same pattern as doRequest
 		var metaErr MetaAPIError
 		if json.Unmarshal(respBody, &metaErr) == nil && metaErr.Error.Message != "" {
-			return "", fmt.Errorf("token exchange failed: %s", metaErr.Error.Message)
+			return nil, fmt.Errorf("%s", metaErr.Error.Message)
 		}
-		return "", fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var tokenResp TokenExchangeResponse
 	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
-		return "", fmt.Errorf("failed to parse token response: %w", err)
+		return nil, fmt.Errorf("failed to parse token response: %w", err)
 	}
 
 	if tokenResp.AccessToken == "" {
-		return "", fmt.Errorf("no access token in response")
+		return nil, fmt.Errorf("no access token in response")
 	}
 
-	c.Log.Info("Token exchange successful")
-	return tokenResp.AccessToken, nil
+	return &tokenResp, nil
+}
+
+// ExpiresAtFromUnix returns a time pointer from a Meta unix timestamp.
+// Returns nil when ts is 0 (never expires / unknown).
+func ExpiresAtFromUnix(ts int64) *time.Time {
+	if ts <= 0 {
+		return nil
+	}
+	t := time.Unix(ts, 0).UTC()
+	return &t
+}
+
+// ExpiresAtFromExpiresIn returns now+expiresIn seconds, or nil when expiresIn <= 0.
+func ExpiresAtFromExpiresIn(expiresIn int, now time.Time) *time.Time {
+	if expiresIn <= 0 {
+		return nil
+	}
+	t := now.UTC().Add(time.Duration(expiresIn) * time.Second)
+	return &t
 }
 
 // PhoneNumberInfo represents phone number information from Meta

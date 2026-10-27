@@ -1508,7 +1508,11 @@
     "contacts": "Contacts",
     "analytics": "Analytics",
     "noWidgets": "No widgets yet",
-    "noWidgetsDesc": "Create your first widget to start monitoring your WhatsApp Business metrics."
+    "noWidgetsDesc": "Create your first widget to start monitoring your WhatsApp Business metrics.",
+    "tokenRefreshWarningTitle": "WhatsApp access token needs attention",
+    "tokenRefreshWarningDesc": "One or more WhatsApp accounts have an expired token or a failed automatic refresh. Reconnect the account under Settings → Accounts.",
+    "tokenRefreshWarningAction": "Open accounts",
+    "tokenRefreshWarningDismiss": "Dismiss"
   },
   "flows": {
     "title": "WhatsApp Flows",

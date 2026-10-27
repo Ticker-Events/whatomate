@@ -335,6 +335,15 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Start Meta WhatsApp token refresh processor
+	tokenRefreshInterval := time.Duration(cfg.WhatsApp.TokenRefreshIntervalMinsOrDefault()) * time.Minute
+	tokenRefreshProcessor := handlers.NewTokenRefreshProcessor(app, tokenRefreshInterval)
+	tokenRefreshCtx, tokenRefreshCancel := context.WithCancel(context.Background())
+	go tokenRefreshProcessor.Start(tokenRefreshCtx)
+	lo.Info("Token refresh processor started",
+		"interval", tokenRefreshInterval,
+		"days_before", cfg.WhatsApp.TokenRefreshDaysBeforeOrDefault())
+
 	// Start embedded workers
 	var workers []*worker.Worker
 	var workerCancel context.CancelFunc
@@ -387,6 +396,11 @@ func runServer(args []string) {
 	slaCancel()
 	slaProcessor.Stop()
 	lo.Info("SLA processor stopped")
+
+	lo.Info("Stopping token refresh processor...")
+	tokenRefreshCancel()
+	tokenRefreshProcessor.Stop()
+	lo.Info("Token refresh processor stopped")
 
 	// Stop workers first
 	if workerCancel != nil {
@@ -719,6 +733,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/accounts", app.ListAccounts)
 	g.POST("/api/accounts", app.CreateAccount)
 	g.POST("/api/accounts/exchange-token", app.ExchangeToken) // Embedded signup
+	g.GET("/api/accounts/token-alerts", app.ListTokenAlerts)
 	g.GET("/api/accounts/{id}", app.GetAccount)
 	g.PUT("/api/accounts/{id}", app.UpdateAccount)
 	g.DELETE("/api/accounts/{id}", app.DeleteAccount)

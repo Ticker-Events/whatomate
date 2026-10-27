@@ -30,7 +30,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from '@/components/ui/alert-dialog'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
+import { api } from '@/services/api'
+import { RouterLink } from 'vue-router'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
@@ -65,7 +68,8 @@ import {
   Zap,
   Shield,
   LineChart,
-  Tags
+  Tags,
+  AlertTriangle
 } from 'lucide-vue-next'
 // Centralized Chart.js setup (registered once)
 import { Line, Bar, Pie } from '@/lib/charts'
@@ -516,12 +520,43 @@ const fetchDataSources = async () => {
   }
 }
 
+interface TokenAlert {
+  id: string
+  name: string
+  phone_id: string
+  token_expires_at?: string
+  token_refresh_failed: boolean
+  token_refresh_error?: string
+}
+
+const tokenAlerts = ref<TokenAlert[]>([])
+const tokenAlertsDismissed = ref(false)
+
+const fetchTokenAlerts = async () => {
+  try {
+    const response = await api.get('/accounts/token-alerts')
+    tokenAlerts.value = response.data.data?.alerts || []
+  } catch (error) {
+    console.error('Failed to load token alerts:', error)
+    tokenAlerts.value = []
+  }
+}
+
+const dismissTokenAlerts = () => {
+  tokenAlertsDismissed.value = true
+}
+
+const showTokenAlerts = computed(
+  () => !tokenAlertsDismissed.value && tokenAlerts.value.length > 0
+)
+
 const fetchDashboardData = async () => {
   isLoading.value = true
   try {
     await Promise.all([
       fetchWidgets(),
-      fetchDataSources()
+      fetchDataSources(),
+      fetchTokenAlerts()
     ])
     await fetchWidgetData()
   } finally {
@@ -750,6 +785,31 @@ onMounted(() => {
     <!-- Content -->
     <ScrollArea class="flex-1">
       <div class="p-6 space-y-6">
+        <Alert v-if="showTokenAlerts" variant="warning" class="relative">
+          <AlertTriangle class="h-4 w-4" />
+          <AlertTitle>{{ $t('dashboard.tokenRefreshWarningTitle') }}</AlertTitle>
+          <AlertDescription class="pr-24">
+            {{ $t('dashboard.tokenRefreshWarningDesc') }}
+            <span class="mt-1 block text-xs opacity-80">
+              {{ tokenAlerts.map(a => a.name).join(', ') }}
+            </span>
+            <RouterLink
+              to="/settings/accounts"
+              class="mt-2 inline-flex text-sm font-medium underline underline-offset-2 hover:opacity-80"
+            >
+              {{ $t('dashboard.tokenRefreshWarningAction') }}
+            </RouterLink>
+          </AlertDescription>
+          <Button
+            variant="ghost"
+            size="sm"
+            class="absolute top-2 right-2 h-7 px-2 text-xs"
+            @click="dismissTokenAlerts"
+          >
+            {{ $t('dashboard.tokenRefreshWarningDismiss') }}
+          </Button>
+        </Alert>
+
         <!-- Loading Skeleton -->
         <div v-if="isLoading" class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div v-for="i in 4" :key="i" class="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6 light:bg-white light:border-gray-200">
