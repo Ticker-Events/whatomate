@@ -54,7 +54,7 @@ const handleRegister = async () => {
       organization_id: organizationId.value
     })
     toast.success(t('auth.registrationSuccess'))
-    router.push('/')
+    router.push('/dashboard')
   } catch (error: any) {
     const message = error.response?.data?.message || t('auth.registrationFailed')
     toast.error(message)
