@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
@@ -65,6 +66,10 @@ type AccountResponse struct {
 	HasAiSensyPassword     bool       `json:"has_aisensy_password"`
 	PhoneNumber            string     `json:"phone_number,omitempty"`
 	DisplayName            string     `json:"display_name,omitempty"`
+	TokenExpiresAt         *string    `json:"token_expires_at,omitempty"`
+	TokenLastRefreshedAt   *string    `json:"token_last_refreshed_at,omitempty"`
+	TokenRefreshFailed     bool       `json:"token_refresh_failed"`
+	TokenRefreshError      string     `json:"token_refresh_error,omitempty"`
 	CreatedByID            *uuid.UUID `json:"created_by_id,omitempty"`
 	CreatedByName          string     `json:"created_by_name,omitempty"`
 	UpdatedByID            *uuid.UUID `json:"updated_by_id,omitempty"`
@@ -99,6 +104,56 @@ func (a *App) ListAccounts(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{
 		"accounts": response,
 	})
+}
+
+// TokenAlert is a dashboard warning for Meta accounts with failed refresh or expired tokens.
+type TokenAlert struct {
+	ID                 uuid.UUID `json:"id"`
+	Name               string    `json:"name"`
+	PhoneID            string    `json:"phone_id"`
+	TokenExpiresAt     *string   `json:"token_expires_at,omitempty"`
+	TokenRefreshFailed bool      `json:"token_refresh_failed"`
+	TokenRefreshError  string    `json:"token_refresh_error,omitempty"`
+}
+
+// ListTokenAlerts returns Meta WhatsApp accounts that need reconnect attention.
+func (a *App) ListTokenAlerts(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	if err := a.requirePermission(r, userID, models.ResourceAccounts, models.ActionRead); err != nil {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	var accounts []models.WhatsAppAccount
+	if err := a.DB.Where(
+		"organization_id = ? AND (provider = '' OR provider = 'meta') AND (token_refresh_failed = ? OR (token_expires_at IS NOT NULL AND token_expires_at < ?))",
+		orgID, true, now,
+	).Order("name ASC").Find(&accounts).Error; err != nil {
+		a.Log.Error("Failed to list token alerts", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list token alerts", nil, "")
+	}
+
+	alerts := make([]TokenAlert, 0, len(accounts))
+	for _, acc := range accounts {
+		alert := TokenAlert{
+			ID:                 acc.ID,
+			Name:               acc.Name,
+			PhoneID:            acc.PhoneID,
+			TokenRefreshFailed: acc.TokenRefreshFailed,
+			TokenRefreshError:  acc.TokenRefreshError,
+		}
+		if acc.TokenExpiresAt != nil {
+			s := acc.TokenExpiresAt.UTC().Format(time.RFC3339)
+			alert.TokenExpiresAt = &s
+		}
+		alerts = append(alerts, alert)
+	}
+
+	return r.SendEnvelope(map[string]any{"alerts": alerts})
 }
 
 // CreateAccount creates a new WhatsApp account
@@ -167,6 +222,10 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		AiSensyEmail:           req.AiSensyEmail,
 		AiSensyPassword:        req.AiSensyPassword,
 		AiSensyProjectID:       req.AiSensyProjectID,
+	}
+
+	if provider == "meta" && req.AccessToken != "" {
+		a.applyMetaTokenExpiry(&account, 0, req.AccessToken)
 	}
 
 	if err := a.encryptAccountSecrets(&account); err != nil {
@@ -274,6 +333,9 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 		}
 		account.AccessToken = enc
 		tokenChanged = true
+		if !account.IsAiSensy() {
+			a.applyMetaTokenExpiry(account, 0, req.AccessToken)
+		}
 	}
 	if req.AppSecret != "" {
 		enc, err := crypto.Encrypt(req.AppSecret, a.Config.App.EncryptionKey)
@@ -550,10 +612,20 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		AiSensyEmail:           acc.AiSensyEmail,
 		AiSensyProjectID:       acc.AiSensyProjectID,
 		HasAiSensyPassword:     acc.AiSensyPassword != "",
+		TokenRefreshFailed:     acc.TokenRefreshFailed,
+		TokenRefreshError:      acc.TokenRefreshError,
 		CreatedByID:            acc.CreatedByID,
 		UpdatedByID:            acc.UpdatedByID,
 		CreatedAt:              acc.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:              acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	}
+	if acc.TokenExpiresAt != nil {
+		s := acc.TokenExpiresAt.UTC().Format(time.RFC3339)
+		resp.TokenExpiresAt = &s
+	}
+	if acc.TokenLastRefreshedAt != nil {
+		s := acc.TokenLastRefreshedAt.UTC().Format(time.RFC3339)
+		resp.TokenLastRefreshedAt = &s
 	}
 	if acc.CreatedBy != nil {
 		resp.CreatedByName = acc.CreatedBy.FullName
@@ -562,6 +634,33 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		resp.UpdatedByName = acc.UpdatedBy.FullName
 	}
 	return resp
+}
+
+// applyMetaTokenExpiry sets token expiry metadata from expires_in seconds and/or debug_token.
+// Clears refresh-failure flags. Call with plaintext token before encrypting.
+func (a *App) applyMetaTokenExpiry(account *models.WhatsAppAccount, expiresIn int, plaintextToken string) {
+	now := time.Now().UTC()
+	expiresAt := whatsapp.ExpiresAtFromExpiresIn(expiresIn, now)
+
+	if expiresAt == nil && plaintextToken != "" {
+		appID, appSecret, _, err := a.resolveMetaAppCreds(account.OrganizationID)
+		if account.AppID != "" {
+			appID = account.AppID
+		}
+		if err == nil && appID != "" && appSecret != "" {
+			appAccessToken := fmt.Sprintf("%s|%s", appID, appSecret)
+			if info, dbgErr := a.WhatsApp.GetTokenDebugInfo(context.Background(), plaintextToken, appAccessToken); dbgErr == nil {
+				expiresAt = whatsapp.ExpiresAtFromUnix(info.ExpiresAt)
+			} else {
+				a.Log.Warn("debug_token failed while resolving token expiry", "error", dbgErr, "phone_id", account.PhoneID)
+			}
+		}
+	}
+
+	account.TokenExpiresAt = expiresAt
+	account.TokenLastRefreshedAt = &now
+	account.TokenRefreshFailed = false
+	account.TokenRefreshError = ""
 }
 
 func generateVerifyToken() string {
@@ -718,7 +817,7 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	ctx := context.Background()
 	a.Log.Info("Exchanging code for access token")
 
-	accessToken, err := a.WhatsApp.ExchangeCodeForToken(ctx, req.Code,
+	accessToken, expiresIn, err := a.WhatsApp.ExchangeCodeForToken(ctx, req.Code,
 		appID, appSecret, a.Config.WhatsApp.APIVersion)
 	if err != nil {
 		a.Log.Error("Failed to exchange token", "error", err)
@@ -736,6 +835,7 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, err.Error(), nil, "")
 	}
+	a.applyMetaTokenExpiry(account, expiresIn, accessToken)
 
 	// 4. Attempt Auto-Registration
 	var priorStatus string

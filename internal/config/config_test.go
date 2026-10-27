@@ -180,3 +180,13 @@ func TestResolveCredentials_DefaultsTTLWhenUnset(t *testing.T) {
 	username, _ := s.ResolveCredentials(now)
 	assert.Equal(t, "1086400", username) // now + default 86400s
 }
+
+func TestWhatsAppConfig_TokenRefreshDefaults(t *testing.T) {
+	var zero config.WhatsAppConfig
+	assert.Equal(t, 10, zero.TokenRefreshDaysBeforeOrDefault())
+	assert.Equal(t, 60, zero.TokenRefreshIntervalMinsOrDefault())
+
+	custom := config.WhatsAppConfig{TokenRefreshDaysBefore: 14, TokenRefreshIntervalMins: 30}
+	assert.Equal(t, 14, custom.TokenRefreshDaysBeforeOrDefault())
+	assert.Equal(t, 30, custom.TokenRefreshIntervalMinsOrDefault())
+}

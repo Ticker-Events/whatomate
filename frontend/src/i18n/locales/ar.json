@@ -1301,7 +1301,11 @@
     "nameRequired": "الاسم مطلوب",
     "dataSourceRequired": "مصدر البيانات مطلوب",
     "selectDataSourceFirst": "يرجى اختيار مصدر البيانات أولاً",
-    "validationError": "يرجى تصحيح الأخطاء قبل الحفظ"
+    "validationError": "يرجى تصحيح الأخطاء قبل الحفظ",
+    "tokenRefreshWarningTitle": "WhatsApp access token needs attention",
+    "tokenRefreshWarningDesc": "One or more WhatsApp accounts have an expired token or a failed automatic refresh. Reconnect the account under Settings → Accounts.",
+    "tokenRefreshWarningAction": "Open accounts",
+    "tokenRefreshWarningDismiss": "Dismiss"
   },
   "campaigns": {
     "title": "الحملات",

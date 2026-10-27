@@ -1284,7 +1284,11 @@
     "contacts": "தொடர்புகள்",
     "analytics": "பகுப்பாய்வு",
     "noWidgets": "இதுவரை விட்ஜெட்கள் இல்லை",
-    "noWidgetsDesc": "உங்கள் WhatsApp வணிக அளவீடுகளைக் கண்காணிக்க உங்கள் முதல் விட்ஜெட்டை உருவாக்கவும்."
+    "noWidgetsDesc": "உங்கள் WhatsApp வணிக அளவீடுகளைக் கண்காணிக்க உங்கள் முதல் விட்ஜெட்டை உருவாக்கவும்.",
+    "tokenRefreshWarningTitle": "WhatsApp access token needs attention",
+    "tokenRefreshWarningDesc": "One or more WhatsApp accounts have an expired token or a failed automatic refresh. Reconnect the account under Settings → Accounts.",
+    "tokenRefreshWarningAction": "Open accounts",
+    "tokenRefreshWarningDismiss": "Dismiss"
   },
   "flows": {
     "title": "WhatsApp பாய்வுகள்",

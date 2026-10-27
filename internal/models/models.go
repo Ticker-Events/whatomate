@@ -336,6 +336,11 @@ type WhatsAppAccount struct {
 	AiSensyProjectID string `gorm:"size:100" json:"aisensy_project_id,omitempty"`
 	AiSensyToken     string `gorm:"type:text" json:"-"` // cached JWT, encrypted
 
+	// Meta long-lived user token expiry / refresh tracking (ignored for AiSensy).
+	TokenExpiresAt       *time.Time `json:"token_expires_at,omitempty"`
+	TokenLastRefreshedAt *time.Time `json:"token_last_refreshed_at,omitempty"`
+	TokenRefreshFailed   bool       `gorm:"default:false" json:"token_refresh_failed"`
+	TokenRefreshError    string     `gorm:"size:500" json:"token_refresh_error,omitempty"`
 
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`

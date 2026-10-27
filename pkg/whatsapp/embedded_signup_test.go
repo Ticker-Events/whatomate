@@ -23,6 +23,7 @@ func TestClient_ExchangeCodeForToken(t *testing.T) {
 		apiVersion      string
 		serverResponse  func(t *testing.T, w http.ResponseWriter, r *http.Request)
 		wantToken       string
+		wantExpiresIn   int
 		wantErr         bool
 		wantErrContains string
 	}{
@@ -42,13 +43,15 @@ func TestClient_ExchangeCodeForToken(t *testing.T) {
 
 				// Return success
 				w.WriteHeader(http.StatusOK)
-				_ = json.NewEncoder(w).Encode(map[string]string{
+				_ = json.NewEncoder(w).Encode(map[string]any{
 					"access_token": "EAABwzLixnjYBO1234567890",
 					"token_type":   "bearer",
+					"expires_in":   5184000,
 				})
 			},
-			wantToken: "EAABwzLixnjYBO1234567890",
-			wantErr:   false,
+			wantToken:     "EAABwzLixnjYBO1234567890",
+			wantExpiresIn: 5184000,
+			wantErr:       false,
 		},
 		{
 			name:       "invalid authorization code",
@@ -137,7 +140,7 @@ func TestClient_ExchangeCodeForToken(t *testing.T) {
 
 			ctx := testutil.TestContext(t)
 
-			token, err := client.ExchangeCodeForToken(ctx, tt.code, tt.appID, tt.appSecret, tt.apiVersion)
+			token, expiresIn, err := client.ExchangeCodeForToken(ctx, tt.code, tt.appID, tt.appSecret, tt.apiVersion)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -149,6 +152,7 @@ func TestClient_ExchangeCodeForToken(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantToken, token)
+			assert.Equal(t, tt.wantExpiresIn, expiresIn)
 		})
 	}
 }
