@@ -21,6 +21,7 @@ func TestClient_ExchangeCodeForToken(t *testing.T) {
 		appID           string
 		appSecret       string
 		apiVersion      string
+		redirectURI     string
 		serverResponse  func(t *testing.T, w http.ResponseWriter, r *http.Request)
 		wantToken       string
 		wantExpiresIn   int
@@ -40,6 +41,7 @@ func TestClient_ExchangeCodeForToken(t *testing.T) {
 				assert.Contains(t, r.URL.RawQuery, "client_id=123456")
 				assert.Contains(t, r.URL.RawQuery, "client_secret=secret123")
 				assert.Contains(t, r.URL.RawQuery, "code=test_auth_code_123")
+				assert.NotContains(t, r.URL.RawQuery, "redirect_uri=")
 
 				// Return success
 				w.WriteHeader(http.StatusOK)
@@ -50,6 +52,29 @@ func TestClient_ExchangeCodeForToken(t *testing.T) {
 				})
 			},
 			wantToken:     "EAABwzLixnjYBO1234567890",
+			wantExpiresIn: 5184000,
+			wantErr:       false,
+		},
+		{
+			name:        "successful token exchange with redirect_uri",
+			code:        "test_auth_code_456",
+			appID:       "123456",
+			appSecret:   "secret123",
+			apiVersion:  "v21.0",
+			redirectURI: "https://agent.tiqr.store/settings/accounts",
+			serverResponse: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "https://agent.tiqr.store/settings/accounts", r.URL.Query().Get("redirect_uri"))
+				assert.Equal(t, "test_auth_code_456", r.URL.Query().Get("code"))
+
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"access_token": "EAABwzLixnjYBO9876543210",
+					"token_type":   "bearer",
+					"expires_in":   5184000,
+				})
+			},
+			wantToken:     "EAABwzLixnjYBO9876543210",
 			wantExpiresIn: 5184000,
 			wantErr:       false,
 		},
@@ -140,7 +165,7 @@ func TestClient_ExchangeCodeForToken(t *testing.T) {
 
 			ctx := testutil.TestContext(t)
 
-			token, expiresIn, err := client.ExchangeCodeForToken(ctx, tt.code, tt.appID, tt.appSecret, tt.apiVersion)
+			token, expiresIn, err := client.ExchangeCodeForToken(ctx, tt.code, tt.appID, tt.appSecret, tt.apiVersion, tt.redirectURI)
 
 			if tt.wantErr {
 				require.Error(t, err)

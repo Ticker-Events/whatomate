@@ -80,8 +80,8 @@ jobs:
       - name: Build
         run: go build -v ./...
 
-  deploy:
-    name: Build and deploy tiqr-agent
+  deploy-backend:
+    name: Deploy backend
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -113,42 +113,27 @@ jobs:
       - name: Install Kustomize
         uses: imranismail/setup-kustomize@v2
 
-      - name: Build and push images
+      - name: Build and push backend image
         env:
           IMAGE_TAG: ${{ github.sha }}
-          VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
         run: |
           API_IMAGE="$REGISTRY/$API_IMAGE_NAME"
-          UI_IMAGE="$REGISTRY/$UI_IMAGE_NAME"
           docker build -t "$API_IMAGE:$IMAGE_TAG" -t "$API_IMAGE:latest" .
-          source digitalocean/scripts/lib-ui-firebase-build.sh
-          UI_BUILD_ARGS=()
-          if append_ui_firebase_build_args UI_BUILD_ARGS "$GITHUB_WORKSPACE"; then
-            echo "UI Firebase config: enabled"
-          else
-            echo "Warning: VITE_FIREBASE_CONFIG not set — Firestore real-time chat will be disabled in the UI"
-          fi
-          docker build "${UI_BUILD_ARGS[@]}" \
-            -t "$UI_IMAGE:$IMAGE_TAG" -t "$UI_IMAGE:latest" \
-            -f frontend/Dockerfile frontend/
           docker push "$API_IMAGE:$IMAGE_TAG"
           docker push "$API_IMAGE:latest"
-          docker push "$UI_IMAGE:$IMAGE_TAG"
-          docker push "$UI_IMAGE:latest"
 
       - name: Install yq
         run: |
           curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.5/yq_linux_amd64
           chmod +x /usr/local/bin/yq
 
-      - name: Deploy (migrate first, then apps)
+      - name: Deploy backend (migrate, api, worker)
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd "$OVERLAY"
           kustomize edit set image \
-            "registry.digitalocean.com/tiqr/tiqr-agent=$REGISTRY/$API_IMAGE_NAME:$IMAGE_TAG" \
-            "registry.digitalocean.com/tiqr/tiqr-agent-ui=$REGISTRY/$UI_IMAGE_NAME:$IMAGE_TAG"
+            "registry.digitalocean.com/tiqr/tiqr-agent=$REGISTRY/$API_IMAGE_NAME:$IMAGE_TAG"
 
           MANIFESTS=$(mktemp)
           kustomize build . > "$MANIFESTS"
@@ -163,10 +148,84 @@ jobs:
 
           yq eval-all 'select(
             .kind == "Deployment"
-            and (.metadata.name == "agent-api" or .metadata.name == "agent-worker" or .metadata.name == "agent-ui")
+            and (.metadata.name == "agent-api" or .metadata.name == "agent-worker")
           )' "$MANIFESTS" -o yaml | kubectl apply -f -
 
           kubectl rollout status deployment/agent-api -n "$NAMESPACE" --timeout=600s
           kubectl rollout status deployment/agent-worker -n "$NAMESPACE" --timeout=600s
-          kubectl rollout status deployment/agent-ui -n "$NAMESPACE" --timeout=300s
           kubectl rollout status deployment/agent-redis -n "$NAMESPACE" --timeout=300s
+
+  deploy-ui:
+    name: Deploy UI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Save kubeconfig
+        run: doctl kubernetes cluster kubeconfig save "$CLUSTER_NAME"
+
+      - name: Ensure registry pull secret
+        run: |
+          doctl kubernetes cluster registry add "$CLUSTER_NAME"
+          kubectl apply -f digitalocean/k8s/overlays/production/namespace.yaml
+          doctl registry kubernetes-manifest --name do-registry --namespace "$NAMESPACE" | kubectl apply -f -
+
+      - name: Login to DO Container Registry
+        run: doctl registry login
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Build and push UI image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
+        run: |
+          UI_IMAGE="$REGISTRY/$UI_IMAGE_NAME"
+          source digitalocean/scripts/lib-ui-firebase-build.sh
+          UI_BUILD_ARGS=()
+          if append_ui_firebase_build_args UI_BUILD_ARGS "$GITHUB_WORKSPACE"; then
+            echo "UI Firebase config: enabled"
+          else
+            echo "Warning: VITE_FIREBASE_CONFIG not set — Firestore real-time chat will be disabled in the UI"
+          fi
+          docker build "${UI_BUILD_ARGS[@]}" \
+            -t "$UI_IMAGE:$IMAGE_TAG" -t "$UI_IMAGE:latest" \
+            -f frontend/Dockerfile frontend/
+          docker push "$UI_IMAGE:$IMAGE_TAG"
+          docker push "$UI_IMAGE:latest"
+
+      - name: Install yq
+        run: |
+          curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.5/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: Deploy UI
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd "$OVERLAY"
+          kustomize edit set image \
+            "registry.digitalocean.com/tiqr/tiqr-agent-ui=$REGISTRY/$UI_IMAGE_NAME:$IMAGE_TAG"
+
+          MANIFESTS=$(mktemp)
+          kustomize build . > "$MANIFESTS"
+
+          yq eval-all 'select(
+            .kind == "Deployment"
+            and .metadata.name == "agent-ui"
+          )' "$MANIFESTS" -o yaml | kubectl apply -f -
+
+          kubectl rollout status deployment/agent-ui -n "$NAMESPACE" --timeout=300s

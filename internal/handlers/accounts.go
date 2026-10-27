@@ -793,6 +793,7 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 		WABAID             string `json:"waba_id"`  // Optional: Discovered via token if missing
 		Name               string `json:"name"`
 		WebhookVerifyToken string `json:"webhook_verify_token"`
+		RedirectURI        string `json:"redirect_uri"` // Must match FB.login OAuth dialog redirect_uri
 	}
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
@@ -801,6 +802,7 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	a.Log.Info("Received embedded signup exchange token request",
 		"phone_id", req.PhoneID,
 		"waba_id", req.WABAID,
+		"redirect_uri", req.RedirectURI,
 		"organization_id", orgID)
 
 	if req.Code == "" {
@@ -818,7 +820,7 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	a.Log.Info("Exchanging code for access token")
 
 	accessToken, expiresIn, err := a.WhatsApp.ExchangeCodeForToken(ctx, req.Code,
-		appID, appSecret, a.Config.WhatsApp.APIVersion)
+		appID, appSecret, a.Config.WhatsApp.APIVersion, req.RedirectURI)
 	if err != nil {
 		a.Log.Error("Failed to exchange token", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
