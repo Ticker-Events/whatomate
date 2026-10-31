@@ -284,8 +284,15 @@ function submitLead() {
   openWhatsApp(lines.join('\n'))
 }
 
+function scrollToId(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
+  // Keep URL on /landing#… — bare href="#id" resolves to /#id via <base href="/">
+  // and hits the auth-guarded dashboard route.
+  history.replaceState(null, '', `/landing#${id}`)
+}
+
 function scrollToLead() {
-  document.getElementById('lead')?.scrollIntoView({ behavior: 'smooth' })
+  scrollToId('lead')
 }
 
 function talkAboutPlan(planName: string) {
@@ -353,18 +360,22 @@ onUnmounted(() => {
   <div class="landing min-h-screen bg-[#07080a] text-white light:bg-slate-50 light:text-slate-900">
     <header class="sticky top-0 z-40 border-b border-white/[0.06] bg-[#07080a]/80 backdrop-blur-md light:border-slate-200 light:bg-white/80">
       <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <a href="#top" class="flex items-center gap-2.5 font-semibold tracking-tight">
+        <a
+          href="/landing#top"
+          class="flex items-center gap-2.5 font-semibold tracking-tight"
+          @click.prevent="scrollToId('top')"
+        >
           <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/20">
             <MessageSquare class="h-5 w-5 text-white" />
           </span>
           <span>TiQR Agent</span>
         </a>
         <nav class="hidden items-center gap-6 text-sm text-white/60 light:text-slate-600 md:flex">
-          <a href="#problems" class="hover:text-white light:hover:text-slate-900">Problems</a>
-          <a href="#solution" class="hover:text-white light:hover:text-slate-900">Solution</a>
-          <a href="#pricing" class="hover:text-white light:hover:text-slate-900">Pricing</a>
-          <a href="#faq" class="hover:text-white light:hover:text-slate-900">FAQ</a>
-          <a href="#lead" class="hover:text-white light:hover:text-slate-900">Contact</a>
+          <a href="/landing#problems" class="hover:text-white light:hover:text-slate-900" @click.prevent="scrollToId('problems')">Problems</a>
+          <a href="/landing#solution" class="hover:text-white light:hover:text-slate-900" @click.prevent="scrollToId('solution')">Solution</a>
+          <a href="/landing#pricing" class="hover:text-white light:hover:text-slate-900" @click.prevent="scrollToId('pricing')">Pricing</a>
+          <a href="/landing#faq" class="hover:text-white light:hover:text-slate-900" @click.prevent="scrollToId('faq')">FAQ</a>
+          <a href="/landing#lead" class="hover:text-white light:hover:text-slate-900" @click.prevent="scrollToId('lead')">Contact</a>
         </nav>
         <div class="flex items-center gap-2">
           <RouterLink
@@ -374,8 +385,9 @@ onUnmounted(() => {
             Sign in
           </RouterLink>
           <a
-            href="#lead"
+            href="/landing#lead"
             class="inline-flex h-9 items-center rounded-md bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-500"
+            @click.prevent="scrollToId('lead')"
           >
             Talk to us
           </a>
@@ -405,15 +417,17 @@ onUnmounted(() => {
             </p>
             <div class="mt-8 flex flex-wrap gap-3">
               <a
-                href="#lead"
+                href="/landing#lead"
                 class="cta-pulse inline-flex h-11 items-center rounded-md bg-emerald-600 px-6 text-sm font-medium text-white hover:bg-emerald-500"
+                @click.prevent="scrollToId('lead')"
               >
                 Stop missing WhatsApp orders
                 <ArrowRight class="ml-2 h-4 w-4" />
               </a>
               <a
-                href="#pricing"
+                href="/landing#pricing"
                 class="inline-flex h-11 items-center rounded-md border border-white/15 bg-white/[0.03] px-6 text-sm font-medium text-white hover:bg-white/[0.06] light:border-slate-300 light:bg-white light:text-slate-900 light:hover:bg-slate-50"
+                @click.prevent="scrollToId('pricing')"
               >
                 See AI pricing
               </a>
