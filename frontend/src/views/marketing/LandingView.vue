@@ -117,6 +117,34 @@ const benefits = [
   },
 ]
 
+const faqs = [
+  {
+    q: 'Can this work for any type of store?',
+    a: 'Yes. TiQR Agent works for bakeries, restaurants, retail, clinics, services, and more — anything that takes orders or inquiries on WhatsApp.',
+  },
+  {
+    q: 'Can you build custom flows for my business?',
+    a: 'Yes. We can design custom WhatsApp flows for your catalog, booking, payments, and handoffs. Contact us and we’ll scope what you need.',
+    contact: true,
+  },
+  {
+    q: 'What’s included in the hero demo?',
+    a: 'The demo shows a real order path: welcome → buy → pickup/delivery → collections → product cards → cart → checkout → order confirmation — the same journey your customers can take on WhatsApp.',
+  },
+  {
+    q: 'How does AI pricing work?',
+    a: 'Each AI plan has a monthly fee plus free orders. Extra orders bill at that plan’s per-order rate. Use the calculator above to estimate your monthly cost. Payment gateway charges are billed as actuals.',
+  },
+  {
+    q: 'What’s the difference between Basic and AI plans?',
+    a: 'Basic (₹999/month) is WhatsApp Business essentials only — inbox, templates, messaging — with no AI agent. AI Base / Advanced / Pro add the WhatsApp AI agent that takes orders and replies for you.',
+  },
+  {
+    q: 'Is pricing per store?',
+    a: 'Yes. Charges are per store per month. If you run multiple outlets, each store is billed separately.',
+  },
+]
+
 /** Demo transcript from tiqr-agent-demo.mp4 — Palooda Payyannur → Bakery Bengaluru */
 type DemoNode =
   | { kind: 'date'; label: string }
@@ -256,9 +284,13 @@ function submitLead() {
   openWhatsApp(lines.join('\n'))
 }
 
+function scrollToLead() {
+  document.getElementById('lead')?.scrollIntoView({ behavior: 'smooth' })
+}
+
 function talkAboutPlan(planName: string) {
   lead.plan = planName
-  document.getElementById('lead')?.scrollIntoView({ behavior: 'smooth' })
+  scrollToLead()
 }
 
 function useReveal() {
@@ -331,6 +363,7 @@ onUnmounted(() => {
           <a href="#problems" class="hover:text-white light:hover:text-slate-900">Problems</a>
           <a href="#solution" class="hover:text-white light:hover:text-slate-900">Solution</a>
           <a href="#pricing" class="hover:text-white light:hover:text-slate-900">Pricing</a>
+          <a href="#faq" class="hover:text-white light:hover:text-slate-900">FAQ</a>
           <a href="#lead" class="hover:text-white light:hover:text-slate-900">Contact</a>
         </nav>
         <div class="flex items-center gap-2">
@@ -714,6 +747,34 @@ onUnmounted(() => {
           <p class="mt-6 text-xs text-white/35 light:text-slate-500">
             Charges are per store per month. If WhatsApp message pricing changes substantially, these fees may be adjusted — expected to be rare.
           </p>
+
+          <!-- Pricing & demo FAQs -->
+          <div id="faq" class="mt-16 scroll-mt-24">
+            <h3 class="text-2xl font-semibold tracking-tight">Pricing &amp; demo FAQs</h3>
+            <p class="mt-2 max-w-2xl text-sm text-white/55 light:text-slate-600">
+              Common questions about plans, the WhatsApp demo, and custom work.
+            </p>
+            <dl class="mt-8 space-y-4">
+              <div
+                v-for="faq in faqs"
+                :key="faq.q"
+                class="rounded-xl border border-white/[0.08] bg-[#0c0d10] px-5 py-4 light:border-slate-200 light:bg-white"
+              >
+                <dt class="font-medium text-white light:text-slate-900">{{ faq.q }}</dt>
+                <dd class="mt-2 text-sm leading-relaxed text-white/55 light:text-slate-600">
+                  {{ faq.a }}
+                  <button
+                    v-if="faq.contact"
+                    type="button"
+                    class="ml-1 font-medium text-emerald-400 hover:underline"
+                    @click="scrollToLead"
+                  >
+                    Contact us
+                  </button>
+                </dd>
+              </div>
+            </dl>
+          </div>
         </div>
       </section>
 
