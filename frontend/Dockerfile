@@ -92,9 +92,10 @@ server {
         try_files /favicon.svg =404;
     }
 
-    # Handle SPA routing - serve index.html for all routes
+    # SPA routing: do not try \$uri/ — a public/ dir matching a Vue route
+    # (e.g. /landing) would 301 to /landing/ then 403 with no index.
     location / {
-        try_files \$uri \$uri/ /index.html;
+        try_files \$uri /index.html;
     }
 
     # Cache static assets

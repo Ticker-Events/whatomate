@@ -158,19 +158,19 @@ const demoProducts = [
     name: 'KIWI',
     price: '₹9',
     desc: 'KIWI cake from Bakery Bengaluru.',
-    img: '/landing/cake-kiwi.jpg',
+    img: '/demo/cake-kiwi.jpg',
   },
   {
     name: 'MANGO',
     price: '₹9',
     desc: 'MANGO cake from Bakery Bengaluru.',
-    img: '/landing/cake-mango.jpg',
+    img: '/demo/cake-mango.jpg',
   },
   {
     name: 'STRAWBERRY',
     price: '₹9',
     desc: 'STRAWBERRY cake from Bakery Bengaluru.',
-    img: '/landing/cake-strawberry.jpg',
+    img: '/demo/cake-strawberry.jpg',
   },
 ]
 
