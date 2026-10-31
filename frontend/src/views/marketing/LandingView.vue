@@ -747,41 +747,34 @@ onUnmounted(() => {
           <p class="mt-6 text-xs text-white/35 light:text-slate-500">
             Charges are per store per month. If WhatsApp message pricing changes substantially, these fees may be adjusted — expected to be rare.
           </p>
-        </div>
-      </section>
 
-      <!-- FAQ -->
-      <section id="faq" class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-        <div class="max-w-2xl">
-          <p class="text-sm font-medium uppercase tracking-[0.18em] text-emerald-400/90">FAQ</p>
-          <h2 class="mt-3 text-3xl font-semibold tracking-tight">Pricing, demo &amp; custom work</h2>
-          <p class="mt-3 text-white/55 light:text-slate-600">
-            Quick answers about plans, the WhatsApp demo, and whether we can fit your store.
-          </p>
-        </div>
-        <div class="mt-10 divide-y divide-white/[0.08] rounded-2xl border border-white/[0.08] light:divide-slate-200 light:border-slate-200 light:bg-white">
-          <details
-            v-for="(faq, i) in faqs"
-            :key="faq.q"
-            class="group px-5 py-1 open:bg-white/[0.02] light:open:bg-slate-50"
-            :open="i < 2"
-          >
-            <summary class="cursor-pointer list-none py-4 font-medium text-white light:text-slate-900 [&::-webkit-details-marker]:hidden flex items-center justify-between gap-4">
-              <span>{{ faq.q }}</span>
-              <span class="text-white/40 transition group-open:rotate-45 light:text-slate-400">+</span>
-            </summary>
-            <p class="pb-4 text-sm leading-relaxed text-white/55 light:text-slate-600">
-              {{ faq.a }}
-              <button
-                v-if="faq.contact"
-                type="button"
-                class="ml-1 font-medium text-emerald-400 hover:underline"
-                @click="scrollToLead"
-              >
-                Contact us
-              </button>
+          <!-- Pricing & demo FAQs -->
+          <div id="faq" class="mt-16 scroll-mt-24">
+            <h3 class="text-2xl font-semibold tracking-tight">Pricing &amp; demo FAQs</h3>
+            <p class="mt-2 max-w-2xl text-sm text-white/55 light:text-slate-600">
+              Common questions about plans, the WhatsApp demo, and custom work.
             </p>
-          </details>
+            <dl class="mt-8 space-y-4">
+              <div
+                v-for="faq in faqs"
+                :key="faq.q"
+                class="rounded-xl border border-white/[0.08] bg-[#0c0d10] px-5 py-4 light:border-slate-200 light:bg-white"
+              >
+                <dt class="font-medium text-white light:text-slate-900">{{ faq.q }}</dt>
+                <dd class="mt-2 text-sm leading-relaxed text-white/55 light:text-slate-600">
+                  {{ faq.a }}
+                  <button
+                    v-if="faq.contact"
+                    type="button"
+                    class="ml-1 font-medium text-emerald-400 hover:underline"
+                    @click="scrollToLead"
+                  >
+                    Contact us
+                  </button>
+                </dd>
+              </div>
+            </dl>
+          </div>
         </div>
       </section>
 
