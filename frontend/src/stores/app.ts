@@ -3,10 +3,10 @@ import { ref, computed } from 'vue'
 import { api } from '@/services/api'
 
 export const useAppStore = defineStore('app', () => {
-  const name = ref('Whatomate')
+  const name = ref('TiQR Agent')
   const loaded = ref(false)
 
-  const displayName = computed(() => name.value || 'Whatomate')
+  const displayName = computed(() => name.value || 'TiQR Agent')
 
   async function fetchAppInfo() {
     try {
