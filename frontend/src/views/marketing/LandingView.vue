@@ -117,6 +117,34 @@ const benefits = [
   },
 ]
 
+const faqs = [
+  {
+    q: 'Can this work for any type of store?',
+    a: 'Yes. TiQR Agent works for bakeries, restaurants, retail, clinics, services, and more — anything that takes orders or inquiries on WhatsApp.',
+  },
+  {
+    q: 'Can you build custom flows for my business?',
+    a: 'Yes. We can design custom WhatsApp flows for your catalog, booking, payments, and handoffs. Contact us and we’ll scope what you need.',
+    contact: true,
+  },
+  {
+    q: 'What’s included in the hero demo?',
+    a: 'The demo shows a real order path: welcome → buy → pickup/delivery → collections → product cards → cart → checkout → order confirmation — the same journey your customers can take on WhatsApp.',
+  },
+  {
+    q: 'How does AI pricing work?',
+    a: 'Each AI plan has a monthly fee plus free orders. Extra orders bill at that plan’s per-order rate. Use the calculator above to estimate your monthly cost. Payment gateway charges are billed as actuals.',
+  },
+  {
+    q: 'What’s the difference between Basic and AI plans?',
+    a: 'Basic (₹999/month) is WhatsApp Business essentials only — inbox, templates, messaging — with no AI agent. AI Base / Advanced / Pro add the WhatsApp AI agent that takes orders and replies for you.',
+  },
+  {
+    q: 'Is pricing per store?',
+    a: 'Yes. Charges are per store per month. If you run multiple outlets, each store is billed separately.',
+  },
+]
+
 /** Demo transcript from tiqr-agent-demo.mp4 — Palooda Payyannur → Bakery Bengaluru */
 type DemoNode =
   | { kind: 'date'; label: string }
@@ -256,9 +284,13 @@ function submitLead() {
   openWhatsApp(lines.join('\n'))
 }
 
+function scrollToLead() {
+  document.getElementById('lead')?.scrollIntoView({ behavior: 'smooth' })
+}
+
 function talkAboutPlan(planName: string) {
   lead.plan = planName
-  document.getElementById('lead')?.scrollIntoView({ behavior: 'smooth' })
+  scrollToLead()
 }
 
 function useReveal() {
@@ -331,6 +363,7 @@ onUnmounted(() => {
           <a href="#problems" class="hover:text-white light:hover:text-slate-900">Problems</a>
           <a href="#solution" class="hover:text-white light:hover:text-slate-900">Solution</a>
           <a href="#pricing" class="hover:text-white light:hover:text-slate-900">Pricing</a>
+          <a href="#faq" class="hover:text-white light:hover:text-slate-900">FAQ</a>
           <a href="#lead" class="hover:text-white light:hover:text-slate-900">Contact</a>
         </nav>
         <div class="flex items-center gap-2">
@@ -714,6 +747,41 @@ onUnmounted(() => {
           <p class="mt-6 text-xs text-white/35 light:text-slate-500">
             Charges are per store per month. If WhatsApp message pricing changes substantially, these fees may be adjusted — expected to be rare.
           </p>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section id="faq" class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+        <div class="max-w-2xl">
+          <p class="text-sm font-medium uppercase tracking-[0.18em] text-emerald-400/90">FAQ</p>
+          <h2 class="mt-3 text-3xl font-semibold tracking-tight">Pricing, demo &amp; custom work</h2>
+          <p class="mt-3 text-white/55 light:text-slate-600">
+            Quick answers about plans, the WhatsApp demo, and whether we can fit your store.
+          </p>
+        </div>
+        <div class="mt-10 divide-y divide-white/[0.08] rounded-2xl border border-white/[0.08] light:divide-slate-200 light:border-slate-200 light:bg-white">
+          <details
+            v-for="(faq, i) in faqs"
+            :key="faq.q"
+            class="group px-5 py-1 open:bg-white/[0.02] light:open:bg-slate-50"
+            :open="i < 2"
+          >
+            <summary class="cursor-pointer list-none py-4 font-medium text-white light:text-slate-900 [&::-webkit-details-marker]:hidden flex items-center justify-between gap-4">
+              <span>{{ faq.q }}</span>
+              <span class="text-white/40 transition group-open:rotate-45 light:text-slate-400">+</span>
+            </summary>
+            <p class="pb-4 text-sm leading-relaxed text-white/55 light:text-slate-600">
+              {{ faq.a }}
+              <button
+                v-if="faq.contact"
+                type="button"
+                class="ml-1 font-medium text-emerald-400 hover:underline"
+                @click="scrollToLead"
+              >
+                Contact us
+              </button>
+            </p>
+          </details>
         </div>
       </section>
 
