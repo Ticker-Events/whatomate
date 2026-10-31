@@ -17,6 +17,12 @@ const router = createRouter({
   history: createWebHistory(normalizedBasePath),
   routes: [
     {
+      path: '/landing',
+      name: 'landing',
+      component: () => import('@/views/marketing/LandingView.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('@/views/auth/LoginView.vue'),
@@ -419,7 +425,7 @@ router.beforeEach(async (to, _from, next) => {
       // Try to restore session from localStorage
       const restored = authStore.restoreSession()
       if (!restored) {
-        return next({ name: 'login', query: { redirect: to.fullPath } })
+        return next({ name: 'landing', query: { redirect: to.fullPath } })
       }
     }
 
@@ -432,9 +438,10 @@ router.beforeEach(async (to, _from, next) => {
       }
     }
   } else {
-    // Redirect to appropriate page if already logged in
-    if (authStore.isAuthenticated && (to.name === 'login' || to.name === 'register')) {
-      return next({ path: getFirstAccessibleRoute(authStore) })
+    // Redirect to product if already logged in
+    if (authStore.isAuthenticated && (to.name === 'login' || to.name === 'register' || to.name === 'landing')) {
+      const redirect = typeof to.query.redirect === 'string' ? to.query.redirect : null
+      return next({ path: redirect || getFirstAccessibleRoute(authStore) })
     }
   }
 
