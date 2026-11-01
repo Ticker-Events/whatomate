@@ -66,15 +66,11 @@ const (
 	tiqrModePickup   = "PICKUP_FROM_STORE"
 	ModeDelivery     = "DELIVERY_TO_LOCATION"
 	tiqrModeDelivery = ModeDelivery
-	Proceed          = "proceed"
-	tiqrProceed      = Proceed
 	PickupMode       = "pickup"
 	tiqrPickupMode   = PickupMode
 	DeliveryMode     = "delivery"
 	tiqrDeliveryMode = DeliveryMode
 	tiqrShareAgain   = "share_again"
-
-	tiqrEcommercePickupOnly = "This store offers store pickup only.\n\nYou can browse products and place an order for pickup when you're ready."
 
 	tiqrEcommerceChooseMode = "How would you like to receive your order?"
 )
@@ -198,43 +194,74 @@ func menuButtons(c *Conv, store map[string]any) codedflow.ButtonPrompt {
 }
 
 // MenuWelcomeBody builds the first-menu body from a cached welcome or the
-// store-name fallback.
+// store-name fallback, then appends live fulfillment modes/radii from the
+// store and the menu CTA.
 func MenuWelcomeBody(store map[string]any, welcome string) string {
 	welcome = strings.TrimSpace(welcome)
-	if welcome == "" {
+	if strings.HasSuffix(welcome, menuCTA) {
+		welcome = strings.TrimSpace(strings.TrimSuffix(welcome, menuCTA))
+	}
+	base := welcome
+	if base == "" {
 		name := strings.TrimSpace(asString(store["name"]))
 		if name != "" {
-			return "Welcome to " + name + ".\n\n" + menuCTA
+			base = "Welcome to " + name + "."
 		}
-		return menuCTA
 	}
-	if strings.HasSuffix(welcome, menuCTA) {
-		return welcome
+	parts := make([]string, 0, 3)
+	if base != "" {
+		parts = append(parts, base)
 	}
-	return welcome + "\n\n" + menuCTA
+	if summary := WelcomeFulfillmentSummary(store); summary != "" {
+		parts = append(parts, summary)
+	}
+	parts = append(parts, menuCTA)
+	return strings.Join(parts, "\n\n")
+}
+
+// WelcomeFulfillmentSummary returns a short plain-text line about pickup and
+// delivery from store.delivery_modes. When delivery is offered, free and paid
+// radii are included when the store has them. Empty modes yield "".
+func WelcomeFulfillmentSummary(store map[string]any) string {
+	modes := storeDeliveryModes(store)
+	hasPickup := deliveryModesContain(modes, tiqrModePickup)
+	hasDelivery := deliveryModesContain(modes, tiqrModeDelivery)
+	if !hasPickup && !hasDelivery {
+		return ""
+	}
+
+	var b strings.Builder
+	switch {
+	case hasPickup && hasDelivery:
+		b.WriteString("We offer store pickup and delivery.")
+	case hasPickup:
+		b.WriteString("We offer store pickup.")
+	default:
+		b.WriteString("We offer delivery.")
+	}
+	if !hasDelivery {
+		return b.String()
+	}
+
+	freeLabel := radiusKmLabel(store["free_delivery_radius"])
+	maxLabel := radiusKmLabel(store["delivery_radius"])
+	offers := make([]string, 0, 2)
+	if freeLabel != "" {
+		offers = append(offers, "Free delivery within "+freeLabel+" km")
+	}
+	if maxLabel != "" {
+		offers = append(offers, "Delivery available up to "+maxLabel+" km")
+	}
+	if len(offers) == 0 {
+		return b.String()
+	}
+	b.WriteByte(' ')
+	b.WriteString(strings.Join(offers, ". "))
+	b.WriteByte('.')
+	return b.String()
 }
 
 func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
-	if !resolveFulfillment(c) {
-		if c.HasReplyRoute() {
-			route := c.TakeReplyRoute()
-			if handled, err := handleBuyReplyRoute(c, route); handled {
-				if err != nil || c.Ended || c.Stop {
-					return err
-				}
-				// Pickup switch mid-location: fulfillment is done, continue browsing.
-				if asString(c.Session().SessionData["delivery_mode"]) != tiqrModePickup {
-					return nil
-				}
-			} else if route.Kind != "" {
-				first = route
-			} else {
-				return nil
-			}
-		} else if first.Kind == "" {
-			return nil
-		}
-	}
 	for {
 		route := first
 		first = codedflow.Route{}
@@ -309,7 +336,14 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 				if !ready {
 					continue
 				}
-				return checkout(c)
+				if err := checkout(c); err != nil || c.Ended || c.Stop {
+					return err
+				}
+				if c.HasReplyRoute() {
+					first = c.TakeReplyRoute()
+					continue
+				}
+				return nil
 			}
 			continue
 		}
@@ -448,7 +482,14 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 			if !ready {
 				continue
 			}
-			return checkout(c)
+			if err := checkout(c); err != nil || c.Ended || c.Stop {
+				return err
+			}
+			if c.HasReplyRoute() {
+				first = c.TakeReplyRoute()
+				continue
+			}
+			return nil
 		}
 		// tiqrAddMore — keep browsing
 	}
@@ -603,7 +644,8 @@ func askAfterCartAdd(c *Conv) (string, bool) {
 }
 
 // resolveFulfillment asks for delivery mode based on store.delivery_modes
-// before browsing. Missing modes keep the previous pickup-only behaviour.
+// after the cart is confirmed (or during early handoff), before the details form.
+// Missing modes keep the previous pickup-only behaviour.
 func resolveFulfillment(c *Conv) bool {
 	store, _ := asStringMap(c.Session().SessionData["store"])
 	modes := storeDeliveryModes(store)
@@ -617,21 +659,10 @@ func resolveFulfillment(c *Conv) bool {
 		})
 		return !c.Stop
 	case hasPickup && !hasDelivery:
-		_, ok := c.AskButtons("fulfillment_pickup_only", codedflow.ButtonPrompt{
-			Body: tiqrEcommercePickupOnly,
-			Buttons: []codedflow.Button{
-				{ID: tiqrProceed, Title: "Proceed"},
-			},
-			Step: codedflow.StepNote{
-				Doing:  "The store only supports pickup. The customer is confirming before browsing.",
-				Expect: "They tap Proceed, or ask to check out if they already have a cart.",
-			},
+		c.Once("fulfillment_pickup_only", func() {
+			c.Session().SessionData["delivery_mode"] = tiqrModePickup
 		})
-		if !ok {
-			return false
-		}
-		c.Session().SessionData["delivery_mode"] = tiqrModePickup
-		return true
+		return !c.Stop
 	case hasPickup && hasDelivery:
 		choice, ok := c.AskButtons("fulfillment_mode", codedflow.ButtonPrompt{
 			Body: tiqrEcommerceChooseMode,
@@ -640,7 +671,7 @@ func resolveFulfillment(c *Conv) bool {
 				{ID: tiqrDeliveryMode, Title: "Delivery"},
 			},
 			Step: codedflow.StepNote{
-				Doing:  "The customer is choosing pickup or delivery before browsing.",
+				Doing:  "The customer is choosing pickup or delivery after confirming the cart.",
 				Expect: "They pick Store pickup or Delivery.",
 			},
 		})
@@ -841,7 +872,13 @@ func (c *Conv) applyCheckoutDivert() (divertResult, error) {
 	if !ready {
 		return divertEmptyCart, nil
 	}
-	return divertCheckoutDone, checkout(c)
+	if err := checkout(c); err != nil || c.Ended || c.Stop {
+		return divertCheckoutDone, err
+	}
+	if c.HasReplyRoute() {
+		return divertEmptyCart, nil
+	}
+	return divertCheckoutDone, nil
 }
 
 func CartLen(c *Conv) int {
@@ -2418,6 +2455,29 @@ func formatCodedCaptureBlock(productName, optionName string, fields map[string]a
 }
 
 func checkout(c *Conv) error {
+	if !resolveFulfillment(c) {
+		if c.HasReplyRoute() {
+			route := c.TakeReplyRoute()
+			if handled, err := handleBuyReplyRoute(c, route); handled {
+				if err != nil || c.Ended || c.Stop {
+					return err
+				}
+				// Previous-step pickup switch completes fulfillment; continue to details.
+				if route.Kind == codedflow.RoutePrevious && strings.TrimSpace(route.ID) == tiqrPickupMode {
+					// fall through
+				} else {
+					return nil
+				}
+			} else if route.Kind != "" {
+				c.SetReplyRoute(route)
+				return nil
+			} else {
+				return nil
+			}
+		} else {
+			return nil
+		}
+	}
 	detailsBody := "Please share your name, email, and phone number so we can place your pickup order."
 	delivery := asString(c.Session().SessionData["delivery_mode"]) == tiqrModeDelivery
 	if delivery {

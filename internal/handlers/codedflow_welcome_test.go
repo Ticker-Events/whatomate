@@ -24,6 +24,58 @@ func TestMenuWelcomeBody(t *testing.T) {
 		"Hi there.\n\nWhat would you like to do?",
 		tiqrecommerce.MenuWelcomeBody(store, "Hi there.\n\nWhat would you like to do?"),
 	)
+
+	both := map[string]any{
+		"name":                 "Demo",
+		"delivery_modes":       []any{"PICKUP_FROM_STORE", "DELIVERY_TO_LOCATION"},
+		"free_delivery_radius": "3",
+		"delivery_radius":      "8",
+	}
+	assert.Equal(t,
+		"Welcome to Demo.\n\nWe offer store pickup and delivery. Free delivery within 3 km. Delivery available up to 8 km.\n\nWhat would you like to do?",
+		tiqrecommerce.MenuWelcomeBody(both, ""),
+	)
+	assert.Equal(t,
+		"Warm hello from Demo bakery.\n\nWe offer store pickup and delivery. Free delivery within 3 km. Delivery available up to 8 km.\n\nWhat would you like to do?",
+		tiqrecommerce.MenuWelcomeBody(both, "Warm hello from Demo bakery."),
+	)
+
+	pickupOnly := map[string]any{
+		"name":                 "Demo",
+		"delivery_modes":       []any{"PICKUP_FROM_STORE"},
+		"free_delivery_radius": "3",
+		"delivery_radius":      "8",
+	}
+	assert.Equal(t,
+		"Welcome to Demo.\n\nWe offer store pickup.\n\nWhat would you like to do?",
+		tiqrecommerce.MenuWelcomeBody(pickupOnly, ""),
+	)
+
+	deliveryOnly := map[string]any{
+		"name":            "Demo",
+		"delivery_modes":  []any{"DELIVERY_TO_LOCATION"},
+		"delivery_radius": 16,
+	}
+	assert.Equal(t,
+		"Welcome to Demo.\n\nWe offer delivery. Delivery available up to 16 km.\n\nWhat would you like to do?",
+		tiqrecommerce.MenuWelcomeBody(deliveryOnly, ""),
+	)
+}
+
+func TestWelcomeFulfillmentSummary(t *testing.T) {
+	assert.Empty(t, tiqrecommerce.WelcomeFulfillmentSummary(nil))
+	assert.Empty(t, tiqrecommerce.WelcomeFulfillmentSummary(map[string]any{"name": "Demo"}))
+	assert.Equal(t, "We offer store pickup.", tiqrecommerce.WelcomeFulfillmentSummary(map[string]any{
+		"delivery_modes": []any{"PICKUP_FROM_STORE"},
+	}))
+	assert.Equal(t,
+		"We offer store pickup and delivery. Free delivery within 3 km. Delivery available up to 8 km.",
+		tiqrecommerce.WelcomeFulfillmentSummary(map[string]any{
+			"delivery_modes":       []any{"PICKUP_FROM_STORE", "DELIVERY_TO_LOCATION"},
+			"free_delivery_radius": "3",
+			"delivery_radius":      "8",
+		}),
+	)
 }
 
 func TestBuildCodedFlowWelcomeFacts(t *testing.T) {

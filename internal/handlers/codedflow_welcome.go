@@ -27,13 +27,12 @@ const (
 
 Use ONLY the store facts below. Do not invent products, prices, policies, or services.
 
-Reply with ONE short message only (about 2–4 short sentences, under 500 characters):
+Reply with ONE short message only (about 2–3 short sentences, under 400 characters):
 1. Warm greeting that names the store.
 2. One crisp line on what they sell (from description / about / collections).
-3. Briefly mention pickup or delivery only when the facts say the store offers them.
-4. Invite them to choose an option below (buy, check an order, or talk to staff).
+3. Invite them to choose an option below (buy, check an order, or talk to staff).
 
-Rules: plain text only — no markdown, no bullet lists, no prices, no policy text, and do not list every collection by name. Keep it welcoming and crisp.`
+Rules: plain text only — no markdown, no bullet lists, no prices, no policy text, and do not list every collection by name. Do not mention pickup, delivery, delivery modes, or delivery radii — the app appends those from the live store. Keep it welcoming and crisp.`
 )
 
 // generateCodedFlowWelcomeAI is swappable in tests.

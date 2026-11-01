@@ -214,6 +214,33 @@ func runEarlyHandoff(c *Conv, collection map[string]any, productID string) error
 	if !askEarlyHandoffAddons(c, productID) {
 		return nil
 	}
+	if !resolveFulfillment(c) {
+		fulfilled := false
+		if c.HasReplyRoute() {
+			route := c.TakeReplyRoute()
+			if handled, err := handleBuyReplyRoute(c, route); handled {
+				if err != nil || c.Ended || c.Stop {
+					return err
+				}
+				// Previous-step pickup switch completes fulfillment; continue to details.
+				if route.Kind == codedflow.RoutePrevious && strings.TrimSpace(route.ID) == tiqrPickupMode {
+					fulfilled = true
+				} else {
+					return nil
+				}
+			} else if route.Kind != "" {
+				collections, _ := anySlice(c.Session().SessionData["collections"])
+				return buyProducts(c, collections, route)
+			} else {
+				return nil
+			}
+		} else {
+			return nil
+		}
+		if !fulfilled {
+			return nil
+		}
+	}
 	if !askEarlyHandoffCustomerDetails(c) {
 		return nil
 	}

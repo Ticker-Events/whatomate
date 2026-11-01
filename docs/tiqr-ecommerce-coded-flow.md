@@ -24,8 +24,8 @@ flowchart TD
   cols -->|error or empty| xfer
   cols --> faqs["list_faqs optional"]
   faqs --> menu[Welcome menu]
-  menu -->|Buy products| ful[Fulfillment]
-  menu -->|named collection or product| ful
+  menu -->|Buy products| list[Collection list]
+  menu -->|named collection or product| list
   menu -->|FAQ match| faqAns[Send FAQ answer stay on menu]
   menu -->|Check order status| look[MCP list_orders_by_phone]
   menu -->|Talk to staff| xfer
@@ -34,9 +34,8 @@ flowchart TD
   look -->|orders| pick[WhatsApp order list]
   pick --> detail[MCP lookup_order_status]
   detail --> endStatus[Say summary and end]
-  ful --> list[Collection list]
   list -->|row or collection id| policy{handoff_policy after_capture}
-  policy -->|yes| earlyHandoff[Capture add-ons Meta Flow]
+  policy -->|yes| earlyHandoff[Capture add-ons fulfillment Meta Flow]
   earlyHandoff --> commerceXfer[Commerce draft and agent transfer]
   policy -->|no| prod[list_products]
   list -->|product query| search[search_products]
@@ -56,7 +55,10 @@ flowchart TD
   skip --> next[Add more or Checkout]
   cart --> next
   next -->|Add more| list
-  next -->|Checkout and cart has lines| flow[WhatsApp Flow by delivery mode]
+  next -->|Checkout and cart has lines| review[Confirm items]
+  review -->|Add more| list
+  review -->|Confirm items| ful[Fulfillment]
+  ful --> flow[WhatsApp Flow by delivery mode]
   flow -->|pickup flow id from binding or default| create[create_order]
   flow -->|delivery flow id from binding or default| create
   create -->|success| done[Confirm, thanks, end]
@@ -85,9 +87,18 @@ Buttons, in order:
 | `check_order_status` | Check order status |
 | `talk_to_agent` | Talk to staff |
 
-The body is the cached welcome on the coded-flow binding (`settings.welcome_message`), then a blank line and `What would you like to do?` when that CTA is not already the ending. When the welcome is empty, the body falls back to `Welcome to {store name}.` plus `What would you like to do?` (or only the CTA when the store has no name).
+The body is the cached welcome on the coded-flow binding (`settings.welcome_message`), then a live fulfillment summary from `store.delivery_modes` (and delivery radii when delivery is offered), then `What would you like to do?`. When the welcome is empty, the body falls back to `Welcome to {store name}.` plus the same fulfillment summary and CTA (or only the CTA when the store has no name and no modes).
 
-Admins edit the welcome on the TiQR Flows screen (`/chatbot/coded-flows`) and can regenerate it with `POST /api/chatbot/coded-flows/tiqr_ecommerce/welcome/refresh?account=`. Regenerate loads buyer REST `get_store`, `get_store_info` (about_us only), and `list_collections`, then asks the account AI for a short plain-text greeting. It does not use MCP. There is no hourly TTL: a saved edit stays until the next regenerate or save.
+Fulfillment summary examples:
+
+| Store modes | Extra line before the CTA |
+| --- | --- |
+| Pickup only | `We offer store pickup.` |
+| Delivery only, with radii | `We offer delivery. Free delivery within N km. Delivery available up to M km.` (only the radii that are set) |
+| Both | `We offer store pickup and delivery.` plus the same radius clauses when set |
+| Missing / empty | No fulfillment line |
+
+Admins edit the welcome on the TiQR Flows screen (`/chatbot/coded-flows`) and can regenerate it with `POST /api/chatbot/coded-flows/tiqr_ecommerce/welcome/refresh?account=`. Regenerate loads buyer REST `get_store`, `get_store_info` (about_us only), and `list_collections`, then asks the account AI for a short plain-text greeting that does not invent pickup/delivery copy (the app appends that from the live store). It does not use MCP. There is no hourly TTL: a saved edit stays until the next regenerate or save.
 
 `askRouteButtons` is called with `AllowCatalog: true` and `AllowFAQ: true`. A tap on those three ids does not call AI. Free text can resolve to:
 
@@ -103,12 +114,12 @@ Admins edit the welcome on the TiQR Flows screen (`/chatbot/coded-flows`) and ca
 
 ### 3. Fulfillment
 
-`resolveFulfillment` runs once at the start of `buyProducts`, before the collection list. It reads `delivery_modes` already stored on the session.
+`resolveFulfillment` runs after the cart is confirmed (Confirm items), before the details WhatsApp Flow. Early-handoff collections run the same helper after capture and add-ons, before their details form. It reads `delivery_modes` already stored on the session.
 
 | Store modes | Behaviour |
 | --- | --- |
-| Missing or empty | No prompt. `delivery_mode` is set to `PICKUP_FROM_STORE` inside `Once`, then browsing continues |
-| Only `PICKUP_FROM_STORE` | One button, Proceed. Then pickup |
+| Missing or empty | No prompt. `delivery_mode` is set to `PICKUP_FROM_STORE` inside `Once`, then the details form opens |
+| Only `PICKUP_FROM_STORE` | No prompt. `delivery_mode` is set to pickup inside `Once`, then the details form opens |
 | Both | Store pickup or Delivery |
 | Only `DELIVERY_TO_LOCATION` | No mode buttons. Goes straight to a location pin. `delivery_mode` is set inside `Once` |
 
@@ -116,9 +127,9 @@ Delivery asks for a WhatsApp location pin (`AskLocation`). Distance is computed 
 
 | Zone | Next step |
 | --- | --- |
-| `free` | Say free delivery, store the zone and distance, continue |
-| `paid` | Say a fee may apply. `ShippingFeePaise` from this function is always 0, so the rupee amount is not filled in |
-| `unconfigured` | Treated as deliverable. The customer is told delivery is possible |
+| `free` | Say free delivery, store the zone and distance, open the details form |
+| `paid` | Say a fee may apply. `ShippingFeePaise` from this function is always 0, so the rupee amount is not filled in. Then the details form |
+| `unconfigured` | Treated as deliverable. The customer is told delivery is possible, then the details form |
 | `out_of_range` and pickup exists | Offer Store pickup or Share again |
 | `out_of_range` and delivery only | Say the out-of-range line and ask for another pin. The loop has no attempt cap |
 
@@ -149,11 +160,11 @@ On the location pin step specifically:
 | WhatsApp location pin (Send location button or attachment) | Accept latitude / longitude and run delivery eligibility |
 | Google Maps link that embeds coordinates (`@lat,lng`, `q=lat,lng`, `!3d…!4d…`) | Same as a location pin |
 | Live location, or a Maps short link with no coordinates | Explain that the pin could not be read, re-send the Send location button, stay on the same step |
-| Previous `pickup`, and the store offers pickup | Set `delivery_mode` to `PICKUP_FROM_STORE`, say one short confirmation, continue into collections in the same turn. Replay restores the switch (choice id), not a pin at lat/long 0 |
+| Previous `pickup`, and the store offers pickup | Set `delivery_mode` to `PICKUP_FROM_STORE`, say one short confirmation, open the details form in the same turn. Replay restores the switch (choice id), not a pin at lat/long 0 |
 | Previous `delivery` while already asking for a pin | Re-send the location request |
 | Menu `check_order_status` | Leave the pin ask and run order status |
 | Menu `talk_to_agent` | Transfer to staff |
-| Menu `buy_products` | Stay on the pin ask (they are already buying; delivery still needs the pin) |
+| Menu `buy_products` | Stay on the pin ask (they are already checking out; delivery still needs the pin) |
 | Delivery-only store (no pickup on the previous step) | `Store pickup` does not switch mode |
 
 A place name such as a city is not a previous choice. A location pin or a Maps URL with coordinates is accepted first.
@@ -173,10 +184,11 @@ Code: `runEarlyHandoff` in `internal/handlers/tiqrecommerce/early_handoff.go`.
 1. Intro: `This is a custom {name} request — I’ll collect a few details and connect you with our team.`
 2. Required capture fields from that collection (same prompts as the cart path). Checkout phrases do not divert away from these questions.
 3. Add-ons: shared numbered catalog add-on step when the product has catalog add-ons. Products with no catalog add-ons skip this step.
-4. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup or delivery Meta flow ID from the account's TiQR Flow binding (`pickup_flow_id` / `delivery_flow_id`), falling back to `1484028330223507` (pickup: name, email, phone) or `1557965846018132` (delivery: name, phone, address). Prefill uses the same phone and (for delivery) reverse-geocoded address data as checkout. Flow fields are copied onto the commerce draft address snapshot and notes; blank email falls back to `support+<digits>@tiqr.events`.
-5. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. Before the draft sync, capture answers are formatted with `CodedOrderNotes` into `commerce_notes.order_notes` (same string as checkout orders), including product/option headers from the staged early-handoff cart line. The cart and order paths are skipped.
+4. Fulfillment: same `resolveFulfillment` as checkout (mode and location pin when needed).
+5. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup or delivery Meta flow ID from the account's TiQR Flow binding (`pickup_flow_id` / `delivery_flow_id`), falling back to `1484028330223507` (pickup: name, email, phone) or `1557965846018132` (delivery: name, phone, address). Prefill uses the same phone and (for delivery) reverse-geocoded address data as checkout. Flow fields are copied onto the commerce draft address snapshot and notes; blank email falls back to `support+<digits>@tiqr.events`.
+6. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. Before the draft sync, capture answers are formatted with `CodedOrderNotes` into `commerce_notes.order_notes` (same string as checkout orders), including product/option headers from the staged early-handoff cart line. The cart and order paths are skipped.
 
-Fulfillment time (`list_fulfillment_slots` / `propose_fulfillment_time`) is skipped for now. Pickup vs delivery and the location pin already ran earlier in the buy flow.
+Fulfillment time (`list_fulfillment_slots` / `propose_fulfillment_time`) is skipped for now.
 
 Image and file capture fields accept a WhatsApp photo or document (same stash as live chat). In TiQR Flow preview, the paperclip sends media metadata only — no file bytes are stored — and the capture notes use a stand-in `/api/media/{id}` link.
 
@@ -448,7 +460,7 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 
 ## Gaps
 
-1. **Checkout during fulfillment is dropped.** `resolveFulfillment` and `resolveDeliveryLocation` return false when the reply is not the expected button or pin. `buyProducts` then returns without `applyCheckoutDivert`. Intent can still set `c.divert` to checkout, but this turn sends nothing and does not open the form. The same step is waiting on the next message. Checkout from the menu, collection list, product, option, quantity, and add-more steps does call `applyCheckoutDivert`.
+1. **Checkout phrases during fulfillment stay on the step.** Fulfillment runs after Confirm items. A free-text "checkout" while choosing mode or sharing a pin does not re-open the details form in that turn; the same fulfillment step waits on the next message. Checkout from the menu, collection list, product, option, quantity, and add-more steps still reviews the cart and then runs fulfillment.
 
 2. **Naming a product on a product card transfers.** Product, option, fulfillment, quantity, location, and the details form call `resolveFreeText` with catalog routes off. A grounded `product` or `collection` route is rejected and the customer is transferred. Only the menu and the collection list can search or jump to a collection.
 

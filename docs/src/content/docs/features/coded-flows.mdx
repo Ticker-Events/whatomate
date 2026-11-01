@@ -185,7 +185,7 @@ keyword
   → get_store
   → list_collections (limit 20)
   → menu
-       ├─ Buy products → fulfillment → collection → products → cart → checkout → end
+       ├─ Buy products → collection → products → cart → confirm → fulfillment → checkout → end
        ├─ Check order status → order list → selected order summary → end
        ├─ Talk to staff → transfer
        ├─ free text → collection id → products → …
@@ -201,10 +201,12 @@ When the store has a name, the menu is:
 ```text
 Welcome to {store name}.
 
+We offer store pickup and delivery. Free delivery within N km. Delivery available up to M km.
+
 What would you like to do?
 ```
 
-Without a name, the first line is omitted. The buttons are:
+The greeting may be a cached AI welcome instead of `Welcome to {store name}.`. The fulfillment line is always built from the live store: pickup and/or delivery from `delivery_modes`, plus free and max delivery radii when delivery is offered and those fields are set. Without a name and without modes, only the CTA remains. The buttons are:
 
 | Id | Title |
 | --- | --- |
@@ -216,12 +218,12 @@ Without a name, the first line is omitted. The buttons are:
 
 ### Fulfillment
 
-Before the collection list, Buy products reads `delivery_modes` from the store already loaded by `get_store`.
+After the customer confirms the cart (and before the details form), the flow reads `delivery_modes` from the store already loaded by `get_store`. Early-handoff collections ask the same questions after capture fields and add-ons.
 
 | `delivery_modes` | What the customer sees |
 | --- | --- |
-| Missing or empty | No extra prompt. `delivery_mode` is stored as `PICKUP_FROM_STORE` and browsing continues (same as before). |
-| Only `PICKUP_FROM_STORE` | Explains that the store is pickup only, with a **Proceed** button. |
+| Missing or empty | No extra prompt. `delivery_mode` is stored as `PICKUP_FROM_STORE` and the details form opens. |
+| Only `PICKUP_FROM_STORE` | No extra prompt. `delivery_mode` is stored as pickup and the details form opens. |
 | Both pickup and delivery | Reply buttons **Store pickup** and **Delivery**. The choice is stored as `delivery_mode`. |
 | Only `DELIVERY_TO_LOCATION` | Asks for a WhatsApp location pin immediately. |
 
@@ -229,7 +231,7 @@ When delivery is selected (or is the only mode):
 
 1. The flow sends a WhatsApp location request.
 2. It calculates distance locally from the store’s `latitude` / `longitude` and compares against `free_delivery_radius` and `delivery_radius` (same rules as TiQR `evaluate_delivery`). No MCP call.
-3. For `free` or `paid`, it tells the customer the result and shows the store’s free and paid radii, then continues to collections.
+3. For `free` or `paid`, it tells the customer the result and shows the store’s free and paid radii, then opens the details form.
 4. For out of range when pickup is also supported, it shows the out-of-range copy and buttons to switch to **Store pickup** or **Share again**.
 5. For out of range when delivery is the only mode, it shows the same radii without offering pickup, then asks for another pin.
 
@@ -241,14 +243,15 @@ Buying is a loop. The customer can add more than one item before checkout. Store
 
 <Steps>
 
-1. **Fulfillment.** Delivery mode and, when needed, a location pin (see above).
-2. **Collection.** The customer gets a list titled "Our collections". The button is "Browse". Each row uses the collection `name` as the title and `description` as the description. The chosen row saves `collection_id` from `id` and `collection_name` from `title`. Free text on this step can also route to a loaded collection id, or to `search_products` with a product query. An empty search result tells the customer the item is not in the store and returns to the collection list. The model never invents product rows. When the store has more than 10 collections, the list shows 9 and a **Show more** row. Show more continues until the last page. If the API `count` is larger than the rows already loaded, Show more calls the response `next` URL (or the same list call with a higher `offset`) before the next page is sent.
-3. **Products.** `list_products` is called with `category_id` set to that collection id, or `search_products` with the validated query. Two or more products are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". One product cannot use a carousel (WhatsApp needs at least two cards), so it is an image reply instead: the product image as the header, `*{name}* (₹{min_price})` plus the product description as the body, and an "Add to cart" button. Either tap saves `product_id` and the product `options` array, and also `product_selected`. More than 10 products use the same Show more page as collections: 9 cards, then a Show more card, and `next` is followed when the API page does not include every product. The Show more card explains that more items are available and uses the store logo as its image. A tap on Add to cart from an earlier carousel page still selects that product after Show more.
-4. **Option.** What happens next depends on how many options the product has.
-5. **Quantity.** The customer replies with a whole number of 1 or more. The pattern is `^[1-9][0-9]*$`.
-6. **Collection fields.** Required fields on that collection are asked one at a time before the line is added. See below.
-7. **Cart line.** The option, quantity, and any collection answers are saved once. A replay does not add the line again.
-8. **Next.** The customer chooses "Add more items", "Edit cart", or "Checkout".
+1. **Collection.** The customer gets a list titled "Our collections". The button is "Browse". Each row uses the collection `name` as the title and `description` as the description. The chosen row saves `collection_id` from `id` and `collection_name` from `title`. Free text on this step can also route to a loaded collection id, or to `search_products` with a product query. An empty search result tells the customer the item is not in the store and returns to the collection list. The model never invents product rows. When the store has more than 10 collections, the list shows 9 and a **Show more** row. Show more continues until the last page. If the API `count` is larger than the rows already loaded, Show more calls the response `next` URL (or the same list call with a higher `offset`) before the next page is sent.
+2. **Products.** `list_products` is called with `category_id` set to that collection id, or `search_products` with the validated query. Two or more products are a carousel. The card text is `{name} (₹{min_price})`. The image is `images[0].original_url`. A product with no image uses a built-in fallback photo. The card button is "Add to cart". One product cannot use a carousel (WhatsApp needs at least two cards), so it is an image reply instead: the product image as the header, `*{name}* (₹{min_price})` plus the product description as the body, and an "Add to cart" button. Either tap saves `product_id` and the product `options` array, and also `product_selected`. More than 10 products use the same Show more page as collections: 9 cards, then a Show more card, and `next` is followed when the API page does not include every product. The Show more card explains that more items are available and uses the store logo as its image. A tap on Add to cart from an earlier carousel page still selects that product after Show more.
+3. **Option.** What happens next depends on how many options the product has.
+4. **Quantity.** The customer replies with a whole number of 1 or more. The pattern is `^[1-9][0-9]*$`.
+5. **Collection fields.** Required fields on that collection are asked one at a time before the line is added. See below.
+6. **Cart line.** The option, quantity, and any collection answers are saved once. A replay does not add the line again.
+7. **Next.** The customer chooses "Add more items", "Edit cart", or "Checkout".
+8. **Confirm items.** Checkout shows the cart and asks the customer to confirm before fulfillment.
+9. **Fulfillment.** Delivery mode and, when needed, a location pin (see above). Then the details form.
 
 </Steps>
 
@@ -284,7 +287,7 @@ A collection with no required fields skips the questions. The saved line include
 
 `capture_fields` is omitted when the collection did not ask anything. `tiqr_cart` is the list of those lines. `cart_count` is the sum of quantities. The customer then sees the option name, the cart summary (including collection answers), and how many units are in the cart.
 
-"Add more items" returns to the collection list. "Checkout" leaves the loop. Free text such as “checkout” or “place my order” on any buy step also enters checkout when the cart has lines. An empty cart gets a short message and the collection list again.
+"Add more items" returns to the collection list. "Checkout" reviews the cart, then asks pickup or delivery (and a location pin when needed) before the details form. Free text such as “checkout” or “place my order” on any buy step also enters that path when the cart has lines. An empty cart gets a short message and the collection list again.
 
 If `list_products` or `search_products` fails, the customer gets a safe “try later” message (never the raw API error) and returns to the collection list. An empty product list uses the “couldn’t find that” copy and also returns to collections.
 
