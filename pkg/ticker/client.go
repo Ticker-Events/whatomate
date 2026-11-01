@@ -143,6 +143,65 @@ func (c *Client) CreateOrder(ctx context.Context, body CreateOrderRequest) (map[
 	return raw, nil
 }
 
+// CreateDiningBookingRequest creates a token dining booking.
+type CreateDiningBookingRequest struct {
+	GuestName   string `json:"guest_name"`
+	PhoneNumber string `json:"phone_number"`
+	PartySize   int    `json:"party_size"`
+	Kind        string `json:"kind,omitempty"`
+}
+
+// CreateDiningBooking creates or returns the active dining booking for a phone.
+func (c *Client) CreateDiningBooking(ctx context.Context, storeID string, body CreateDiningBookingRequest) (map[string]any, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	var raw map[string]any
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/dining/bookings/"
+	if err := c.postJSON(ctx, path, body, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// GetDiningBooking fetches the active dining booking for a phone number.
+func (c *Client) GetDiningBooking(ctx context.Context, storeID, phoneNumber string) (map[string]any, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	if strings.TrimSpace(phoneNumber) == "" {
+		return nil, fmt.Errorf("phone_number is required")
+	}
+	q := url.Values{}
+	q.Set("phone_number", strings.TrimSpace(phoneNumber))
+	var raw map[string]any
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/dining/bookings/current/?" + q.Encode()
+	if err := c.getJSON(ctx, path, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// CancelDiningBooking cancels a dining booking by id.
+func (c *Client) CancelDiningBooking(ctx context.Context, storeID, bookingID, phoneNumber string) (map[string]any, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	if strings.TrimSpace(bookingID) == "" {
+		return nil, fmt.Errorf("booking_id is required")
+	}
+	body := map[string]string{}
+	if strings.TrimSpace(phoneNumber) != "" {
+		body["phone_number"] = strings.TrimSpace(phoneNumber)
+	}
+	var raw map[string]any
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/dining/bookings/" + url.PathEscape(bookingID) + "/cancel/"
+	if err := c.postJSON(ctx, path, body, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // GetOrder fetches an order by uuid.
 func (c *Client) GetOrder(ctx context.Context, orderUUID string) (map[string]any, error) {
 	if orderUUID == "" {

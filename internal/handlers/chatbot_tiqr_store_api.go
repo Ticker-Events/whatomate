@@ -337,6 +337,51 @@ func invokeTiqrStoreRESTOperation(
 		return syntheticFulfillmentSlots(params["delivery_mode"]), nil
 	case "propose_fulfillment_time":
 		return syntheticProposeFulfillment(params)
+	case "create_dining_booking":
+		partySize, err := strconv.Atoi(strings.TrimSpace(params["party_size"]))
+		if err != nil || partySize < 1 {
+			return nil, fmt.Errorf("party_size is required")
+		}
+		guestName := strings.TrimSpace(params["guest_name"])
+		if guestName == "" {
+			return nil, fmt.Errorf("guest_name is required")
+		}
+		phoneNumber := strings.TrimSpace(params["phone_number"])
+		if phoneNumber == "" {
+			phoneNumber = strings.TrimSpace(phone)
+		}
+		if phoneNumber == "" {
+			return nil, fmt.Errorf("phone_number is required")
+		}
+		kind := strings.TrimSpace(params["kind"])
+		if kind == "" {
+			kind = "token"
+		}
+		return client.CreateDiningBooking(ctx, storeID, ticker.CreateDiningBookingRequest{
+			GuestName:   guestName,
+			PhoneNumber: phoneNumber,
+			PartySize:   partySize,
+			Kind:        kind,
+		})
+	case "get_dining_booking":
+		phoneNumber := strings.TrimSpace(params["phone_number"])
+		if phoneNumber == "" {
+			phoneNumber = strings.TrimSpace(phone)
+		}
+		if phoneNumber == "" {
+			return nil, fmt.Errorf("phone_number is required")
+		}
+		return client.GetDiningBooking(ctx, storeID, phoneNumber)
+	case "cancel_dining_booking":
+		bookingID := strings.TrimSpace(params["booking_id"])
+		if bookingID == "" {
+			return nil, fmt.Errorf("booking_id is required")
+		}
+		phoneNumber := strings.TrimSpace(params["phone_number"])
+		if phoneNumber == "" {
+			phoneNumber = strings.TrimSpace(phone)
+		}
+		return client.CancelDiningBooking(ctx, storeID, bookingID, phoneNumber)
 	case "check_delivery", "retry_payment":
 		return nil, fmt.Errorf("operation %q is not available over REST (use MCP)", operation)
 	default:
