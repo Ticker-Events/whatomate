@@ -154,3 +154,10 @@ credentials = ""  # Service account JSON string, or set WHATOMATE_FIREBASE_CREDE
 [codedflow]
 trace = true
 order_retries = 2
+
+# Notify ticker-events so store staff get FCM pushes for staff-facing chats.
+# Empty url or pushkey disables the notify path (other deployments stay unchanged).
+# Env: WHATOMATE_TICKER_URL, WHATOMATE_TICKER_PUSHKEY
+[ticker]
+url = ""
+pushkey = ""

@@ -2437,6 +2437,11 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		WhatsAppAccount: account.Name,
 		Direction:       models.DirectionIncoming,
 	})
+
+	// Staff push when the bot is not handling this chat (bot off, or already with staff).
+	if !a.willChatbotHandle(account, contact) {
+		a.notifyChatIncomingPush(account, contact, preview)
+	}
 	return &message
 }
 

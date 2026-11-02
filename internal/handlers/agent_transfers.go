@@ -1267,6 +1267,12 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 	// Broadcast to WebSocket
 	a.broadcastTransferCreated(transfer, contact)
 
+	// Bot was handling until this handoff — notify staff once. When the bot is
+	// already off, saveIncomingMessage already notified for the same message.
+	if settings != nil && settings.IsEnabled {
+		a.notifyChatIncomingPush(account, contact, contact.LastMessagePreview)
+	}
+
 	return nil
 }
 

@@ -408,6 +408,8 @@ func (a *App) createCommerceTransfer(account *models.WhatsAppAccount, contact *m
 		// the clock; updateContactLastMessage keeps it while a transfer is active.
 		a.startAgentResponseWait(contact)
 		a.broadcastTransferCreated(&transfer, contact)
+		// Commerce handoff always happens while the bot is on; notify staff once.
+		a.notifyChatIncomingPush(account, contact, contact.LastMessagePreview)
 	}
 	return &transfer, created, nil
 }

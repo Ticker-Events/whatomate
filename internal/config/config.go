@@ -31,7 +31,16 @@ type Config struct {
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
 	Firebase     FirebaseConfig     `koanf:"firebase"`
-	CodedFlow CodedFlowConfig `koanf:"codedflow"`
+	CodedFlow    CodedFlowConfig    `koanf:"codedflow"`
+	Ticker       TickerConfig       `koanf:"ticker"`
+}
+
+// TickerConfig holds settings for notifying ticker-events about staff-facing chat events.
+type TickerConfig struct {
+	// URL is the ticker-events API origin (no trailing slash), e.g. https://staging-api.tiqr.events
+	URL string `koanf:"url"`
+	// PushKey is the shared secret sent as X-API-Key to chat-incoming-push.
+	PushKey string `koanf:"pushkey"`
 }
 
 // CodedFlowConfig controls coded-flow runtime behaviour.
