@@ -20,6 +20,11 @@ type chatIncomingPushPayload struct {
 	AssignedUserID string `json:"assigned_user_id,omitempty"`
 }
 
+// First-party ticker-events calls may resolve to a private VPC IP inside k8s.
+// App.HTTPClient uses SSRFSafeDialer (for user webhooks), so chat push uses
+// this dedicated client instead — same pattern as commerce ticker MCP/REST.
+var chatPushHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 // notifyChatIncomingPush asks ticker-events to FCM-notify store staff about a
 // staff-facing inbound chat message. No-op when ticker URL/pushkey are unset.
 func (a *App) notifyChatIncomingPush(account *models.WhatsAppAccount, contact *models.Contact, preview string) {
@@ -77,11 +82,7 @@ func (a *App) sendChatIncomingPush(ctx context.Context, baseURL, pushKey string,
 	req.Header.Set("X-API-Key", pushKey)
 	req.Header.Set("User-Agent", "Whatomate-ChatPush/1.0")
 
-	client := a.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
+	resp, err := chatPushHTTPClient.Do(req)
 	if err != nil {
 		a.Log.Warn("chat push: request failed", "error", err, "contact_id", payload.ContactID)
 		return
