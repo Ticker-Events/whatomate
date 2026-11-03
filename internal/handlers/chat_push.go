@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -89,16 +90,20 @@ func (a *App) sendChatIncomingPush(ctx context.Context, baseURL, pushKey string,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		a.Log.Warn("chat push: non-2xx response",
 			"status", resp.StatusCode,
 			"contact_id", payload.ContactID,
 			"organization_id", payload.OrganizationID,
+			"body", string(body),
 		)
 		return
 	}
-	a.Log.Debug("chat push: notified ticker-events",
+	a.Log.Info("chat push: notified ticker-events",
 		"contact_id", payload.ContactID,
 		"organization_id", payload.OrganizationID,
+		"status", resp.StatusCode,
+		"body", string(body),
 	)
 }
