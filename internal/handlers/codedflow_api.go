@@ -12,6 +12,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrleads"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -23,6 +24,8 @@ const (
 	codedSettingDeliveryFlowID     = "delivery_flow_id"
 	codedSettingWelcomeMessage     = "welcome_message"
 	codedSettingWelcomeGeneratedAt = "welcome_generated_at"
+	codedSettingEvaluationMode     = "evaluation_mode"
+	codedSettingCompletionAction   = "completion_action"
 )
 
 // CodedFlowBindingResponse is one compiled-in flow plus its account settings.
@@ -47,6 +50,9 @@ type CodedFlowBindingResponse struct {
 	// WelcomeMessage is the cached first-menu body for tiqr_ecommerce.
 	WelcomeMessage     string `json:"welcome_message,omitempty"`
 	WelcomeGeneratedAt string `json:"welcome_generated_at,omitempty"`
+	// EvaluationMode / CompletionAction are tiqr_leads binding settings.
+	EvaluationMode   string `json:"evaluation_mode,omitempty"`
+	CompletionAction string `json:"completion_action,omitempty"`
 }
 
 // ListCodedFlows returns every coded flow shipped with this build, merged
@@ -97,6 +103,7 @@ func (a *App) ListCodedFlows(r *fastglue.Request) error {
 		}
 		applyEcommerceFlowIDs(&item, flow.Key, binding)
 		applyEcommerceWelcome(&item, flow.Key, binding)
+		applyLeadsSettings(&item, flow.Key, binding)
 		response = append(response, item)
 	}
 
@@ -133,12 +140,14 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 	}
 
 	var req struct {
-		Keywords       []string `json:"keywords"`
-		IsEnabled      bool     `json:"is_enabled"`
-		IsDefault      bool     `json:"is_default"`
-		PickupFlowID   *string  `json:"pickup_flow_id"`
-		DeliveryFlowID *string  `json:"delivery_flow_id"`
-		WelcomeMessage *string  `json:"welcome_message"`
+		Keywords         []string `json:"keywords"`
+		IsEnabled        bool     `json:"is_enabled"`
+		IsDefault        bool     `json:"is_default"`
+		PickupFlowID     *string  `json:"pickup_flow_id"`
+		DeliveryFlowID   *string  `json:"delivery_flow_id"`
+		WelcomeMessage   *string  `json:"welcome_message"`
+		EvaluationMode   *string  `json:"evaluation_mode"`
+		CompletionAction *string  `json:"completion_action"`
 	}
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
@@ -162,7 +171,11 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		binding.Keywords = keywords
 		binding.IsEnabled = req.IsEnabled
 		binding.IsDefault = req.IsDefault
-		merged, mergeErr := mergeCodedFlowSettings(flow.Key, binding.Settings, req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage)
+		merged, mergeErr := mergeCodedFlowSettings(
+			flow.Key, binding.Settings,
+			req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage,
+			req.EvaluationMode, req.CompletionAction,
+		)
 		if mergeErr != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, mergeErr.Error(), nil, "")
 		}
@@ -180,7 +193,11 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update TiQR Flow", nil, "")
 		}
 	case errors.Is(findErr, gorm.ErrRecordNotFound):
-		settings, mergeErr := mergeCodedFlowSettings(flow.Key, nil, req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage)
+		settings, mergeErr := mergeCodedFlowSettings(
+			flow.Key, nil,
+			req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage,
+			req.EvaluationMode, req.CompletionAction,
+		)
 		if mergeErr != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, mergeErr.Error(), nil, "")
 		}
@@ -230,6 +247,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 	}
 	applyEcommerceFlowIDs(&resp, flow.Key, &binding)
 	applyEcommerceWelcome(&resp, flow.Key, &binding)
+	applyLeadsSettings(&resp, flow.Key, &binding)
 	return r.SendEnvelope(resp)
 }
 
@@ -317,6 +335,7 @@ func mergeCodedFlowSettings(
 	flowKey string,
 	existing models.JSONB,
 	pickupID, deliveryID, welcomeMessage *string,
+	evaluationMode, completionAction *string,
 ) (models.JSONB, error) {
 	out := models.JSONB{}
 	for k, v := range existing {
@@ -356,7 +375,62 @@ func mergeCodedFlowSettings(
 			}
 		}
 	}
+	if flowKey == tiqrleads.FlowKey {
+		if evaluationMode != nil {
+			normalized := normalizeLeadsEvaluationMode(*evaluationMode)
+			if normalized == "" {
+				return nil, errors.New("Evaluation must be rules or hybrid")
+			}
+			out[codedSettingEvaluationMode] = normalized
+		}
+		if completionAction != nil {
+			normalized := normalizeLeadsCompletionAction(*completionAction)
+			if normalized == "" {
+				return nil, errors.New("After qualification must be record, handoff_high, or always_handoff")
+			}
+			out[codedSettingCompletionAction] = normalized
+		}
+	}
 	return out, nil
+}
+
+func normalizeLeadsEvaluationMode(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "rules", "hybrid":
+		return strings.TrimSpace(strings.ToLower(raw))
+	default:
+		return ""
+	}
+}
+
+func normalizeLeadsCompletionAction(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "record", "handoff_high", "always_handoff":
+		return strings.TrimSpace(strings.ToLower(raw))
+	default:
+		return ""
+	}
+}
+
+func applyLeadsSettings(item *CodedFlowBindingResponse, flowKey string, binding *models.CodedFlowBinding) {
+	if item == nil || flowKey != tiqrleads.FlowKey {
+		return
+	}
+	item.EvaluationMode = "rules"
+	item.CompletionAction = "record"
+	if binding == nil || binding.Settings == nil {
+		return
+	}
+	if v, ok := binding.Settings[codedSettingEvaluationMode].(string); ok {
+		if normalized := normalizeLeadsEvaluationMode(v); normalized != "" {
+			item.EvaluationMode = normalized
+		}
+	}
+	if v, ok := binding.Settings[codedSettingCompletionAction].(string); ok {
+		if normalized := normalizeLeadsCompletionAction(v); normalized != "" {
+			item.CompletionAction = normalized
+		}
+	}
 }
 
 func normalizeMetaFlowID(raw string) (string, error) {
@@ -414,14 +488,15 @@ func (a *App) ResolveEcommerceMetaFlowID(orgID uuid.UUID, accountName string, de
 }
 
 // CodedFlowSupportedLanguages returns language codes that limit AI detection.
-// For tiqr_ecommerce, codes come from store.supported_languages (session store,
-// or GetStore when the store is not cached yet). Empty means open detection.
-// Other coded flows have no language setting and return nil (open detection).
+// For tiqr_ecommerce and tiqr_leads, codes come from store.supported_languages
+// (session store, or GetStore when the store is not cached yet). Empty means
+// open detection. Other coded flows have no language setting and return nil.
 func (a *App) CodedFlowSupportedLanguages(session *models.ChatbotSession) []string {
 	if a == nil || session == nil {
 		return nil
 	}
-	if codedflow.SessionKey(session) != tiqrecommerce.FlowKey {
+	key := codedflow.SessionKey(session)
+	if key != tiqrecommerce.FlowKey && key != tiqrleads.FlowKey {
 		return nil
 	}
 	var store map[string]any

@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea'
 import CodedFlowPreview from '@/components/chatbot/flow-preview/CodedFlowPreview.vue'
 
 const TIQR_ECOMMERCE_KEY = 'tiqr_ecommerce'
+const TIQR_LEADS_KEY = 'tiqr_leads'
 const USE_DEFAULT = '__default__'
 
 type AccountOption = {
@@ -42,6 +43,8 @@ type KeywordDraft = {
   deliveryFlowId: string
   welcomeMessage: string
   welcomeGeneratedAt: string
+  evaluationMode: string
+  completionAction: string
   saving: boolean
   regeneratingWelcome: boolean
 }
@@ -94,6 +97,8 @@ function applyFlows(rows: CodedFlowBinding[]) {
       deliveryFlowId: draftDeliveryValue(flow),
       welcomeMessage: flow.welcome_message || '',
       welcomeGeneratedAt: flow.welcome_generated_at || '',
+      evaluationMode: flow.evaluation_mode || 'rules',
+      completionAction: flow.completion_action || 'record',
       saving: false,
       regeneratingWelcome: false,
     }
@@ -202,6 +207,8 @@ async function save(flow: CodedFlowBinding) {
       pickup_flow_id?: string
       delivery_flow_id?: string
       welcome_message?: string
+      evaluation_mode?: string
+      completion_action?: string
     } = {
       keywords,
       is_enabled: draft.enabled,
@@ -211,6 +218,10 @@ async function save(flow: CodedFlowBinding) {
       payload.pickup_flow_id = resolveStoredFlowId(draft.pickupFlowId)
       payload.delivery_flow_id = resolveStoredFlowId(draft.deliveryFlowId)
       payload.welcome_message = draft.welcomeMessage
+    }
+    if (flow.key === TIQR_LEADS_KEY) {
+      payload.evaluation_mode = draft.evaluationMode || 'rules'
+      payload.completion_action = draft.completionAction || 'record'
     }
     const response = await chatbotService.updateCodedFlow(flow.key, account.value, payload)
     const body = response.data as { data?: CodedFlowBinding } & CodedFlowBinding
@@ -232,6 +243,8 @@ async function save(flow: CodedFlowBinding) {
     flow.stored_delivery_flow_id = saved.stored_delivery_flow_id
     flow.welcome_message = saved.welcome_message
     flow.welcome_generated_at = saved.welcome_generated_at
+    flow.evaluation_mode = saved.evaluation_mode
+    flow.completion_action = saved.completion_action
     draft.keywords = (flow.keywords || []).join(', ')
     draft.enabled = flow.is_enabled
     draft.isDefault = flow.is_default
@@ -239,6 +252,8 @@ async function save(flow: CodedFlowBinding) {
     draft.deliveryFlowId = draftDeliveryValue(flow)
     draft.welcomeMessage = flow.welcome_message || ''
     draft.welcomeGeneratedAt = flow.welcome_generated_at || ''
+    draft.evaluationMode = flow.evaluation_mode || 'rules'
+    draft.completionAction = flow.completion_action || 'record'
     toast.success(t('codedFlows.saved'))
   } catch (err) {
     toast.error(getErrorMessage(err, t('codedFlows.saveError')))
@@ -423,6 +438,48 @@ watch(showPreview, (open) => {
               <p v-if="drafts[flow.key].welcomeGeneratedAt" class="text-xs text-muted-foreground">
                 {{ $t('codedFlows.welcomeGeneratedAt', { time: formatWelcomeGeneratedAt(drafts[flow.key].welcomeGeneratedAt) }) }}
               </p>
+            </div>
+
+            <div v-if="flow.key === TIQR_LEADS_KEY && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">
+              <div>
+                <p class="text-xs font-medium">{{ $t('codedFlows.leadsSettingsTitle') }}</p>
+                <p class="text-xs text-muted-foreground mt-0.5">{{ $t('codedFlows.leadsSettingsHint') }}</p>
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div class="space-y-1.5">
+                  <Label class="text-xs">{{ $t('codedFlows.leadsEvaluation') }}</Label>
+                  <Select
+                    :model-value="drafts[flow.key].evaluationMode"
+                    :disabled="!canWrite"
+                    @update:model-value="(v: any) => { drafts[flow.key].evaluationMode = String(v) }"
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="rules">{{ $t('codedFlows.leadsEvaluationRules') }}</SelectItem>
+                      <SelectItem value="hybrid">{{ $t('codedFlows.leadsEvaluationHybrid') }}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div class="space-y-1.5">
+                  <Label class="text-xs">{{ $t('codedFlows.leadsCompletion') }}</Label>
+                  <Select
+                    :model-value="drafts[flow.key].completionAction"
+                    :disabled="!canWrite"
+                    @update:model-value="(v: any) => { drafts[flow.key].completionAction = String(v) }"
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="record">{{ $t('codedFlows.leadsCompletionRecord') }}</SelectItem>
+                      <SelectItem value="handoff_high">{{ $t('codedFlows.leadsCompletionHandoffHigh') }}</SelectItem>
+                      <SelectItem value="always_handoff">{{ $t('codedFlows.leadsCompletionAlwaysHandoff') }}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
 
             <div v-if="flow.key === TIQR_ECOMMERCE_KEY && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">

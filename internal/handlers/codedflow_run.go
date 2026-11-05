@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrleads"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/gorm"
 )
@@ -21,6 +22,18 @@ func tryEcommerceTransfer(a *App, chat codedflow.Chat, message string) (bool, er
 	conv := codedflow.NewConv(a, chat)
 	err := tiqrecommerce.TransferEcommerce(conv, message)
 	return true, err
+}
+
+func tryLeadsTransfer(a *App, chat codedflow.Chat, message string) (bool, string, error) {
+	if chat == nil || chat.Session() == nil {
+		return false, "", nil
+	}
+	if !tiqrleads.IsLeadsSession(chat.Session()) {
+		return false, "", nil
+	}
+	conv := codedflow.NewConv(a, chat)
+	body := tiqrleads.PrepareHandoff(conv, message)
+	return true, body, nil
 }
 
 // resumeCodedFlow continues a session that is already inside a coded flow.

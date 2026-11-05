@@ -151,6 +151,78 @@ type CreateDiningBookingRequest struct {
 	Kind        string `json:"kind,omitempty"`
 }
 
+// CreateLeadRequest creates a WhatsApp lead from the TiQR Leads coded flow.
+type CreateLeadRequest struct {
+	SessionID         string         `json:"session_id"`
+	PhoneNumber       string         `json:"phone_number"`
+	Name              string         `json:"name,omitempty"`
+	EvaluationMode    string         `json:"evaluation_mode"`
+	CompletionAction  string         `json:"completion_action"`
+	Qualified         bool           `json:"qualified"`
+	Answers           []any          `json:"answers,omitempty"`
+	CriteriaSnapshot  map[string]any `json:"criteria_snapshot,omitempty"`
+}
+
+// GetLeadCriteria loads enabled lead criteria for the evaluation mode.
+func (c *Client) GetLeadCriteria(ctx context.Context, storeID, mode string) (map[string]any, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	q := url.Values{}
+	if strings.TrimSpace(mode) != "" {
+		q.Set("mode", strings.TrimSpace(mode))
+	}
+	var raw map[string]any
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/leads/criteria/?" + q.Encode()
+	if err := c.getJSON(ctx, path, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// CreateLead creates or upserts the lead for a store phone contact.
+func (c *Client) CreateLead(ctx context.Context, storeID string, body CreateLeadRequest) (map[string]any, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	var raw map[string]any
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/leads/"
+	if err := c.postJSON(ctx, path, body, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// GetLeadByPhone fetches the store lead for a phone number.
+// A 404 returns an empty map (not an error) so the coded flow can continue.
+func (c *Client) GetLeadByPhone(ctx context.Context, storeID, phoneNumber string) (map[string]any, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	if strings.TrimSpace(phoneNumber) == "" {
+		return nil, fmt.Errorf("phone_number is required")
+	}
+	q := url.Values{}
+	q.Set("phone_number", strings.TrimSpace(phoneNumber))
+	var raw map[string]any
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/leads/current/?" + q.Encode()
+	if err := c.getJSON(ctx, path, &raw); err != nil {
+		if isTickerNotFound(err) {
+			return map[string]any{}, nil
+		}
+		return nil, err
+	}
+	return raw, nil
+}
+
+func isTickerNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "ticker api error 404")
+}
+
 // CreateDiningBooking creates or returns the active dining booking for a phone.
 func (c *Client) CreateDiningBooking(ctx context.Context, storeID string, body CreateDiningBookingRequest) (map[string]any, error) {
 	if strings.TrimSpace(storeID) == "" {

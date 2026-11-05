@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrleads"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/geocode"
 	"github.com/shridarpatil/whatomate/pkg/tickermcp"
@@ -312,9 +313,40 @@ func defaultLookupLatestOrder(a *App, account *models.WhatsAppAccount, session *
 }
 
 func (a *App) TryEcommerceTransfer(chat codedflow.Chat, message string) (bool, error) {
-	// Implemented in codedflow_ecommerce_host.go to avoid an init-time cycle
+	// Implemented in codedflow_run.go to avoid an init-time cycle
 	// with the blank-imported tiqrecommerce package registration.
 	return tryEcommerceTransfer(a, chat, message)
+}
+
+func (a *App) TryLeadsTransfer(chat codedflow.Chat, message string) (bool, string, error) {
+	return tryLeadsTransfer(a, chat, message)
+}
+
+func (a *App) LeadsFlowOptions(orgID uuid.UUID, accountName string) (evaluationMode, completionAction string) {
+	evaluationMode = "rules"
+	completionAction = "record"
+	if a == nil || a.DB == nil || accountName == "" {
+		return evaluationMode, completionAction
+	}
+	var binding models.CodedFlowBinding
+	err := a.DB.Where(
+		"organization_id = ? AND whats_app_account = ? AND flow_key = ?",
+		orgID, accountName, tiqrleads.FlowKey,
+	).First(&binding).Error
+	if err != nil || binding.Settings == nil {
+		return evaluationMode, completionAction
+	}
+	if v, ok := binding.Settings[codedSettingEvaluationMode].(string); ok {
+		if normalized := normalizeLeadsEvaluationMode(v); normalized != "" {
+			evaluationMode = normalized
+		}
+	}
+	if v, ok := binding.Settings[codedSettingCompletionAction].(string); ok {
+		if normalized := normalizeLeadsCompletionAction(v); normalized != "" {
+			completionAction = normalized
+		}
+	}
+	return evaluationMode, completionAction
 }
 
 func (a *App) GenerateOpenAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage, contextData string) (string, error) {

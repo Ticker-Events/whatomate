@@ -382,11 +382,83 @@ func invokeTiqrStoreRESTOperation(
 			phoneNumber = strings.TrimSpace(phone)
 		}
 		return client.CancelDiningBooking(ctx, storeID, bookingID, phoneNumber)
+	case "get_lead_criteria":
+		mode := strings.TrimSpace(params["mode"])
+		if mode == "" {
+			mode = "rules"
+		}
+		return client.GetLeadCriteria(ctx, storeID, mode)
+	case "get_lead":
+		phoneNumber := strings.TrimSpace(params["phone_number"])
+		if phoneNumber == "" {
+			phoneNumber = strings.TrimSpace(phone)
+		}
+		if phoneNumber == "" {
+			return nil, fmt.Errorf("phone_number is required")
+		}
+		raw, err := client.GetLeadByPhone(ctx, storeID, phoneNumber)
+		if err != nil {
+			// Soft-fail like FAQ load: continue qualification without a prior lead.
+			return map[string]any{}, nil
+		}
+		return raw, nil
+	case "create_lead":
+		return createLeadFromParams(ctx, client, storeID, phone, params)
 	case "check_delivery", "retry_payment":
 		return nil, fmt.Errorf("operation %q is not available over REST (use MCP)", operation)
 	default:
 		return nil, fmt.Errorf("unknown tiqr store operation %q", operation)
 	}
+}
+
+func createLeadFromParams(
+	ctx context.Context,
+	client *ticker.Client,
+	storeID, phone string,
+	params map[string]string,
+) (map[string]any, error) {
+	sessionID := strings.TrimSpace(params["session_id"])
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	phoneNumber := strings.TrimSpace(params["phone_number"])
+	if phoneNumber == "" {
+		phoneNumber = strings.TrimSpace(phone)
+	}
+	if phoneNumber == "" {
+		return nil, fmt.Errorf("phone_number is required")
+	}
+	evaluationMode := strings.TrimSpace(params["evaluation_mode"])
+	if evaluationMode == "" {
+		evaluationMode = "rules"
+	}
+	completionAction := strings.TrimSpace(params["completion_action"])
+	if completionAction == "" {
+		completionAction = "mid_chat"
+	}
+	qualified := strings.EqualFold(strings.TrimSpace(params["qualified"]), "true")
+	var answers []any
+	if raw := strings.TrimSpace(params["answers_json"]); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &answers); err != nil {
+			return nil, fmt.Errorf("invalid answers_json: %w", err)
+		}
+	}
+	criteriaSnapshot := map[string]any{}
+	if raw := strings.TrimSpace(params["criteria_snapshot"]); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &criteriaSnapshot); err != nil {
+			return nil, fmt.Errorf("invalid criteria_snapshot: %w", err)
+		}
+	}
+	return client.CreateLead(ctx, storeID, ticker.CreateLeadRequest{
+		SessionID:        sessionID,
+		PhoneNumber:      phoneNumber,
+		Name:             strings.TrimSpace(params["name"]),
+		EvaluationMode:   evaluationMode,
+		CompletionAction: completionAction,
+		Qualified:        qualified,
+		Answers:          answers,
+		CriteriaSnapshot: criteriaSnapshot,
+	})
 }
 
 // syntheticFulfillmentSlots is a REST-only stand-in so coded flows can ask for a

@@ -132,12 +132,19 @@ type Host interface {
 	EcommerceWelcomeMessage(orgID uuid.UUID, accountName string) string
 
 	// CodedFlowSupportedLanguages returns language codes that limit AI detection.
-	// For tiqr_ecommerce these come from the store; empty means open detection.
+	// For tiqr_ecommerce and tiqr_leads these come from the store; empty means open detection.
 	// Other flows return nil (open detection).
 	CodedFlowSupportedLanguages(session *models.ChatbotSession) []string
 
+	// LeadsFlowOptions returns evaluation_mode and completion_action for tiqr_leads.
+	LeadsFlowOptions(orgID uuid.UUID, accountName string) (evaluationMode, completionAction string)
+
 	// Ecommerce handoff: returns handled=true when the session is a TiQR ecommerce coded flow.
 	TryEcommerceTransfer(chat Chat, message string) (handled bool, err error)
+
+	// TryLeadsTransfer saves a (partial) lead for tiqr_leads and returns an
+	// enriched handoff body. handled is true when the session is TiQR Leads.
+	TryLeadsTransfer(chat Chat, message string) (handled bool, body string, err error)
 
 	// Trace
 	ShouldTraceCodedFlow(session *models.ChatbotSession) bool

@@ -65,6 +65,14 @@ type StepNote struct {
 	Expect string
 }
 
+// TextRoutePrompt asks a free-text question whose answer is classified onto
+// Buttons (allow-list for intent). WhatsApp does not show those buttons.
+type TextRoutePrompt struct {
+	Body    string
+	Buttons []Button
+	Step    StepNote
+}
+
 // ButtonPrompt is a reply-button question.
 type ButtonPrompt struct {
 	Body    string
@@ -740,7 +748,8 @@ func (c *Conv) Once(name string, fn func()) bool {
 
 // Transfer tells the customer, queues the chat, and ends the flow.
 // TiQR ecommerce sessions snapshot the cart and checkout fields onto a
-// commerce draft before creating the agent transfer.
+// commerce draft before creating the agent transfer. TiQR Leads sessions
+// save a (possibly partial) lead and enrich the handoff body.
 func (c *Conv) Transfer(message string) error {
 	if c.Ended {
 		return nil
@@ -754,6 +763,16 @@ func (c *Conv) Transfer(message string) error {
 				c.Ended = true
 				return nil
 			}
+		}
+	}
+	// Leads handoff also runs while capturing so preview can show classification.
+	// PrepareHandoff skips the live create_lead post in preview.
+	if handled, body, err := c.app.TryLeadsTransfer(c.chat, message); handled {
+		if err != nil && !c.chat.Capturing() {
+			c.app.LogWarn("tiqr leads handoff save failed; continuing with queue transfer", "error", err)
+		}
+		if strings.TrimSpace(body) != "" {
+			message = body
 		}
 	}
 	_, err := c.app.ExecChatTransfer(c.chat, "transfer", map[string]any{"body": c.text(message)})

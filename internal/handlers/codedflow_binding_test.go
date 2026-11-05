@@ -291,6 +291,26 @@ func TestApp_CodedFlowSupportedLanguages_FromStore(t *testing.T) {
 		SessionData:     models.JSONB{"_coded_flow": "tiqr_ecommerce"},
 	}
 	assert.Equal(t, []string{"en"}, app.CodedFlowSupportedLanguages(missing))
+
+	leads := &models.ChatbotSession{
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		SessionData: models.JSONB{
+			"_coded_flow": "tiqr_leads",
+			"store": map[string]any{
+				"id":                  "7",
+				"supported_languages": []any{"en", "ml"},
+			},
+		},
+	}
+	assert.Equal(t, []string{"en", "ml"}, app.CodedFlowSupportedLanguages(leads))
+
+	leadsMissing := &models.ChatbotSession{
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		SessionData:     models.JSONB{"_coded_flow": "tiqr_leads"},
+	}
+	assert.Equal(t, []string{"en"}, app.CodedFlowSupportedLanguages(leadsMissing))
 }
 
 func TestApp_UpdateCodedFlowBinding_IgnoresSupportedLanguagesPayload(t *testing.T) {
@@ -422,4 +442,75 @@ func TestApp_RefreshCodedFlowWelcome_RejectsOtherFlow(t *testing.T) {
 	testutil.SetPathParam(req, "key", "not_ecommerce")
 	require.NoError(t, app.RefreshCodedFlowWelcome(req))
 	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+}
+
+func TestApp_UpdateCodedFlowBinding_LeadsSettings(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+	perms := getChatbotFlowPermissions(t, app)
+	role := testutil.CreateTestRole(t, app.DB, org.ID, "coded-flow-leads", perms)
+	user := testutil.CreateTestUser(t, app.DB, org.ID,
+		testutil.WithEmail(testutil.UniqueEmail("coded-leads")),
+		testutil.WithRoleID(&role.ID),
+	)
+
+	save := testutil.NewJSONRequest(t, map[string]any{
+		"keywords":          []string{"lead", "qualify"},
+		"is_enabled":        true,
+		"is_default":        true,
+		"evaluation_mode":   "hybrid",
+		"completion_action": "handoff_high",
+	})
+	testutil.SetAuthContext(save, org.ID, user.ID)
+	testutil.SetQueryParam(save, "account", account.Name)
+	testutil.SetPathParam(save, "key", "tiqr_leads")
+	require.NoError(t, app.UpdateCodedFlowBinding(save))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(save))
+
+	var saved struct {
+		Data handlers.CodedFlowBindingResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(save), &saved))
+	assert.Equal(t, "hybrid", saved.Data.EvaluationMode)
+	assert.Equal(t, "handoff_high", saved.Data.CompletionAction)
+	assert.True(t, saved.Data.IsDefault)
+	assert.True(t, saved.Data.IsEnabled)
+
+	eval, completion := app.LeadsFlowOptions(org.ID, account.Name)
+	assert.Equal(t, "hybrid", eval)
+	assert.Equal(t, "handoff_high", completion)
+
+	list := testutil.NewGETRequest(t)
+	testutil.SetAuthContext(list, org.ID, user.ID)
+	testutil.SetQueryParam(list, "account", account.Name)
+	require.NoError(t, app.ListCodedFlows(list))
+	var listed struct {
+		Data struct {
+			Flows []handlers.CodedFlowBindingResponse `json:"flows"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(list), &listed))
+	var leads *handlers.CodedFlowBindingResponse
+	for i := range listed.Data.Flows {
+		if listed.Data.Flows[i].Key == "tiqr_leads" {
+			leads = &listed.Data.Flows[i]
+		}
+	}
+	require.NotNil(t, leads)
+	assert.True(t, leads.IsDefault)
+	assert.Equal(t, "hybrid", leads.EvaluationMode)
+	assert.Equal(t, "handoff_high", leads.CompletionAction)
+
+	bad := testutil.NewJSONRequest(t, map[string]any{
+		"keywords":          []string{"lead"},
+		"is_enabled":        true,
+		"evaluation_mode":   "ai",
+		"completion_action": "record",
+	})
+	testutil.SetAuthContext(bad, org.ID, user.ID)
+	testutil.SetQueryParam(bad, "account", account.Name)
+	testutil.SetPathParam(bad, "key", "tiqr_leads")
+	require.NoError(t, app.UpdateCodedFlowBinding(bad))
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(bad))
 }

@@ -370,6 +370,8 @@ export type CodedFlowBinding = {
   stored_delivery_flow_id?: string
   welcome_message?: string
   welcome_generated_at?: string
+  evaluation_mode?: string
+  completion_action?: string
 }
 
 export type CodedPreviewButton = {
@@ -527,6 +529,8 @@ export const chatbotService = {
       pickup_flow_id?: string
       delivery_flow_id?: string
       welcome_message?: string
+      evaluation_mode?: string
+      completion_action?: string
     },
   ) =>
     api.put<CodedFlowBinding>(`/chatbot/coded-flows/${encodeURIComponent(key)}`, data, { params: { account } }),

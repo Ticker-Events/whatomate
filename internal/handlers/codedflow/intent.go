@@ -133,6 +133,49 @@ func (c *Conv) AskRouteButtons(name string, prompt ButtonPrompt, opts RouteOptio
 	return c.askRoute(name, c.buttonConfig(prompt), opts)
 }
 
+// AskRouteText sends a text question and classifies the reply onto Buttons
+// (or FAQ / handoff / guide) using the shared intent path.
+func (c *Conv) AskRouteText(name string, prompt TextRoutePrompt, opts RouteOptions) (Route, bool) {
+	if route, done, ok := c.replayRoute(); done {
+		return route, ok
+	}
+	cfg := c.textRouteConfig(prompt)
+	if c.Stop {
+		return Route{}, false
+	}
+	if c.noAnswerYet() {
+		if _, err := c.app.ExecChatMessage(c.chat, name, map[string]any{"message": asString(cfg["body"])}); err != nil {
+			c.fail(err)
+			return Route{}, false
+		}
+		if c.chat.Capturing() {
+			c.chat.Preview().ExpectText()
+		}
+		c.wait(name)
+		return Route{}, false
+	}
+	return c.resolveFreeText(name, cfg, opts)
+}
+
+func (c *Conv) textRouteConfig(prompt TextRoutePrompt) map[string]any {
+	buttons := make([]any, 0, len(prompt.Buttons))
+	for _, button := range prompt.Buttons {
+		buttons = append(buttons, map[string]any{
+			"id":    button.ID,
+			"type":  "reply",
+			"title": button.Title,
+		})
+	}
+	cfg := map[string]any{
+		"body":    c.text(prompt.Body),
+		"mode":    "text",
+		"source":  "static",
+		"buttons": buttons,
+	}
+	putStepNote(cfg, prompt.Step)
+	return cfg
+}
+
 func (c *Conv) AskRouteList(name string, items []any, prompt ListPrompt, opts RouteOptions) (Route, bool) {
 	if route, done, ok := c.replayRoute(); done {
 		return route, ok

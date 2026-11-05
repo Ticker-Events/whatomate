@@ -81,6 +81,34 @@ const details = reactive<Record<DetailKey, string>>({
 
 const waiting = computed(() => !importMode.value && status.value === 'waiting_input')
 
+type LeadAnswerRow = {
+  criterion_name?: string
+  answer?: string
+  score?: number
+  weight?: number
+}
+
+const isLeadsFlow = computed(() => props.flow.key === 'tiqr_leads')
+
+const leadsClassification = computed(() => {
+  if (!isLeadsFlow.value || status.value !== 'completed') return null
+  const ctx = sessionContext.value || {}
+  const score = ctx.leads_score
+  const category = ctx.leads_category
+  if (score === undefined && category === undefined && ctx.leads_qualified === undefined) {
+    return null
+  }
+  const answers = Array.isArray(ctx.leads_answers)
+    ? (ctx.leads_answers as LeadAnswerRow[])
+    : []
+  return {
+    score: score ?? '—',
+    category: typeof category === 'string' ? category : '—',
+    qualified: ctx.leads_qualified === true || ctx.leads_qualified === 'true',
+    answers,
+  }
+})
+
 type ImportedSessionLog = {
   version: number
   turns: Array<{
@@ -508,6 +536,38 @@ function submitLocation() {
                 {{ item.label }}
               </li>
             </ol>
+          </div>
+
+          <div
+            v-if="leadsClassification"
+            class="rounded-lg border border-border bg-muted/30 p-3 space-y-2"
+            data-testid="leads-preview-classification"
+          >
+            <p class="text-xs font-medium">{{ $t('codedFlows.leadsPreviewTitle') }}</p>
+            <dl class="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+              <dt class="text-muted-foreground">{{ $t('codedFlows.leadsPreviewScore') }}</dt>
+              <dd class="font-medium">{{ leadsClassification.score }}</dd>
+              <dt class="text-muted-foreground">{{ $t('codedFlows.leadsPreviewCategory') }}</dt>
+              <dd class="font-medium capitalize">{{ leadsClassification.category }}</dd>
+              <dt class="text-muted-foreground">{{ $t('codedFlows.leadsPreviewQualified') }}</dt>
+              <dd class="font-medium">
+                {{ leadsClassification.qualified ? $t('common.yes') : $t('common.no') }}
+              </dd>
+            </dl>
+            <ul
+              v-if="leadsClassification.answers.length"
+              class="space-y-1 border-t border-border pt-2 text-xs"
+            >
+              <li
+                v-for="(row, idx) in leadsClassification.answers"
+                :key="idx"
+                class="text-muted-foreground"
+              >
+                <span class="text-foreground">{{ row.criterion_name || '—' }}:</span>
+                {{ row.answer || '—' }}
+                <span class="opacity-70">({{ row.score ?? 0 }}×{{ row.weight ?? 0 }})</span>
+              </li>
+            </ul>
           </div>
 
           <FlowDebugSections
