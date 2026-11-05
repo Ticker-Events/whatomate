@@ -32,6 +32,14 @@ func TestScoreFromSessionData(t *testing.T) {
 	assert.Equal(t, "medium", category)
 
 	data[sessionAnswers] = []any{
+		map[string]any{"kind": answerKindField, "score": 0, "weight": 0},
+		map[string]any{"kind": answerKindCriterion, "score": 80, "weight": 100},
+	}
+	score, category = scoreFromSessionData(data)
+	assert.Equal(t, 80, score)
+	assert.Equal(t, "high", category)
+
+	data[sessionAnswers] = []any{
 		map[string]any{"score": 100, "weight": 100},
 	}
 	score, category = scoreFromSessionData(data)
@@ -105,6 +113,64 @@ func TestBuildHandoffSummaryPartial(t *testing.T) {
 	summary := buildHandoffSummary(session)
 	assert.Contains(t, summary, "Qualified: false")
 	assert.Contains(t, summary, "Status: partial")
+}
+
+func TestStepsFromCriteriaPayloadPrefersSteps(t *testing.T) {
+	payload := map[string]any{
+		"welcome_text": "Hello lead",
+		"criteria": []any{
+			map[string]any{"id": "1", "name": "Budget"},
+		},
+		"steps": []any{
+			map[string]any{"kind": "field", "key": "email", "label": "Email", "type": "text"},
+			map[string]any{"kind": "criterion", "id": "1", "name": "Budget"},
+			map[string]any{"kind": "criterion", "id": "2", "name": "Need"},
+		},
+	}
+	steps := stepsFromCriteriaPayload(payload)
+	require.Len(t, steps, 3)
+	first, ok := asStringMap(steps[0])
+	require.True(t, ok)
+	assert.Equal(t, "field", asString(first["kind"]))
+	assert.Equal(t, "email", asString(first["key"]))
+}
+
+func TestBuildHandoffSummaryWithFieldAnswers(t *testing.T) {
+	session := &models.ChatbotSession{
+		PhoneNumber: "917777777777",
+		SessionData: models.JSONB{
+			sessionHighMin:   75,
+			sessionMediumMin: 50,
+			sessionLowMin:    25,
+			sessionCriteria: map[string]any{
+				"steps": []any{
+					map[string]any{"kind": "field", "key": "email"},
+					map[string]any{"kind": "criterion", "id": "1"},
+				},
+			},
+			sessionAnswers: []any{
+				map[string]any{
+					"kind":           answerKindField,
+					"criterion_name": "Email",
+					"answer":         "a@b.com",
+					"score":          0,
+					"weight":         0,
+				},
+				map[string]any{
+					"kind":           answerKindCriterion,
+					"criterion_name": "Budget",
+					"answer":         "Yes",
+					"score":          100,
+					"weight":         100,
+				},
+			},
+		},
+	}
+	summary := buildHandoffSummary(session)
+	assert.Contains(t, summary, "Qualified: true")
+	assert.Contains(t, summary, "Email: a@b.com")
+	assert.Contains(t, summary, "Budget: Yes")
+	assert.NotContains(t, summary, "Email: a@b.com (score")
 }
 
 func TestIsLeadsSession(t *testing.T) {

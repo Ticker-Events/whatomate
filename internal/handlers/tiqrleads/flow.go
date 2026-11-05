@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -18,6 +19,7 @@ const (
 	sessionLeadSaved  = "leads_saved"
 	sessionCriteria   = "lead_criteria"
 	sessionThankYou   = "leads_thank_you"
+	sessionWelcome    = "leads_welcome"
 	sessionHighMin    = "leads_high_min"
 	sessionMediumMin  = "leads_medium_min"
 	sessionLowMin     = "leads_low_min"
@@ -32,6 +34,9 @@ const (
 	completionHandoffHigh   = "handoff_high"
 	completionAlwaysHandoff = "always_handoff"
 	completionMidChat       = "mid_chat"
+
+	answerKindCriterion = "criterion"
+	answerKindField     = "field"
 )
 
 // FlowKey is the coded-flow registry key for TiQR Leads.
@@ -107,6 +112,7 @@ func tiqrLeads(c *codedflow.Conv) error {
 	c.Once("leads_stash_criteria", func() {
 		c.Session().SessionData[sessionCriteria] = criteriaRaw
 		c.Session().SessionData[sessionThankYou] = asString(criteriaRaw["thank_you_text"])
+		c.Session().SessionData[sessionWelcome] = asString(criteriaRaw["welcome_text"])
 		c.Session().SessionData[sessionHighMin] = criteriaRaw["high_min"]
 		c.Session().SessionData[sessionMediumMin] = criteriaRaw["medium_min"]
 		c.Session().SessionData[sessionLowMin] = criteriaRaw["low_min"]
@@ -115,19 +121,33 @@ func tiqrLeads(c *codedflow.Conv) error {
 		}
 	})
 
-	criteriaList, _ := anySlice(criteriaRaw["criteria"])
-	if len(criteriaList) == 0 {
+	steps := stepsFromCriteriaPayload(criteriaRaw)
+	if len(steps) == 0 {
 		c.Say("Lead qualification is not set up yet. Please try again later.")
 		return c.End()
 	}
 
-	for i, item := range criteriaList {
+	c.Once("leads_say_welcome", func() {
+		welcome := strings.TrimSpace(asString(c.Session().SessionData[sessionWelcome]))
+		if welcome != "" {
+			c.Say(welcome)
+		}
+	})
+
+	for i, item := range steps {
 		row, ok := asStringMap(item)
 		if !ok {
 			continue
 		}
-		if err := askCriterion(c, i, row, evalMode); err != nil {
-			return err
+		kind := strings.TrimSpace(asString(row["kind"]))
+		if kind == answerKindField || (kind == "" && asString(row["key"]) != "" && asString(row["type"]) != "") {
+			if err := askCaptureField(c, i, row); err != nil {
+				return err
+			}
+		} else {
+			if err := askCriterion(c, i, row, evalMode); err != nil {
+				return err
+			}
 		}
 		if c.Stop {
 			return nil
@@ -135,6 +155,25 @@ func tiqrLeads(c *codedflow.Conv) error {
 	}
 
 	return finishQualified(c)
+}
+
+func stepsFromCriteriaPayload(criteriaRaw map[string]any) []any {
+	if steps, ok := anySlice(criteriaRaw["steps"]); ok && len(steps) > 0 {
+		return steps
+	}
+	criteriaList, _ := anySlice(criteriaRaw["criteria"])
+	out := make([]any, 0, len(criteriaList))
+	for _, item := range criteriaList {
+		row, ok := asStringMap(item)
+		if !ok {
+			continue
+		}
+		if asString(row["kind"]) == "" {
+			row["kind"] = answerKindCriterion
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode string) error {
@@ -180,7 +219,7 @@ func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode str
 		if route.Kind != codedflow.RouteChoice {
 			return c.Transfer(codedflow.AgentHandoff)
 		}
-		stashAnswer(c, stepName, name, question, labelByID[route.ID], scoreByID[route.ID], weight)
+		stashCriterionAnswer(c, stepName, name, question, labelByID[route.ID], scoreByID[route.ID], weight)
 		return nil
 	}
 
@@ -246,14 +285,216 @@ func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode str
 	if route.Kind != codedflow.RouteChoice {
 		return c.Transfer(codedflow.AgentHandoff)
 	}
-	stashAnswer(c, stepName, name, question, labelByID[route.ID], scoreByID[route.ID], weight)
+	stashCriterionAnswer(c, stepName, name, question, labelByID[route.ID], scoreByID[route.ID], weight)
 	return nil
 }
 
-func stashAnswer(c *codedflow.Conv, stepName, name, question, answer string, score, weight int) {
+func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
+	key := strings.TrimSpace(asString(field["key"]))
+	label := strings.TrimSpace(asString(field["label"]))
+	if label == "" {
+		label = key
+	}
+	fieldType := strings.TrimSpace(asString(field["type"]))
+	help := strings.TrimSpace(asString(field["help_text"]))
+	stepName := fmt.Sprintf("lead_f_%s", key)
+	if key == "" {
+		stepName = fmt.Sprintf("lead_f_%d", index)
+	}
+	body := label
+	if help != "" {
+		body += "\n" + help
+	}
+
+	switch fieldType {
+	case "number":
+		value, ok := c.AskNumber(stepName, codedflow.NumberPrompt{
+			Body:    body,
+			Pattern: `^-?\d+(\.\d+)?$`,
+			Step: codedflow.StepNote{
+				Doing:  "Collect lead field " + label,
+				Expect: "A number",
+			},
+		})
+		if !ok {
+			return nil
+		}
+		stashFieldAnswer(c, stepName, label, body, value)
+		return nil
+	case "single_select":
+		options := stringOptions(field["options"])
+		buttons := make([]codedflow.Button, 0, len(options))
+		for i, option := range options {
+			buttons = append(buttons, codedflow.Button{
+				ID:    fmt.Sprintf("opt_%d", i),
+				Title: truncate(option, 24),
+			})
+		}
+		if len(buttons) == 0 {
+			text, ok := c.AskText(stepName, body, codedflow.StepNote{
+				Doing:  "Collect lead field " + label,
+				Expect: "A free-text reply",
+			})
+			if !ok {
+				return nil
+			}
+			stashFieldAnswer(c, stepName, label, body, text)
+			return nil
+		}
+		titleMax := 24
+		if len(buttons) <= 3 {
+			titleMax = 20
+		}
+		for i := range buttons {
+			buttons[i].Title = truncate(buttons[i].Title, titleMax)
+		}
+		note := codedflow.StepNote{
+			Doing:  "Collect lead field " + label,
+			Expect: "One of the offered choices",
+		}
+		var route codedflow.Route
+		var ok bool
+		if len(buttons) <= 3 {
+			route, ok = c.AskRouteButtons(stepName, codedflow.ButtonPrompt{
+				Body:    body,
+				Buttons: buttons,
+				Step:    note,
+			}, codedflow.RouteOptions{AllowFAQ: true})
+		} else {
+			items := make([]any, 0, len(buttons))
+			for _, button := range buttons {
+				items = append(items, map[string]any{
+					"id":    button.ID,
+					"title": button.Title,
+				})
+			}
+			route, ok = c.AskRouteList(stepName, items, codedflow.ListPrompt{
+				Body:     body,
+				Button:   "Choose",
+				Header:   truncate(label, 60),
+				Section:  "Options",
+				ItemsKey: stepName + "_items",
+				IDField:  "id",
+				Title:    "title",
+				Step:     note,
+			}, codedflow.RouteOptions{AllowFAQ: true})
+		}
+		if !ok {
+			return nil
+		}
+		if route.Kind != codedflow.RouteChoice {
+			return c.Transfer(codedflow.AgentHandoff)
+		}
+		chosen := route.ID
+		for i, button := range buttons {
+			if button.ID == route.ID {
+				chosen = options[i]
+				break
+			}
+		}
+		stashFieldAnswer(c, stepName, label, body, chosen)
+		return nil
+	case "multi_select":
+		options := stringOptions(field["options"])
+		prompt := body
+		if len(options) > 0 {
+			prompt += "\nOptions: " + strings.Join(options, ", ")
+		}
+		prompt += "\nReply with one or more options."
+		text, ok := c.AskText(stepName, prompt, codedflow.StepNote{
+			Doing:  "Collect lead field " + label,
+			Expect: "One or more of the listed options",
+		})
+		if !ok {
+			return nil
+		}
+		stashFieldAnswer(c, stepName, label, prompt, text)
+		return nil
+	case "image":
+		return askCaptureImage(c, stepName, label, body)
+	default:
+		// text / textarea
+		text, ok := c.AskText(stepName, body, codedflow.StepNote{
+			Doing:  "Collect lead field " + label,
+			Expect: "A free-text reply",
+		})
+		if !ok {
+			return nil
+		}
+		stashFieldAnswer(c, stepName, label, body, text)
+		return nil
+	}
+}
+
+func askCaptureImage(c *codedflow.Conv, stepName, label, body string) error {
+	name := stepName + "_img"
+	prompt := body
+	if !strings.Contains(strings.ToLower(prompt), "photo") {
+		prompt += "\nPlease send a photo."
+	}
+	if rec, done := c.DoneCall(); done {
+		if !codedflow.CallOK(rec) {
+			return nil
+		}
+		stashFieldAnswer(c, stepName, label, body, asString(rec["value"]))
+		return nil
+	}
+	media := codedflow.InboundMedia{}
+	if c.ChatCtx() != nil {
+		media = c.ChatCtx().InboundMedia()
+	}
+	link := strings.TrimSpace(media.DisplayURL)
+	if link == "" && strings.TrimSpace(media.MessageID) != "" {
+		link = "/api/media/" + strings.TrimSpace(media.MessageID)
+	}
+	if strings.TrimSpace(media.MediaURL) != "" && link != "" {
+		if c.ChatCtx() != nil {
+			c.ChatCtx().SetConsumed(true)
+		}
+		c.AppendCall(map[string]any{"name": name, "ok": true, "value": link})
+		stashFieldAnswer(c, stepName, label, body, link)
+		return nil
+	}
+	if c.ChatCtx() != nil && !c.NoAnswerYet() {
+		c.ChatCtx().SetConsumed(true)
+		prompt = "Please send a photo.\n" + body
+	}
+	c.Say(prompt)
+	c.Wait(name)
+	return nil
+}
+
+func stringOptions(raw any) []string {
+	items, ok := anySlice(raw)
+	if !ok {
+		if rows, ok := raw.([]string); ok {
+			return rows
+		}
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		value := strings.TrimSpace(asString(item))
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func stashCriterionAnswer(c *codedflow.Conv, stepName, name, question, answer string, score, weight int) {
+	stashAnswer(c, stepName, answerKindCriterion, name, question, answer, score, weight)
+}
+
+func stashFieldAnswer(c *codedflow.Conv, stepName, name, question, answer string) {
+	stashAnswer(c, stepName, answerKindField, name, question, answer, 0, 0)
+}
+
+func stashAnswer(c *codedflow.Conv, stepName, kind, name, question, answer string, score, weight int) {
 	c.Once("answer_"+stepName, func() {
 		rows := answersFromSessionData(c.Session().SessionData)
 		rows = append(rows, map[string]any{
+			"kind":           kind,
 			"criterion_name": name,
 			"question":       question,
 			"answer":         answer,

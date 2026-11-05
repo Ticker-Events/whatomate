@@ -114,6 +114,9 @@ func scoreFromSessionData(data models.JSONB) (int, string) {
 		if !ok {
 			continue
 		}
+		if asString(row["kind"]) == answerKindField {
+			continue
+		}
 		total += float64(asInt(row["score"])) * float64(asInt(row["weight"])) / 100.0
 	}
 	score := int(math.Round(total))
@@ -148,13 +151,15 @@ func buildHandoffSummary(session *models.ChatbotSession) string {
 	data := session.SessionData
 	score, category := scoreFromSessionData(data)
 	answers := answersFromSessionData(data)
-	criteriaCount := 0
+	stepCount := 0
 	if snap, ok := asStringMap(data[sessionCriteria]); ok {
-		if rows, ok := anySlice(snap["criteria"]); ok {
-			criteriaCount = len(rows)
+		if rows, ok := anySlice(snap["steps"]); ok && len(rows) > 0 {
+			stepCount = len(rows)
+		} else if rows, ok := anySlice(snap["criteria"]); ok {
+			stepCount = len(rows)
 		}
 	}
-	qualified := criteriaCount > 0 && len(answers) >= criteriaCount
+	qualified := stepCount > 0 && len(answers) >= stepCount
 	var b strings.Builder
 	b.WriteString("Lead qualification summary\n")
 	b.WriteString("Name: ")
@@ -171,6 +176,13 @@ func buildHandoffSummary(session *models.ChatbotSession) string {
 	for _, item := range answers {
 		row, ok := asStringMap(item)
 		if !ok {
+			continue
+		}
+		if asString(row["kind"]) == answerKindField {
+			b.WriteString(fmt.Sprintf("- %s: %s\n",
+				asString(row["criterion_name"]),
+				asString(row["answer"]),
+			))
 			continue
 		}
 		b.WriteString(fmt.Sprintf("- %s: %s (score %d, weight %d)\n",
