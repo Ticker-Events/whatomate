@@ -1195,5 +1195,147 @@ func TestProcessIncomingMessageFull_AudioWithActiveTransferSkipsHandoff(t *testi
 }
 
 // =============================================================================
+// default coded flow vs flow keywords
+// =============================================================================
+
+var registerDefaultRouteFlows sync.Once
+
+const (
+	defaultRouteFlowKey = "test_default_route_flow"
+	keywordRouteFlowKey = "test_keyword_route_flow"
+)
+
+func ensureDefaultRouteFlows() {
+	registerDefaultRouteFlows.Do(func() {
+		codedflow.Register(codedflow.NewFlow(
+			defaultRouteFlowKey,
+			"Default route test",
+			"Starts when no keyword matches",
+			nil,
+			func(c *codedflow.Conv) error {
+				c.Say("default-flow")
+				return nil
+			},
+		))
+		codedflow.Register(codedflow.NewFlow(
+			keywordRouteFlowKey,
+			"Keyword route test",
+			"Starts from its keyword",
+			nil,
+			func(c *codedflow.Conv) error {
+				c.Say("keyword-flow")
+				return nil
+			},
+		))
+	})
+}
+
+func bindCodedFlow(t *testing.T, app *App, orgID uuid.UUID, accountName, flowKey, keyword string, isDefault bool) {
+	t.Helper()
+	binding := models.CodedFlowBinding{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  orgID,
+		WhatsAppAccount: accountName,
+		FlowKey:         flowKey,
+		Keywords:        models.StringArray{keyword},
+		IsEnabled:       true,
+		IsDefault:       isDefault,
+	}
+	require.NoError(t, app.DB.Create(&binding).Error)
+}
+
+func sendProcessorText(app *App, account *models.WhatsAppAccount, contact *models.Contact, id, body string) {
+	app.processIncomingMessageFull(account.PhoneID, IncomingTextMessage{
+		From:      contact.PhoneNumber,
+		ID:        id,
+		Timestamp: "1710000000",
+		Type:      "text",
+		Text: &struct {
+			Body string `json:"body"`
+		}{Body: body},
+	}, "Tester")
+}
+
+func activeProcessorSession(t *testing.T, app *App, contactID uuid.UUID) models.ChatbotSession {
+	t.Helper()
+	var session models.ChatbotSession
+	require.NoError(t, app.DB.Where("contact_id = ?", contactID).First(&session).Error)
+	return session
+}
+
+func TestProcessIncomingMessageFull_KeywordStartsOtherFlowWhenDefaultIsSet(t *testing.T) {
+	ensureDefaultRouteFlows()
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+	bindCodedFlow(t, app, org.ID, account.Name, defaultRouteFlowKey, "welcome", true)
+	bindCodedFlow(t, app, org.ID, account.Name, keywordRouteFlowKey, "booking", false)
+
+	sendProcessorText(app, account, contact, "wamid.keyword_over_default", "I need a booking")
+
+	session := activeProcessorSession(t, app, contact.ID)
+	assert.Equal(t, keywordRouteFlowKey, session.SessionData[codedflow.DataKey])
+}
+
+func TestProcessIncomingMessageFull_UnmatchedTextStartsDefaultCodedFlow(t *testing.T) {
+	ensureDefaultRouteFlows()
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+	bindCodedFlow(t, app, org.ID, account.Name, defaultRouteFlowKey, "welcome", true)
+	bindCodedFlow(t, app, org.ID, account.Name, keywordRouteFlowKey, "booking", false)
+
+	sendProcessorText(app, account, contact, "wamid.default_when_no_keyword", "hello there")
+
+	session := activeProcessorSession(t, app, contact.ID)
+	assert.Equal(t, defaultRouteFlowKey, session.SessionData[codedflow.DataKey])
+}
+
+func TestProcessIncomingMessageFull_VisualKeywordStartsFlowWhenDefaultIsSet(t *testing.T) {
+	ensureDefaultRouteFlows()
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	createChatbotSettings(t, app, org.ID, account.Name, models.AIConfig{})
+	bindCodedFlow(t, app, org.ID, account.Name, defaultRouteFlowKey, "welcome", true)
+
+	visual := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "Support",
+		IsEnabled:       true,
+		TriggerKeywords: models.StringArray{"support"},
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "m1",
+			"nodes": []any{
+				map[string]any{
+					"id": "m1", "type": "message", "label": "greet",
+					"config": map[string]any{"message": "Support started"},
+				},
+				map[string]any{
+					"id": "e1", "type": "end", "label": "done",
+					"config": map[string]any{"message": "Done"},
+				},
+			},
+			"edges": []any{
+				map[string]any{"from": "m1", "to": "e1", "condition": "default"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(visual).Error)
+
+	sendProcessorText(app, account, contact, "wamid.visual_over_default", "I need support")
+
+	session := activeProcessorSession(t, app, contact.ID)
+	require.NotNil(t, session.CurrentFlowID)
+	assert.Equal(t, visual.ID, *session.CurrentFlowID)
+	assert.Empty(t, session.SessionData[codedflow.DataKey])
+}
+
+// =============================================================================
 // evaluateExpression (package-level, not on App)
 // =============================================================================

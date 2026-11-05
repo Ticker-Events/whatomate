@@ -2116,7 +2116,7 @@
   "codedFlows": {
     "title": "TiQR Flows",
     "backToChatbot": "Chatbot",
-    "description": "These conversations ship with the app. Assign keywords to start one, or choose one default flow to run at the start of every new session. The steps cannot be edited here.",
+    "description": "These conversations ship with the app. Assign keywords to start one, or choose one default flow for new sessions that do not match a keyword. The steps cannot be edited here.",
     "account": "WhatsApp account",
     "selectAccount": "Select an account",
     "noAccounts": "Add a WhatsApp account before assigning keywords.",
@@ -2124,7 +2124,7 @@
     "keywords": "Keywords",
     "keywordsHint": "A message that contains one of these words starts the flow. Separate keywords with commas.",
     "defaultFlow": "Default flow",
-    "defaultFlowHint": "Start this flow automatically when a new session begins. Only one flow can be the default for this account.",
+    "defaultFlowHint": "Start this flow when a new session begins and the message does not match another flow keyword. Only one flow can be the default for this account.",
     "supportedLanguages": "Supported languages",
     "supportedLanguagesHint": "Limit AI language detection for this flow. Messages that do not match continue in English.",
     "allLanguages": "All languages",

@@ -26,7 +26,7 @@ TiQR Leads does not ship its own translator, intent model, guide loop, FAQ answe
 
 | Concern | Behavior |
 | --- | --- |
-| Default flow | `matchDefaultCodedFlow` starts an enabled default binding on the first inbound message |
+| Default flow | On a new session, flow keywords are checked first. `matchDefaultCodedFlow` starts an enabled default binding only when the message matches no coded-flow or visual flow keyword |
 | Translation | Outbound lines go through `Conv.text()`; language is stored when intent returns it. Detection is limited by the store’s `supported_languages` (same as ecommerce). Empty list = open detection; failed store load = `["en"]` |
 | Intent | Free text goes through `resolveFreeText` / `IdentifyCodedIntent`. Exact button or list taps do not |
 | FAQ | After the existing-lead check, `LoadFaqs("faqs", "list_faqs")`. Empty or failed FAQ load does not transfer. A grounded FAQ answer is sent and the flow **stays on the same criterion**; FAQ replies are not lead answers and do not change the score |

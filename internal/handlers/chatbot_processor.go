@@ -17,8 +17,8 @@ import (
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	_ "github.com/shridarpatil/whatomate/internal/handlers/tiqrdining"
-	_ "github.com/shridarpatil/whatomate/internal/handlers/tiqrleads"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	_ "github.com/shridarpatil/whatomate/internal/handlers/tiqrleads"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
@@ -319,104 +319,114 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if a.resumeCodedFlow(account, contact, session, messageText, buttonID, flowResponseData) {
 		return
 	}
-	// A default coded flow owns the first inbound message in a new session,
-	// regardless of its contents. The message is not treated as flow input.
+	// Flow keywords win over a default coded flow. On a new session the
+	// default starts only when the message matches no coded-flow or visual
+	// flow keyword. The opening message is not treated as flow input.
+	deferToFlowKeyword := false
 	if isNewSession {
-		if flow := a.matchDefaultCodedFlow(account.OrganizationID, account.Name); flow != nil {
-			session.CurrentFlowID = nil
-			session.CurrentStep = ""
-			session.StepRetries = 0
-			session.SessionData = models.JSONB{
-				codedflow.DataKey: flow.Key,
+		if defaultFlow := a.matchDefaultCodedFlow(account.OrganizationID, account.Name); defaultFlow != nil {
+			if a.matchCodedFlowTrigger(account.OrganizationID, account.Name, messageText) == nil &&
+				a.matchFlowTrigger(account.OrganizationID, messageText) == nil {
+				session.CurrentFlowID = nil
+				session.CurrentStep = ""
+				session.StepRetries = 0
+				session.SessionData = models.JSONB{
+					codedflow.DataKey: defaultFlow.Key,
+				}
+				if err := a.runCodedFlow(account, contact, session, defaultFlow, messageText, buttonID, flowResponseData); err != nil {
+					a.Log.Error("Default coded flow failed at start", "error", err, "session", session.ID, "flow", defaultFlow.Key)
+				}
+				return
 			}
-			if err := a.runCodedFlow(account, contact, session, flow, messageText, buttonID, flowResponseData); err != nil {
-				a.Log.Error("Default coded flow failed at start", "error", err, "session", session.ID, "flow", flow.Key)
-			}
-			return
+			deferToFlowKeyword = true
 		}
 	}
 	// Checkout reads the persisted message directly. Drop the stash so it is not saved.
 	tiqrecommerce.TakeInboundCaptureMedia(session)
 
-	// Commerce button taps (cart, checkout) stop further routing.
-	if a.handleCommerceButtonTap(account, contact, session, settings, buttonID) {
-		return
-	}
-
-	// Location pin during checkout (before text handlers treat JSON as address).
-	if msg.Type == "location" && msg.Location != nil {
-		if a.handleCheckoutLocationPin(account, contact, session, settings, msg.Location.Latitude, msg.Location.Longitude) {
+	var keywordResponse *KeywordResponse
+	var keywordMatched bool
+	if !deferToFlowKeyword {
+		// Commerce button taps (cart, checkout) stop further routing.
+		if a.handleCommerceButtonTap(account, contact, session, settings, buttonID) {
 			return
 		}
-	}
 
-	// WhatsApp address form submission during checkout.
-	if messageType == "nfm_reply" {
-		if a.handleCheckoutAddressMessage(account, contact, session, settings, nfmName, flowResponseData) {
-			return
-		}
-	}
-
-	// Checkout conversation steps and cart quantity replies.
-	if a.handleCheckoutConversation(account, contact, session, settings, messageText, buttonID, persistedMessage) {
-		return
-	}
-	if a.handleCartQuantityReply(account, contact, session, messageText) {
-		return
-	}
-	if a.handleBrowsingCartEdit(account, contact, session, messageText) {
-		return
-	}
-	if commerceConfigured(settings.AI) && isCheckoutStartIntent(messageText) && !cartIsEmpty(session) && getCheckoutState(session) == nil {
-		a.startCheckout(account, contact, session, settings)
-		return
-	}
-
-	// Check for transfer keyword BEFORE sending greeting (transfer takes priority)
-	keywordResponse, keywordMatched := a.matchKeywordRules(account.OrganizationID, account.Name, messageText)
-	if keywordMatched && keywordResponse.ResponseType == models.ResponseTypeTransfer {
-		a.Log.Info("Transfer keyword matched", "response", keywordResponse.Body)
-		// Check business hours - if outside hours, send out of hours message instead
-		if settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 {
-			if !a.isWithinBusinessHours(settings.BusinessHours.Hours) {
-				a.Log.Info("Outside business hours, sending out of hours message instead of transfer")
-				if settings.BusinessHours.OutOfHoursMessage != "" {
-					if err := a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage); err != nil {
-						a.Log.Error("Failed to send out of hours message", "error", err, "contact", contact.PhoneNumber)
-					}
-				}
+		// Location pin during checkout (before text handlers treat JSON as address).
+		if msg.Type == "location" && msg.Location != nil {
+			if a.handleCheckoutLocationPin(account, contact, session, settings, msg.Location.Latitude, msg.Location.Longitude) {
 				return
 			}
 		}
-		// Within business hours - send transfer message and create transfer
-		if keywordResponse.Body != "" {
-			if err := a.sendAndSaveTextMessage(account, contact, keywordResponse.Body); err != nil {
-				a.Log.Error("Failed to send transfer message", "error", err, "contact", contact.PhoneNumber)
+
+		// WhatsApp address form submission during checkout.
+		if messageType == "nfm_reply" {
+			if a.handleCheckoutAddressMessage(account, contact, session, settings, nfmName, flowResponseData) {
+				return
 			}
 		}
-		a.createTransferFromKeyword(account, contact)
-		return
-	}
 
-	// Check if user is in an active flow. After Phase 4.2 every flow has
-	// a v2 Graph populated; any flow without one is a misconfiguration
-	// (manual DB edit or failed backfill) — log and exit cleanly.
-	if session.CurrentFlowID != nil {
-		flow, err := a.getChatbotFlowByIDCached(account.OrganizationID, *session.CurrentFlowID)
-		if err != nil || flow == nil {
-			a.Log.Error("Active chatbot flow not loadable", "error", err, "session", session.ID, "flow", session.CurrentFlowID)
-			a.exitFlow(session)
+		// Checkout conversation steps and cart quantity replies.
+		if a.handleCheckoutConversation(account, contact, session, settings, messageText, buttonID, persistedMessage) {
 			return
 		}
-		if flow.Graph == nil {
-			a.Log.Error("Active chatbot flow has no v2 graph; ignoring inbound", "session", session.ID, "flow", flow.ID)
-			a.exitFlow(session)
+		if a.handleCartQuantityReply(account, contact, session, messageText) {
 			return
 		}
-		if err := a.runChatGraph(account, contact, session, flow, messageText, buttonID, flowResponseData); err != nil {
-			a.Log.Error("Chat graph runner failed", "error", err, "session", session.ID, "flow", flow.ID)
+		if a.handleBrowsingCartEdit(account, contact, session, messageText) {
+			return
 		}
-		return
+		if commerceConfigured(settings.AI) && isCheckoutStartIntent(messageText) && !cartIsEmpty(session) && getCheckoutState(session) == nil {
+			a.startCheckout(account, contact, session, settings)
+			return
+		}
+
+		// Check for transfer keyword BEFORE sending greeting (transfer takes priority)
+		keywordResponse, keywordMatched = a.matchKeywordRules(account.OrganizationID, account.Name, messageText)
+		if keywordMatched && keywordResponse.ResponseType == models.ResponseTypeTransfer {
+			a.Log.Info("Transfer keyword matched", "response", keywordResponse.Body)
+			// Check business hours - if outside hours, send out of hours message instead
+			if settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 {
+				if !a.isWithinBusinessHours(settings.BusinessHours.Hours) {
+					a.Log.Info("Outside business hours, sending out of hours message instead of transfer")
+					if settings.BusinessHours.OutOfHoursMessage != "" {
+						if err := a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage); err != nil {
+							a.Log.Error("Failed to send out of hours message", "error", err, "contact", contact.PhoneNumber)
+						}
+					}
+					return
+				}
+			}
+			// Within business hours - send transfer message and create transfer
+			if keywordResponse.Body != "" {
+				if err := a.sendAndSaveTextMessage(account, contact, keywordResponse.Body); err != nil {
+					a.Log.Error("Failed to send transfer message", "error", err, "contact", contact.PhoneNumber)
+				}
+			}
+			a.createTransferFromKeyword(account, contact)
+			return
+		}
+
+		// Check if user is in an active flow. After Phase 4.2 every flow has
+		// a v2 Graph populated; any flow without one is a misconfiguration
+		// (manual DB edit or failed backfill) — log and exit cleanly.
+		if session.CurrentFlowID != nil {
+			flow, err := a.getChatbotFlowByIDCached(account.OrganizationID, *session.CurrentFlowID)
+			if err != nil || flow == nil {
+				a.Log.Error("Active chatbot flow not loadable", "error", err, "session", session.ID, "flow", session.CurrentFlowID)
+				a.exitFlow(session)
+				return
+			}
+			if flow.Graph == nil {
+				a.Log.Error("Active chatbot flow has no v2 graph; ignoring inbound", "session", session.ID, "flow", flow.ID)
+				a.exitFlow(session)
+				return
+			}
+			if err := a.runChatGraph(account, contact, session, flow, messageText, buttonID, flowResponseData); err != nil {
+				a.Log.Error("Chat graph runner failed", "error", err, "session", session.ID, "flow", flow.ID)
+			}
+			return
+		}
 	}
 
 	// Coded flows are checked before visual graphs so a shared keyword
