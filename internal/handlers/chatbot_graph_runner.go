@@ -565,11 +565,20 @@ func (a *App) execChatAPICall(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 
+	a.Log.Info("api_call node response",
+		"node", node.ID,
+		"label", node.Label,
+		"session", ctx.session.ID,
+		"status_code", statusCode,
+		"response", truncateLogValue(string(respBody), 4000),
+	)
+
 	if statusCode < 200 || statusCode >= 300 {
 		return nodeOutcome{outcome: "http:non2xx"}, nil
 	}
 
 	// 2xx: optionally extract response_mapping → SessionData.
+	extracted := map[string]any{}
 	if mapping, ok := node.Config["response_mapping"].(map[string]any); ok && len(mapping) > 0 {
 		var jsonResp map[string]any
 		if err := json.Unmarshal(respBody, &jsonResp); err == nil {
@@ -579,9 +588,19 @@ func (a *App) execChatAPICall(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 					mappingStrings[varName] = pathStr
 				}
 			}
-			extracted := extractResponseMapping(jsonResp, mappingStrings)
+			extracted = extractResponseMapping(jsonResp, mappingStrings)
 			maps.Copy(sessionData, extracted)
+		} else {
+			a.Log.Warn("api_call node response_mapping skipped: response is not a JSON object",
+				"node", node.ID, "session", ctx.session.ID, "error", err)
 		}
+	}
+	if len(extracted) > 0 {
+		a.Log.Info("api_call node mapped variables",
+			"node", node.ID,
+			"session", ctx.session.ID,
+			"mapped", extracted,
+		)
 	}
 
 	// Optionally render and send a message after the fetch. Mirrors v1
@@ -589,6 +608,11 @@ func (a *App) execChatAPICall(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 	// keep collapsing api_fetch steps onto a single api_call node.
 	if tmpl := stringFromConfig(node.Config, "message_template"); tmpl != "" {
 		rendered := processTemplate(tmpl, sessionData)
+		a.Log.Info("api_call node message_template",
+			"node", node.ID,
+			"session", ctx.session.ID,
+			"rendered", truncateLogValue(rendered, 1000),
+		)
 		if rendered != "" {
 			if err := a.sendAndSaveTextMessage(ctx.account, ctx.contact, rendered); err != nil {
 				a.Log.Error("api_call node failed to send message_template",
