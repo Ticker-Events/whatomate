@@ -53,13 +53,8 @@ func (a *App) resolveOutgoingMediaRef(ctx context.Context, account *models.Whats
 	return a.getMessagingClient(account).UploadMedia(ctx, waAccount, data, mimeType, filename)
 }
 
-// uploadAiSensyMediaLink stores media on S3 and returns a time-limited HTTPS URL
-// that AiSensy can fetch when delivering the message.
-func (a *App) uploadAiSensyMediaLink(ctx context.Context, data []byte, mimeType, filename string) (string, error) {
-	if a.S3Client == nil {
-		return "", fmt.Errorf("aisensy media requires S3/Spaces storage (configure [storage] type=s3)")
-	}
-
+// aisensyMediaObjectKey builds a unique S3 key for AiSensy-hosted media.
+func aisensyMediaObjectKey(mimeType, filename string) string {
 	ext := getExtensionFromMimeType(mimeType)
 	if ext == "" {
 		if dot := strings.LastIndex(filename, "."); dot >= 0 {
@@ -72,13 +67,53 @@ func (a *App) uploadAiSensyMediaLink(ctx context.Context, data []byte, mimeType,
 	if safeName == "" {
 		safeName = "file" + ext
 	}
-	key := fmt.Sprintf("aisensy-media/%s/%s", uuid.New().String(), safeName)
+	return fmt.Sprintf("aisensy-media/%s/%s", uuid.New().String(), safeName)
+}
 
+// uploadAiSensyMediaLink stores media on S3 and returns a time-limited HTTPS URL
+// that AiSensy can fetch when delivering the message.
+func (a *App) uploadAiSensyMediaLink(ctx context.Context, data []byte, mimeType, filename string) (string, error) {
+	if a.S3Client == nil {
+		return "", fmt.Errorf("aisensy media requires S3/Spaces storage (configure [storage] type=s3)")
+	}
+
+	key := aisensyMediaObjectKey(mimeType, filename)
 	url, err := a.S3Client.UploadAndPresign(ctx, key, bytes.NewReader(data), mimeType, time.Hour)
 	if err != nil {
 		return "", fmt.Errorf("upload media to S3 for aisensy: %w", err)
 	}
-	a.Log.Info("AiSensy media hosted on S3", "key", key, "size", len(data))
+	a.Log.Info("AiSensy media hosted on S3", "key", key, "size", len(data), "url_kind", "presigned")
+	return url, nil
+}
+
+// uploadAiSensyTemplateSample hosts a template header sample on S3/Spaces and
+// returns a durable HTTPS URL for use as header_handle when creating templates
+// via AiSensy (which has no Meta resumable-upload equivalent).
+func (a *App) uploadAiSensyTemplateSample(ctx context.Context, data []byte, mimeType, filename string) (string, error) {
+	if a.S3Client == nil {
+		return "", fmt.Errorf("aisensy media requires S3/Spaces storage (configure [storage] type=s3)")
+	}
+
+	key := aisensyMediaObjectKey(mimeType, filename)
+
+	if publicURL := a.S3Client.PublicURL(key); publicURL != "" {
+		if err := a.S3Client.UploadPublic(ctx, key, bytes.NewReader(data), mimeType); err == nil {
+			a.Log.Info("AiSensy template sample hosted on S3",
+				"key", key, "size", len(data), "url_kind", "public")
+			return publicURL, nil
+		} else {
+			a.Log.Warn("AiSensy template sample public upload failed; falling back to presigned URL",
+				"key", key, "error", err)
+		}
+	}
+
+	const sampleExpiry = 7 * 24 * time.Hour
+	url, err := a.S3Client.UploadAndPresign(ctx, key, bytes.NewReader(data), mimeType, sampleExpiry)
+	if err != nil {
+		return "", fmt.Errorf("upload template sample to S3 for aisensy: %w", err)
+	}
+	a.Log.Info("AiSensy template sample hosted on S3",
+		"key", key, "size", len(data), "url_kind", "presigned", "expiry", sampleExpiry.String())
 	return url, nil
 }
 

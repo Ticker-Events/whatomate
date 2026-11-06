@@ -65,45 +65,36 @@ func (c *Client) GenerateToken(ctx context.Context, email, password, projectID s
 	raw := fmt.Sprintf("%s:%s:%s", email, password, projectID)
 	b64 := base64.StdEncoding.EncodeToString([]byte(raw))
 
-	c.Log.Info("aisensy GenerateToken request",
-		"curl", fmt.Sprintf(
-			"curl --request POST --url %s/users/regenrate-token --header 'Accept: application/json' --header 'Authorization: Bearer %s' --header 'Content-Type: application/json' --data '{\"direct_api\": true}'",
-			c.baseURL, b64,
-		),
-		"decoded_credential", raw,
-	)
-
 	payload := map[string]bool{
 		"direct_api": true,
 	}
 	body, _ := json.Marshal(payload)
 
 	url := c.baseURL + "/users/regenrate-token"
+	const contentType = "application/json"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to create token request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+b64)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		c.logAPIFailure(http.MethodPost, url, b64, contentType, body, 0, nil, err)
 		return "", fmt.Errorf("failed to generate aisensy token: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.logAPIFailure(http.MethodPost, url, b64, contentType, body, resp.StatusCode, nil, err)
 		return "", fmt.Errorf("failed to read token response: %w", err)
 	}
 
-	c.Log.Info("aisensy GenerateToken response",
-		"status", resp.StatusCode,
-		"body", string(respBody),
-	)
-
 	if resp.StatusCode != http.StatusOK {
+		c.logAPIFailure(http.MethodPost, url, b64, contentType, body, resp.StatusCode, respBody, nil)
 		return "", fmt.Errorf("aisensy token generation failed (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
@@ -220,13 +211,17 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, ac
 
 // rawRequest performs the HTTP call and returns body + status code.
 func (c *Client) rawRequest(ctx context.Context, method, url string, body any, token string) ([]byte, int, error) {
+	var bodyBytes []byte
 	var bodyReader io.Reader
+	contentType := ""
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to marshal request body: %w", err)
 		}
+		bodyBytes = b
 		bodyReader = bytes.NewReader(b)
+		contentType = "application/json"
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
@@ -234,19 +229,25 @@ func (c *Client) rawRequest(ctx context.Context, method, url string, body any, t
 		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		c.logAPIFailure(method, url, token, contentType, bodyBytes, 0, nil, err)
 		return nil, 0, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.logAPIFailure(method, url, token, contentType, bodyBytes, resp.StatusCode, nil, err)
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.logAPIFailure(method, url, token, contentType, bodyBytes, resp.StatusCode, respBody, nil)
 	}
 
 	return respBody, resp.StatusCode, nil

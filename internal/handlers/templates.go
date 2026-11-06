@@ -705,36 +705,43 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 		}
 	}
 
-	if account.IsAiSensy() {
-		return r.SendErrorEnvelope(
-			fasthttp.StatusBadRequest,
-			"Template header media upload is not supported for AiSensy accounts",
-			nil,
-			"",
-		)
-	}
-
-	// Account app_id, else org/global Meta app credentials (same as embedded signup).
-	waAccount := a.toWhatsAppAccount(account)
-	if waAccount.AppID == "" {
-		appID, _, _, credErr := a.resolveMetaAppCreds(orgID)
-		if credErr != nil || appID == "" {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account does not have app_id configured. Please update the account settings.", nil, "")
-		}
-		waAccount.AppID = appID
-	}
-
-	// Perform resumable upload to get handle
 	ctx := context.Background()
-	handle, err := a.getMessagingClient(account).ResumableUpload(ctx, waAccount, fileData, mimeType, fileHeader.Filename)
-	if err != nil {
-		a.Log.Error("Failed to upload template media", "error", err)
-		return r.SendErrorEnvelope(
-			fasthttp.StatusBadGateway,
-			fmt.Sprintf("Failed to upload media to provider: %v", err),
-			nil,
-			"",
-		)
+	var handle string
+	if account.IsAiSensy() {
+		// AiSensy has no Meta resumable-upload API; host the sample and use the HTTPS URL as handle.
+		var uploadErr error
+		handle, uploadErr = a.uploadAiSensyTemplateSample(ctx, fileData, mimeType, fileHeader.Filename)
+		if uploadErr != nil {
+			a.Log.Error("Failed to upload AiSensy template media", "error", uploadErr)
+			return r.SendErrorEnvelope(
+				fasthttp.StatusBadGateway,
+				fmt.Sprintf("Failed to upload media to provider: %v", uploadErr),
+				nil,
+				"",
+			)
+		}
+	} else {
+		// Account app_id, else org/global Meta app credentials (same as embedded signup).
+		waAccount := a.toWhatsAppAccount(account)
+		if waAccount.AppID == "" {
+			appID, _, _, credErr := a.resolveMetaAppCreds(orgID)
+			if credErr != nil || appID == "" {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account does not have app_id configured. Please update the account settings.", nil, "")
+			}
+			waAccount.AppID = appID
+		}
+
+		var uploadErr error
+		handle, uploadErr = a.getMessagingClient(account).ResumableUpload(ctx, waAccount, fileData, mimeType, fileHeader.Filename)
+		if uploadErr != nil {
+			a.Log.Error("Failed to upload template media", "error", uploadErr)
+			return r.SendErrorEnvelope(
+				fasthttp.StatusBadGateway,
+				fmt.Sprintf("Failed to upload media to provider: %v", uploadErr),
+				nil,
+				"",
+			)
+		}
 	}
 
 	return r.SendEnvelope(map[string]any{

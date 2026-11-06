@@ -151,13 +151,19 @@ func (c *Client) sendFlowAsset(ctx context.Context, url string, body []byte, con
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		c.logAPIFailure(http.MethodPost, url, token, contentType, body, 0, nil, err)
 		return nil, 0, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.logAPIFailure(http.MethodPost, url, token, contentType, body, resp.StatusCode, nil, err)
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.logAPIFailure(http.MethodPost, url, token, contentType, body, resp.StatusCode, respBody, nil)
 	}
 
 	return respBody, resp.StatusCode, nil
