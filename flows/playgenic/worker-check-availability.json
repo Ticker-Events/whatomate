@@ -1,0 +1,78 @@
+{
+  "format": "whatomate.chatbot_flow",
+  "format_version": 1,
+  "exported_at": "2026-11-06T05:00:04Z",
+  "flow": {
+    "name": "worker · check availability",
+    "description": "Sets flow_intent=availability and jumps to worker · schedule.",
+    "trigger_keywords": [],
+    "graph": {
+      "edges": [
+        {
+          "to": "set_intent_avail",
+          "from": "__start__",
+          "condition": "default"
+        },
+        {
+          "to": "goto_schedule",
+          "from": "set_intent_avail",
+          "condition": "default"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "__start__",
+          "type": "start",
+          "label": "Start",
+          "config": {},
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "set_intent_avail",
+          "type": "set_variable",
+          "label": "Intent availability",
+          "config": {
+            "set": [
+              {
+                "name": "flow_intent",
+                "value": "\"availability\""
+              }
+            ]
+          },
+          "position": {
+            "x": 0,
+            "y": 100
+          }
+        },
+        {
+          "id": "goto_schedule",
+          "type": "goto_flow",
+          "label": "→ schedule",
+          "config": {
+            "flow_id": "b764a24d-275a-41fd-920e-d2804dbd9e78",
+            "flow_name": "worker · schedule"
+          },
+          "position": {
+            "x": 0,
+            "y": 240
+          }
+        }
+      ],
+      "version": 2,
+      "entry_node": "__start__"
+    },
+    "whatsapp_account": "TiQR Store Production",
+    "on_complete_action": "none",
+    "timeout_message": "Your Playgenic worker session timed out. Send worker to start again.",
+    "cancel_keywords": [
+      "stop",
+      "exit"
+    ],
+    "panel_config": {
+      "sections": []
+    }
+  }
+}

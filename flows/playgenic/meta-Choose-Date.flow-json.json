@@ -1,0 +1,29 @@
+{
+  "screens": [
+    {
+      "id": "SCREEN_A",
+      "data": {},
+      "title": "Choose Date",
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "name": "booking_date",
+            "type": "DatePicker",
+            "label": "Select date",
+            "required": false
+          },
+          {
+            "type": "Footer",
+            "label": "Check Availability",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "version": "6.0"
+}

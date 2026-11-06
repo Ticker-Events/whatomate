@@ -1,0 +1,321 @@
+{
+  "format": "whatomate.chatbot_flow",
+  "format_version": 1,
+  "exported_at": "2026-11-06T05:00:04Z",
+  "flow": {
+    "name": "worker · create booking",
+    "description": "Customer phone/name intake for manual booking, then jumps to worker · schedule.",
+    "trigger_keywords": [],
+    "graph": {
+      "edges": [
+        {
+          "to": "set_intent_create",
+          "from": "__start__",
+          "condition": "default"
+        },
+        {
+          "to": "phone_prompt",
+          "from": "set_intent_create",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "api_error",
+          "condition": "default"
+        },
+        {
+          "to": "lookup_api",
+          "from": "phone_prompt",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "phone_prompt",
+          "condition": "max_retries"
+        },
+        {
+          "to": "cond_customer",
+          "from": "lookup_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "lookup_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "found_buttons",
+          "from": "cond_customer",
+          "condition": "true"
+        },
+        {
+          "to": "goto_schedule",
+          "from": "found_buttons",
+          "condition": "button:cust_ok"
+        },
+        {
+          "to": "phone_prompt",
+          "from": "found_buttons",
+          "condition": "button:cust_other"
+        },
+        {
+          "to": "customer_api",
+          "from": "name_prompt",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "name_prompt",
+          "condition": "max_retries"
+        },
+        {
+          "to": "goto_schedule",
+          "from": "customer_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "customer_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "node_1792754666908_0",
+          "from": "cond_customer",
+          "condition": "false"
+        },
+        {
+          "to": "phone_prompt",
+          "from": "node_1792754666908_0",
+          "condition": "button:btn_1792754713906_0"
+        },
+        {
+          "to": "name_prompt",
+          "from": "node_1792754666908_0",
+          "condition": "button:btn_1792754723883_1"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "__start__",
+          "type": "start",
+          "label": "Start",
+          "config": {},
+          "position": {
+            "x": 340,
+            "y": 20
+          }
+        },
+        {
+          "id": "set_intent_create",
+          "type": "set_variable",
+          "label": "Intent create",
+          "config": {
+            "set": [
+              {
+                "name": "flow_intent",
+                "value": "\"create\""
+              }
+            ]
+          },
+          "position": {
+            "x": 340,
+            "y": 160
+          }
+        },
+        {
+          "id": "phone_prompt",
+          "type": "prompt",
+          "label": "Customer phone",
+          "config": {
+            "body": "📱 Enter the customer’s phone number.",
+            "store_as": "customer_phone",
+            "max_retries": 3,
+            "validation_error": "Enter the phone number using digits only.",
+            "validation_regex": "^[0-9]{7,15}$"
+          },
+          "position": {
+            "x": 320,
+            "y": 300
+          }
+        },
+        {
+          "id": "lookup_api",
+          "type": "api_call",
+          "label": "Lookup customer",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/customers/lookup",
+            "body": "{\"whatsapp_number\":\"{{customer_phone}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "customer_id": "id",
+              "customer_name": "full_name",
+              "customer_phone": "whatsapp_number",
+              "customer_exists": "exists",
+              "customer_language": "language",
+              "customer_credit_balance": "credit_balance"
+            }
+          },
+          "position": {
+            "x": 600,
+            "y": 440
+          }
+        },
+        {
+          "id": "cond_customer",
+          "type": "condition",
+          "label": "Customer exists?",
+          "config": {
+            "expression": "customer_exists == true"
+          },
+          "position": {
+            "x": 300,
+            "y": 580
+          }
+        },
+        {
+          "id": "found_buttons",
+          "type": "buttons",
+          "label": "Customer found",
+          "config": {
+            "body": "CUSTOMER FOUND\n\n{{customer_name}}\nPhone: {{customer_phone}}",
+            "buttons": [
+              {
+                "id": "cust_ok",
+                "type": "reply",
+                "title": "Continue"
+              },
+              {
+                "id": "cust_other",
+                "type": "reply",
+                "title": "Different Customer"
+              }
+            ]
+          },
+          "position": {
+            "x": 40,
+            "y": 740
+          }
+        },
+        {
+          "id": "name_prompt",
+          "type": "prompt",
+          "label": "Customer name",
+          "config": {
+            "body": "👤 Enter the customer’s full name.\n\n📱 Phone: {{customer_phone}}",
+            "store_as": "customer_name",
+            "max_retries": 3,
+            "validation_error": "Please enter the full name (at least 2 characters).",
+            "validation_regex": ".{2,}"
+          },
+          "position": {
+            "x": 240,
+            "y": 880
+          }
+        },
+        {
+          "id": "customer_api",
+          "type": "api_call",
+          "label": "Create customer",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/customer/create",
+            "body": "{\"field_id\":\"{{field_id}}\",\"whatsapp_number\":\"{{customer_phone}}\",\"full_name\":\"{{customer_name}}\",\"language\": \"{{language}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "token": "token",
+              "field_id": "field_id",
+              "user_type": "user_type",
+              "customer_id": "customer_id",
+              "customer_name": "full_name"
+            }
+          },
+          "position": {
+            "x": 180,
+            "y": 1020
+          }
+        },
+        {
+          "id": "api_error",
+          "type": "message",
+          "label": "API failed",
+          "config": {
+            "message": "We could not reach Playgenic right now. Please try again."
+          },
+          "position": {
+            "x": 580,
+            "y": 1180
+          }
+        },
+        {
+          "id": "goto_shell",
+          "type": "goto_flow",
+          "label": "→ shell",
+          "config": {
+            "flow_id": "fe3eabd9-e55b-43b4-9cef-bead31c228b4",
+            "flow_name": "worker · shell"
+          },
+          "position": {
+            "x": 460,
+            "y": 1320
+          }
+        },
+        {
+          "id": "goto_schedule",
+          "type": "goto_flow",
+          "label": "→ schedule",
+          "config": {
+            "flow_id": "b764a24d-275a-41fd-920e-d2804dbd9e78",
+            "flow_name": "worker · schedule"
+          },
+          "position": {
+            "x": 20,
+            "y": 1180
+          }
+        },
+        {
+          "id": "node_1792754666908_0",
+          "type": "buttons",
+          "label": "Buttons",
+          "config": {
+            "body": "👤 No customer was found for {{customer_phone}}.\n\nWould you like to add a new customer?",
+            "buttons": [
+              {
+                "id": "btn_1792754713906_0",
+                "type": "reply",
+                "title": "Search another"
+              },
+              {
+                "id": "btn_1792754723883_1",
+                "type": "reply",
+                "title": "New Customer"
+              }
+            ]
+          },
+          "position": {
+            "x": 240,
+            "y": 740
+          }
+        }
+      ],
+      "version": 2,
+      "entry_node": "__start__"
+    },
+    "whatsapp_account": "TiQR Store Production",
+    "on_complete_action": "none",
+    "timeout_message": "Your Playgenic worker session timed out. Send worker to start again.",
+    "cancel_keywords": [
+      "stop",
+      "exit"
+    ],
+    "panel_config": {
+      "sections": []
+    }
+  }
+}

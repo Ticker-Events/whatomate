@@ -1,0 +1,446 @@
+{
+  "format": "whatomate.chatbot_flow",
+  "format_version": 1,
+  "exported_at": "2026-11-06T05:00:04Z",
+  "flow": {
+    "name": "worker · report issue",
+    "description": "Report an issue (type, description, optional photo stub).",
+    "trigger_keywords": [],
+    "graph": {
+      "edges": [
+        {
+          "to": "issue_buttons",
+          "from": "__start__",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "api_error",
+          "condition": "default"
+        },
+        {
+          "to": "set_issue_booking",
+          "from": "issue_buttons",
+          "condition": "button:issue_booking"
+        },
+        {
+          "to": "issue_prompt",
+          "from": "set_issue_booking",
+          "condition": "default"
+        },
+        {
+          "to": "set_issue_customer",
+          "from": "issue_buttons",
+          "condition": "button:issue_customer"
+        },
+        {
+          "to": "issue_prompt",
+          "from": "set_issue_customer",
+          "condition": "default"
+        },
+        {
+          "to": "set_issue_payment",
+          "from": "issue_buttons",
+          "condition": "button:issue_payment"
+        },
+        {
+          "to": "issue_prompt",
+          "from": "set_issue_payment",
+          "condition": "default"
+        },
+        {
+          "to": "set_issue_pitch",
+          "from": "issue_buttons",
+          "condition": "button:issue_pitch"
+        },
+        {
+          "to": "issue_prompt",
+          "from": "set_issue_pitch",
+          "condition": "default"
+        },
+        {
+          "to": "set_issue_technical",
+          "from": "issue_buttons",
+          "condition": "button:issue_technical"
+        },
+        {
+          "to": "issue_prompt",
+          "from": "set_issue_technical",
+          "condition": "default"
+        },
+        {
+          "to": "set_issue_other",
+          "from": "issue_buttons",
+          "condition": "button:issue_other"
+        },
+        {
+          "to": "issue_prompt",
+          "from": "set_issue_other",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "issue_prompt",
+          "condition": "max_retries"
+        },
+        {
+          "to": "issue_api",
+          "from": "issue_submit",
+          "condition": "button:issue_yes"
+        },
+        {
+          "to": "goto_shell",
+          "from": "issue_submit",
+          "condition": "button:issue_no"
+        },
+        {
+          "to": "issue_ok_msg",
+          "from": "issue_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "issue_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "goto_shell",
+          "from": "issue_ok_msg",
+          "condition": "default"
+        },
+        {
+          "to": "issue_submit",
+          "from": "issue_prompt",
+          "condition": "default"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "__start__",
+          "type": "start",
+          "label": "Start",
+          "config": {},
+          "position": {
+            "x": 580,
+            "y": 20
+          }
+        },
+        {
+          "id": "issue_buttons",
+          "type": "buttons",
+          "label": "Issue type",
+          "config": {
+            "body": "🛠️ Report an Issue\n\nPlease select the problem.\n\nInclude the pitch name or booking ID if relevant.",
+            "mode": "list",
+            "header": "Issue",
+            "buttons": [
+              {
+                "id": "issue_booking",
+                "type": "reply",
+                "title": "Booking",
+                "description": "A booking problem"
+              },
+              {
+                "id": "issue_customer",
+                "type": "reply",
+                "title": "Customer",
+                "description": "A customer problem"
+              },
+              {
+                "id": "issue_payment",
+                "type": "reply",
+                "title": "Payment",
+                "description": "A payment problem"
+              },
+              {
+                "id": "issue_pitch",
+                "type": "reply",
+                "title": "Pitch/Maintenance",
+                "description": "Ground or lights"
+              },
+              {
+                "id": "issue_technical",
+                "type": "reply",
+                "title": "Technical",
+                "description": "App or WhatsApp"
+              },
+              {
+                "id": "issue_other",
+                "type": "reply",
+                "title": "Other",
+                "description": "Anything else"
+              }
+            ],
+            "list_button": "Type",
+            "section_title": "Issue"
+          },
+          "position": {
+            "x": 580,
+            "y": 160
+          }
+        },
+        {
+          "id": "set_issue_booking",
+          "type": "set_variable",
+          "label": "Booking",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "issue_type_text",
+                "value": "\"Booking\"",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "issue_type",
+                "value": "\"other\"",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 1140,
+            "y": 400
+          }
+        },
+        {
+          "id": "set_issue_customer",
+          "type": "set_variable",
+          "label": "Customer",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "issue_type_text",
+                "value": "\"Customer\"",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "issue_type",
+                "value": "other",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 920,
+            "y": 400
+          }
+        },
+        {
+          "id": "set_issue_payment",
+          "type": "set_variable",
+          "label": "Payment",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "issue_type_text",
+                "value": "\"Payment\"",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "issue_type",
+                "value": "\"payment\"",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 700,
+            "y": 400
+          }
+        },
+        {
+          "id": "set_issue_pitch",
+          "type": "set_variable",
+          "label": "Pitch/Maintenance",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "issue_type_text",
+                "value": "\"Pitch/Maintenance\"",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "issue_type",
+                "value": "\"field\"",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 460,
+            "y": 400
+          }
+        },
+        {
+          "id": "set_issue_technical",
+          "type": "set_variable",
+          "label": "Technical",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "issue_type_text",
+                "value": "\"Technical\"",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "issue_type",
+                "value": "\"other\"",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 240,
+            "y": 400
+          }
+        },
+        {
+          "id": "set_issue_other",
+          "type": "set_variable",
+          "label": "Other",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "issue_type",
+                "value": "\"other\"",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "issue_type_text",
+                "value": "\"Other\"",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 20,
+            "y": 400
+          }
+        },
+        {
+          "id": "issue_prompt",
+          "type": "prompt",
+          "label": "Issue description",
+          "config": {
+            "body": "Please describe the problem.",
+            "store_as": "issue_description",
+            "max_retries": 3,
+            "validation_error": "Please describe the issue (at least 5 characters).",
+            "validation_regex": ".{5,}"
+          },
+          "position": {
+            "x": 500,
+            "y": 540
+          }
+        },
+        {
+          "id": "issue_submit",
+          "type": "buttons",
+          "label": "Submit issue",
+          "config": {
+            "body": "Submit this issue?\n\nType: {{issue_type_text}}\nDescription: _{{issue_description}}_",
+            "buttons": [
+              {
+                "id": "issue_yes",
+                "type": "reply",
+                "title": "Submit"
+              },
+              {
+                "id": "issue_no",
+                "type": "reply",
+                "title": "Cancel"
+              }
+            ]
+          },
+          "position": {
+            "x": 680,
+            "y": 980
+          }
+        },
+        {
+          "id": "issue_api",
+          "type": "api_call",
+          "label": "Submit issue",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/report-problem",
+            "body": "{\"field_id\":\"{{field_id}}\",\"phone\":\"{{phone_number}}\",\"issue_type\":\"{{issue_type}}\",\"description\":\"{{issue_type_text}} | {{issue_description}}\", \"reported_by\": \"worker\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "ok": "ok",
+              "issue_reference": "data.issue_id"
+            }
+          },
+          "position": {
+            "x": 500,
+            "y": 1140
+          }
+        },
+        {
+          "id": "issue_ok_msg",
+          "type": "message",
+          "label": "Issue submitted",
+          "config": {
+            "message": "✅ Issue Submitted\n\n🎟️ Reference: {{issue_reference}}\n\nYour report has been saved."
+          },
+          "position": {
+            "x": 680,
+            "y": 1280
+          }
+        },
+        {
+          "id": "api_error",
+          "type": "message",
+          "label": "API failed",
+          "config": {
+            "message": "We could not reach Playgenic right now. Please try again."
+          },
+          "position": {
+            "x": 320,
+            "y": 1280
+          }
+        },
+        {
+          "id": "goto_shell",
+          "type": "goto_flow",
+          "label": "→ shell",
+          "config": {
+            "flow_id": "",
+            "flow_name": "worker · shell"
+          },
+          "position": {
+            "x": 580,
+            "y": 1420
+          }
+        }
+      ],
+      "version": 2,
+      "entry_node": "__start__"
+    },
+    "whatsapp_account": "TiQR Store Production",
+    "on_complete_action": "none",
+    "timeout_message": "Your Playgenic worker session timed out. Send worker to start again.",
+    "cancel_keywords": [
+      "stop",
+      "exit"
+    ],
+    "panel_config": {
+      "sections": []
+    }
+  }
+}

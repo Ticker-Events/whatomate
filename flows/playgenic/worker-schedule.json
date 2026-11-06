@@ -1,0 +1,657 @@
+{
+  "format": "whatomate.chatbot_flow",
+  "format_version": 1,
+  "exported_at": "2026-11-06T05:00:04Z",
+  "flow": {
+    "name": "worker · schedule",
+    "description": "Shared date → pitch → slot picker. Branches on flow_intent: create | availability | reschedule.",
+    "trigger_keywords": [],
+    "graph": {
+      "edges": [
+        {
+          "to": "goto_shell",
+          "from": "api_error",
+          "condition": "default"
+        },
+        {
+          "to": "no_pitches",
+          "from": "cond_pitches",
+          "condition": "false"
+        },
+        {
+          "to": "goto_shell",
+          "from": "no_pitches",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "avail_buttons",
+          "condition": "button:avail_menu"
+        },
+        {
+          "to": "goto_shell",
+          "from": "no_slots",
+          "condition": "default"
+        },
+        {
+          "to": "cond_slot_resched",
+          "from": "slot_list",
+          "condition": "default"
+        },
+        {
+          "to": "resched_confirm_msg",
+          "from": "cond_slot_resched",
+          "condition": "true"
+        },
+        {
+          "to": "create_api",
+          "from": "create_buttons",
+          "condition": "button:create_yes"
+        },
+        {
+          "to": "goto_shell",
+          "from": "create_buttons",
+          "condition": "button:create_back"
+        },
+        {
+          "to": "cond_create_ok",
+          "from": "create_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "create_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "created_msg",
+          "from": "cond_create_ok",
+          "condition": "true"
+        },
+        {
+          "to": "slot_taken_msg",
+          "from": "cond_create_ok",
+          "condition": "false"
+        },
+        {
+          "to": "goto_shell",
+          "from": "created_msg",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "slot_taken_msg",
+          "condition": "default"
+        },
+        {
+          "to": "resched_buttons",
+          "from": "resched_confirm_msg",
+          "condition": "default"
+        },
+        {
+          "to": "resched_api",
+          "from": "resched_buttons",
+          "condition": "button:resched_yes"
+        },
+        {
+          "to": "set_hub_actions",
+          "from": "resched_buttons",
+          "condition": "button:resched_back"
+        },
+        {
+          "to": "cond_resched_ok",
+          "from": "resched_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "resched_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "resched_ok_msg",
+          "from": "cond_resched_ok",
+          "condition": "true"
+        },
+        {
+          "to": "slot_taken_msg",
+          "from": "cond_resched_ok",
+          "condition": "false"
+        },
+        {
+          "to": "goto_shell",
+          "from": "resched_ok_msg",
+          "condition": "default"
+        },
+        {
+          "to": "goto_booking_hub",
+          "from": "set_hub_actions",
+          "condition": "default"
+        },
+        {
+          "to": "goto_create",
+          "from": "avail_buttons",
+          "condition": "button:avail_create"
+        },
+        {
+          "to": "node_1792753838824_0",
+          "from": "__start__",
+          "condition": "default"
+        },
+        {
+          "to": "node_1792809664386_0",
+          "from": "node_1792753838824_0",
+          "condition": "default"
+        },
+        {
+          "to": "cond_pitches",
+          "from": "node_1792809664386_0",
+          "condition": "default"
+        },
+        {
+          "to": "slot_list",
+          "from": "pitch_list",
+          "condition": "default"
+        },
+        {
+          "to": "cond_intent_avail",
+          "from": "cond_pitches",
+          "condition": "true"
+        },
+        {
+          "to": "pitch_list",
+          "from": "cond_intent_avail",
+          "condition": "false"
+        },
+        {
+          "to": "avail_buttons",
+          "from": "cond_intent_avail",
+          "condition": "true"
+        },
+        {
+          "to": "create_buttons",
+          "from": "cond_slot_resched",
+          "condition": "false"
+        },
+        {
+          "to": "node_1792753838824_0",
+          "from": "node_1793338857354_0",
+          "condition": "default"
+        },
+        {
+          "to": "node_1793338857354_0",
+          "from": "__start__",
+          "condition": "default"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "__start__",
+          "type": "start",
+          "label": "Start",
+          "config": {},
+          "position": {
+            "x": 1014.5,
+            "y": 20
+          }
+        },
+        {
+          "id": "cond_intent_avail",
+          "type": "condition",
+          "label": "Checking availability?",
+          "config": {
+            "expression": "flow_intent == \"availability\""
+          },
+          "position": {
+            "x": 880.25,
+            "y": 730
+          }
+        },
+        {
+          "id": "cond_pitches",
+          "type": "condition",
+          "label": "Any pitches?",
+          "config": {
+            "expression": "pitches != nil && len(pitches) > 0"
+          },
+          "position": {
+            "x": 1006.5,
+            "y": 588
+          }
+        },
+        {
+          "id": "no_pitches",
+          "type": "message",
+          "label": "No pitches",
+          "config": {
+            "message": "No pitches are set up for this venue."
+          },
+          "position": {
+            "x": 1992,
+            "y": 1888.5
+          }
+        },
+        {
+          "id": "pitch_list",
+          "type": "buttons",
+          "label": "Select pitch",
+          "config": {
+            "body": "⚽️ Available pitches  \n🗓️ {{date booking_date \"D MMMM YYYY\"}}\n{{for pitch in pitches}}\n🏟️ {{pitch.name}} \n💰 OMR {{pitch.price}} per hour\n⏱️\n{{for slot in pitch.slots}}{{slot.start}}–{{slot.end}}, {{endfor}}\n{{endfor}}",
+            "mode": "list",
+            "header": "Pitches",
+            "source": "dynamic",
+            "id_field": "id",
+            "items_var": "pitches",
+            "list_button": "Pitches",
+            "title_field": "name",
+            "section_title": "Pitches",
+            "description_field": "{{name}} - OMR {{price}}",
+            "selection_mapping": {
+              "pitch_name": "name",
+              "pitch_price": "price",
+              "play_ground_id": "id",
+              "available_slots": "slots"
+            }
+          },
+          "position": {
+            "x": 999.25,
+            "y": 872
+          }
+        },
+        {
+          "id": "avail_buttons",
+          "type": "buttons",
+          "label": "After availability",
+          "config": {
+            "body": "⚽️ Available pitches  \n🗓️ {{date booking_date \"D MMMM YYYY\"}}\n{{for pitch in pitches}}\n⏱️ {{pitch.name}} - OMR {{pitch.price}}\n{{for slot in pitch.slots}}{{slot.start}}–{{slot.end}}, {{endfor}}\n{{endfor}}",
+            "buttons": [
+              {
+                "id": "avail_create",
+                "type": "reply",
+                "title": "Create Booking"
+              },
+              {
+                "id": "avail_menu",
+                "type": "reply",
+                "title": "Main Menu"
+              }
+            ]
+          },
+          "position": {
+            "x": 20,
+            "y": 1881
+          }
+        },
+        {
+          "id": "no_slots",
+          "type": "message",
+          "label": "No slots",
+          "config": {
+            "message": "No available times for {{pitch_name}} on that date."
+          },
+          "position": {
+            "x": 268.5,
+            "y": 1888.5
+          }
+        },
+        {
+          "id": "slot_list",
+          "type": "buttons",
+          "label": "Select time",
+          "config": {
+            "body": "🕒 Select an available time.\n\n🏟️ Pitch: {{pitch_name}}\n📅 Date: {{date booking_date \"D MMMM YYYY\"}}",
+            "mode": "list",
+            "header": "Times",
+            "source": "dynamic",
+            "id_field": "start",
+            "items_var": "available_slots",
+            "list_button": "Times",
+            "title_field": "start",
+            "section_title": "Available",
+            "description_field": "{{start}}-{{end}}",
+            "selection_mapping": {
+              "slot_label": "label",
+              "slot_end_time": "end",
+              "slot_start_time": "start"
+            }
+          },
+          "position": {
+            "x": 999.25,
+            "y": 1014
+          }
+        },
+        {
+          "id": "cond_slot_resched",
+          "type": "condition",
+          "label": "Reschedule confirm?",
+          "config": {
+            "expression": "flow_intent == \"reschedule\""
+          },
+          "position": {
+            "x": 999.25,
+            "y": 1156
+          }
+        },
+        {
+          "id": "create_buttons",
+          "type": "buttons",
+          "label": "Confirm booking buttons",
+          "config": {
+            "body": "📝 Review Booking\n\n👤 Customer: {{customer_name}}\n📱 Phone: {{customer_phone}}\n🏟️ Pitch: {{pitch_name}}\n📅 Date: {{date booking_date \"D MMM YYYY\"}}\n🕒 Time: {{slot_start_time}}–{{slot_end_time}} {{slot_label}}\n💰 Total: OMR {{pitch_price}}\n\nPlease check the details before continuing.",
+            "buttons": [
+              {
+                "id": "create_yes",
+                "type": "reply",
+                "title": "Confirm Booking"
+              },
+              {
+                "id": "create_back",
+                "type": "reply",
+                "title": "Back"
+              }
+            ]
+          },
+          "position": {
+            "x": 470.5,
+            "y": 1440
+          }
+        },
+        {
+          "id": "create_api",
+          "type": "api_call",
+          "label": "Create booking",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/bookings",
+            "body": "{\"field_id\":\"{{field_id}}\",\"play_ground_id\":\"{{play_ground_id}}\",\"date\":\"{{booking_date}}\",\"start_time\":\"{{slot_start_time}}\",\"duration_minutes\":{{duration_minutes}},\"whatsapp_number\":\"{{customer_phone}}\",\"customer_name\":\"{{customer_name}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "ok": "ok",
+              "code": "code",
+              "booking_id": "booking_id",
+              "paid_amount": "paid_amount",
+              "booking_code": "booking_code",
+              "total_amount": "total_amount",
+              "customer_notice": "customer_notice",
+              "outstanding_amount": "outstanding_amount"
+            }
+          },
+          "position": {
+            "x": 847.75,
+            "y": 1597
+          }
+        },
+        {
+          "id": "cond_create_ok",
+          "type": "condition",
+          "label": "Booking created?",
+          "config": {
+            "expression": "ok == true"
+          },
+          "position": {
+            "x": 766,
+            "y": 1739
+          }
+        },
+        {
+          "id": "created_msg",
+          "type": "message",
+          "label": "Booking created",
+          "config": {
+            "message": "✅ Booking Created\n\n🎟️ Booking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n🏟️ Pitch: {{pitch_name}}\n📅 Date: {{date booking_date \"D MMM YYYY\"}}\n🕒 Time: {{slot_start_time}}–{{slot_end_time}} {{slot_label}}\n\n{{customer_notice}}"
+          },
+          "position": {
+            "x": 591.5,
+            "y": 1888.5
+          }
+        },
+        {
+          "id": "slot_taken_msg",
+          "type": "message",
+          "label": "Slot taken",
+          "config": {
+            "message": "That time was just booked. Please choose another slot."
+          },
+          "position": {
+            "x": 977.5,
+            "y": 1888.5
+          }
+        },
+        {
+          "id": "resched_confirm_msg",
+          "type": "message",
+          "label": "Confirm reschedule",
+          "config": {
+            "message": "📅 Review Booking Change\n\n🎟️ Booking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n\nCurrent booking:\n📅 {{date existing_booking_date \"D MMM YYYY\"}}\n🕒 {{existing_start_time}} - {{existing_end_time}}\n\nNew booking:\n📅 {{new_date}}\n🕒 {{new_time}}\n🏟️ {{pitch_name}}\n\nConfirm this change?\n\nCONFIRM RESCHEDULE\n\nBooking: {{booking_code}}\n\nCurrent: {{confirm_date}} | {{confirm_start}}-{{confirm_end}} | {{current_pitch}}\nNew: {{date_label}} | {{slot_label}} | {{pitch_name}}"
+          },
+          "position": {
+            "x": 1651.75,
+            "y": 1298
+          }
+        },
+        {
+          "id": "resched_buttons",
+          "type": "buttons",
+          "label": "Reschedule buttons",
+          "config": {
+            "body": "Confirm this new time?",
+            "buttons": [
+              {
+                "id": "resched_yes",
+                "type": "reply",
+                "title": "Confirm"
+              },
+              {
+                "id": "resched_back",
+                "type": "reply",
+                "title": "Back"
+              }
+            ]
+          },
+          "position": {
+            "x": 1735.75,
+            "y": 1440
+          }
+        },
+        {
+          "id": "resched_api",
+          "type": "api_call",
+          "label": "Reschedule booking",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/bookings/{{booking_id}}/reschedule",
+            "body": "{\"field_id\":\"{{field_id}}\",\"play_ground_id\":\"{{play_ground_id}}\",\"date\":\"{{booking_date}}\",\"start_time\":\"{{start_time}}\",\"duration_minutes\":{{duration_minutes}}}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "ok": "ok",
+              "code": "code",
+              "pitch_name": "pitch_name",
+              "customer_notice": "customer_notice"
+            }
+          },
+          "position": {
+            "x": 1668.5,
+            "y": 1597
+          }
+        },
+        {
+          "id": "cond_resched_ok",
+          "type": "condition",
+          "label": "Reschedule ok?",
+          "config": {
+            "expression": "ok == true"
+          },
+          "position": {
+            "x": 1740.5,
+            "y": 1739
+          }
+        },
+        {
+          "id": "resched_ok_msg",
+          "type": "message",
+          "label": "Rescheduled",
+          "config": {
+            "message": "✅ Booking Rescheduled\n\n🎟️ Booking ID: {{booking_code}}\n🏟️ Pitch: {{pitch_name}}\n📅 New Date: {{date booking_date \"D MMM YYYY\"}}\n🕒 New Time: {{slot_start_time}} - {{slot_end_time}}"
+          },
+          "position": {
+            "x": 1580,
+            "y": 1880
+          }
+        },
+        {
+          "id": "api_error",
+          "type": "message",
+          "label": "API failed",
+          "config": {
+            "message": "We could not reach Playgenic right now. Please try again."
+          },
+          "position": {
+            "x": 1156,
+            "y": 1739
+          }
+        },
+        {
+          "id": "set_hub_actions",
+          "type": "set_variable",
+          "label": "Return to booking actions",
+          "config": {
+            "set": [
+              {
+                "name": "hub_entry",
+                "value": "\"actions\""
+              }
+            ]
+          },
+          "position": {
+            "x": 1209.75,
+            "y": 1597
+          }
+        },
+        {
+          "id": "goto_shell",
+          "type": "goto_flow",
+          "label": "→ shell",
+          "config": {
+            "flow_id": "fe3eabd9-e55b-43b4-9cef-bead31c228b4",
+            "flow_name": "worker · shell"
+          },
+          "position": {
+            "x": 746.5,
+            "y": 2038
+          }
+        },
+        {
+          "id": "goto_booking_hub",
+          "type": "goto_flow",
+          "label": "→ booking hub",
+          "config": {
+            "flow_id": "f9c63d63-2b55-41cf-90ea-e2b138bc7cfb",
+            "flow_name": "worker · booking hub"
+          },
+          "position": {
+            "x": 1513,
+            "y": 1739
+          }
+        },
+        {
+          "id": "goto_create",
+          "type": "goto_flow",
+          "label": "→ create booking",
+          "config": {
+            "flow_id": "a9a3a1f0-44e4-4497-a1ca-c7bee3a32566",
+            "flow_name": "worker · create booking"
+          },
+          "position": {
+            "x": 20,
+            "y": 2038
+          }
+        },
+        {
+          "id": "node_1792753838824_0",
+          "type": "whatsapp_flow",
+          "label": "WhatsApp Flow",
+          "config": {
+            "cta": "Choose date",
+            "body": "📅 Which date would you like to book?\nSelect a date from the calendar.",
+            "header": "",
+            "flow_id": "1090658037290971"
+          },
+          "position": {
+            "x": 1014.5,
+            "y": 304
+          }
+        },
+        {
+          "id": "node_1792809664386_0",
+          "type": "api_call",
+          "label": "API",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/customer/pitches/available?field_id={{field_id}}&date={{booking_date}}&duration_minutes=60&whatsapp_number={{phone_number}}",
+            "body": "",
+            "method": "GET",
+            "headers": {
+              "Authorization": "Bearer {{token}}"
+            },
+            "message_template": "",
+            "response_mapping": {
+              "pitches": "pitches"
+            }
+          },
+          "position": {
+            "x": 945.5,
+            "y": 446
+          }
+        },
+        {
+          "id": "node_1793338857354_0",
+          "type": "set_variable",
+          "label": "Assign",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "existing_booking_date",
+                "value": "booking_date",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "existing_start_time",
+                "value": "start_time",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "existing_end_time",
+                "value": "end_time",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 960,
+            "y": 160
+          }
+        }
+      ],
+      "version": 2,
+      "entry_node": "__start__"
+    },
+    "whatsapp_account": "TiQR Store Production",
+    "on_complete_action": "none",
+    "timeout_message": "Your Playgenic worker session timed out. Send worker to start again.",
+    "cancel_keywords": [
+      "stop",
+      "exit"
+    ],
+    "panel_config": {
+      "sections": []
+    }
+  }
+}

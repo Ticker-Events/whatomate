@@ -209,6 +209,24 @@ func TestProcessTemplate_Date_MissingIsEmpty(t *testing.T) {
 	assert.Equal(t, "", processTemplate(`{{date booking_date "DD/MM/YYYY"}}`, map[string]any{}))
 }
 
+func TestProcessTemplate_Date_TimeOnly12Hour(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"start_time": "22:00:00", "end_time": "23:00:00"}
+	assert.Equal(t, "10:00 PM – 11:00 PM", processTemplate(`{{date start_time "hh:mm A"}} – {{date end_time "hh:mm A"}}`, data))
+}
+
+func TestProcessTemplate_Date_TimeOnlyHHMM(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"start_time": "09:30"}
+	assert.Equal(t, "09:30 AM", processTemplate(`{{date start_time "hh:mm A"}}`, data))
+}
+
+func TestProcessTemplate_Title(t *testing.T) {
+	t.Parallel()
+	data := map[string]any{"booking_status": "confirmed"}
+	assert.Equal(t, "Confirmed", processTemplate(`{{title booking_status}}`, data))
+}
+
 // --- processForLoops ---
 
 func TestProcessForLoops_EmptyArray(t *testing.T) {

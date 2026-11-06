@@ -1,0 +1,69 @@
+{
+  "format": "whatomate.whatsapp_flow",
+  "format_version": 1,
+  "exported_at": "2026-11-06T05:02:44Z",
+  "flow": {
+    "name": "Choose Date",
+    "status": "PUBLISHED",
+    "category": "OTHER",
+    "json_version": "6.0",
+    "meta_flow_id": "1090658037290971",
+    "whatsapp_account": "TiQR Store Production",
+    "preview_url": "",
+    "screens": [
+      {
+        "id": "SCREEN_A",
+        "data": {},
+        "title": "Choose Date",
+        "layout": {
+          "type": "SingleColumnLayout",
+          "children": [
+            {
+              "name": "booking_date",
+              "type": "DatePicker",
+              "label": "Select date",
+              "required": false
+            },
+            {
+              "type": "Footer",
+              "label": "Check Availability",
+              "on-click-action": {
+                "name": "complete",
+                "payload": {}
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "flow_json": {
+      "screens": [
+        {
+          "id": "SCREEN_A",
+          "data": {},
+          "title": "Choose Date",
+          "layout": {
+            "type": "SingleColumnLayout",
+            "children": [
+              {
+                "name": "booking_date",
+                "type": "DatePicker",
+                "label": "Select date",
+                "required": false
+              },
+              {
+                "type": "Footer",
+                "label": "Check Availability",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {}
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "version": "6.0"
+    }
+  }
+}

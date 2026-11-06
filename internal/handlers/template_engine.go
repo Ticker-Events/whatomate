@@ -27,6 +27,11 @@ var (
 		`\{\{\s*date\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*(?:"([^"]*)"|'([^']*)')?\s*\}\}`,
 	)
 
+	// {{title path}} — title-cases words in the resolved value (confirmed → Confirmed).
+	titlePattern = regexp.MustCompile(
+		`\{\{\s*title\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*\}\}`,
+	)
+
 	// {{variable}} / {{ variable }} / {{object.nested.path}} / {{array[0].field}}.
 	// Whitespace inside the braces is tolerated to match the rest of the
 	// industry (`{{ name }}` is the common form authors expect).
@@ -41,8 +46,9 @@ var (
 		"MMMM", "MMM", "MM", "M",
 		"dddd", "ddd",
 		"DD", "D",
-		"HH", "H",
+		"HH", "hh", "H", "h",
 		"mm", "ss",
+		"A", "a",
 	}
 
 	momentMonthsLong = []string{
@@ -102,6 +108,7 @@ func renderTemplate(template string, data map[string]any, format valueFormatter)
 	result = processForLoops(result, data, format)
 	result = processConditionals(result, data)
 	result = processDateFormats(result, data, format)
+	result = processTitleFormats(result, data, format)
 	return processVariables(result, data, format)
 }
 
@@ -193,6 +200,7 @@ func renderForLoopBody(match *forLoopSpan, data map[string]any, format valueForm
 		processed := processForLoopsDepth(match.body, loopData, format, depth+1)
 		processed = processConditionals(processed, loopData)
 		processed = processDateFormats(processed, loopData, format)
+		processed = processTitleFormats(processed, loopData, format)
 		processed = processVariables(processed, loopData, format)
 		output.WriteString(processed)
 	}
@@ -231,7 +239,40 @@ func processDateFormats(template string, data map[string]any, format ...valueFor
 	})
 }
 
+// processTitleFormats replaces {{title path}} with a title-cased string.
+func processTitleFormats(template string, data map[string]any, format ...valueFormatter) string {
+	formatter := formatValue
+	if len(format) > 0 && format[0] != nil {
+		formatter = format[0]
+	}
+	return titlePattern.ReplaceAllStringFunc(template, func(match string) string {
+		parts := titlePattern.FindStringSubmatch(match)
+		if parts == nil {
+			return match
+		}
+		raw := formatter(getNestedValue(data, parts[1]))
+		if raw == "" {
+			return ""
+		}
+		return titleCaseWords(raw)
+	})
+}
+
+func titleCaseWords(s string) string {
+	parts := strings.Fields(s)
+	for i, p := range parts {
+		runes := []rune(strings.ToLower(p))
+		if len(runes) == 0 {
+			continue
+		}
+		runes[0] = []rune(strings.ToUpper(string(runes[0])))[0]
+		parts[i] = string(runes)
+	}
+	return strings.Join(parts, " ")
+}
+
 // parseTemplateTime parses common ISO / RFC3339 date strings from API payloads.
+// Also accepts time-only values such as "22:00:00" or "22:00".
 func parseTemplateTime(s string) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -243,6 +284,8 @@ func parseTemplateTime(s string) (time.Time, bool) {
 		"2006-01-02",
 		"2006-01-02T15:04:05",
 		"2006-01-02 15:04:05",
+		"15:04:05",
+		"15:04",
 	}
 	for _, layout := range layouts {
 		if t, err := time.Parse(layout, s); err == nil {
@@ -304,10 +347,32 @@ func momentTokenValue(t time.Time, tok string) string {
 		return fmt.Sprintf("%02d", t.Hour())
 	case "H":
 		return strconv.Itoa(t.Hour())
+	case "hh":
+		h := t.Hour() % 12
+		if h == 0 {
+			h = 12
+		}
+		return fmt.Sprintf("%02d", h)
+	case "h":
+		h := t.Hour() % 12
+		if h == 0 {
+			h = 12
+		}
+		return strconv.Itoa(h)
 	case "mm":
 		return fmt.Sprintf("%02d", t.Minute())
 	case "ss":
 		return fmt.Sprintf("%02d", t.Second())
+	case "A":
+		if t.Hour() < 12 {
+			return "AM"
+		}
+		return "PM"
+	case "a":
+		if t.Hour() < 12 {
+			return "am"
+		}
+		return "pm"
 	default:
 		return tok
 	}
