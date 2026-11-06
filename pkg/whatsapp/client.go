@@ -433,19 +433,36 @@ func (c *Client) ResumableUpload(ctx context.Context, account *Account, data []b
 	if account.AppID == "" {
 		return "", fmt.Errorf("app_id is required for resumable upload")
 	}
-
-	// Step 1: Create upload session
-	sessionURL := fmt.Sprintf("%s/%s/%s/uploads", c.getBaseURL(), account.APIVersion, account.AppID)
-
-	sessionPayload := map[string]any{
-		"file_length": len(data),
-		"file_type":   mimeType,
-		"file_name":   filename,
+	if len(data) == 0 {
+		return "", fmt.Errorf("file data is empty")
 	}
+	if filename == "" {
+		filename = "upload.bin"
+	}
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	apiVersion := account.APIVersion
+	if apiVersion == "" {
+		apiVersion = "v21.0"
+	}
+
+	// Step 1: Create upload session (Meta expects file_* as query params).
+	sessionURL := fmt.Sprintf(
+		"%s/%s/%s/uploads?%s",
+		c.getBaseURL(),
+		apiVersion,
+		account.AppID,
+		url.Values{
+			"file_name":   {filename},
+			"file_length": {fmt.Sprintf("%d", len(data))},
+			"file_type":   {mimeType},
+		}.Encode(),
+	)
 
 	c.Log.Info("Creating upload session", "url", sessionURL, "file_size", len(data), "mime_type", mimeType)
 
-	sessionResp, err := c.doRequest(ctx, http.MethodPost, sessionURL, sessionPayload, account.AccessToken)
+	sessionResp, err := c.doRequest(ctx, http.MethodPost, sessionURL, nil, account.AccessToken)
 	if err != nil {
 		return "", fmt.Errorf("failed to create upload session: %w", err)
 	}
@@ -462,7 +479,7 @@ func (c *Client) ResumableUpload(ctx context.Context, account *Account, data []b
 	c.Log.Info("Upload session created", "session_id", uploadSession.ID)
 
 	// Step 2: Upload file data to session
-	uploadURL := fmt.Sprintf("%s/%s/%s", c.getBaseURL(), account.APIVersion, uploadSession.ID)
+	uploadURL := fmt.Sprintf("%s/%s/%s", c.getBaseURL(), apiVersion, uploadSession.ID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, bytes.NewReader(data))
 	if err != nil {
@@ -485,7 +502,7 @@ func (c *Client) ResumableUpload(ctx context.Context, account *Account, data []b
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(respBody))
+		return "", ParseMetaAPIError(resp.StatusCode, respBody)
 	}
 
 	var finishResp ResumableUploadFinishResponse

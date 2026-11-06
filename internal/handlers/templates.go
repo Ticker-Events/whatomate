@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/google/uuid"
@@ -676,11 +677,13 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 	}
 	defer func() { _ = file.Close() }()
 
-	// Read file data
-	fileData := make([]byte, fileHeader.Size)
-	if _, err := file.Read(fileData); err != nil {
+	fileData, err := io.ReadAll(file)
+	if err != nil {
 		a.Log.Error("Failed to read file data", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file data", nil, "")
+	}
+	if len(fileData) == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Uploaded file is empty", nil, "")
 	}
 
 	// Determine mime type from Content-Type header or filename
@@ -702,6 +705,15 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 		}
 	}
 
+	if account.IsAiSensy() {
+		return r.SendErrorEnvelope(
+			fasthttp.StatusBadRequest,
+			"Template header media upload is not supported for AiSensy accounts",
+			nil,
+			"",
+		)
+	}
+
 	// Account app_id, else org/global Meta app credentials (same as embedded signup).
 	waAccount := a.toWhatsAppAccount(account)
 	if waAccount.AppID == "" {
@@ -717,7 +729,12 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 	handle, err := a.getMessagingClient(account).ResumableUpload(ctx, waAccount, fileData, mimeType, fileHeader.Filename)
 	if err != nil {
 		a.Log.Error("Failed to upload template media", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Failed to upload media to provider", nil, "")
+		return r.SendErrorEnvelope(
+			fasthttp.StatusBadGateway,
+			fmt.Sprintf("Failed to upload media to provider: %v", err),
+			nil,
+			"",
+		)
 	}
 
 	return r.SendEnvelope(map[string]any{
