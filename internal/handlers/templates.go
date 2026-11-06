@@ -663,11 +663,6 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")
 	}
 
-	// Check if account has app_id configured
-	if account.AppID == "" {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account does not have app_id configured. Please update the account settings.", nil, "")
-	}
-
 	// Get the uploaded file
 	fileHeader, err := r.RequestCtx.FormFile("file")
 	if err != nil {
@@ -707,8 +702,15 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 		}
 	}
 
-	// Create whatsapp account with AppID
+	// Account app_id, else org/global Meta app credentials (same as embedded signup).
 	waAccount := a.toWhatsAppAccount(account)
+	if waAccount.AppID == "" {
+		appID, _, _, credErr := a.resolveMetaAppCreds(orgID)
+		if credErr != nil || appID == "" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account does not have app_id configured. Please update the account settings.", nil, "")
+		}
+		waAccount.AppID = appID
+	}
 
 	// Perform resumable upload to get handle
 	ctx := context.Background()
