@@ -1,0 +1,128 @@
+{
+  "format": "whatomate.chatbot_flow",
+  "format_version": 1,
+  "exported_at": "2026-11-06T05:00:04Z",
+  "flow": {
+    "name": "worker · daily summary",
+    "description": "Fetch and show the worker daily summary, then return to shell.",
+    "trigger_keywords": [],
+    "graph": {
+      "edges": [
+        {
+          "to": "summary_api",
+          "from": "__start__",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "api_error",
+          "condition": "default"
+        },
+        {
+          "to": "summary_msg",
+          "from": "summary_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "summary_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "goto_shell",
+          "from": "summary_msg",
+          "condition": "default"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "__start__",
+          "type": "start",
+          "label": "Start",
+          "config": {},
+          "position": {
+            "x": 280,
+            "y": 20
+          }
+        },
+        {
+          "id": "summary_api",
+          "type": "api_call",
+          "label": "Daily summary",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/daily-summary",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "summary_date": "summary_date",
+              "arrived_count": "arrived_count",
+              "no_show_count": "no_show_count",
+              "cash_collected": "cash_collected",
+              "total_bookings": "total_bookings",
+              "cancelled_count": "cancelled_count",
+              "total_collected": "total_collected",
+              "online_collected": "online_collected",
+              "outstanding_total": "outstanding_total"
+            }
+          },
+          "position": {
+            "x": 200,
+            "y": 160
+          }
+        },
+        {
+          "id": "summary_msg",
+          "type": "message",
+          "label": "Summary",
+          "config": {
+            "message": "📊 Daily Summary\n📅 {{date summary_date \"D MMM YYYY\"}}\n\n⚽ Bookings Today: {{total_bookings}}\n💵 Cash Collected Today: OMR {{cash_collected}}\n💳 Online Payments Received Today: OMR {{online_collected}}\n⏳ Outstanding on Today’s Bookings: OMR {{outstanding_total}}\nTotal collected: OMR {{total_collected}} "
+          },
+          "position": {
+            "x": 380,
+            "y": 300
+          }
+        },
+        {
+          "id": "api_error",
+          "type": "message",
+          "label": "API failed",
+          "config": {
+            "message": "We could not reach Playgenic right now. Please try again."
+          },
+          "position": {
+            "x": 20,
+            "y": 300
+          }
+        },
+        {
+          "id": "goto_shell",
+          "type": "goto_flow",
+          "label": "→ shell",
+          "config": {
+            "flow_id": "",
+            "flow_name": "worker · shell"
+          },
+          "position": {
+            "x": 280,
+            "y": 440
+          }
+        }
+      ],
+      "version": 2,
+      "entry_node": "__start__"
+    },
+    "whatsapp_account": "TiQR Store Production",
+    "on_complete_action": "none",
+    "timeout_message": "Your Playgenic worker session timed out. Send worker to start again.",
+    "cancel_keywords": [
+      "stop",
+      "exit"
+    ],
+    "panel_config": {
+      "sections": []
+    }
+  }
+}

@@ -1,0 +1,599 @@
+{
+  "format": "whatomate.chatbot_flow",
+  "format_version": 1,
+  "exported_at": "2026-11-06T05:00:04Z",
+  "flow": {
+    "name": "worker · shell",
+    "description": "Worker shell: identify (skip if already known), main/more menus, goto child flows.",
+    "trigger_keywords": [
+      "worker",
+      "staff"
+    ],
+    "graph": {
+      "edges": [
+        {
+          "to": "identify_api",
+          "from": "init_vars",
+          "condition": "default"
+        },
+        {
+          "to": "cond_worker",
+          "from": "identify_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "identify_error",
+          "from": "identify_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "end_node",
+          "from": "identify_error",
+          "condition": "default"
+        },
+        {
+          "to": "not_registered",
+          "from": "cond_worker",
+          "condition": "false"
+        },
+        {
+          "to": "end_node",
+          "from": "not_registered",
+          "condition": "default"
+        },
+        {
+          "to": "set_hub_today",
+          "from": "menu_buttons",
+          "condition": "button:menu_today"
+        },
+        {
+          "to": "set_hub_search",
+          "from": "menu_buttons",
+          "condition": "button:menu_search"
+        },
+        {
+          "to": "goto_create",
+          "from": "menu_buttons",
+          "condition": "button:menu_create"
+        },
+        {
+          "to": "goto_check_avail",
+          "from": "menu_buttons",
+          "condition": "button:menu_avail"
+        },
+        {
+          "to": "set_hub_pay",
+          "from": "menu_buttons",
+          "condition": "button:menu_pay"
+        },
+        {
+          "to": "more_buttons",
+          "from": "menu_buttons",
+          "condition": "button:menu_more"
+        },
+        {
+          "to": "goto_booking_hub",
+          "from": "set_hub_today",
+          "condition": "default"
+        },
+        {
+          "to": "goto_booking_hub",
+          "from": "set_hub_search",
+          "condition": "default"
+        },
+        {
+          "to": "goto_booking_hub",
+          "from": "set_hub_pay",
+          "condition": "default"
+        },
+        {
+          "to": "set_hub_upcoming",
+          "from": "more_buttons",
+          "condition": "button:more_upcoming"
+        },
+        {
+          "to": "set_hub_resched",
+          "from": "more_buttons",
+          "condition": "button:more_resched"
+        },
+        {
+          "to": "set_hub_cancel",
+          "from": "more_buttons",
+          "condition": "button:more_cancel"
+        },
+        {
+          "to": "set_hub_search",
+          "from": "more_buttons",
+          "condition": "button:more_arrival"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "more_buttons",
+          "condition": "button:more_menu"
+        },
+        {
+          "to": "goto_booking_hub",
+          "from": "set_hub_upcoming",
+          "condition": "default"
+        },
+        {
+          "to": "goto_booking_hub",
+          "from": "set_hub_resched",
+          "condition": "default"
+        },
+        {
+          "to": "goto_booking_hub",
+          "from": "set_hub_cancel",
+          "condition": "default"
+        },
+        {
+          "to": "init_vars",
+          "from": "__start__",
+          "condition": "default"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "cond_worker",
+          "condition": "true"
+        },
+        {
+          "to": "cond_worker",
+          "from": "identify_api",
+          "condition": "default"
+        },
+        {
+          "to": "goto_issue",
+          "from": "more_buttons",
+          "condition": "button:more_issue"
+        },
+        {
+          "to": "goto_summary",
+          "from": "more_buttons",
+          "condition": "button:more_summary"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "__start__",
+          "type": "start",
+          "label": "Start",
+          "config": {},
+          "position": {
+            "x": 652.25,
+            "y": 20
+          }
+        },
+        {
+          "id": "init_vars",
+          "type": "set_variable",
+          "label": "Init demo vars",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "field_id",
+                "value": "\"7301efe6-1cab-4c04-893c-e0804fbe757d\"",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "duration_minutes",
+                "value": "60",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 652.25,
+            "y": 162
+          }
+        },
+        {
+          "id": "identify_api",
+          "type": "api_call",
+          "label": "Identify worker",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/identify",
+            "body": "{\"whatsapp_number\":\"{{phone_number}}\",\"field_id\":\"{{field_id}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "message_template": "",
+            "response_mapping": {
+              "token": "token",
+              "field_id": "field_id",
+              "user_type": "user_type",
+              "worker_id": "id",
+              "customer_id": "customer_id",
+              "worker_name": "full_name",
+              "worker_exists": "exists",
+              "credit_balance": "credit_balance",
+              "whatsapp_number": "whatsapp_number",
+              "worker_language": "language"
+            }
+          },
+          "position": {
+            "x": 580.25,
+            "y": 304
+          }
+        },
+        {
+          "id": "identify_error",
+          "type": "message",
+          "label": "Identify failed",
+          "config": {
+            "message": "We could not reach Playgenic right now. Please try again in a moment."
+          },
+          "position": {
+            "x": 35,
+            "y": 635
+          }
+        },
+        {
+          "id": "not_registered",
+          "type": "message",
+          "label": "Not a worker",
+          "config": {
+            "message": "This WhatsApp number is not registered as a worker for this venue.\n\nAsk the Field Owner to add you."
+          },
+          "position": {
+            "x": 413,
+            "y": 635
+          }
+        },
+        {
+          "id": "end_node",
+          "type": "end",
+          "label": "End",
+          "config": {},
+          "position": {
+            "x": 414.25,
+            "y": 863
+          }
+        },
+        {
+          "id": "cond_worker",
+          "type": "condition",
+          "label": "Worker registered?",
+          "config": {
+            "expression": "user_type == \"WORKER\""
+          },
+          "position": {
+            "x": 842.5,
+            "y": 446
+          }
+        },
+        {
+          "id": "menu_buttons",
+          "type": "buttons",
+          "label": "Main menu",
+          "config": {
+            "body": "👋 Welcome back, {{worker_name}}!\nWhat would you like to do?",
+            "mode": "list",
+            "header": "",
+            "buttons": [
+              {
+                "id": "menu_today",
+                "type": "reply",
+                "title": "Today's Bookings",
+                "description": "Bookings for today"
+              },
+              {
+                "id": "menu_search",
+                "type": "reply",
+                "title": "Search Booking",
+                "description": "Phone or booking code"
+              },
+              {
+                "id": "menu_create",
+                "type": "reply",
+                "title": "Create Booking",
+                "description": "Manual booking"
+              },
+              {
+                "id": "menu_avail",
+                "type": "reply",
+                "title": "Check Availability",
+                "description": "Open slots"
+              },
+              {
+                "id": "menu_pay",
+                "type": "reply",
+                "title": "Update Payment",
+                "description": "Record cash"
+              },
+              {
+                "id": "menu_more",
+                "type": "reply",
+                "title": "More Options",
+                "description": "Upcoming, issues, summary"
+              }
+            ],
+            "list_button": "Menu",
+            "section_title": "Worker"
+          },
+          "position": {
+            "x": 1130,
+            "y": 588
+          }
+        },
+        {
+          "id": "more_buttons",
+          "type": "buttons",
+          "label": "More options",
+          "config": {
+            "body": "⚙️ More Options\n\nWhat would you like to do?",
+            "mode": "list",
+            "header": "More",
+            "buttons": [
+              {
+                "id": "more_upcoming",
+                "type": "reply",
+                "title": "Upcoming Bookings",
+                "description": "After today"
+              },
+              {
+                "id": "more_cancel",
+                "type": "reply",
+                "title": "Cancel Booking",
+                "description": "Find a booking first"
+              },
+              {
+                "id": "more_issue",
+                "type": "reply",
+                "title": "Report Issue",
+                "description": "Send a problem report"
+              },
+              {
+                "id": "more_summary",
+                "type": "reply",
+                "title": "Daily Summary",
+                "description": "Today's totals"
+              },
+              {
+                "id": "more_menu",
+                "type": "reply",
+                "title": "Main Menu",
+                "description": "Back"
+              }
+            ],
+            "list_button": "More",
+            "section_title": "More"
+          },
+          "position": {
+            "x": 1229,
+            "y": 824
+          }
+        },
+        {
+          "id": "set_hub_today",
+          "type": "set_variable",
+          "label": "Hub: today",
+          "config": {
+            "set": [
+              {
+                "name": "list_mode",
+                "value": "\"today\""
+              },
+              {
+                "name": "open_action",
+                "value": "\"actions\""
+              },
+              {
+                "name": "hub_entry",
+                "value": "\"list\""
+              }
+            ]
+          },
+          "position": {
+            "x": 1506.5,
+            "y": 1044
+          }
+        },
+        {
+          "id": "set_hub_search",
+          "type": "set_variable",
+          "label": "Hub: search",
+          "config": {
+            "set": [
+              {
+                "name": "list_mode",
+                "value": "\"search\""
+              },
+              {
+                "name": "open_action",
+                "value": "\"actions\""
+              },
+              {
+                "name": "hub_entry",
+                "value": "\"list\""
+              }
+            ]
+          },
+          "position": {
+            "x": 1288.5,
+            "y": 1044
+          }
+        },
+        {
+          "id": "set_hub_upcoming",
+          "type": "set_variable",
+          "label": "Hub: upcoming",
+          "config": {
+            "set": [
+              {
+                "name": "list_mode",
+                "value": "\"upcoming\""
+              },
+              {
+                "name": "open_action",
+                "value": "\"actions\""
+              },
+              {
+                "name": "hub_entry",
+                "value": "\"list\""
+              }
+            ]
+          },
+          "position": {
+            "x": 456,
+            "y": 1044
+          }
+        },
+        {
+          "id": "set_hub_pay",
+          "type": "set_variable",
+          "label": "Hub: payment",
+          "config": {
+            "set": [
+              {
+                "name": "list_mode",
+                "value": "\"search\""
+              },
+              {
+                "name": "open_action",
+                "value": "\"pay\""
+              },
+              {
+                "name": "hub_entry",
+                "value": "\"list\""
+              }
+            ]
+          },
+          "position": {
+            "x": 674,
+            "y": 1044
+          }
+        },
+        {
+          "id": "set_hub_resched",
+          "type": "set_variable",
+          "label": "Hub: reschedule",
+          "config": {
+            "set": [
+              {
+                "name": "list_mode",
+                "value": "\"search\""
+              },
+              {
+                "name": "open_action",
+                "value": "\"reschedule\""
+              },
+              {
+                "name": "hub_entry",
+                "value": "\"list\""
+              }
+            ]
+          },
+          "position": {
+            "x": 238,
+            "y": 1044
+          }
+        },
+        {
+          "id": "set_hub_cancel",
+          "type": "set_variable",
+          "label": "Hub: cancel",
+          "config": {
+            "set": [
+              {
+                "name": "list_mode",
+                "value": "\"search\""
+              },
+              {
+                "name": "open_action",
+                "value": "\"cancel\""
+              },
+              {
+                "name": "hub_entry",
+                "value": "\"list\""
+              }
+            ]
+          },
+          "position": {
+            "x": 20,
+            "y": 1044
+          }
+        },
+        {
+          "id": "goto_booking_hub",
+          "type": "goto_flow",
+          "label": "→ booking hub",
+          "config": {
+            "flow_id": "f9c63d63-2b55-41cf-90ea-e2b138bc7cfb",
+            "flow_name": "worker · booking hub"
+          },
+          "position": {
+            "x": 578.5,
+            "y": 1186
+          }
+        },
+        {
+          "id": "goto_create",
+          "type": "goto_flow",
+          "label": "→ create booking",
+          "config": {
+            "flow_id": "a9a3a1f0-44e4-4497-a1ca-c7bee3a32566",
+            "flow_name": "worker · create booking"
+          },
+          "position": {
+            "x": 793,
+            "y": 863
+          }
+        },
+        {
+          "id": "goto_check_avail",
+          "type": "goto_flow",
+          "label": "→ check availability",
+          "config": {
+            "flow_id": "632adf52-188f-4234-9819-0e9237152865",
+            "flow_name": "worker · check availability"
+          },
+          "position": {
+            "x": 1011,
+            "y": 863
+          }
+        },
+        {
+          "id": "goto_issue",
+          "type": "goto_flow",
+          "label": "→ report issue",
+          "config": {
+            "flow_id": "c10204d0-6284-4945-b4ae-157505ed85e1",
+            "flow_name": "worker · report issue"
+          },
+          "position": {
+            "x": 1724.5,
+            "y": 1044
+          }
+        },
+        {
+          "id": "goto_summary",
+          "type": "goto_flow",
+          "label": "→ daily summary",
+          "config": {
+            "flow_id": "f724942b-6a81-44a5-883d-a584d9934b2a",
+            "flow_name": "worker · daily summary"
+          },
+          "position": {
+            "x": 1942.5,
+            "y": 1044
+          }
+        }
+      ],
+      "version": 2,
+      "entry_node": "__start__"
+    },
+    "whatsapp_account": "TiQR Store Production",
+    "on_complete_action": "none",
+    "timeout_message": "Your Playgenic worker session timed out. Send worker to start again.",
+    "cancel_keywords": [
+      "stop",
+      "exit"
+    ],
+    "panel_config": {
+      "sections": []
+    }
+  }
+}

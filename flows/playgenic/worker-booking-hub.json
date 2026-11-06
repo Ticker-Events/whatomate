@@ -1,0 +1,1155 @@
+{
+  "format": "whatomate.chatbot_flow",
+  "format_version": 1,
+  "exported_at": "2026-11-06T05:00:04Z",
+  "flow": {
+    "name": "worker · booking hub",
+    "description": "Find bookings (today/search/upcoming) and booking actions (arrive, pay, cancel, noshow). Reschedule jumps to worker · schedule.",
+    "trigger_keywords": [],
+    "graph": {
+      "edges": [
+        {
+          "to": "cond_hub_actions",
+          "from": "__start__",
+          "condition": "default"
+        },
+        {
+          "to": "action_buttons",
+          "from": "cond_hub_actions",
+          "condition": "true"
+        },
+        {
+          "to": "cond_list_today",
+          "from": "cond_hub_actions",
+          "condition": "false"
+        },
+        {
+          "to": "cond_list_upcoming",
+          "from": "cond_list_today",
+          "condition": "false"
+        },
+        {
+          "to": "upcoming_api",
+          "from": "cond_list_upcoming",
+          "condition": "true"
+        },
+        {
+          "to": "search_prompt",
+          "from": "cond_list_upcoming",
+          "condition": "false"
+        },
+        {
+          "to": "goto_shell",
+          "from": "api_error",
+          "condition": "default"
+        },
+        {
+          "to": "search_api",
+          "from": "search_prompt",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "search_prompt",
+          "condition": "max_retries"
+        },
+        {
+          "to": "cond_has_bookings",
+          "from": "today_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "today_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "cond_has_bookings",
+          "from": "upcoming_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "upcoming_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "cond_has_bookings",
+          "from": "search_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "search_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "booking_list",
+          "from": "cond_has_bookings",
+          "condition": "true"
+        },
+        {
+          "to": "no_bookings",
+          "from": "cond_has_bookings",
+          "condition": "false"
+        },
+        {
+          "to": "goto_shell",
+          "from": "no_bookings",
+          "condition": "default"
+        },
+        {
+          "to": "cond_pick_pay",
+          "from": "booking_list",
+          "condition": "default"
+        },
+        {
+          "to": "pay_prompt",
+          "from": "cond_pick_pay",
+          "condition": "true"
+        },
+        {
+          "to": "cond_pick_resched",
+          "from": "cond_pick_pay",
+          "condition": "false"
+        },
+        {
+          "to": "set_intent_resched",
+          "from": "cond_pick_resched",
+          "condition": "true"
+        },
+        {
+          "to": "cond_pick_cancel",
+          "from": "cond_pick_resched",
+          "condition": "false"
+        },
+        {
+          "to": "cancel_prompt",
+          "from": "cond_pick_cancel",
+          "condition": "true"
+        },
+        {
+          "to": "action_buttons",
+          "from": "cond_pick_cancel",
+          "condition": "false"
+        },
+        {
+          "to": "arrived_confirm",
+          "from": "action_buttons",
+          "condition": "button:act_arrived"
+        },
+        {
+          "to": "pay_prompt",
+          "from": "action_buttons",
+          "condition": "button:act_pay"
+        },
+        {
+          "to": "set_intent_resched",
+          "from": "action_buttons",
+          "condition": "button:act_resched"
+        },
+        {
+          "to": "cancel_prompt",
+          "from": "action_buttons",
+          "condition": "button:act_cancel"
+        },
+        {
+          "to": "noshow_confirm",
+          "from": "action_buttons",
+          "condition": "button:act_noshow"
+        },
+        {
+          "to": "goto_shell",
+          "from": "action_buttons",
+          "condition": "button:act_back"
+        },
+        {
+          "to": "arrived_api",
+          "from": "arrived_confirm",
+          "condition": "button:arrived_yes"
+        },
+        {
+          "to": "action_buttons",
+          "from": "arrived_confirm",
+          "condition": "button:arrived_back"
+        },
+        {
+          "to": "cond_arrived",
+          "from": "arrived_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "arrived_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "arrived_msg",
+          "from": "cond_arrived",
+          "condition": "true"
+        },
+        {
+          "to": "action_fail_msg",
+          "from": "cond_arrived",
+          "condition": "false"
+        },
+        {
+          "to": "goto_shell",
+          "from": "arrived_msg",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "action_fail_msg",
+          "condition": "default"
+        },
+        {
+          "to": "noshow_api",
+          "from": "noshow_confirm",
+          "condition": "button:noshow_yes"
+        },
+        {
+          "to": "action_buttons",
+          "from": "noshow_confirm",
+          "condition": "button:noshow_back"
+        },
+        {
+          "to": "cond_noshow",
+          "from": "noshow_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "noshow_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "noshow_msg",
+          "from": "cond_noshow",
+          "condition": "true"
+        },
+        {
+          "to": "action_fail_msg",
+          "from": "cond_noshow",
+          "condition": "false"
+        },
+        {
+          "to": "goto_shell",
+          "from": "noshow_msg",
+          "condition": "default"
+        },
+        {
+          "to": "goto_shell",
+          "from": "pay_prompt",
+          "condition": "max_retries"
+        },
+        {
+          "to": "cond_pay_ok",
+          "from": "pay_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "pay_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "pay_ok_msg",
+          "from": "cond_pay_ok",
+          "condition": "true"
+        },
+        {
+          "to": "cond_pay_exceeds",
+          "from": "cond_pay_ok",
+          "condition": "false"
+        },
+        {
+          "to": "goto_shell",
+          "from": "pay_ok_msg",
+          "condition": "default"
+        },
+        {
+          "to": "pay_exceeds",
+          "from": "cond_pay_exceeds",
+          "condition": "true"
+        },
+        {
+          "to": "action_fail_msg",
+          "from": "cond_pay_exceeds",
+          "condition": "false"
+        },
+        {
+          "to": "pay_prompt",
+          "from": "pay_exceeds",
+          "condition": "button:pay_retry"
+        },
+        {
+          "to": "goto_shell",
+          "from": "pay_exceeds",
+          "condition": "button:pay_cancel"
+        },
+        {
+          "to": "goto_shell",
+          "from": "cancel_prompt",
+          "condition": "max_retries"
+        },
+        {
+          "to": "cancel_api",
+          "from": "cancel_buttons",
+          "condition": "button:cancel_yes"
+        },
+        {
+          "to": "action_buttons",
+          "from": "cancel_buttons",
+          "condition": "button:cancel_back"
+        },
+        {
+          "to": "cond_cancel_ok",
+          "from": "cancel_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "api_error",
+          "from": "cancel_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "cancel_ok_msg",
+          "from": "cond_cancel_ok",
+          "condition": "true"
+        },
+        {
+          "to": "action_fail_msg",
+          "from": "cond_cancel_ok",
+          "condition": "false"
+        },
+        {
+          "to": "goto_shell",
+          "from": "cancel_ok_msg",
+          "condition": "default"
+        },
+        {
+          "to": "goto_schedule",
+          "from": "set_intent_resched",
+          "condition": "default"
+        },
+        {
+          "to": "node_1793338407968_0",
+          "from": "booking_list",
+          "condition": "default"
+        },
+        {
+          "to": "cond_pick_pay",
+          "from": "node_1793338407968_0",
+          "condition": "default"
+        },
+        {
+          "to": "cancel_buttons",
+          "from": "cancel_prompt",
+          "condition": "default"
+        },
+        {
+          "to": "node_1793340956948_1",
+          "from": "cond_list_today",
+          "condition": "true"
+        },
+        {
+          "to": "today_api",
+          "from": "node_1793340956948_1",
+          "condition": "default"
+        },
+        {
+          "to": "node_1793354690746_1",
+          "from": "pay_prompt",
+          "condition": "default"
+        },
+        {
+          "to": "node_1793354803501_2",
+          "from": "node_1793354690746_1",
+          "condition": "default"
+        },
+        {
+          "to": "pay_api",
+          "from": "node_1793354803501_2",
+          "condition": "button:pay_yes"
+        },
+        {
+          "to": "action_buttons",
+          "from": "node_1793354803501_2",
+          "condition": "button:btn_1793354846260_1"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "__start__",
+          "type": "start",
+          "label": "Start",
+          "config": {},
+          "position": {
+            "x": 2060,
+            "y": 20
+          }
+        },
+        {
+          "id": "cond_hub_actions",
+          "type": "condition",
+          "label": "Return to actions?",
+          "config": {
+            "expression": "hub_entry == \"actions\""
+          },
+          "position": {
+            "x": 2060,
+            "y": 160
+          }
+        },
+        {
+          "id": "cond_list_today",
+          "type": "condition",
+          "label": "List today?",
+          "config": {
+            "expression": "list_mode == \"today\""
+          },
+          "position": {
+            "x": 1960,
+            "y": 300
+          }
+        },
+        {
+          "id": "cond_list_upcoming",
+          "type": "condition",
+          "label": "List upcoming?",
+          "config": {
+            "expression": "list_mode == \"upcoming\""
+          },
+          "position": {
+            "x": 180,
+            "y": 440
+          }
+        },
+        {
+          "id": "today_api",
+          "type": "api_call",
+          "label": "Today's bookings",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/bookings?field_id={{field_id}}&when=today",
+            "body": "",
+            "method": "GET",
+            "headers": {
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "bookings": "bookings"
+            }
+          },
+          "position": {
+            "x": 3880,
+            "y": 740
+          }
+        },
+        {
+          "id": "upcoming_api",
+          "type": "api_call",
+          "label": "Upcoming bookings",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/bookings?field_id={{field_id}}&when=upcoming",
+            "body": "{\"field_id\":\"{{field_id}}\",\"play_ground_id\":\"{{play_ground_id}}\",\"start_time\":\"{{start_time}}\",\"date\":\"{{date}}\",\"duration_minutes\":\"{{duration_minutes}}\"}",
+            "method": "GET",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "date": "bookings.date",
+              "status": "bookings.status",
+              "bookings": "bookings",
+              "end_time": "bookings.end_time",
+              "attendance": "bookings.attendance",
+              "booking_id": "bookings.booking_id",
+              "pitch_name": "bookings.pitch_name",
+              "start_time": "bookings.start_time",
+              "venue_name": "bookings.venue_name",
+              "paid_amount": "bookings.paid_amount",
+              "booking_code": "bookings.booking_code",
+              "total_amount": "bookings.total_amount",
+              "cancel_reason": "bookings.cancel_reason",
+              "customer_name": "bookings.customer_name",
+              "playground_id": "bookings.playground_id",
+              "customer_phone": "bookings.customer_phone",
+              "outstanding_amount": "bookings.outstanding_amount"
+            }
+          },
+          "position": {
+            "x": 580,
+            "y": 740
+          }
+        },
+        {
+          "id": "search_prompt",
+          "type": "prompt",
+          "label": "Search query",
+          "config": {
+            "body": "🔎 Find a Booking\nEnter the customer’s phone number or booking ID.",
+            "store_as": "search_query",
+            "max_retries": 3,
+            "validation_error": "Enter a phone number or booking code.",
+            "validation_regex": "^[A-Za-z0-9+\\- ]{4,}$"
+          },
+          "position": {
+            "x": 20,
+            "y": 580
+          }
+        },
+        {
+          "id": "search_api",
+          "type": "api_call",
+          "label": "Search bookings",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/bookings/search?field_id={{field_id}}&q={{search_query}}",
+            "method": "GET",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "bookings": "bookings"
+            }
+          },
+          "position": {
+            "x": 220,
+            "y": 740
+          }
+        },
+        {
+          "id": "cond_has_bookings",
+          "type": "condition",
+          "label": "Any bookings?",
+          "config": {
+            "expression": "bookings != nil && len(bookings) > 0"
+          },
+          "position": {
+            "x": 820,
+            "y": 880
+          }
+        },
+        {
+          "id": "no_bookings",
+          "type": "message",
+          "label": "No bookings",
+          "config": {
+            "message": "🔎 No bookings found for {{search_query}}.\n\nPlease check the phone number or booking ID and try again."
+          },
+          "position": {
+            "x": 880,
+            "y": 2700
+          }
+        },
+        {
+          "id": "booking_list",
+          "type": "buttons",
+          "label": "Select booking",
+          "config": {
+            "body": "Select a booking to view its details.",
+            "mode": "list",
+            "header": "Bookings",
+            "source": "dynamic",
+            "id_field": "booking_id",
+            "items_var": "bookings",
+            "list_button": "Bookings",
+            "title_field": "{{if customer_name}}{{customer_name}}{{else}}{{customer_phone}}{{endif}}",
+            "section_title": "Results",
+            "description_field": "{{date date \"D MMM YYYY\"}} · {{date start_time \"hh:mm A\"}} – {{date end_time \"hh:mm A\"}} · {{title status}}{{if pitch_name}} · {{pitch_name}}{{endif}}",
+            "selection_mapping": {
+              "end_time": "end_time",
+              "attendance": "attendance",
+              "booking_id": "booking_id",
+              "pitch_name": "pitch_name",
+              "start_time": "start_time",
+              "confirm_end": "end_time",
+              "paid_amount": "paid_amount",
+              "booking_code": "booking_code",
+              "booking_date": "date",
+              "confirm_date": "date",
+              "total_amount": "total_amount",
+              "confirm_start": "start_time",
+              "current_pitch": "pitch_name",
+              "customer_name": "customer_name",
+              "booking_status": "status",
+              "customer_phone": "customer_phone",
+              "play_ground_id": "playground_id",
+              "outstanding_amount": "outstanding_amount"
+            }
+          },
+          "position": {
+            "x": 940,
+            "y": 1000
+          }
+        },
+        {
+          "id": "cond_pick_pay",
+          "type": "condition",
+          "label": "Open payment?",
+          "config": {
+            "expression": "open_action == \"pay\""
+          },
+          "position": {
+            "x": 780,
+            "y": 1300
+          }
+        },
+        {
+          "id": "cond_pick_resched",
+          "type": "condition",
+          "label": "Open reschedule?",
+          "config": {
+            "expression": "open_action == \"reschedule\""
+          },
+          "position": {
+            "x": 840,
+            "y": 1440
+          }
+        },
+        {
+          "id": "cond_pick_cancel",
+          "type": "condition",
+          "label": "Open cancel?",
+          "config": {
+            "expression": "open_action == \"cancel\""
+          },
+          "position": {
+            "x": 740,
+            "y": 1720
+          }
+        },
+        {
+          "id": "action_buttons",
+          "type": "buttons",
+          "label": "Booking actions",
+          "config": {
+            "body": "🎟️ Booking Details\n\nBooking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n📱 Phone: {{customer_phone}}\n\n{{if pitch_name}}🏟️ Pitch: {{pitch_name}}\n{{endif}}📅 Date: {{date confirm_date \"D MMM YYYY\"}}\n🕒 Time: {{date confirm_start \"hh:mm A\"}} – {{date confirm_end \"hh:mm A\"}}\n📌 Status: {{title booking_status}}\n\n💰 Total: {{total_amount}} OMR\n💵 Amount Paid: {{paid_amount}} OMR\n💳 Balance Due: {{outstanding_amount}} OMR",
+            "mode": "reply",
+            "header": "Booking",
+            "buttons": [
+              {
+                "id": "act_pay",
+                "type": "reply",
+                "title": "Update Payment",
+                "description": "Record cash"
+              },
+              {
+                "id": "act_cancel",
+                "type": "reply",
+                "title": "Cancel",
+                "description": "Cancel with a reason"
+              },
+              {
+                "id": "act_back",
+                "type": "reply",
+                "title": "Back",
+                "description": "Main menu"
+              }
+            ],
+            "list_button": "Actions",
+            "section_title": "Booking"
+          },
+          "position": {
+            "x": 2660,
+            "y": 1720
+          }
+        },
+        {
+          "id": "arrived_confirm",
+          "type": "buttons",
+          "label": "Confirm arrival",
+          "config": {
+            "body": "📍 Update Attendance\n\n🎟️ Booking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n📅 Date: {{date booking_date \"D MMM YYYY\"}}\n🕒 Time: {{start_time}}–{{end_time}}\n\nMark this booking as *Arrived*?",
+            "buttons": [
+              {
+                "id": "arrived_yes",
+                "type": "reply",
+                "title": "Confirm Arrival"
+              },
+              {
+                "id": "arrived_back",
+                "type": "reply",
+                "title": "Back"
+              }
+            ]
+          },
+          "position": {
+            "x": 2700,
+            "y": 1940
+          }
+        },
+        {
+          "id": "arrived_api",
+          "type": "api_call",
+          "label": "Record arrival",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/bookings/{{booking_id}}/arrival",
+            "body": "{\"booking_id\":\"{{booking_id}}\",\"field_id\":\"{{field_id}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "ok": "ok",
+              "code": "code",
+              "success": "success",
+              "booking_code": "booking_code",
+              "customer_notice": "customer_notice"
+            }
+          },
+          "position": {
+            "x": 2640,
+            "y": 2260
+          }
+        },
+        {
+          "id": "cond_arrived",
+          "type": "condition",
+          "label": "Arrival ok?",
+          "config": {
+            "expression": "ok == true"
+          },
+          "position": {
+            "x": 2720,
+            "y": 2540
+          }
+        },
+        {
+          "id": "arrived_msg",
+          "type": "message",
+          "label": "Arrival recorded",
+          "config": {
+            "message": "✅ Attendance Updated\n\n🎟️ Booking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n📍 Status: Arrived"
+          },
+          "position": {
+            "x": 2840,
+            "y": 2700
+          }
+        },
+        {
+          "id": "action_fail_msg",
+          "type": "message",
+          "label": "Action failed",
+          "config": {
+            "message": "This booking can no longer be updated."
+          },
+          "position": {
+            "x": 2580,
+            "y": 2700
+          }
+        },
+        {
+          "id": "noshow_confirm",
+          "type": "buttons",
+          "label": "Confirm no-show",
+          "config": {
+            "body": "📍 Update Attendance\n\n🎟️ Booking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n📅 Date: {{date booking_date \"D MMM YYYY\"}}\n🕒 Time: {{start_time}}–{{end_time}}\n\nMark this booking as *No-Show*?",
+            "buttons": [
+              {
+                "id": "noshow_yes",
+                "type": "reply",
+                "title": "Confirm No-show"
+              },
+              {
+                "id": "noshow_back",
+                "type": "reply",
+                "title": "Back"
+              }
+            ]
+          },
+          "position": {
+            "x": 3240,
+            "y": 1940
+          }
+        },
+        {
+          "id": "noshow_api",
+          "type": "api_call",
+          "label": "Record no-show",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/bookings/{{booking_id}}/no-show",
+            "body": "{\"booking_id\":\"{{booking_id}}\",\"field_id\":\"{{field_id}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "ok": "ok",
+              "code": "code",
+              "success": "success",
+              "booking_code": "booking_code",
+              "customer_notice": "customer_notice"
+            }
+          },
+          "position": {
+            "x": 3180,
+            "y": 2260
+          }
+        },
+        {
+          "id": "cond_noshow",
+          "type": "condition",
+          "label": "No-show ok?",
+          "config": {
+            "expression": "ok == true"
+          },
+          "position": {
+            "x": 3260,
+            "y": 2540
+          }
+        },
+        {
+          "id": "noshow_msg",
+          "type": "message",
+          "label": "No-show recorded",
+          "config": {
+            "message": "✅ Attendance Updated\n\n🎟️ Booking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n📍 Status: No-Show"
+          },
+          "position": {
+            "x": 3240,
+            "y": 2700
+          }
+        },
+        {
+          "id": "pay_prompt",
+          "type": "prompt",
+          "label": "Cash amount",
+          "config": {
+            "body": "💵 Record Cash Payment\n\n🎟️ Booking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n\n💰 Total: OMR {{total_amount}}\n💵 Already Paid: OMR {{paid_amount}}\n💳 Balance Due: OMR {{outstanding_amount}}\n\nEnter the cash amount received.",
+            "store_as": "cash_amount",
+            "max_retries": 3,
+            "validation_error": "Enter a valid amount, for example 5 or 10.50.",
+            "validation_regex": "^\\d+(\\.\\d{1,2})?$"
+          },
+          "position": {
+            "x": 1540,
+            "y": 1900
+          }
+        },
+        {
+          "id": "pay_api",
+          "type": "api_call",
+          "label": "Record cash",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/bookings/{{booking_id}}/payments",
+            "body": "{\"booking_id\":\"{{booking_id}}\",\"amount\":\"{{cash_amount}}\",\"field_id\":\"{{field_id}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "ok": "ok",
+              "code": "code",
+              "cash_amount": "cash_amount",
+              "link_action": "link_action",
+              "paid_amount": "paid_amount",
+              "customer_notice": "customer_notice",
+              "previously_paid": "previously_paid",
+              "outstanding_amount": "outstanding_amount",
+              "payment_link_amount": "payment_link_amount"
+            }
+          },
+          "position": {
+            "x": 1340,
+            "y": 2260
+          }
+        },
+        {
+          "id": "cond_pay_ok",
+          "type": "condition",
+          "label": "Payment ok?",
+          "config": {
+            "expression": "ok == true"
+          },
+          "position": {
+            "x": 1420,
+            "y": 2400
+          }
+        },
+        {
+          "id": "cond_pay_exceeds",
+          "type": "condition",
+          "label": "Amount too high?",
+          "config": {
+            "expression": "code == \"exceeds\""
+          },
+          "position": {
+            "x": 1480,
+            "y": 2540
+          }
+        },
+        {
+          "id": "pay_ok_msg",
+          "type": "message",
+          "label": "Payment recorded",
+          "config": {
+            "message": "✅ Cash Payment Recorded\n\n🎟️ Booking ID: {{booking_code}}\n💵 Cash Received: OMR {{cash_amount}}\n💰 Total Paid: OMR {{paid_amount}}\n💳 Balance Due: OMR {{outstanding_amount}}"
+          },
+          "position": {
+            "x": 1280,
+            "y": 2660
+          }
+        },
+        {
+          "id": "pay_exceeds",
+          "type": "buttons",
+          "label": "Amount exceeds",
+          "config": {
+            "body": "Amount exceeds outstanding balance.\n\nOutstanding: OMR {{outstanding_amount}}\nPlease enter an amount no greater than OMR {{outstanding_amount}}.",
+            "buttons": [
+              {
+                "id": "pay_retry",
+                "type": "reply",
+                "title": "Try Again"
+              },
+              {
+                "id": "pay_cancel",
+                "type": "reply",
+                "title": "Cancel"
+              }
+            ]
+          },
+          "position": {
+            "x": 1760,
+            "y": 2680
+          }
+        },
+        {
+          "id": "cancel_prompt",
+          "type": "prompt",
+          "label": "Cancel reason",
+          "config": {
+            "body": "Please type the reason for cancelling booking {{booking_code}}:",
+            "store_as": "cancel_reason",
+            "max_retries": 3,
+            "validation_error": "Please enter a reason (at least 2 characters).",
+            "validation_regex": ".{2,}"
+          },
+          "position": {
+            "x": 2320,
+            "y": 1960
+          }
+        },
+        {
+          "id": "cancel_buttons",
+          "type": "buttons",
+          "label": "Cancel buttons",
+          "config": {
+            "body": "⚠️ Cancel this booking?\n\n🎟️ Booking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n🏟️ Pitch: {{pitch_name}}\n📅 Date: {{date booking_date \"D MMM YYYY\"}}\n🕒 Time: {{start_time}}–{{end_time}}\nReason: {{cancel_reason}}",
+            "buttons": [
+              {
+                "id": "cancel_yes",
+                "type": "reply",
+                "title": "Confirm cancel"
+              },
+              {
+                "id": "cancel_back",
+                "type": "reply",
+                "title": "Back"
+              }
+            ]
+          },
+          "position": {
+            "x": 3680,
+            "y": 2100
+          }
+        },
+        {
+          "id": "cancel_api",
+          "type": "api_call",
+          "label": "Cancel booking",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/worker/bookings/{{booking_id}}/cancel",
+            "body": "{\"field_id\":\"{{field_id}}\",\"reason\":\"{{cancel_reason}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{token}}"
+            },
+            "response_mapping": {
+              "ok": "ok",
+              "code": "code",
+              "success": "success",
+              "booking_code": "booking_code",
+              "customer_notice": "customer_notice"
+            }
+          },
+          "position": {
+            "x": 3600,
+            "y": 2260
+          }
+        },
+        {
+          "id": "cond_cancel_ok",
+          "type": "condition",
+          "label": "Cancel ok?",
+          "config": {
+            "expression": "ok == true"
+          },
+          "position": {
+            "x": 3700,
+            "y": 2540
+          }
+        },
+        {
+          "id": "cancel_ok_msg",
+          "type": "message",
+          "label": "Cancelled",
+          "config": {
+            "message": "✅ Booking Cancelled\n\n🎟️ Booking ID: {{booking_code}}\n👤 Customer: {{customer_name}}\n📅 Date: {{booking_date}}\n🕒 Time: {{start_time}}–{{end_time}}"
+          },
+          "position": {
+            "x": 3620,
+            "y": 2700
+          }
+        },
+        {
+          "id": "api_error",
+          "type": "message",
+          "label": "API failed",
+          "config": {
+            "message": "We could not reach Playgenic right now. Please try again."
+          },
+          "position": {
+            "x": 2040,
+            "y": 2400
+          }
+        },
+        {
+          "id": "set_intent_resched",
+          "type": "set_variable",
+          "label": "Intent reschedule",
+          "config": {
+            "set": [
+              {
+                "name": "flow_intent",
+                "value": "\"reschedule\""
+              }
+            ]
+          },
+          "position": {
+            "x": 2100,
+            "y": 1960
+          }
+        },
+        {
+          "id": "goto_shell",
+          "type": "goto_flow",
+          "label": "→ shell",
+          "config": {
+            "flow_id": "fe3eabd9-e55b-43b4-9cef-bead31c228b4",
+            "flow_name": "worker · shell"
+          },
+          "position": {
+            "x": 2100,
+            "y": 2840
+          }
+        },
+        {
+          "id": "goto_schedule",
+          "type": "goto_flow",
+          "label": "→ schedule",
+          "config": {
+            "flow_id": "b764a24d-275a-41fd-920e-d2804dbd9e78",
+            "flow_name": "worker · schedule"
+          },
+          "position": {
+            "x": 2100,
+            "y": 2100
+          }
+        },
+        {
+          "id": "node_1793338407968_0",
+          "type": "message",
+          "label": "Booking details",
+          "config": {
+            "message": ""
+          },
+          "position": {
+            "x": 1060,
+            "y": 1160
+          }
+        },
+        {
+          "id": "node_1793340956948_1",
+          "type": "set_variable",
+          "label": "Assign",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "search_query",
+                "value": "\"today\"",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 3840,
+            "y": 560
+          }
+        },
+        {
+          "id": "node_1793354690746_1",
+          "type": "set_variable",
+          "label": "Set Balance amount",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "balance_amount",
+                "value": "outstanding_amount - cash_amount",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 1440,
+            "y": 2020
+          }
+        },
+        {
+          "id": "node_1793354803501_2",
+          "type": "buttons",
+          "label": "Buttons",
+          "config": {
+            "body": "💵 Confirm Cash Payment\n\n👤 Customer: {{customer_name}}\n🎟️ Booking ID: {{booking_code}}\n\n💵 Cash Received: OMR {{cash_amount}}\n💳 Balance After Payment: OMR {{balance_amount}}\n\nPlease check the amount before confirming.\n\n🔒 Once confirmed, only the Field Owner or Super Admin can correct this payment.",
+            "buttons": [
+              {
+                "id": "pay_yes",
+                "type": "reply",
+                "title": "Confirm"
+              },
+              {
+                "id": "btn_1793354846260_1",
+                "type": "reply",
+                "title": "Cancel"
+              }
+            ]
+          },
+          "position": {
+            "x": 1480,
+            "y": 2140
+          }
+        }
+      ],
+      "version": 2,
+      "entry_node": "__start__"
+    },
+    "whatsapp_account": "TiQR Store Production",
+    "on_complete_action": "none",
+    "timeout_message": "Your Playgenic worker session timed out. Send worker to start again.",
+    "cancel_keywords": [
+      "stop",
+      "exit"
+    ],
+    "panel_config": {
+      "sections": []
+    }
+  }
+}

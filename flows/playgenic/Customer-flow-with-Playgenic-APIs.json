@@ -1,0 +1,878 @@
+{
+  "format": "whatomate.chatbot_flow",
+  "format_version": 1,
+  "exported_at": "2026-11-06T05:02:44Z",
+  "flow": {
+    "name": "Customer flow with Playgenic APIs",
+    "description": "WhatsApp book + stub Confirm Payment + My Bookings. No auth. Dummy API base https://playgenic-dummy.vercel.app.\n- POST /api/wa/customer/identify\n- POST /api/wa/customer/profile\n- GET /api/wa/customer/pitches/available\n- POST /api/wa/customer/bookings\n- GET /api/wa/customer/bookings\n- POST /api/wa/customer/bookings/{id}/confirm\n\nSession vars: field_id, language, customer_exists, customer_id, customer_name, booking_date, start_time, duration_minutes, pitches, bookings, play_ground_id, pitch_name, pitch_price, booking_id, booking_code, total_amount, outstanding_amount, venue_phone.\n\nStub pay: reply Confirm Payment → confirm api_call → confirmation message.",
+    "trigger_keywords": [
+      "hi",
+      "hello",
+      "book",
+      "playgenic",
+      "مرحبا"
+    ],
+    "graph": {
+      "edges": [
+        {
+          "to": "init_vars",
+          "from": "__start__",
+          "condition": "default"
+        },
+        {
+          "to": "lang_buttons",
+          "from": "init_vars",
+          "condition": "default"
+        },
+        {
+          "to": "set_lang_en",
+          "from": "lang_buttons",
+          "condition": "button:lang_en"
+        },
+        {
+          "to": "set_lang_ar",
+          "from": "lang_buttons",
+          "condition": "button:lang_ar"
+        },
+        {
+          "to": "identify_api",
+          "from": "set_lang_en",
+          "condition": "default"
+        },
+        {
+          "to": "identify_api",
+          "from": "set_lang_ar",
+          "condition": "default"
+        },
+        {
+          "to": "cond_exists",
+          "from": "identify_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "identify_error",
+          "from": "identify_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "end_node",
+          "from": "identify_error",
+          "condition": "default"
+        },
+        {
+          "to": "name_prompt",
+          "from": "cond_exists",
+          "condition": "false"
+        },
+        {
+          "to": "profile_api",
+          "from": "name_prompt",
+          "condition": "default"
+        },
+        {
+          "to": "end_node",
+          "from": "name_prompt",
+          "condition": "max_retries"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "profile_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "profile_error",
+          "from": "profile_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "end_node",
+          "from": "profile_error",
+          "condition": "default"
+        },
+        {
+          "to": "set_intent_book",
+          "from": "menu_buttons",
+          "condition": "button:menu_book"
+        },
+        {
+          "to": "set_intent_avail",
+          "from": "menu_buttons",
+          "condition": "button:menu_avail"
+        },
+        {
+          "to": "contact_msg",
+          "from": "menu_buttons",
+          "condition": "button:menu_contact"
+        },
+        {
+          "to": "list_bookings_api",
+          "from": "menu_buttons",
+          "condition": "button:menu_my_bookings"
+        },
+        {
+          "to": "cond_has_bookings",
+          "from": "list_bookings_api",
+          "condition": "http:2xx"
+        },
+        {
+          "to": "list_bookings_error",
+          "from": "list_bookings_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "list_bookings_error",
+          "condition": "default"
+        },
+        {
+          "to": "booking_list_buttons",
+          "from": "cond_has_bookings",
+          "condition": "true"
+        },
+        {
+          "to": "no_bookings",
+          "from": "cond_has_bookings",
+          "condition": "false"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "no_bookings",
+          "condition": "default"
+        },
+        {
+          "to": "booking_detail_msg",
+          "from": "booking_list_buttons",
+          "condition": "default"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "booking_detail_msg",
+          "condition": "default"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "contact_msg",
+          "condition": "default"
+        },
+        {
+          "to": "create_error",
+          "from": "create_api",
+          "condition": "http:non2xx"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "create_error",
+          "condition": "default"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "confirm_error",
+          "condition": "default"
+        },
+        {
+          "to": "menu_buttons",
+          "from": "cond_exists",
+          "condition": "true"
+        },
+        {
+          "to": "node_1792695704967_3",
+          "from": "node_1792694421460_0",
+          "condition": "default"
+        },
+        {
+          "to": "node_1792698417929_0",
+          "from": "node_1792695933928_4",
+          "condition": "default"
+        },
+        {
+          "to": "node_1792699819544_1",
+          "from": "node_1792695704967_3",
+          "condition": "default"
+        },
+        {
+          "to": "node_1792695933928_4",
+          "from": "node_1792699819544_1",
+          "condition": "button:btn_1792699828246_0"
+        },
+        {
+          "to": "node_1792694421460_0",
+          "from": "node_1792699819544_1",
+          "condition": "button:btn_1792699864677_1"
+        },
+        {
+          "to": "node_1792700290101_2",
+          "from": "node_1792695704967_3",
+          "condition": "default"
+        },
+        {
+          "to": "node_1792699819544_1",
+          "from": "node_1792700290101_2",
+          "condition": "true"
+        },
+        {
+          "to": "node_1792700307584_3",
+          "from": "node_1792700290101_2",
+          "condition": "false"
+        },
+        {
+          "to": "node_1792694421460_0",
+          "from": "node_1792700307584_3",
+          "condition": "default"
+        },
+        {
+          "to": "create_api",
+          "from": "node_1792698417929_0",
+          "condition": "default"
+        },
+        {
+          "to": "node_1792694421460_0",
+          "from": "set_intent_book",
+          "condition": "default"
+        },
+        {
+          "to": "node_1792694421460_0",
+          "from": "set_intent_avail",
+          "condition": "default"
+        },
+        {
+          "to": "node_1792695704967_3",
+          "from": "create_error",
+          "condition": "default"
+        },
+        {
+          "to": "end_node",
+          "from": "node_1793869656766_1",
+          "condition": "default"
+        },
+        {
+          "to": "node_1793869656766_1",
+          "from": "create_api",
+          "condition": "default"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "__start__",
+          "type": "start",
+          "label": "Start",
+          "config": {},
+          "position": {
+            "x": 1900,
+            "y": 20
+          }
+        },
+        {
+          "id": "init_vars",
+          "type": "set_variable",
+          "label": "Init demo vars",
+          "config": {
+            "set": [
+              {
+                "op": "set",
+                "name": "field_id",
+                "value": "\"7301efe6-1cab-4c04-893c-e0804fbe757d\"",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "duration_minutes",
+                "value": "60",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "minimum_confirm_amount",
+                "value": "1",
+                "value_type": "expression"
+              },
+              {
+                "op": "set",
+                "name": "venue_phone",
+                "value": "\"7878787878\"",
+                "value_type": "expression"
+              }
+            ]
+          },
+          "position": {
+            "x": 1900,
+            "y": 160
+          }
+        },
+        {
+          "id": "lang_buttons",
+          "type": "buttons",
+          "label": "Choose language",
+          "config": {
+            "body": "Welcome to Playgenic\n\nPlease choose your language.\nيرجى اختيار اللغة.",
+            "buttons": [
+              {
+                "id": "lang_en",
+                "type": "reply",
+                "title": "English"
+              },
+              {
+                "id": "lang_ar",
+                "type": "reply",
+                "title": "العربية"
+              }
+            ]
+          },
+          "position": {
+            "x": 1900,
+            "y": 300
+          }
+        },
+        {
+          "id": "set_lang_en",
+          "type": "set_variable",
+          "label": "Language EN",
+          "config": {
+            "set": [
+              {
+                "name": "language",
+                "value": "\"en\""
+              }
+            ]
+          },
+          "position": {
+            "x": 2000,
+            "y": 460
+          }
+        },
+        {
+          "id": "set_lang_ar",
+          "type": "set_variable",
+          "label": "Language AR",
+          "config": {
+            "set": [
+              {
+                "name": "language",
+                "value": "\"ar\""
+              }
+            ]
+          },
+          "position": {
+            "x": 1780,
+            "y": 460
+          }
+        },
+        {
+          "id": "identify_api",
+          "type": "api_call",
+          "label": "Identify customer",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/identify",
+            "body": "{\"whatsapp_number\":\"{{phone_number}}\",\"field_id\":\"{{field_id}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "response_mapping": {
+              "id": "id",
+              "field_id": "field_id",
+              "user_type": "user_type",
+              "customer_id": "customer_id",
+              "customer_name": "full_name",
+              "credit_balance": "credit_balance",
+              "customer_exists": "exists",
+              "whatsapp_number": "whatsapp_number",
+              "customer_language": "language"
+            }
+          },
+          "position": {
+            "x": 1820,
+            "y": 600
+          }
+        },
+        {
+          "id": "identify_error",
+          "type": "message",
+          "label": "Identify failed",
+          "config": {
+            "message": "We could not reach Playgenic right now. Please try again in a moment."
+          },
+          "position": {
+            "x": 2680,
+            "y": 2520
+          }
+        },
+        {
+          "id": "cond_exists",
+          "type": "condition",
+          "label": "Customer exists?",
+          "config": {
+            "expression": "customer_exists == true"
+          },
+          "position": {
+            "x": 1800,
+            "y": 740
+          }
+        },
+        {
+          "id": "name_prompt",
+          "type": "prompt",
+          "label": "Ask full name",
+          "config": {
+            "body": "Welcome to Playgenic\n\nWe could not find a Playgenic account linked to this phone number.\nPlease enter your full name:",
+            "store_as": "customer_name",
+            "max_retries": 3,
+            "validation_error": "Please enter your full name (at least 2 characters).",
+            "validation_regex": ".{2,}"
+          },
+          "position": {
+            "x": 2460,
+            "y": 880
+          }
+        },
+        {
+          "id": "profile_api",
+          "type": "api_call",
+          "label": "Create profile",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/customer/profile",
+            "body": "{\"whatsapp_number\":\"{{phone_number}}\",\"full_name\":\"{{customer_name}}\",\"language\":\"{{language}}\",\"field_id\":\"{{field_id}}\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "message_template": "",
+            "response_mapping": {
+              "field_id": "field_id",
+              "user_type": "user_type",
+              "customer_id": "customer_id",
+              "customer_name": "full_name"
+            }
+          },
+          "position": {
+            "x": 2280,
+            "y": 1020
+          }
+        },
+        {
+          "id": "profile_error",
+          "type": "message",
+          "label": "Profile failed",
+          "config": {
+            "message": "We could not create your profile right now. Please try again later."
+          },
+          "position": {
+            "x": 2280,
+            "y": 2520
+          }
+        },
+        {
+          "id": "menu_buttons",
+          "type": "buttons",
+          "label": "Main menu",
+          "config": {
+            "body": "Hello {{customer_name}} 👋, What would you like to do?",
+            "mode": "list",
+            "header": "",
+            "buttons": [
+              {
+                "id": "menu_book",
+                "type": "reply",
+                "title": "Book a Pitch",
+                "description": "Reserve a pitch"
+              },
+              {
+                "id": "menu_avail",
+                "type": "reply",
+                "title": "Check Availability",
+                "description": "See open pitches"
+              },
+              {
+                "id": "menu_my_bookings",
+                "type": "reply",
+                "title": "My Bookings",
+                "description": "View your bookings"
+              },
+              {
+                "id": "menu_contact",
+                "type": "reply",
+                "title": "Contact Field",
+                "description": "Call the venue"
+              }
+            ],
+            "list_button": "Options",
+            "section_title": "Menu"
+          },
+          "position": {
+            "x": 860,
+            "y": 1180
+          }
+        },
+        {
+          "id": "set_intent_book",
+          "type": "set_variable",
+          "label": "Intent book",
+          "config": {
+            "set": [
+              {
+                "name": "flow_intent",
+                "value": "\"book\""
+              }
+            ]
+          },
+          "position": {
+            "x": 1980,
+            "y": 1380
+          }
+        },
+        {
+          "id": "set_intent_avail",
+          "type": "set_variable",
+          "label": "Intent availability",
+          "config": {
+            "set": [
+              {
+                "name": "flow_intent",
+                "value": "\"availability\""
+              }
+            ]
+          },
+          "position": {
+            "x": 1440,
+            "y": 1380
+          }
+        },
+        {
+          "id": "contact_msg",
+          "type": "message",
+          "label": "Contact field",
+          "config": {
+            "message": "CONTACT FIELD\n\nYou can reach the field at:\n{{venue_phone}}\n\nSend hi anytime to return to the main menu."
+          },
+          "position": {
+            "x": 420,
+            "y": 1380
+          }
+        },
+        {
+          "id": "create_api",
+          "type": "api_call",
+          "label": "Create booking",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/customer/bookings",
+            "body": "{\"field_id\":\"{{field_id}}\",\"play_ground_id\":\"{{play_ground_id}}\",\"date\":\"{{booking_date}}\",\"start_time\":\"{{start_time}}\",\"duration_minutes\":{{duration_minutes}},\"whatsapp_number\":\"{{phone_number}}\",\"customer_name\":\"{{customer_name}}\",\"source\":\"whatsapp\"}",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "response_mapping": {
+              "success": "success",
+              "booking_id": "booking_id",
+              "venue_name": "venue_name",
+              "confirm_end": "end_time",
+              "booking_code": "booking_code",
+              "confirm_date": "date",
+              "payment_link": "payment_link",
+              "total_amount": "total_amount",
+              "confirm_start": "start_time",
+              "booking_status": "status",
+              "dp_payment_link": "dp_payment_link",
+              "playground_name": "playground_name",
+              "outstanding_amount": "outstanding_amount",
+              "minimum_confirm_amount": "minimum_confirm_amount"
+            }
+          },
+          "position": {
+            "x": 1800,
+            "y": 2380
+          }
+        },
+        {
+          "id": "create_error",
+          "type": "message",
+          "label": "Create failed",
+          "config": {
+            "message": "We could not create your booking. The slot may no longer be available. Please try again from the menu."
+          },
+          "position": {
+            "x": 1880,
+            "y": 2500
+          }
+        },
+        {
+          "id": "confirm_error",
+          "type": "message",
+          "label": "Confirm failed",
+          "config": {
+            "message": "Payment confirmation failed. Please try again from the menu or contact the field."
+          },
+          "position": {
+            "x": 1240,
+            "y": 1020
+          }
+        },
+        {
+          "id": "list_bookings_api",
+          "type": "api_call",
+          "label": "List my bookings",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/customer/bookings?field_id={{field_id}}&whatsapp_number={{phone_number}}",
+            "method": "GET",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "response_mapping": {
+              "bookings": "bookings"
+            }
+          },
+          "position": {
+            "x": 800,
+            "y": 1380
+          }
+        },
+        {
+          "id": "list_bookings_error",
+          "type": "message",
+          "label": "List bookings failed",
+          "config": {
+            "message": "We could not load your bookings right now. Please try again."
+          },
+          "position": {
+            "x": 20,
+            "y": 1520
+          }
+        },
+        {
+          "id": "cond_has_bookings",
+          "type": "condition",
+          "label": "Any bookings?",
+          "config": {
+            "expression": "bookings != nil && len(bookings) > 0"
+          },
+          "position": {
+            "x": 1200,
+            "y": 1520
+          }
+        },
+        {
+          "id": "no_bookings",
+          "type": "message",
+          "label": "No bookings",
+          "config": {
+            "message": "You have no bookings yet.\n\nUse Book a Pitch from the menu to reserve a slot."
+          },
+          "position": {
+            "x": 220,
+            "y": 1660
+          }
+        },
+        {
+          "id": "booking_list_buttons",
+          "type": "buttons",
+          "label": "Select booking",
+          "config": {
+            "body": "YOUR BOOKINGS\n\nSelect a booking for details",
+            "mode": "list",
+            "header": "Bookings",
+            "source": "dynamic",
+            "id_field": "booking_id",
+            "items_var": "bookings",
+            "list_button": "Bookings",
+            "title_field": "{{booking_code}}",
+            "section_title": "Recent",
+            "description_field": "{{date date \"D MMM YYYY\"}} · {{date start_time \"hh:mm A\"}} – {{date end_time \"hh:mm A\"}} · {{title status}}",
+            "selection_mapping": {
+              "booking_id": "booking_id",
+              "pitch_name": "pitch_name",
+              "venue_name": "venue_name",
+              "confirm_end": "end_time",
+              "paid_amount": "paid_amount",
+              "booking_code": "booking_code",
+              "confirm_date": "date",
+              "total_amount": "total_amount",
+              "confirm_start": "start_time",
+              "booking_status": "status",
+              "outstanding_amount": "outstanding_amount"
+            }
+          },
+          "position": {
+            "x": 1220,
+            "y": 1660
+          }
+        },
+        {
+          "id": "booking_detail_msg",
+          "type": "message",
+          "label": "Booking detail",
+          "config": {
+            "message": "BOOKING DETAILS\n\nBooking: {{booking_code}}\nStatus: {{title booking_status}}\nVenue: {{venue_name}}\n{{if pitch_name}}Pitch: {{pitch_name}}\n{{endif}}Date: {{date confirm_date \"D MMM YYYY\"}}\nTime: {{date confirm_start \"hh:mm A\"}} – {{date confirm_end \"hh:mm A\"}}\nTotal: {{total_amount}} OMR\nPaid: {{paid_amount}} OMR\nOutstanding: {{outstanding_amount}} OMR"
+          },
+          "position": {
+            "x": 1040,
+            "y": 1800
+          }
+        },
+        {
+          "id": "end_node",
+          "type": "end",
+          "label": "End",
+          "config": {},
+          "position": {
+            "x": 2540,
+            "y": 2660
+          }
+        },
+        {
+          "id": "node_1792694421460_0",
+          "type": "whatsapp_flow",
+          "label": "Choose date",
+          "config": {
+            "cta": "Open",
+            "body": "📅 When would you like to play?\n\nSelect your date from the calendar.",
+            "header": "",
+            "flow_id": "1090658037290971"
+          },
+          "position": {
+            "x": 1820,
+            "y": 1520
+          }
+        },
+        {
+          "id": "node_1792695704967_3",
+          "type": "api_call",
+          "label": "API",
+          "config": {
+            "url": "https://playgenicapi.demospro2023.in.net/api/wa/customer/pitches/available?field_id={{field_id}}&date={{booking_date}}&start_time={{start_time}}&duration_minutes={{duration_minutes}}&whatsapp_number={{phone_number}}",
+            "body": "",
+            "method": "GET",
+            "headers": {},
+            "message_template": "",
+            "response_mapping": {
+              "pitches": "pitches"
+            }
+          },
+          "position": {
+            "x": 1880,
+            "y": 1660
+          }
+        },
+        {
+          "id": "node_1792695933928_4",
+          "type": "buttons",
+          "label": "Buttons",
+          "config": {
+            "body": "Choose a pitch",
+            "mode": "list",
+            "source": "dynamic",
+            "buttons": [],
+            "id_field": "id",
+            "store_as": "",
+            "items_var": "pitches",
+            "list_button": "Select the Pitch",
+            "title_field": "name",
+            "description_field": "OMR {{price}} per hour",
+            "selection_mapping": {
+              "slots": "slots",
+              "pitch_name": "name",
+              "play_ground_id": "id"
+            }
+          },
+          "position": {
+            "x": 1840,
+            "y": 2100
+          }
+        },
+        {
+          "id": "node_1792698417929_0",
+          "type": "buttons",
+          "label": "Buttons",
+          "config": {
+            "body": "Pick an available slot",
+            "mode": "list",
+            "source": "dynamic",
+            "buttons": [],
+            "id_field": "start",
+            "items_var": "slots",
+            "list_button": "Choose Slot",
+            "title_field": "label",
+            "description_field": "",
+            "selection_mapping": {
+              "start_time": "id"
+            }
+          },
+          "position": {
+            "x": 1840,
+            "y": 2240
+          }
+        },
+        {
+          "id": "node_1792699819544_1",
+          "type": "buttons",
+          "label": "Buttons",
+          "config": {
+            "body": "⚽️ Available pitches\n🗓️ {{date booking_date \"D MMM YYYY\"}}\n{{for pitch in pitches}}\n⏱️ {{pitch.name}} - OMR {{pitch.price}}\n{{for slot in pitch.slots}} {{slot.label}}, {{endfor}}\n{{endfor}}",
+            "buttons": [
+              {
+                "id": "btn_1792699828246_0",
+                "type": "reply",
+                "title": "Choose pitch, slot"
+              },
+              {
+                "id": "btn_1792699864677_1",
+                "type": "reply",
+                "title": "Change Date"
+              }
+            ]
+          },
+          "position": {
+            "x": 1840,
+            "y": 1940
+          }
+        },
+        {
+          "id": "node_1792700290101_2",
+          "type": "condition",
+          "label": "Condition",
+          "config": {
+            "expression": "pitches != nil && len(pitches) > 0"
+          },
+          "position": {
+            "x": 1880,
+            "y": 1800
+          }
+        },
+        {
+          "id": "node_1792700307584_3",
+          "type": "message",
+          "label": "Message",
+          "config": {
+            "message": "No slots available on {{booking_date}}, please choose another date. "
+          },
+          "position": {
+            "x": 1440,
+            "y": 1960
+          }
+        },
+        {
+          "id": "node_1793869656766_1",
+          "type": "message",
+          "label": "Message",
+          "config": {
+            "message": "💳 Complete Your Booking Payment\n\nYour booking is almost ready! ⚽\n\n📋 Booking Details\n\n🏟️ Field: {{venue_name}} - {{pitch_name}}\n📅 Date: {{date confirm_date \"D MMM YYYY\"}}\n🕒 Time: {{confirm_start}}-{{confirm_end}}\n⏱️ Duration: {{duration_minutes}} mins\n💰 Total Amount: {{total_amount}} OMR\n\nPlease complete your payment using one of the links below:\n\n💵 Pay 1 OMR Deposit\n\nPay 1 OMR to confirm your booking. You can pay the remaining balance later.\n\n🔗 Payment Link: {{dp_payment_link}}\n\n💳 Pay Full Amount\n\nPay the full amount now. No remaining balance.\n\n🔗 Payment Link: {{payment_link}}\n\n✅ Your booking will be confirmed automatically once your payment is successful.\n\n⚠️ Important: Please complete your payment within 10 minutes to secure your selected time slot."
+          },
+          "position": {
+            "x": 1100,
+            "y": 2520
+          }
+        }
+      ],
+      "version": 2,
+      "entry_node": "__start__"
+    },
+    "whatsapp_account": "TiQR Store Production",
+    "on_complete_action": "none",
+    "timeout_message": "Your Playgenic session timed out. Send hi to start again.",
+    "cancel_keywords": [
+      "cancel",
+      "stop",
+      "exit"
+    ],
+    "panel_config": {
+      "sections": []
+    }
+  }
+}
