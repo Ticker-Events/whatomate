@@ -16,7 +16,7 @@ import (
 
 // TemplateRequest represents the request body for creating/updating a template
 type TemplateRequest struct {
-	WhatsAppAccount string `json:"whatsapp_account" validate:"required"` // WhatsApp account name
+	WhatsAppAccount string `json:"whatsapp_account"` // Optional; defaults to org default outgoing account
 	Name            string `json:"name" validate:"required"`
 	DisplayName     string `json:"display_name"`
 	Language        string `json:"language" validate:"required"`
@@ -125,8 +125,8 @@ func (a *App) CreateTemplate(r *fastglue.Request) error {
 
 	// Validate required fields
 	isAuthTemplate := strings.ToUpper(req.Category) == "AUTHENTICATION"
-	if req.WhatsAppAccount == "" || req.Name == "" || req.Language == "" || req.Category == "" {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "whatsapp_account, name, language, and category are required", nil, "")
+	if req.Name == "" || req.Language == "" || req.Category == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "name, language, and category are required", nil, "")
 	}
 	if !isAuthTemplate && req.BodyContent == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "body_content is required", nil, "")
@@ -150,10 +150,12 @@ func (a *App) CreateTemplate(r *fastglue.Request) error {
 		}
 	}
 
-	// Verify account belongs to organization
-	if _, err := a.resolveWhatsAppAccount(orgID, req.WhatsAppAccount); err != nil {
+	// Explicit account, else org default outgoing (then any account).
+	account, err := a.resolveWhatsAppAccount(orgID, req.WhatsAppAccount)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")
 	}
+	req.WhatsAppAccount = account.Name
 
 	// Normalize template name (lowercase, underscores)
 	templateName := normalizeTemplateName(req.Name)
@@ -466,7 +468,7 @@ func (a *App) SyncTemplates(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
 
-	// Get account name from query or body
+	// Get account name from query or body; empty → org default outgoing.
 	accountName := string(r.RequestCtx.QueryArgs().Peek("account"))
 	if accountName == "" {
 		var body struct {
@@ -474,10 +476,6 @@ func (a *App) SyncTemplates(r *fastglue.Request) error {
 		}
 		_ = r.Decode(&body, "json")
 		accountName = body.WhatsAppAccount
-	}
-
-	if accountName == "" {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "whatsapp_account is required", nil, "")
 	}
 
 	account, err := a.resolveWhatsAppAccount(orgID, accountName)
@@ -654,16 +652,12 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
 
-	// Get account name from form or query
+	// Account from form/query; empty → org default outgoing (same as commerce catalog).
 	accountName := string(r.RequestCtx.FormValue("account"))
 	if accountName == "" {
 		accountName = string(r.RequestCtx.QueryArgs().Peek("account"))
 	}
-	if accountName == "" {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "account is required", nil, "")
-	}
 
-	// Verify account belongs to organization
 	account, err := a.resolveWhatsAppAccount(orgID, accountName)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")

@@ -1168,7 +1168,8 @@ func TestApp_SyncTemplates_MissingAccount(t *testing.T) {
 
 	err := app.SyncTemplates(req)
 	require.NoError(t, err)
-	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadRequest, "whatsapp_account is required")
+	// Empty account falls back to org default; with no accounts configured this fails.
+	testutil.AssertErrorResponse(t, req, fasthttp.StatusNotFound, "WhatsApp account not found")
 }
 
 func TestApp_SyncTemplates_AccountNotFound(t *testing.T) {

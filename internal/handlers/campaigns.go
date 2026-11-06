@@ -24,7 +24,7 @@ import (
 // CampaignRequest represents campaign create/update request
 type CampaignRequest struct {
 	Name            string     `json:"name" validate:"required"`
-	WhatsAppAccount string     `json:"whatsapp_account" validate:"required"`
+	WhatsAppAccount string     `json:"whatsapp_account"` // Optional; defaults to org default outgoing account
 	TemplateID      string     `json:"template_id" validate:"required"`
 	HeaderMediaID   string     `json:"header_media_id"`
 	ScheduledAt     *time.Time `json:"scheduled_at"`
@@ -171,14 +171,15 @@ func (a *App) CreateCampaign(r *fastglue.Request) error {
 		return nil
 	}
 
-	// Validate WhatsApp account exists
-	if _, err := a.resolveWhatsAppAccount(orgID, req.WhatsAppAccount); err != nil {
+	// Explicit account, else org default outgoing (then any account).
+	account, err := a.resolveWhatsAppAccount(orgID, req.WhatsAppAccount)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")
 	}
 
 	campaign := models.BulkMessageCampaign{
 		OrganizationID:  orgID,
-		WhatsAppAccount: req.WhatsAppAccount,
+		WhatsAppAccount: account.Name,
 		Name:            req.Name,
 		TemplateID:      templateID,
 		HeaderMediaID:   req.HeaderMediaID,
