@@ -592,10 +592,14 @@ func SaveLeadFromSession(c *codedflow.Conv, qualified bool, completionAction str
 	answers := answersFromSessionData(c.Session().SessionData)
 	payloadAnswers, _ := json.Marshal(answers)
 	criteriaSnap, _ := json.Marshal(c.Session().SessionData[sessionCriteria])
+	name := strings.TrimSpace(asString(c.Session().SessionData["lead_f_name"]))
+	if name == "" {
+		name = asString(c.Session().SessionData["contact_name"])
+	}
 	params := map[string]string{
 		"session_id":        c.Session().ID.String(),
 		"phone_number":      c.Session().PhoneNumber,
-		"name":              asString(c.Session().SessionData["contact_name"]),
+		"name":              name,
 		"evaluation_mode":   asString(c.Session().SessionData[sessionEvalMode]),
 		"completion_action": completionAction,
 		"qualified":         strconv.FormatBool(qualified),

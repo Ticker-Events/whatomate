@@ -734,16 +734,39 @@ func (c *Conv) LookupOrder(name string) (map[string]any, bool) {
 }
 
 // Once runs fn on the first visit and skips it on replay.
+//
+// Nested calls inside fn (for example Say) are appended before this Once
+// marker. On replay, if the next saved call is something else, fn runs so
+// those nested calls can consume their own records; the marker is then
+// consumed. If the next saved call is already this marker (empty Once),
+// fn is skipped.
 func (c *Conv) Once(name string, fn func()) bool {
 	if c.Stop {
 		return false
 	}
-	if _, done := c.doneCall(); done {
+	if rec, ok := c.peekCall(); ok && asString(rec["name"]) == name {
+		_, _ = c.doneCall()
 		return true
 	}
 	fn()
+	if rec, ok := c.peekCall(); ok && asString(rec["name"]) == name {
+		_, _ = c.doneCall()
+		return true
+	}
 	c.appendCall(map[string]any{"name": name, "ok": true})
 	return true
+}
+
+// peekCall returns the next saved call without advancing the cursor.
+func (c *Conv) peekCall() (map[string]any, bool) {
+	if c.Stop {
+		return nil, false
+	}
+	records := c.callRecords()
+	if c.seq >= len(records) {
+		return nil, false
+	}
+	return records[c.seq], true
 }
 
 // Transfer tells the customer, queues the chat, and ends the flow.
