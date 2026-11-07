@@ -15,7 +15,7 @@ import (
 
 // FlowRequest represents the request body for creating/updating a flow
 type FlowRequest struct {
-	WhatsAppAccount string         `json:"whatsapp_account" validate:"required"`
+	WhatsAppAccount string         `json:"whatsapp_account"` // Optional; defaults to org default outgoing account
 	Name            string         `json:"name" validate:"required"`
 	Category        string         `json:"category"`
 	JSONVersion     string         `json:"json_version"`
@@ -107,12 +107,10 @@ func (a *App) CreateFlow(r *fastglue.Request) error {
 	if req.Name == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Name is required", nil, "")
 	}
-	if req.WhatsAppAccount == "" {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account is required", nil, "")
-	}
 
-	// Verify account exists and belongs to org
-	if _, err := a.resolveWhatsAppAccount(orgID, req.WhatsAppAccount); err != nil {
+	// Empty whatsapp_account → org default outgoing (same as templates/campaigns).
+	account, err := a.resolveWhatsAppAccount(orgID, req.WhatsAppAccount)
+	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")
 	}
 
@@ -124,7 +122,7 @@ func (a *App) CreateFlow(r *fastglue.Request) error {
 
 	flow := models.WhatsAppFlow{
 		OrganizationID:  orgID,
-		WhatsAppAccount: req.WhatsAppAccount,
+		WhatsAppAccount: account.Name,
 		Name:            req.Name,
 		Status:          "DRAFT",
 		Category:        req.Category,
@@ -537,29 +535,26 @@ func (a *App) DuplicateFlow(r *fastglue.Request) error {
 	})
 }
 
-// SyncFlows syncs flows from Meta for a specific WhatsApp account
+// SyncFlows syncs flows from Meta. Empty account → org default outgoing.
 func (a *App) SyncFlows(r *fastglue.Request) error {
 	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
 
-	// Get account name from request
-	var req struct {
-		WhatsAppAccount string `json:"whatsapp_account"`
-	}
-	if err := a.decodeRequest(r, &req); err != nil {
-		return nil
-	}
-
-	if req.WhatsAppAccount == "" {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account is required", nil, "")
+	// Get account name from query or body; empty → org default outgoing.
+	accountName := string(r.RequestCtx.QueryArgs().Peek("account"))
+	if accountName == "" {
+		var body struct {
+			WhatsAppAccount string `json:"whatsapp_account"`
+		}
+		_ = r.Decode(&body, "json")
+		accountName = body.WhatsAppAccount
 	}
 
-	// Get the WhatsApp account
-	account, err := a.resolveWhatsAppAccount(orgID, req.WhatsAppAccount)
+	account, err := a.resolveWhatsAppAccount(orgID, accountName)
 	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "WhatsApp account not found", nil, "")
 	}
 
 	// Use provider-aware messaging client
@@ -614,7 +609,7 @@ func (a *App) SyncFlows(r *fastglue.Request) error {
 			// Flow doesn't exist locally, create it
 			newFlow := models.WhatsAppFlow{
 				OrganizationID:  orgID,
-				WhatsAppAccount: req.WhatsAppAccount,
+				WhatsAppAccount: account.Name,
 				MetaFlowID:      mf.ID,
 				Name:            mf.Name,
 				Status:          mf.Status,
