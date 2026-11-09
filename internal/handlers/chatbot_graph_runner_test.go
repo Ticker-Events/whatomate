@@ -1369,6 +1369,7 @@ func TestRunChatGraph_Transfer_ToQueueCompletesSession(t *testing.T) {
 	require.NoError(t, err, "transfer row should be created")
 	assert.Equal(t, models.TransferStatusActive, transfer.Status)
 	assert.Nil(t, transfer.TeamID, "no team_id config → queue transfer")
+	assert.Equal(t, "context", transfer.Notes, "queue transfers must persist staff notes")
 }
 
 // TestRunChatGraph_Transfer_ToSpecificTeam exercises the team path.

@@ -23,9 +23,10 @@ const (
 	sessionHighMin    = "leads_high_min"
 	sessionMediumMin  = "leads_medium_min"
 	sessionLowMin     = "leads_low_min"
-	sessionScore      = "leads_score"
-	sessionCategory   = "leads_category"
-	sessionQualified  = "leads_qualified"
+	sessionScore           = "leads_score"
+	sessionCategory        = "leads_category"
+	sessionQualified       = "leads_qualified"
+	sessionHandoffSummary  = "leads_handoff_summary"
 
 	evalRules  = "rules"
 	evalHybrid = "hybrid"
@@ -610,21 +611,33 @@ func IsLeadsSession(session *models.ChatbotSession) bool {
 	return codedflow.SessionKey(session) == FlowKey
 }
 
-// PrepareHandoff saves a partial lead (when not already saved) and returns the
-// agent handoff body. Completion modes that already called SaveLeadFromSession
-// keep the qualified lead; mid-chat handoffs create a partial one.
+// SessionHandoffSummaryKey is the session_data key for the staff-only lead
+// handoff summary. The customer never receives this text.
+const SessionHandoffSummaryKey = sessionHandoffSummary
+
+// PrepareHandoff saves a partial lead (when not already saved) and stashes the
+// staff-only handoff summary on the session. It returns the original customer
+// transfer message unchanged — the summary is for store/agent notes only.
+// Completion modes that already called SaveLeadFromSession keep the qualified
+// lead; mid-chat handoffs create a partial one.
 // Preview capture writes classification only — create_lead stays mockable via Store.
 func PrepareHandoff(c *codedflow.Conv, message string) string {
 	writeClassificationFromSession(c, false)
-	if c != nil && c.ChatCtx() != nil && c.ChatCtx().Capturing() {
-		if summary := buildHandoffSummary(c.Session()); summary != "" {
-			return summary
-		}
-		return message
+	if c != nil && c.ChatCtx() != nil && !c.ChatCtx().Capturing() {
+		_ = SaveLeadFromSession(c, false, completionMidChat)
 	}
-	_ = SaveLeadFromSession(c, false, completionMidChat)
-	if summary := buildHandoffSummary(c.Session()); summary != "" {
-		return summary
-	}
+	stashHandoffSummary(c)
 	return message
+}
+
+func stashHandoffSummary(c *codedflow.Conv) {
+	if c == nil || c.Session() == nil {
+		return
+	}
+	if c.Session().SessionData == nil {
+		c.Session().SessionData = models.JSONB{}
+	}
+	if summary := buildHandoffSummary(c.Session()); summary != "" {
+		c.Session().SessionData[sessionHandoffSummary] = summary
+	}
 }

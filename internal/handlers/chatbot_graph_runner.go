@@ -1114,10 +1114,10 @@ func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, e
 		} else {
 			a.Log.Warn("transfer node has invalid team_id, falling back to queue",
 				"node", node.ID, "team_id", teamIDStr, "error", err)
-			a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow)
+			a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow, notes)
 		}
 	} else {
-		a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow)
+		a.createTransferToQueue(ctx.account, ctx.contact, models.TransferSourceFlow, notes)
 	}
 
 	ctx.session.Status = models.SessionStatusCompleted

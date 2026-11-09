@@ -194,3 +194,75 @@ func TestWriteClassificationFromLeadNoopOnNilConv(t *testing.T) {
 	writeClassificationFromSession(nil, true)
 }
 
+// handoffTestChat is a minimal codedflow.Chat for PrepareHandoff. Capturing is
+// true so SaveLeadFromSession is skipped (no Host / Store needed).
+type handoffTestChat struct {
+	session *models.ChatbotSession
+}
+
+func (c *handoffTestChat) Session() *models.ChatbotSession             { return c.session }
+func (c *handoffTestChat) Account() *models.WhatsAppAccount           { return nil }
+func (c *handoffTestChat) Contact() *models.Contact                   { return nil }
+func (c *handoffTestChat) UserInput() string                          { return "" }
+func (c *handoffTestChat) SetUserInput(string)                        {}
+func (c *handoffTestChat) InboundMedia() codedflow.InboundMedia       { return codedflow.InboundMedia{} }
+func (c *handoffTestChat) ButtonID() string                           { return "" }
+func (c *handoffTestChat) SetButtonID(string)                         {}
+func (c *handoffTestChat) FlowResponseData() map[string]any           { return nil }
+func (c *handoffTestChat) SetFlowResponseData(map[string]any)         {}
+func (c *handoffTestChat) QuotedMessage() *codedflow.QuotedMessage    { return nil }
+func (c *handoffTestChat) Consumed() bool                             { return false }
+func (c *handoffTestChat) SetConsumed(bool)                           {}
+func (c *handoffTestChat) Capturing() bool                            { return true }
+func (c *handoffTestChat) LastTiqr() map[string]any                   { return nil }
+func (c *handoffTestChat) SetLastTiqr(map[string]any)                 {}
+func (c *handoffTestChat) LastTiqrErr() string                        { return "" }
+func (c *handoffTestChat) SetLastTiqrErr(string)                      {}
+func (c *handoffTestChat) LastTiqrStatus() int                        { return 0 }
+func (c *handoffTestChat) SetLastTiqrStatus(int)                      {}
+func (c *handoffTestChat) Preview() *codedflow.PreviewSink            { return nil }
+func (c *handoffTestChat) SetPreview(*codedflow.PreviewSink)          {}
+func (c *handoffTestChat) Archive() *codedflow.PreviewSink            { return nil }
+func (c *handoffTestChat) SetArchive(*codedflow.PreviewSink)          {}
+func (c *handoffTestChat) Native() any                                { return nil }
+
+func TestPrepareHandoffReturnsCustomerMessageAndStashesSummary(t *testing.T) {
+	customerLine := "I'm not sure about your question. I'm transferring you to a staff member who can help."
+	session := &models.ChatbotSession{
+		PhoneNumber: "919999999999",
+		SessionData: models.JSONB{
+			"contact_name":   "Asha",
+			sessionHighMin:   75,
+			sessionMediumMin: 50,
+			sessionLowMin:    25,
+			sessionLeadSaved: "1",
+			sessionCriteria: map[string]any{
+				"criteria": []any{
+					map[string]any{"id": "1"},
+					map[string]any{"id": "2"},
+				},
+			},
+			sessionAnswers: []any{
+				map[string]any{
+					"criterion_name": "Budget",
+					"answer":         "High",
+					"score":          100,
+					"weight":         50,
+				},
+			},
+			sessionPendingQuestion: "Pg courses available?",
+		},
+	}
+	c := codedflow.NewConv(nil, &handoffTestChat{session: session})
+
+	got := PrepareHandoff(c, customerLine)
+
+	assert.Equal(t, customerLine, got, "customer must receive the transfer line only")
+	stashed := asString(session.SessionData[sessionHandoffSummary])
+	require.NotEmpty(t, stashed)
+	assert.Contains(t, stashed, "Lead qualification summary")
+	assert.Contains(t, stashed, "Asha")
+	assert.Contains(t, stashed, "Budget: High")
+	assert.NotEqual(t, customerLine, stashed)
+}
+

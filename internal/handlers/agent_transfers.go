@@ -1276,8 +1276,9 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 	return nil
 }
 
-// createTransferToQueue creates an unassigned agent transfer that goes to the queue
-func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource) {
+// createTransferToQueue creates an unassigned agent transfer that goes to the queue.
+// notes is staff-only context (for example a lead qualification summary).
+func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource, notes string) {
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
 		a.Log.Debug("Contact already has active transfer, skipping", "contact_id", contact.ID, "source", source)
 		return
@@ -1306,6 +1307,7 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 		PhoneNumber:     contact.PhoneNumber,
 		Status:          models.TransferStatusActive,
 		Source:          source,
+		Notes:           notes,
 		TransferredAt:   time.Now(),
 	}
 

@@ -231,7 +231,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if !settings.IsEnabled {
 		a.Log.Debug("Chatbot not enabled for this account, creating transfer for agent queue", "account", account.Name, "settings_id", settings.ID)
 		// Create transfer to agent queue when chatbot is disabled
-		a.createTransferToQueue(account, contact, models.TransferSourceChatbotDisabled)
+		a.createTransferToQueue(account, contact, models.TransferSourceChatbotDisabled, "")
 		return
 	}
 	a.Log.Info("Chatbot settings loaded", "settings_id", settings.ID, "is_enabled", settings.IsEnabled, "ai_enabled", settings.AI.Enabled, "ai_provider", settings.AI.Provider, "default_response", settings.DefaultResponse)
@@ -710,7 +710,7 @@ func (a *App) handleInboundAudioUnsupported(account *models.WhatsAppAccount, con
 		if err := tiqrecommerce.CompleteEcommerceHandoff(codedflow.NewConv(a, chat)); err != nil {
 			a.Log.Warn("ecommerce handoff after voice note failed; queueing transfer",
 				"error", err, "session", session.ID)
-			a.createTransferToQueue(account, contact, models.TransferSourceAudio)
+			a.createTransferToQueue(account, contact, models.TransferSourceAudio, "")
 			codedflow.FinishSession(session)
 			if err := a.persistChatSession(session); err != nil {
 				a.Log.Error("Failed to finish ecommerce session after voice note fallback",
@@ -720,7 +720,7 @@ func (a *App) handleInboundAudioUnsupported(account *models.WhatsAppAccount, con
 		return
 	}
 
-	a.createTransferToQueue(account, contact, models.TransferSourceAudio)
+	a.createTransferToQueue(account, contact, models.TransferSourceAudio, "")
 }
 
 func inboundCaptureMediaType(messageType string) bool {

@@ -772,7 +772,8 @@ func (c *Conv) peekCall() (map[string]any, bool) {
 // Transfer tells the customer, queues the chat, and ends the flow.
 // TiQR ecommerce sessions snapshot the cart and checkout fields onto a
 // commerce draft before creating the agent transfer. TiQR Leads sessions
-// save a (possibly partial) lead and enrich the handoff body.
+// save a (possibly partial) lead and stash a staff-only summary on the
+// transfer notes — the customer only receives message.
 func (c *Conv) Transfer(message string) error {
 	if c.Ended {
 		return nil
@@ -788,8 +789,9 @@ func (c *Conv) Transfer(message string) error {
 			}
 		}
 	}
-	// Leads handoff also runs while capturing so preview can show classification.
-	// PrepareHandoff skips the live create_lead post in preview.
+	// Leads handoff also runs while capturing so preview can classify.
+	// PrepareHandoff skips the live create_lead post in preview and keeps
+	// message as the customer-facing transfer line.
 	if handled, body, err := c.app.TryLeadsTransfer(c.chat, message); handled {
 		if err != nil && !c.chat.Capturing() {
 			c.app.LogWarn("tiqr leads handoff save failed; continuing with queue transfer", "error", err)
@@ -798,7 +800,13 @@ func (c *Conv) Transfer(message string) error {
 			message = body
 		}
 	}
-	_, err := c.app.ExecChatTransfer(c.chat, "transfer", map[string]any{"body": c.text(message)})
+	cfg := map[string]any{"body": c.text(message)}
+	if session := c.session(); session != nil && session.SessionData != nil {
+		if notes := strings.TrimSpace(asString(session.SessionData["leads_handoff_summary"])); notes != "" {
+			cfg["notes"] = notes
+		}
+	}
+	_, err := c.app.ExecChatTransfer(c.chat, "transfer", cfg)
 	finishCodedSession(c.session())
 	c.Stop = true
 	c.Ended = true

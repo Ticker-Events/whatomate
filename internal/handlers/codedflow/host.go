@@ -142,8 +142,9 @@ type Host interface {
 	// Ecommerce handoff: returns handled=true when the session is a TiQR ecommerce coded flow.
 	TryEcommerceTransfer(chat Chat, message string) (handled bool, err error)
 
-	// TryLeadsTransfer saves a (partial) lead for tiqr_leads and returns an
-	// enriched handoff body. handled is true when the session is TiQR Leads.
+	// TryLeadsTransfer saves a (partial) lead for tiqr_leads and stashes a
+	// staff-only handoff summary on the session. body is the customer-facing
+	// transfer line (unchanged). handled is true when the session is TiQR Leads.
 	TryLeadsTransfer(chat Chat, message string) (handled bool, body string, err error)
 
 	// Trace
