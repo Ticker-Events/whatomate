@@ -669,6 +669,7 @@ func (c *Conv) StoreList(name, operation string, params map[string]string) ([]an
 // LoadFaqs loads active store FAQs into the session once.
 // An empty list or a failed fetch does not stop shopping: the call is still
 // recorded as ok so later turns do not retry, and intent simply has no FAQ route.
+// Prefer also calling LoadStoreInfo so FAQ misses can fall back to About us / policies.
 func (c *Conv) LoadFaqs(name, operation string) []any {
 	if c.Stop {
 		return nil

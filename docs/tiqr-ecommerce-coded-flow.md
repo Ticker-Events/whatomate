@@ -73,7 +73,7 @@ Checkout said in free text on the menu, the collection list, a product card, an 
 
 `Store("store", "get_store")` then `StoreList("collections", "list_collections", limit 20)`. Either failure transfers with a fixed line (`tiqrEcommerceFailBusiness` or `tiqrEcommerceFailCollections`) and completes the session. An empty collection list is the same failure: `StoreList` treats zero rows as not ok.
 
-After collections load, `LoadFaqs("faqs", "list_faqs")` stores active store FAQs on the session. An empty list or a failed FAQ fetch does not transfer: shopping continues without a FAQ intent route.
+After collections load, `LoadFaqs("faqs", "list_faqs")` stores active store FAQs on the session, and `LoadStoreInfo("store_info", "get_store_info")` stores About us plus policy fields. An empty list or a failed FAQ/store-info fetch does not transfer: shopping continues without those fallback routes.
 
 `delivery_modes` on the store payload decides fulfillment later. Nothing else from the store is required to show the menu.
 
@@ -110,7 +110,7 @@ Admins edit the welcome on the TiQR Flows screen (`/chatbot/coded-flows`) and ca
 | `collection` | `buyProducts` with that collection id. The id must be one of the loaded collections |
 | `product` | `buyProducts` with a search query. The model supplies words, not a product id |
 | `checkout` | `afterCheckoutDivert`. Empty cart continues into browsing. A cart opens checkout |
-| `handoff`, ungrounded JSON, or an AI error | transfer |
+| `handoff`, ungrounded JSON, or an AI error | try store information (About us / policies) at confidence ≥ 0.9; otherwise transfer. Explicit “talk to staff” skips store info and transfers |
 
 ### 3. Fulfillment
 
@@ -384,9 +384,9 @@ The model must return one route and leave the other slots empty. Go then checks 
 - `checkout` and `handoff` must not carry ids
 - anything else, including a product route on a step that does not allow catalog, is ungrounded
 
-At or above 0.75 and grounded: the route is applied in the same turn. A confident `previous` or welcome-menu result does not go to the guide. `checkout` sets `c.divert` and does not record a shopping call, so the script can leave the step. `faq` sends the stored FAQ answer (translated when the session language is not English) and stays on the same step without recording a shopping call, so buttons already on screen stay usable. Below 0.75, or route `unclear`: one guide question, staying on the same step.
+At or above 0.75 and grounded: the route is applied in the same turn. A confident `previous` or welcome-menu result does not go to the guide. `checkout` sets `c.divert` and does not record a shopping call, so the script can leave the step. `faq` sends the stored FAQ answer (translated when the session language is not English) and stays on the same step without recording a shopping call, so buttons already on screen stay usable. Below 0.75, or route `unclear`: try a grounded store-information answer first (About us / privacy / terms / refund / shipping, confidence ≥ 0.9); if that fails, one guide question, staying on the same step.
 
-Ungrounded output, a grounded `handoff`, or an intent error transfers immediately. When the customer asked for a person, the line is `AgentHandoff` (`I'm connecting you with a team member who can help.`). Otherwise the line is `UnsureConnect` built from their message (`I'm not sure about {topic}. I'm connecting you to a staff member who can help.`). The customer does not get a guide question in those cases. Explicit menu taps such as `talk_to_agent` still use `AgentHandoff`.
+Ungrounded output, a grounded `handoff`, or an intent error tries store information before transfer (unless the customer asked for a person). A confident store-info answer is sent and the step stays open, same as FAQ. When store info cannot answer and the customer asked for a person, the line is `AgentHandoff` (`I'm connecting you with a team member who can help.`). Otherwise the line is `UnsureConnect` built from their message (`I'm not sure about {topic}. I'm connecting you to a staff member who can help.`). Explicit menu taps such as `talk_to_agent` still use `AgentHandoff`.
 
 Language from the first successful intent call is stored as `customer_language` only if the session does not already have one. Button taps never set it.
 

@@ -327,24 +327,39 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 	}
 	raw, err := c.ClassifyIntent(message, ctx)
 	if err != nil {
-		_ = c.Transfer(HandoffMessage(message))
-		return Route{}, false
+		return c.giveUpOrStoreInfo(name, message)
 	}
 	result, grounded := ValidateCodedIntent(raw, ctx)
 	c.rememberLanguage(result.Language)
 	if !grounded {
-		_ = c.Transfer(HandoffMessage(message))
-		return Route{}, false
+		return c.giveUpOrStoreInfo(name, message)
 	}
 	if result.Route == codedRouteHandoff && result.Confidence >= IntentSettings.IntentThreshold {
 		c.clearGuide()
-		_ = c.Transfer(HandoffMessage(message))
-		return Route{}, false
+		return c.giveUpOrStoreInfo(name, message)
 	}
 	if result.Confidence >= IntentSettings.IntentThreshold {
 		return c.acceptIntentResult(name, cfg, ctx, result)
 	}
+	if answer, ok := c.TryStoreInfoAnswer(message); ok {
+		c.clearGuide()
+		return c.deliverStoreInfoAnswer(name, answer)
+	}
 	return c.askGuide(name, ctx)
+}
+
+// giveUpOrStoreInfo tries a grounded store-information answer before handoff.
+// Explicit person requests skip store info and transfer immediately.
+func (c *Conv) giveUpOrStoreInfo(name, message string) (Route, bool) {
+	if WantsPerson(message) {
+		_ = c.Transfer(HandoffMessage(message))
+		return Route{}, false
+	}
+	if answer, ok := c.TryStoreInfoAnswer(message); ok {
+		return c.deliverStoreInfoAnswer(name, answer)
+	}
+	_ = c.Transfer(HandoffMessage(message))
+	return Route{}, false
 }
 
 func (c *Conv) acceptIntentResult(name string, cfg map[string]any, ctx IntentContext, result IntentResult) (Route, bool) {

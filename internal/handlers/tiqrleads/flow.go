@@ -57,6 +57,7 @@ func newTiqrLeadsFlow() codedflow.CodedFlow {
 			{Name: "load_store", Label: "Load store"},
 			{Name: "check_existing", Label: "Check existing lead"},
 			{Name: "load_faqs", Label: "Load FAQs"},
+			{Name: "load_store_info", Label: "Load store information"},
 			{Name: "load_criteria", Label: "Load criteria"},
 			{Name: "ask", Label: "Ask qualification questions"},
 			{Name: "save", Label: "Save lead"},
@@ -78,6 +79,7 @@ func tiqrLeads(c *codedflow.Conv) error {
 	if ok && leadIsQualified(existing) {
 		writeClassificationFromLead(c, existing)
 		_ = c.LoadFaqs("faqs", "list_faqs")
+		_ = c.LoadStoreInfo(codedflow.SessionStoreInfoKey, "get_store_info")
 		if c.Stop {
 			return nil
 		}
@@ -91,6 +93,7 @@ func tiqrLeads(c *codedflow.Conv) error {
 	}
 
 	_ = c.LoadFaqs("faqs", "list_faqs")
+	_ = c.LoadStoreInfo(codedflow.SessionStoreInfoKey, "get_store_info")
 	if c.Stop {
 		return nil
 	}

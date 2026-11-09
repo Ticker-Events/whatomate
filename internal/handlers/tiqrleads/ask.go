@@ -232,6 +232,7 @@ func shouldDivertFreeText(c *codedflow.Conv, text string) bool {
 	}
 	outcome := classifyHelpQuestion(c, text)
 	return outcome.Kind == helpOutcomeFAQ ||
+		outcome.Kind == helpOutcomeStoreInfo ||
 		outcome.Kind == helpOutcomeRefuse ||
 		outcome.Kind == helpOutcomeStaff
 }
@@ -257,13 +258,13 @@ func looksLikeQuestion(text string) bool {
 	return false
 }
 
-// handleLeadSideQuestion answers FAQ/refuse or transfers for staff. For miss it
-// sends an unsure line. Always re-asks the lead prompt except on staff transfer.
-// Returns true when the inbound was consumed as a side question.
+// handleLeadSideQuestion answers FAQ/store-info/refuse or transfers for staff.
+// For miss it sends an unsure line. Always re-asks the lead prompt except on
+// staff transfer. Returns true when the inbound was consumed as a side question.
 func handleLeadSideQuestion(c *codedflow.Conv, stepName, text string, reask func()) bool {
 	outcome := classifyHelpQuestion(c, text)
 	switch outcome.Kind {
-	case helpOutcomeFAQ:
+	case helpOutcomeFAQ, helpOutcomeStoreInfo:
 		c.ChatCtx().SetConsumed(true)
 		deliverHelpLine(c, stepName+"_faq", outcome.Answer)
 		reask()

@@ -114,7 +114,7 @@ func answerOpeningQuestion(c *codedflow.Conv) error {
 
 	outcome := asString(c.Session().SessionData[sessionOpenOutcome])
 	switch outcome {
-	case helpOutcomeFAQ:
+	case helpOutcomeFAQ, helpOutcomeStoreInfo:
 		answer := asString(c.Session().SessionData[sessionOpenAnswer])
 		if answer != "" {
 			c.Say(answer)
@@ -154,7 +154,7 @@ func helpFollowUpLoop(c *codedflow.Conv, startWithHowCanIHelp bool) error {
 		}
 
 		text, ok := c.AskText(step, prompt, codedflow.StepNote{
-			Doing:  "Answer follow-up questions from the store FAQ only",
+			Doing:  "Answer follow-up questions from the store FAQ, then store information",
 			Expect: "A store question, a decline, or a request for staff",
 		})
 		if !ok {
@@ -174,7 +174,7 @@ func helpFollowUpLoop(c *codedflow.Conv, startWithHowCanIHelp bool) error {
 				c.Session().SessionData[sessionPendingQuestion] = text
 			}
 			switch outcome.Kind {
-			case helpOutcomeFAQ:
+			case helpOutcomeFAQ, helpOutcomeStoreInfo:
 				deliverHelpLine(c, step+"_ans", outcome.Answer)
 				c.Session().SessionData[sessionHelpTurn] = turn + 1
 			case helpOutcomeRefuse:
@@ -187,7 +187,7 @@ func helpFollowUpLoop(c *codedflow.Conv, startWithHowCanIHelp bool) error {
 		switch action {
 		case "decline":
 			return finishAfterHelp(c)
-		case helpOutcomeFAQ, helpOutcomeRefuse:
+		case helpOutcomeFAQ, helpOutcomeStoreInfo, helpOutcomeRefuse:
 			startWithHowCanIHelp = false
 			continue
 		case helpOutcomeStaff:

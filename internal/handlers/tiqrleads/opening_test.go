@@ -191,6 +191,128 @@ func TestClassifyHelpQuestionNotesIntentErrorAsMiss(t *testing.T) {
 	assert.Equal(t, "ai is not configured", sink.AICalls[0].Error)
 }
 
+func TestClassifyHelpQuestionAnswersFromStoreInfo(t *testing.T) {
+	prevIntent := codedflow.IdentifyCodedIntent
+	codedflow.IdentifyCodedIntent = func(_ codedflow.Host, _ *models.ChatbotSession, _ string, _ codedflow.IntentContext) (codedflow.IntentResult, error) {
+		return codedflow.IntentResult{
+			Route:      codedflow.RouteUnclear,
+			Confidence: 0.4,
+			Reasoning:  "no faq",
+		}, nil
+	}
+	t.Cleanup(func() { codedflow.IdentifyCodedIntent = prevIntent })
+
+	prevStore := codedflow.AnswerFromStoreInfoAI
+	codedflow.AnswerFromStoreInfoAI = func(_ codedflow.Host, _ *models.ChatbotSession, _ string) (string, error) {
+		return `{"confident":true,"confidence":0.96,"answer":"We are a family bakery since 1990."}`, nil
+	}
+	t.Cleanup(func() { codedflow.AnswerFromStoreInfoAI = prevStore })
+
+	sink := &codedflow.PreviewSink{}
+	session := &models.ChatbotSession{
+		SessionData: models.JSONB{
+			"faqs": []any{},
+			codedflow.SessionStoreInfoKey: map[string]any{
+				"about_us": "Family bakery since 1990.",
+			},
+		},
+	}
+	c := codedflow.NewConv(nil, &helpArchiveChat{session: session, archive: sink})
+
+	got := classifyHelpQuestion(c, "What kind of store is this?")
+	assert.Equal(t, helpOutcomeStoreInfo, got.Kind)
+	assert.Equal(t, "We are a family bakery since 1990.", got.Answer)
+}
+
+func TestClassifyHelpQuestionRefundPolicyFromStoreInfo(t *testing.T) {
+	prevIntent := codedflow.IdentifyCodedIntent
+	codedflow.IdentifyCodedIntent = func(_ codedflow.Host, _ *models.ChatbotSession, _ string, _ codedflow.IntentContext) (codedflow.IntentResult, error) {
+		return codedflow.IntentResult{
+			Route:      codedflow.RouteHandoff,
+			Confidence: 0.9,
+			Reasoning:  "no faq match",
+		}, nil
+	}
+	t.Cleanup(func() { codedflow.IdentifyCodedIntent = prevIntent })
+
+	prevStore := codedflow.AnswerFromStoreInfoAI
+	codedflow.AnswerFromStoreInfoAI = func(_ codedflow.Host, _ *models.ChatbotSession, _ string) (string, error) {
+		return `{"confident":true,"confidence":0.93,"answer":"Refunds are available within 7 days."}`, nil
+	}
+	t.Cleanup(func() { codedflow.AnswerFromStoreInfoAI = prevStore })
+
+	session := &models.ChatbotSession{
+		SessionData: models.JSONB{
+			codedflow.SessionStoreInfoKey: map[string]any{
+				"refund_policy": "Refunds within 7 days of purchase.",
+			},
+		},
+	}
+	c := codedflow.NewConv(nil, &helpArchiveChat{session: session, archive: &codedflow.PreviewSink{}})
+
+	got := classifyHelpQuestion(c, "Can I get a refund?")
+	assert.Equal(t, helpOutcomeStoreInfo, got.Kind)
+	assert.Equal(t, "Refunds are available within 7 days.", got.Answer)
+}
+
+func TestClassifyHelpQuestionStaffSkipsStoreInfo(t *testing.T) {
+	prevIntent := codedflow.IdentifyCodedIntent
+	codedflow.IdentifyCodedIntent = func(_ codedflow.Host, _ *models.ChatbotSession, _ string, _ codedflow.IntentContext) (codedflow.IntentResult, error) {
+		return codedflow.IntentResult{
+			Route:      codedflow.RouteHandoff,
+			Confidence: 0.95,
+			Reasoning:  "asked for staff",
+		}, nil
+	}
+	t.Cleanup(func() { codedflow.IdentifyCodedIntent = prevIntent })
+
+	called := false
+	prevStore := codedflow.AnswerFromStoreInfoAI
+	codedflow.AnswerFromStoreInfoAI = func(_ codedflow.Host, _ *models.ChatbotSession, _ string) (string, error) {
+		called = true
+		return `{"confident":true,"confidence":0.99,"answer":"nope"}`, nil
+	}
+	t.Cleanup(func() { codedflow.AnswerFromStoreInfoAI = prevStore })
+
+	session := &models.ChatbotSession{
+		SessionData: models.JSONB{
+			codedflow.SessionStoreInfoKey: map[string]any{"about_us": "Family bakery"},
+		},
+	}
+	c := codedflow.NewConv(nil, &helpArchiveChat{session: session, archive: &codedflow.PreviewSink{}})
+
+	got := classifyHelpQuestion(c, "talk to staff")
+	assert.Equal(t, helpOutcomeStaff, got.Kind)
+	assert.False(t, called)
+}
+
+func TestClassifyHelpQuestionStoreInfoMissStaysMiss(t *testing.T) {
+	prevIntent := codedflow.IdentifyCodedIntent
+	codedflow.IdentifyCodedIntent = func(_ codedflow.Host, _ *models.ChatbotSession, _ string, _ codedflow.IntentContext) (codedflow.IntentResult, error) {
+		return codedflow.IntentResult{
+			Route:      codedflow.RouteUnclear,
+			Confidence: 0.2,
+		}, nil
+	}
+	t.Cleanup(func() { codedflow.IdentifyCodedIntent = prevIntent })
+
+	prevStore := codedflow.AnswerFromStoreInfoAI
+	codedflow.AnswerFromStoreInfoAI = func(_ codedflow.Host, _ *models.ChatbotSession, _ string) (string, error) {
+		return `{"confident":false,"confidence":0.2,"answer":""}`, nil
+	}
+	t.Cleanup(func() { codedflow.AnswerFromStoreInfoAI = prevStore })
+
+	session := &models.ChatbotSession{
+		SessionData: models.JSONB{
+			codedflow.SessionStoreInfoKey: map[string]any{"about_us": "Family bakery"},
+		},
+	}
+	c := codedflow.NewConv(nil, &helpArchiveChat{session: session, archive: &codedflow.PreviewSink{}})
+
+	got := classifyHelpQuestion(c, "What is your API key?")
+	assert.Equal(t, helpOutcomeMiss, got.Kind)
+}
+
 func TestTiqrLeadsDoesNotCallIdentifyCodedIntentDirectly(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)

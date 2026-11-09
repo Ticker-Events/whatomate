@@ -23,10 +23,11 @@ const (
 	helpModePostQualify = "post_qualify"
 	helpModeReentry     = "reentry"
 
-	helpOutcomeFAQ    = "faq"
-	helpOutcomeRefuse = "refuse"
-	helpOutcomeMiss   = "miss"
-	helpOutcomeStaff  = "staff"
+	helpOutcomeFAQ       = "faq"
+	helpOutcomeStoreInfo = "store_info"
+	helpOutcomeRefuse    = "refuse"
+	helpOutcomeMiss      = "miss"
+	helpOutcomeStaff     = "staff"
 
 	howCanIHelpMessage  = "How can I help you?"
 	anythingElseMessage = "Is there anything else I can help with?"
@@ -147,7 +148,7 @@ func isDeclineHelp(text string) bool {
 }
 
 type helpLookupResult struct {
-	Kind   string // faq, refuse, miss, staff
+	Kind   string // faq, store_info, refuse, miss, staff
 	Answer string
 }
 
@@ -214,8 +215,10 @@ func normalizeHelpText(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// classifyHelpQuestion maps free text to a grounded FAQ, refuse, staff handoff, or miss.
-// It does not send messages or transfer. Intent AI is always noted via Conv helpers.
+// classifyHelpQuestion maps free text to a grounded FAQ, store-info answer,
+// refuse, staff handoff, or miss. It does not send messages or transfer.
+// Intent AI is always noted via Conv helpers. Store information is only tried
+// after FAQ matching fails.
 func classifyHelpQuestion(c *codedflow.Conv, message string) helpLookupResult {
 	message = strings.TrimSpace(message)
 	if message == "" {
@@ -238,7 +241,7 @@ func classifyHelpQuestion(c *codedflow.Conv, message string) helpLookupResult {
 		AllowFAQ:           true,
 		AllowRefuse:        true,
 		Question:           "(help after lead qualification)",
-		Doing:              "Answer a customer question from the store FAQ only",
+		Doing:              "Answer a customer question from the store FAQ first, then store information",
 		Expect:             "A store FAQ match, refuse for off-topic or unsafe asks, or handoff when they ask for a person",
 		ChoiceIDs:          map[string]string{},
 		Collections:        map[string]string{},
@@ -251,27 +254,37 @@ func classifyHelpQuestion(c *codedflow.Conv, message string) helpLookupResult {
 
 	raw, err := c.ClassifyIntent(message, ctx)
 	if err != nil {
-		return helpLookupResult{Kind: helpOutcomeMiss}
+		return tryStoreInfoHelp(c, message)
 	}
 	result, grounded := codedflow.ValidateCodedIntent(raw, ctx)
 	if !grounded {
-		return helpLookupResult{Kind: helpOutcomeMiss}
+		return tryStoreInfoHelp(c, message)
 	}
 	if result.Confidence < codedflow.IntentThreshold() && result.Route != codedflow.RouteRefuse {
-		return helpLookupResult{Kind: helpOutcomeMiss}
+		return tryStoreInfoHelp(c, message)
 	}
 	switch result.Route {
 	case codedflow.RouteFAQ:
 		answer := faqAnswerFromSession(c.Session().SessionData, result.FaqID)
 		if answer == "" {
-			return helpLookupResult{Kind: helpOutcomeMiss}
+			return tryStoreInfoHelp(c, message)
 		}
 		return helpLookupResult{Kind: helpOutcomeFAQ, Answer: answer}
 	case codedflow.RouteRefuse:
 		return helpLookupResult{Kind: helpOutcomeRefuse}
 	case codedflow.RouteHandoff:
-		return helpLookupResult{Kind: helpOutcomeStaff}
+		if codedflow.WantsPerson(message) {
+			return helpLookupResult{Kind: helpOutcomeStaff}
+		}
+		return tryStoreInfoHelp(c, message)
 	default:
-		return helpLookupResult{Kind: helpOutcomeMiss}
+		return tryStoreInfoHelp(c, message)
 	}
+}
+
+func tryStoreInfoHelp(c *codedflow.Conv, message string) helpLookupResult {
+	if answer, ok := c.TryStoreInfoAnswer(message); ok {
+		return helpLookupResult{Kind: helpOutcomeStoreInfo, Answer: answer}
+	}
+	return helpLookupResult{Kind: helpOutcomeMiss}
 }

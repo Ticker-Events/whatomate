@@ -119,6 +119,7 @@ func runTiqrEcommerce(c *Conv) error {
 		return c.Transfer(tiqrEcommerceFailCollections)
 	}
 	_ = c.LoadFaqs("faqs", "list_faqs")
+	_ = c.LoadStoreInfo(codedflow.SessionStoreInfoKey, "get_store_info")
 	if c.Stop {
 		return nil
 	}
