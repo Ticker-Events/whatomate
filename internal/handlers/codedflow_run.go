@@ -91,6 +91,13 @@ func (a *App) runCodedFlowPreview(
 	if inboundMedia.DisplayURL == "" && strings.TrimSpace(inboundMedia.MediaURL) != "" {
 		inboundMedia.DisplayURL = displayMediaURL(a.S3Client, inboundMedia.MediaURL, inboundMedia.MessageID)
 	}
+	if flow != nil && flow.Key == tiqrleads.FlowKey && strings.TrimSpace(session.CurrentStep) == "" {
+		var prior []string
+		if a.DB != nil {
+			prior = tiqrleads.UnansweredInboundTexts(a.getSessionHistory(session.ID, 50))
+		}
+		tiqrleads.EnsureOpeningText(session, userInput, prior)
+	}
 	chatCtx := &chatNodeCtx{
 		account:          account,
 		contact:          contact,

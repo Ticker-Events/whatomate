@@ -192,5 +192,10 @@ func buildHandoffSummary(session *models.ChatbotSession) string {
 			asInt(row["weight"]),
 		))
 	}
+	if pending := strings.TrimSpace(asString(data[sessionPendingQuestion])); pending != "" {
+		b.WriteString("Unanswered question: ")
+		b.WriteString(pending)
+		b.WriteByte('\n')
+	}
 	return strings.TrimSpace(b.String())
 }

@@ -69,14 +69,17 @@ func tiqrLeads(c *codedflow.Conv) error {
 		return c.Transfer(codedflow.AgentHandoff)
 	}
 
-	// Contact-scoped: skip re-qualification when this phone already has a qualified lead.
+	// Contact-scoped: already-qualified leads skip re-ask and go to FAQ help.
 	existing, ok := c.Store("existing_lead", "get_lead", map[string]string{
 		"phone_number": c.Session().PhoneNumber,
 	})
 	if ok && leadIsQualified(existing) {
 		writeClassificationFromLead(c, existing)
-		c.Say("We've already recorded your details.")
-		return c.End()
+		_ = c.LoadFaqs("faqs", "list_faqs")
+		if c.Stop {
+			return nil
+		}
+		return runHelpPath(c, true)
 	}
 	if c.Stop {
 		return nil
@@ -127,12 +130,8 @@ func tiqrLeads(c *codedflow.Conv) error {
 		return c.End()
 	}
 
-	c.Once("leads_say_welcome", func() {
-		welcome := strings.TrimSpace(asString(c.Session().SessionData[sessionWelcome]))
-		if welcome != "" {
-			c.Say(welcome)
-		}
-	})
+	stashDefaultNameAnswer(c)
+	welcomeWithName(c)
 
 	for i, item := range steps {
 		row, ok := asStringMap(item)
@@ -212,7 +211,7 @@ func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode str
 				Doing:  "Qualify the lead on " + name,
 				Expect: "An answer that matches one of the conditions",
 			},
-		}, codedflow.RouteOptions{AllowFAQ: true})
+		}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
 		if !ok {
 			return nil
 		}
@@ -259,7 +258,7 @@ func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode str
 			Body:    question,
 			Buttons: buttons,
 			Step:    note,
-		}, codedflow.RouteOptions{AllowFAQ: true})
+		}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
 	} else {
 		items := make([]any, 0, len(buttons))
 		for _, button := range buttons {
@@ -277,7 +276,7 @@ func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode str
 			IDField:  "id",
 			Title:    "title",
 			Step:     note,
-		}, codedflow.RouteOptions{AllowFAQ: true})
+		}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
 	}
 	if !ok {
 		return nil
@@ -359,7 +358,7 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 				Body:    body,
 				Buttons: buttons,
 				Step:    note,
-			}, codedflow.RouteOptions{AllowFAQ: true})
+			}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
 		} else {
 			items := make([]any, 0, len(buttons))
 			for _, button := range buttons {
@@ -377,7 +376,7 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 				IDField:  "id",
 				Title:    "title",
 				Step:     note,
-			}, codedflow.RouteOptions{AllowFAQ: true})
+			}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
 		}
 		if !ok {
 			return nil
@@ -511,25 +510,14 @@ func finishQualified(c *codedflow.Conv) error {
 	if err := SaveLeadFromSession(c, true, asString(c.Session().SessionData[sessionCompletion])); err != nil {
 		c.App().LogWarn("tiqr leads save failed", "error", err)
 	}
-	completion := asString(c.Session().SessionData[sessionCompletion])
-	category := asString(c.Session().SessionData[sessionCategory])
 	thankYou := asString(c.Session().SessionData[sessionThankYou])
 	if thankYou == "" {
 		thankYou = "Thanks for your answers. We'll be in touch soon."
 	}
-	switch completion {
-	case completionAlwaysHandoff:
-		return c.Transfer(codedflow.AgentHandoff)
-	case completionHandoffHigh:
-		if category == "high" {
-			return c.Transfer(codedflow.AgentHandoff)
-		}
+	c.Once("leads_thank_you", func() {
 		c.Say(thankYou)
-		return c.End()
-	default:
-		c.Say(thankYou)
-		return c.End()
-	}
+	})
+	return runHelpPath(c, false)
 }
 
 func leadIsQualified(lead map[string]any) bool {

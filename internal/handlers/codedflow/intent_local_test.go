@@ -145,6 +145,18 @@ func TestValidateCodedIntent_CollectionWithoutAllowCatalog(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestValidateCodedIntent_Refuse(t *testing.T) {
+	_, ok := ValidateCodedIntent(IntentResult{Route: RouteRefuse, Confidence: 0.95}, IntentContext{})
+	assert.False(t, ok)
+
+	got, ok := ValidateCodedIntent(IntentResult{Route: RouteRefuse, Confidence: 0.95}, IntentContext{AllowRefuse: true})
+	require.True(t, ok)
+	assert.Equal(t, RouteRefuse, got.Route)
+
+	_, ok = ValidateCodedIntent(IntentResult{Route: RouteRefuse, FaqID: "1", Confidence: 0.95}, IntentContext{AllowRefuse: true})
+	assert.False(t, ok)
+}
+
 func TestParseCodedIntent_AcceptsNumericIDs(t *testing.T) {
 	raw := `{"language":"en","route":"collection","choice_id":"","collection_id":79,"product_query":"","answer":"","faq_id":"","confidence":0.95,"reasoning":"matches Themed Cakes"}`
 	got, err := parseCodedIntent(raw)
