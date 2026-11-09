@@ -793,7 +793,7 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 		WABAID             string `json:"waba_id"`  // Optional: Discovered via token if missing
 		Name               string `json:"name"`
 		WebhookVerifyToken string `json:"webhook_verify_token"`
-		RedirectURI        string `json:"redirect_uri"` // Must match FB.login OAuth dialog redirect_uri
+		RedirectURI        string `json:"redirect_uri"` // Optional. Empty for FB.login Embedded Signup.
 	}
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil

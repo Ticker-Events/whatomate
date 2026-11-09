@@ -598,7 +598,8 @@ type TokenExchangeResponse struct {
 }
 
 // ExchangeCodeForToken exchanges a Facebook authorization code for a long-lived access token.
-// redirectURI must match the redirect_uri used in the FB.login / OAuth dialog (JS SDK uses the page URL).
+// Leave redirectURI empty for FB.login() Embedded Signup. That dialog's redirect_uri is
+// Facebook's xd_arbiter URL, not the page, so sending the page URL makes Meta reject the code.
 // expiresIn is seconds until expiry (0 if Meta omitted expires_in).
 func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecret, apiVersion, redirectURI string) (accessToken string, expiresIn int, err error) {
 	q := url.Values{}
