@@ -145,14 +145,18 @@ func tiqrLeads(c *codedflow.Conv) error {
 		}
 		kind := strings.TrimSpace(asString(row["kind"]))
 		if kind == answerKindField || (kind == "" && asString(row["key"]) != "" && asString(row["type"]) != "") {
+			stepName := leadFieldStepName(i, row)
 			if stepAlreadyAnswered(c, answerKindField, fieldAnswerName(row)) {
+				drainLeadStepReplay(c, stepName)
 				continue
 			}
 			if err := askCaptureField(c, i, row); err != nil {
 				return err
 			}
 		} else {
+			stepName := leadCriterionStepName(i, row)
 			if stepAlreadyAnswered(c, answerKindCriterion, criterionAnswerName(row)) {
+				drainLeadStepReplay(c, stepName)
 				continue
 			}
 			if err := askCriterion(c, i, row, evalMode); err != nil {
@@ -186,15 +190,27 @@ func stepsFromCriteriaPayload(criteriaRaw map[string]any) []any {
 	return out
 }
 
-func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode string) error {
+func leadCriterionStepName(index int, row map[string]any) string {
 	id := asString(row["id"])
+	if id == "" {
+		return fmt.Sprintf("lead_q_%d", index)
+	}
+	return fmt.Sprintf("lead_q_%s", id)
+}
+
+func leadFieldStepName(index int, field map[string]any) string {
+	key := strings.TrimSpace(asString(field["key"]))
+	if key == "" {
+		return fmt.Sprintf("lead_f_%d", index)
+	}
+	return fmt.Sprintf("lead_f_%s", key)
+}
+
+func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode string) error {
 	name := asString(row["name"])
 	question := asString(row["question"])
 	weight := asInt(row["weight"])
-	stepName := fmt.Sprintf("lead_q_%s", id)
-	if id == "" {
-		stepName = fmt.Sprintf("lead_q_%d", index)
-	}
+	stepName := leadCriterionStepName(index, row)
 
 	if evalMode == evalHybrid {
 		rules, _ := anySlice(row["rules"])
@@ -301,10 +317,7 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 	}
 	fieldType := strings.TrimSpace(asString(field["type"]))
 	help := strings.TrimSpace(asString(field["help_text"]))
-	stepName := fmt.Sprintf("lead_f_%s", key)
-	if key == "" {
-		stepName = fmt.Sprintf("lead_f_%d", index)
-	}
+	stepName := leadFieldStepName(index, field)
 	body := label
 	if help != "" {
 		body += "\n" + help
@@ -430,7 +443,7 @@ func askCaptureImage(c *codedflow.Conv, stepName, label, body string) error {
 	if !strings.Contains(strings.ToLower(prompt), "photo") {
 		prompt += "\nPlease send a photo."
 	}
-	if rec, done := c.DoneCall(); done {
+	if rec, ok := consumeNamedCall(c, name); ok {
 		if !codedflow.CallOK(rec) {
 			return nil
 		}
@@ -492,19 +505,52 @@ func stashFieldAnswer(c *codedflow.Conv, stepName, name, question, answer string
 }
 
 func stashAnswer(c *codedflow.Conv, stepName, kind, name, question, answer string, score, weight int) {
-	c.Once("answer_"+stepName, func() {
-		rows := answersFromSessionData(c.Session().SessionData)
-		rows = append(rows, map[string]any{
-			"kind":           kind,
-			"criterion_name": name,
-			"question":       question,
-			"answer":         answer,
-			"score":          score,
-			"weight":         weight,
-			"position":       len(rows),
-		})
+	upsert := func() {
+		upsertLeadAnswer(c, kind, name, question, answer, score, weight)
+	}
+	c.Once("answer_"+stepName, upsert)
+	// Once may already have fired with an empty poisoned answer from a
+	// stolen DoneCall. Still write a real answer when we have one.
+	if strings.TrimSpace(answer) != "" {
+		upsert()
+	}
+}
+
+func upsertLeadAnswer(c *codedflow.Conv, kind, name, question, answer string, score, weight int) {
+	if c == nil || c.Session() == nil {
+		return
+	}
+	rows := answersFromSessionData(c.Session().SessionData)
+	for i, item := range rows {
+		row, ok := asStringMap(item)
+		if !ok {
+			continue
+		}
+		if asString(row["kind"]) != kind {
+			continue
+		}
+		if !strings.EqualFold(asString(row["criterion_name"]), name) {
+			continue
+		}
+		row["question"] = question
+		row["answer"] = answer
+		row["score"] = score
+		row["weight"] = weight
+		row["position"] = i
+		rows[i] = row
 		c.Session().SessionData[sessionAnswers] = rows
+		return
+	}
+	rows = append(rows, map[string]any{
+		"kind":           kind,
+		"criterion_name": name,
+		"question":       question,
+		"answer":         answer,
+		"score":          score,
+		"weight":         weight,
+		"position":       len(rows),
 	})
+	c.Session().SessionData[sessionAnswers] = rows
 }
 
 func finishQualified(c *codedflow.Conv) error {

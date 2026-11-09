@@ -24,7 +24,7 @@ func askLeadRouteButtons(
 	if c.Stop {
 		return codedflow.Route{}, false
 	}
-	if route, done, ok := replayLeadRoute(c); done {
+	if route, done, ok := replayLeadRoute(c, stepName); done {
 		return route, ok
 	}
 	choices := choiceMapFromButtons(prompt.Buttons)
@@ -61,7 +61,7 @@ func askLeadRouteList(
 	if c.Stop {
 		return codedflow.Route{}, false
 	}
-	if route, done, ok := replayLeadRoute(c); done {
+	if route, done, ok := replayLeadRoute(c, stepName); done {
 		return route, ok
 	}
 	if prompt.ItemsKey != "" && items != nil {
@@ -100,7 +100,7 @@ func askLeadRouteText(
 	if c.Stop {
 		return codedflow.Route{}, false
 	}
-	if route, done, ok := replayLeadRoute(c); done {
+	if route, done, ok := replayLeadRoute(c, stepName); done {
 		return route, ok
 	}
 	choices := choiceMapFromButtons(prompt.Buttons)
@@ -140,7 +140,7 @@ func askLeadText(c *codedflow.Conv, stepName, body string, step codedflow.StepNo
 	if c.Stop {
 		return "", false
 	}
-	if rec, done := c.DoneCall(); done {
+	if rec, ok := consumeNamedCall(c, stepName); ok {
 		if !codedflow.CallOK(rec) {
 			return "", false
 		}
@@ -180,7 +180,7 @@ func askLeadNumber(c *codedflow.Conv, stepName string, prompt codedflow.NumberPr
 	if c.Stop {
 		return "", false
 	}
-	if rec, done := c.DoneCall(); done {
+	if rec, ok := consumeNamedCall(c, stepName); ok {
 		if !codedflow.CallOK(rec) {
 			return "", false
 		}
@@ -302,9 +302,9 @@ func reaskAfterUnsure(c *codedflow.Conv, stepName string, reask func()) codedflo
 	return codedflow.Route{}
 }
 
-func replayLeadRoute(c *codedflow.Conv) (codedflow.Route, bool, bool) {
-	rec, done := c.DoneCall()
-	if !done {
+func replayLeadRoute(c *codedflow.Conv, stepName string) (codedflow.Route, bool, bool) {
+	rec, ok := consumeNamedCall(c, stepName)
+	if !ok {
 		return codedflow.Route{}, false, false
 	}
 	if !codedflow.CallOK(rec) {
@@ -319,6 +319,34 @@ func replayLeadRoute(c *codedflow.Conv) (codedflow.Route, bool, bool) {
 		ID:    asString(rec["id"]),
 		Title: asString(rec["title"]),
 	}, true, true
+}
+
+// consumeNamedCall advances the coded-call cursor only when the next saved
+// record belongs to stepName. Blind DoneCall would let a skipped earlier
+// step's record poison the next ask (empty answers, stolen inbound).
+func consumeNamedCall(c *codedflow.Conv, stepName string) (map[string]any, bool) {
+	if c == nil || strings.TrimSpace(stepName) == "" {
+		return nil, false
+	}
+	records := c.CallRecords()
+	seq := c.Seq()
+	if seq < 0 || seq >= len(records) {
+		return nil, false
+	}
+	if asString(records[seq]["name"]) != stepName {
+		return nil, false
+	}
+	return c.DoneCall()
+}
+
+// drainLeadStepReplay consumes this step's choice/text call and its
+// answer_* Once marker when the step was already answered and skipped.
+func drainLeadStepReplay(c *codedflow.Conv, stepName string) {
+	if c == nil || strings.TrimSpace(stepName) == "" {
+		return
+	}
+	_, _ = consumeNamedCall(c, stepName)
+	_, _ = consumeNamedCall(c, "answer_"+stepName)
 }
 
 func acceptLeadChoice(c *codedflow.Conv, stepName, id, title string) (codedflow.Route, bool) {
@@ -523,9 +551,11 @@ func stepAlreadyAnswered(c *codedflow.Conv, kind, name string) bool {
 		if asString(row["kind"]) != kind {
 			continue
 		}
-		if strings.EqualFold(asString(row["criterion_name"]), name) {
-			return true
+		if !strings.EqualFold(asString(row["criterion_name"]), name) {
+			continue
 		}
+		// Empty answers are replay poison from a stolen DoneCall — re-ask.
+		return strings.TrimSpace(asString(row["answer"])) != ""
 	}
 	return false
 }
