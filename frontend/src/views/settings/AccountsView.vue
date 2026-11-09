@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -64,6 +64,13 @@ const whatsappConfig = ref<{ app_id: string; config_id: string; api_version: str
 const isFBSDKLoaded = ref(false)
 const isConnectingFB = ref(false)
 const showOnboardingDialog = ref(false)
+const signupSession = ref({ wabaId: '', phoneNumberId: '' })
+
+const signupFinishEvents = new Set([
+  'FINISH',
+  'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+  'FINISH_ONLY_WABA',
+])
 
 const canWrite = computed(() => authStore.hasPermission('accounts', 'write'))
 const canDelete = computed(() => authStore.hasPermission('accounts', 'delete'))
@@ -88,8 +95,47 @@ watch(() => organizationsStore.selectedOrgId, () => {
   fetchWhatsAppConfig()
 })
 onMounted(async () => {
+  window.addEventListener('message', onEmbeddedSignupMessage)
   await Promise.all([fetchAccounts(), fetchWhatsAppConfig()])
 })
+onUnmounted(() => {
+  window.removeEventListener('message', onEmbeddedSignupMessage)
+})
+
+function onEmbeddedSignupMessage(event: MessageEvent) {
+  if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return
+  const data = parseSignupMessage(event.data)
+  if (!data || data.type !== 'WA_EMBEDDED_SIGNUP' || !signupFinishEvents.has(data.event || '')) return
+  signupSession.value = {
+    wabaId: data.data?.waba_id || signupSession.value.wabaId,
+    phoneNumberId: data.data?.phone_number_id || signupSession.value.phoneNumberId,
+  }
+}
+
+function parseSignupMessage(raw: unknown): { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } } | null {
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+  if (raw && typeof raw === 'object') return raw as { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } }
+  return null
+}
+
+function waitForSignupSession(): Promise<void> {
+  if (signupSession.value.wabaId) return Promise.resolve()
+  return new Promise((resolve) => {
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      if (signupSession.value.wabaId || Date.now() - started >= 2000) {
+        window.clearInterval(timer)
+        resolve()
+      }
+    }, 50)
+  })
+}
 
 async function fetchAccounts() {
   isLoading.value = true
@@ -162,6 +208,7 @@ function launchWhatsAppSignup(isCoexistence: boolean = true) {
 
   showOnboardingDialog.value = false
   isConnectingFB.value = true
+  signupSession.value = { wabaId: '', phoneNumberId: '' }
 
   const loginOptions: any = {
     config_id: whatsappConfig.value.config_id,
@@ -178,7 +225,8 @@ function launchWhatsAppSignup(isCoexistence: boolean = true) {
     }
   } else {
     loginOptions.extras = {
-      setup: {}
+      setup: {},
+      sessionInfoVersion: '3'
     }
   }
 
@@ -193,14 +241,22 @@ function launchWhatsAppSignup(isCoexistence: boolean = true) {
   }
   try {
     window.FB.login(
-      (response: any) => {
+      async (response: any) => {
         if (response.authResponse) {
           const code = response.authResponse.code
-          const phoneNumberId = response.authResponse.phone_number_id
-          const wabaId = response.authResponse.waba_id
-
           if (!code) {
             toast.error('Incomplete data from Facebook: missing authorization code')
+            isConnectingFB.value = false
+            return
+          }
+
+          // waba_id and phone_number_id arrive in a WA_EMBEDDED_SIGNUP postMessage,
+          // not on authResponse. The message usually lands just before this callback.
+          await waitForSignupSession()
+          const phoneNumberId = response.authResponse.phone_number_id || signupSession.value.phoneNumberId
+          const wabaId = response.authResponse.waba_id || signupSession.value.wabaId
+          if (!wabaId) {
+            toast.error('Facebook did not return a WhatsApp Business Account. Finish the signup window and try again.')
             isConnectingFB.value = false
             return
           }

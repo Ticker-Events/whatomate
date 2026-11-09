@@ -24,12 +24,12 @@ import (
 type AccountRequest struct {
 	Name string `json:"name" validate:"required"`
 	// Provider selects the messaging backend: "meta" (default) or "aisensy"
-	Provider               string `json:"provider"`
-	AppID                  string `json:"app_id"`
-	PhoneID                string `json:"phone_id" validate:"required"`
-	BusinessID             string `json:"business_id"`
-	AccessToken            string `json:"access_token"`
-	AppSecret              string `json:"app_secret"` // Meta App Secret for webhook signature verification
+	Provider    string `json:"provider"`
+	AppID       string `json:"app_id"`
+	PhoneID     string `json:"phone_id" validate:"required"`
+	BusinessID  string `json:"business_id"`
+	AccessToken string `json:"access_token"`
+	AppSecret   string `json:"app_secret"` // Meta App Secret for webhook signature verification
 
 	WebhookVerifyToken     string `json:"webhook_verify_token"`
 	APIVersion             string `json:"api_version"`
@@ -896,52 +896,53 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	return r.SendEnvelope(out)
 }
 
+func (a *App) discoverWABAID(ctx context.Context, orgID uuid.UUID, accessToken string) (string, error) {
+	a.Log.Info("Missing WABA ID, attempting discovery via debug_token")
+
+	appID, appSecret, _, err := a.resolveMetaAppCreds(orgID)
+	if err != nil {
+		return "", err
+	}
+
+	appAccessToken := fmt.Sprintf("%s|%s", appID, appSecret)
+	debugInfo, err := a.WhatsApp.GetTokenDebugInfo(ctx, accessToken, appAccessToken)
+	if err != nil {
+		a.Log.Error("Failed to debug token", "error", err)
+		return "", fmt.Errorf("failed to validate token details: %w", err)
+	}
+
+	for _, scopeName := range []string{"whatsapp_business_management", "whatsapp_business_messaging"} {
+		for _, scope := range debugInfo.GranularScopes {
+			if scope.Scope == scopeName && len(scope.TargetIds) > 0 {
+				return scope.TargetIds[0], nil
+			}
+		}
+	}
+
+	a.Log.Warn("No WABA ID found in granular scopes, falling back to /me/accounts strategy")
+	sharedInfo, err := a.WhatsApp.GetSharedWABA(ctx, accessToken)
+	if err == nil && len(sharedInfo.Data) > 0 {
+		return sharedInfo.Data[0].ID, nil
+	}
+	return "", nil
+}
+
 func (a *App) discoverWABAAndPhone(ctx context.Context, orgID uuid.UUID, accessToken, phoneID, wabaID, name string) (string, string, string, error) {
 	if phoneID != "" && wabaID != "" {
 		return phoneID, wabaID, name, nil
 	}
 
-	a.Log.Info("Missing PhoneID/WABAID, attempting discovery via debug_token")
-
-	// 1. Resolve Meta credentials for this org
-	appID, appSecret, _, err := a.resolveMetaAppCreds(orgID)
-	if err != nil {
-		return "", "", "", err
-	}
-
-	appAccessToken := fmt.Sprintf("%s|%s", appID, appSecret)
-
-	debugInfo, err := a.WhatsApp.GetTokenDebugInfo(ctx, accessToken, appAccessToken)
-	if err != nil {
-		a.Log.Error("Failed to debug token", "error", err)
-		return "", "", "", fmt.Errorf("failed to validate token details: %w", err)
-	}
-
-	// 2. Find WABA ID from Granular Scopes
-	var discoveredWABAID string
-	for _, scope := range debugInfo.GranularScopes {
-		if scope.Scope == "whatsapp_business_management" {
-			if len(scope.TargetIds) > 0 {
-				discoveredWABAID = scope.TargetIds[0]
-				break
-			}
+	if wabaID == "" {
+		discoveredWABAID, err := a.discoverWABAID(ctx, orgID, accessToken)
+		if err != nil {
+			return "", "", "", err
 		}
-	}
-
-	if discoveredWABAID == "" {
-		a.Log.Warn("No WABA ID found in granular scopes, falling back to /me/accounts strategy")
-		sharedInfo, err := a.WhatsApp.GetSharedWABA(ctx, accessToken)
-		if err == nil && len(sharedInfo.Data) > 0 {
-			discoveredWABAID = sharedInfo.Data[0].ID
+		if discoveredWABAID == "" {
+			return "", "", "", fmt.Errorf("could not discover WhatsApp Business Account ID from token")
 		}
+		wabaID = discoveredWABAID
+		a.Log.Info("Discovered WABA ID", "waba_id", wabaID)
 	}
-
-	if discoveredWABAID == "" {
-		return "", "", "", fmt.Errorf("could not discover WhatsApp Business Account ID from token")
-	}
-
-	wabaID = discoveredWABAID
-	a.Log.Info("Discovered WABA ID", "waba_id", wabaID)
 
 	if phoneID == "" {
 		phonesResp, err := a.WhatsApp.GetWABAPhoneNumbers(ctx, wabaID, accessToken)
