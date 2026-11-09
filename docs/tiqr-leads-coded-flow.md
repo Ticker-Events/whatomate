@@ -16,7 +16,7 @@ Per-account enablement, keywords, **Set as default**, evaluation mode, and after
 | --- | --- |
 | None | Run qualification; `create_lead` creates the row |
 | `qualified=true` | Skip re-asking; load FAQs and enter the post-flow help path (no “details already collected” line) |
-| `qualified=false` (mid-chat partial) | Re-run questions; `create_lead` upserts the same phone row |
+| `qualified=false` (partial / unclassified) | Seed saved answers, skip welcome, continue with a short “where we left off” line, ask only unanswered steps; `create_lead` upserts the same phone row when complete |
 
 Uniqueness on the backend is `(store, phone_number)`. `session_id` is kept as the last Whatomate session that wrote the lead (audit only).
 
@@ -31,17 +31,18 @@ When the flow starts (`CurrentStep` empty), unanswered inbound texts for the ses
 
 ## Shared runner behavior
 
-TiQR Leads uses the shared coded-flow route APIs with `RouteOptions{AllowFAQ: true, AllowRefuse: true}` on criterion and capture asks.
+TiQR Leads uses a leads-only ask path (not the shared ecommerce FAQ stop) for criterion and capture asks.
 
 | Concern | Behavior |
 | --- | --- |
 | Default flow | On a new session, flow keywords are checked first. `matchDefaultCodedFlow` starts an enabled default binding only when the message matches no coded-flow or visual flow keyword |
 | Translation | Outbound lines go through `Conv.text()`; language is stored when intent returns it. Detection is limited by the store’s `supported_languages` (same as ecommerce). Empty list = open detection; failed store load = `["en"]` |
-| Intent | Free text goes through `resolveFreeText` / `IdentifyCodedIntent`. Exact button or list taps do not |
-| FAQ | After the existing-lead check, `LoadFaqs("faqs", "list_faqs")`. Empty or failed FAQ load does not transfer. A grounded FAQ answer is sent and the flow **stays on the same criterion**; FAQ replies are not lead answers and do not change the score |
-| Refuse | Route `refuse` for internal ids/secrets, malicious or jailbreak prompts, or asks unrelated to store FAQs. Customer hears `I can't help you with that.` and the criterion is re-asked (no invented answer, no transfer) |
-| Guide | Below the 0.75 threshold, or route `unclear`, uses `askGuide` up to `MaxGuideTurns` (3), then handoff |
-| Handoff | Route `handoff`, ungrounded intent, intent error, or used-up guide calls `Conv.Transfer`. Before transfer, a (partial) lead is saved (live) or classification is written for preview. `TryEcommerceTransfer` does not run for this flow |
+| Intent | Choice paraphrases are classified onto the current buttons/rules. Exact button or list taps do not need intent |
+| FAQ / side question | After the existing-lead check, `LoadFaqs("faqs", "list_faqs")`. Empty or failed FAQ load does not transfer. A grounded FAQ answer (or refuse line / short unsure line) is sent and the **same lead prompt is re-asked in the same turn**. Side questions are not stored as lead answers and do not change the score. Free-text capture fields only divert when the reply looks like a question or matches FAQ/refuse/staff |
+| Refuse | Off-topic or unsafe asks hear `I can't help you with that.` and the criterion is re-asked (no invented answer, no transfer) |
+| Staff request | Explicit ask for a person still transfers. Before transfer, a (partial) lead is saved (live) or classification is written for preview |
+| Handoff | Mid-chat staff handoff calls `Conv.Transfer`. `TryEcommerceTransfer` does not run for this flow |
+| Session expiry | When a `tiqr_leads` session idles past `SessionTimeoutMins`, Whatomate posts `create_lead` with `qualified=false` and `completion_action=session_expired` (category `unclassified`) if any answers beyond the auto Name were collected. The next chat seeds those answers and only asks the remaining steps |
 
 ## Evaluation modes
 
@@ -58,7 +59,9 @@ Lead score is the weighted sum of answered criteria: each contributes `score * w
 
 Category uses store thresholds (defaults: High ≥ 75, Medium ≥ 50, Low ≥ 25, else Unqualified), with High > Medium > Low.
 
-On mid-chat handoff, unanswered criteria are omitted from the score (not treated as zero). `qualified` is true only when every enabled criterion for that mode was answered.
+Session-expired partials use category `unclassified` (not scored into High/Medium/Low/Unqualified). Staff classification in chat cannot pick Unclassified.
+
+On mid-chat handoff or session expiry, unanswered criteria are omitted from the score (not treated as zero). `qualified` is true only when every enabled criterion for that mode was answered.
 
 Session keys written for preview / handoff: `leads_score`, `leads_category`, `leads_qualified`, plus `leads_answers`.
 

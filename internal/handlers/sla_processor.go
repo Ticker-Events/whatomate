@@ -140,6 +140,9 @@ func (p *SLAProcessor) processStaleTransfers() {
 	for _, s := range settings {
 		p.processOrganizationSLA(s, now)
 	}
+
+	// Persist partial TiQR Leads when chat sessions idle past timeout.
+	p.flushExpiredLeadsSessions()
 }
 
 // processOrganizationSLA processes SLA for a single organization

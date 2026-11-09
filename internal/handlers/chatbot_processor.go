@@ -1176,6 +1176,9 @@ func (a *App) getOrCreateSession(orgID, contactID uuid.UUID, accountName, phoneN
 		return &session, false // existing session
 	}
 
+	// Save any timed-out tiqr_leads answers before opening a fresh session.
+	a.flushTimedOutLeadsSessionForContact(orgID, contactID, accountName, timeoutMins)
+
 	// Create new session
 	session = models.ChatbotSession{
 		BaseModel:       models.BaseModel{ID: uuid.New()},

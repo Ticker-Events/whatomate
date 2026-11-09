@@ -35,6 +35,7 @@ const (
 	completionHandoffHigh   = "handoff_high"
 	completionAlwaysHandoff = "always_handoff"
 	completionMidChat       = "mid_chat"
+	completionSessionExpired = "session_expired"
 
 	answerKindCriterion = "criterion"
 	answerKindField     = "field"
@@ -84,6 +85,9 @@ func tiqrLeads(c *codedflow.Conv) error {
 	}
 	if c.Stop {
 		return nil
+	}
+	if ok && leadExists(existing) && !leadIsQualified(existing) {
+		seedPartialLeadAnswers(c, existing)
 	}
 
 	_ = c.LoadFaqs("faqs", "list_faqs")
@@ -141,10 +145,16 @@ func tiqrLeads(c *codedflow.Conv) error {
 		}
 		kind := strings.TrimSpace(asString(row["kind"]))
 		if kind == answerKindField || (kind == "" && asString(row["key"]) != "" && asString(row["type"]) != "") {
+			if stepAlreadyAnswered(c, answerKindField, fieldAnswerName(row)) {
+				continue
+			}
 			if err := askCaptureField(c, i, row); err != nil {
 				return err
 			}
 		} else {
+			if stepAlreadyAnswered(c, answerKindCriterion, criterionAnswerName(row)) {
+				continue
+			}
 			if err := askCriterion(c, i, row, evalMode); err != nil {
 				return err
 			}
@@ -205,19 +215,16 @@ func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode str
 			scoreByID[ruleID] = asInt(rule["score"])
 			labelByID[ruleID] = condition
 		}
-		route, ok := c.AskRouteText(stepName, codedflow.TextRoutePrompt{
+		route, ok := askLeadRouteText(c, stepName, codedflow.TextRoutePrompt{
 			Body:    question,
 			Buttons: buttons,
 			Step: codedflow.StepNote{
 				Doing:  "Qualify the lead on " + name,
 				Expect: "An answer that matches one of the conditions",
 			},
-		}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
+		})
 		if !ok {
 			return nil
-		}
-		if route.Kind != codedflow.RouteChoice {
-			return c.Transfer(codedflow.AgentHandoff)
 		}
 		stashCriterionAnswer(c, stepName, name, question, labelByID[route.ID], scoreByID[route.ID], weight)
 		return nil
@@ -255,11 +262,11 @@ func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode str
 	var route codedflow.Route
 	var ok bool
 	if len(buttons) <= 3 {
-		route, ok = c.AskRouteButtons(stepName, codedflow.ButtonPrompt{
+		route, ok = askLeadRouteButtons(c, stepName, codedflow.ButtonPrompt{
 			Body:    question,
 			Buttons: buttons,
 			Step:    note,
-		}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
+		})
 	} else {
 		items := make([]any, 0, len(buttons))
 		for _, button := range buttons {
@@ -268,7 +275,7 @@ func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode str
 				"title": button.Title,
 			})
 		}
-		route, ok = c.AskRouteList(stepName, items, codedflow.ListPrompt{
+		route, ok = askLeadRouteList(c, stepName, items, codedflow.ListPrompt{
 			Body:     question,
 			Button:   "Choose",
 			Header:   truncate(name, 60),
@@ -277,13 +284,10 @@ func askCriterion(c *codedflow.Conv, index int, row map[string]any, evalMode str
 			IDField:  "id",
 			Title:    "title",
 			Step:     note,
-		}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
+		})
 	}
 	if !ok {
 		return nil
-	}
-	if route.Kind != codedflow.RouteChoice {
-		return c.Transfer(codedflow.AgentHandoff)
 	}
 	stashCriterionAnswer(c, stepName, name, question, labelByID[route.ID], scoreByID[route.ID], weight)
 	return nil
@@ -305,10 +309,14 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 	if help != "" {
 		body += "\n" + help
 	}
+	note := codedflow.StepNote{
+		Doing:  "Collect lead field " + label,
+		Expect: "A free-text reply",
+	}
 
 	switch fieldType {
 	case "number":
-		value, ok := c.AskNumber(stepName, codedflow.NumberPrompt{
+		value, ok := askLeadNumber(c, stepName, codedflow.NumberPrompt{
 			Body:    body,
 			Pattern: `^-?\d+(\.\d+)?$`,
 			Step: codedflow.StepNote{
@@ -331,10 +339,7 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 			})
 		}
 		if len(buttons) == 0 {
-			text, ok := c.AskText(stepName, body, codedflow.StepNote{
-				Doing:  "Collect lead field " + label,
-				Expect: "A free-text reply",
-			})
+			text, ok := askLeadText(c, stepName, body, note)
 			if !ok {
 				return nil
 			}
@@ -348,18 +353,18 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 		for i := range buttons {
 			buttons[i].Title = truncate(buttons[i].Title, titleMax)
 		}
-		note := codedflow.StepNote{
+		choiceNote := codedflow.StepNote{
 			Doing:  "Collect lead field " + label,
 			Expect: "One of the offered choices",
 		}
 		var route codedflow.Route
 		var ok bool
 		if len(buttons) <= 3 {
-			route, ok = c.AskRouteButtons(stepName, codedflow.ButtonPrompt{
+			route, ok = askLeadRouteButtons(c, stepName, codedflow.ButtonPrompt{
 				Body:    body,
 				Buttons: buttons,
-				Step:    note,
-			}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
+				Step:    choiceNote,
+			})
 		} else {
 			items := make([]any, 0, len(buttons))
 			for _, button := range buttons {
@@ -368,7 +373,7 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 					"title": button.Title,
 				})
 			}
-			route, ok = c.AskRouteList(stepName, items, codedflow.ListPrompt{
+			route, ok = askLeadRouteList(c, stepName, items, codedflow.ListPrompt{
 				Body:     body,
 				Button:   "Choose",
 				Header:   truncate(label, 60),
@@ -376,14 +381,11 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 				ItemsKey: stepName + "_items",
 				IDField:  "id",
 				Title:    "title",
-				Step:     note,
-			}, codedflow.RouteOptions{AllowFAQ: true, AllowRefuse: true})
+				Step:     choiceNote,
+			})
 		}
 		if !ok {
 			return nil
-		}
-		if route.Kind != codedflow.RouteChoice {
-			return c.Transfer(codedflow.AgentHandoff)
 		}
 		chosen := route.ID
 		for i, button := range buttons {
@@ -401,7 +403,7 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 			prompt += "\nOptions: " + strings.Join(options, ", ")
 		}
 		prompt += "\nReply with one or more options."
-		text, ok := c.AskText(stepName, prompt, codedflow.StepNote{
+		text, ok := askLeadText(c, stepName, prompt, codedflow.StepNote{
 			Doing:  "Collect lead field " + label,
 			Expect: "One or more of the listed options",
 		})
@@ -413,11 +415,7 @@ func askCaptureField(c *codedflow.Conv, index int, field map[string]any) error {
 	case "image":
 		return askCaptureImage(c, stepName, label, body)
 	default:
-		// text / textarea
-		text, ok := c.AskText(stepName, body, codedflow.StepNote{
-			Doing:  "Collect lead field " + label,
-			Expect: "A free-text reply",
-		})
+		text, ok := askLeadText(c, stepName, body, note)
 		if !ok {
 			return nil
 		}
@@ -437,6 +435,9 @@ func askCaptureImage(c *codedflow.Conv, stepName, label, body string) error {
 			return nil
 		}
 		stashFieldAnswer(c, stepName, label, body, asString(rec["value"]))
+		return nil
+	}
+	if ensureLeadSideQuestionOnImage(c, name, body) {
 		return nil
 	}
 	media := codedflow.InboundMedia{}

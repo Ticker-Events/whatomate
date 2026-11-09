@@ -58,6 +58,10 @@ func stashDefaultNameAnswer(c *codedflow.Conv) {
 
 func welcomeWithName(c *codedflow.Conv) {
 	c.Once("leads_say_welcome", func() {
+		if asString(c.Session().SessionData[sessionResumePartial]) == "1" {
+			c.Say(continueLeadMessage)
+			return
+		}
 		welcome := strings.TrimSpace(asString(c.Session().SessionData[sessionWelcome]))
 		name := strings.TrimSpace(asString(c.Session().SessionData["contact_name"]))
 		switch {
