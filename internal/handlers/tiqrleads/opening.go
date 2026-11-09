@@ -23,14 +23,18 @@ const (
 	helpModePostQualify = "post_qualify"
 	helpModeReentry     = "reentry"
 
-	helpOutcomeFAQ       = "faq"
-	helpOutcomeStoreInfo = "store_info"
-	helpOutcomeRefuse    = "refuse"
-	helpOutcomeMiss      = "miss"
-	helpOutcomeStaff     = "staff"
+	helpOutcomeFAQ        = "faq"
+	helpOutcomeStoreInfo  = "store_info"
+	helpOutcomeStoreFacts = "store_facts"
+	helpOutcomeRefuse     = "refuse"
+	helpOutcomeMiss       = "miss"
+	helpOutcomeStaff      = "staff"
 
-	howCanIHelpMessage  = "How can I help you?"
-	anythingElseMessage = "Is there anything else I can help with?"
+	sessionOpeningHandled = "leads_opening_handled"
+
+	howCanIHelpMessage   = "How can I help you?"
+	anythingElseMessage  = "Is there anything else I can help with?"
+	openingBridgeMessage = "I can also note a few details for the team."
 )
 
 // EnsureOpeningText stores unanswered pre-flow inbound text once on the session.
@@ -254,20 +258,20 @@ func classifyHelpQuestion(c *codedflow.Conv, message string) helpLookupResult {
 
 	raw, err := c.ClassifyIntent(message, ctx)
 	if err != nil {
-		return tryStoreInfoHelp(c, message)
+		return tryGroundedStoreAnswer(c, message)
 	}
 	result, grounded := codedflow.ValidateCodedIntent(raw, ctx)
 	if !grounded {
-		return tryStoreInfoHelp(c, message)
+		return tryGroundedStoreAnswer(c, message)
 	}
 	if result.Confidence < codedflow.IntentThreshold() && result.Route != codedflow.RouteRefuse {
-		return tryStoreInfoHelp(c, message)
+		return tryGroundedStoreAnswer(c, message)
 	}
 	switch result.Route {
 	case codedflow.RouteFAQ:
 		answer := faqAnswerFromSession(c.Session().SessionData, result.FaqID)
 		if answer == "" {
-			return tryStoreInfoHelp(c, message)
+			return tryGroundedStoreAnswer(c, message)
 		}
 		return helpLookupResult{Kind: helpOutcomeFAQ, Answer: answer}
 	case codedflow.RouteRefuse:
@@ -276,13 +280,17 @@ func classifyHelpQuestion(c *codedflow.Conv, message string) helpLookupResult {
 		if codedflow.WantsPerson(message) {
 			return helpLookupResult{Kind: helpOutcomeStaff}
 		}
-		return tryStoreInfoHelp(c, message)
+		return tryGroundedStoreAnswer(c, message)
 	default:
-		return tryStoreInfoHelp(c, message)
+		return tryGroundedStoreAnswer(c, message)
 	}
 }
 
-func tryStoreInfoHelp(c *codedflow.Conv, message string) helpLookupResult {
+// tryGroundedStoreAnswer checks structured store fields first, then policy text.
+func tryGroundedStoreAnswer(c *codedflow.Conv, message string) helpLookupResult {
+	if facts := tryStoreFactsHelp(c, message); facts.Kind == helpOutcomeStoreFacts {
+		return facts
+	}
 	if answer, ok := c.TryStoreInfoAnswer(message); ok {
 		return helpLookupResult{Kind: helpOutcomeStoreInfo, Answer: answer}
 	}

@@ -210,7 +210,7 @@ func askLeadNumber(c *codedflow.Conv, stepName string, prompt codedflow.NumberPr
 		c.AppendCall(map[string]any{"name": stepName, "ok": true, "var": stepName, "value": text})
 		return text, true
 	}
-	if shouldDivertFreeText(c, text) || looksLikeQuestion(text) {
+	if shouldDivertFreeText(c, text) {
 		if handled := handleLeadSideQuestion(c, stepName, text, func() {
 			_, _ = c.App().ExecChatMessage(c.ChatCtx(), stepName, map[string]any{"message": body})
 		}); handled {
@@ -227,14 +227,16 @@ func askLeadNumber(c *codedflow.Conv, stepName string, prompt codedflow.NumberPr
 }
 
 func shouldDivertFreeText(c *codedflow.Conv, text string) bool {
-	if looksLikeQuestion(text) {
-		return true
-	}
 	outcome := classifyHelpQuestion(c, text)
-	return outcome.Kind == helpOutcomeFAQ ||
-		outcome.Kind == helpOutcomeStoreInfo ||
-		outcome.Kind == helpOutcomeRefuse ||
-		outcome.Kind == helpOutcomeStaff
+	switch outcome.Kind {
+	case helpOutcomeFAQ, helpOutcomeStoreInfo, helpOutcomeStoreFacts, helpOutcomeRefuse, helpOutcomeStaff:
+		return true
+	case helpOutcomeMiss:
+		// Obvious questions that still miss get an unsure line; plain answers stay.
+		return looksLikeQuestion(text)
+	default:
+		return false
+	}
 }
 
 func looksLikeQuestion(text string) bool {
@@ -264,7 +266,7 @@ func looksLikeQuestion(text string) bool {
 func handleLeadSideQuestion(c *codedflow.Conv, stepName, text string, reask func()) bool {
 	outcome := classifyHelpQuestion(c, text)
 	switch outcome.Kind {
-	case helpOutcomeFAQ, helpOutcomeStoreInfo:
+	case helpOutcomeFAQ, helpOutcomeStoreInfo, helpOutcomeStoreFacts:
 		c.ChatCtx().SetConsumed(true)
 		deliverHelpLine(c, stepName+"_faq", outcome.Answer)
 		reask()

@@ -29,6 +29,17 @@ When the flow starts (`CurrentStep` empty), unanswered inbound texts for the ses
 | `generic` | Every line is only a greeting or ack (`hi`, `hello`, `thanks`, …) |
 | `question` | Anything else (including `Hi, is there a refund?`) |
 
+After welcome (and before question 1), an opening `question` is answered immediately:
+
+| Outcome | Behavior |
+| --- | --- |
+| FAQ / store facts / store-info policy | Send the grounded answer, then “I can also note a few details for the team”, then question 1 |
+| Refuse | Refuse line, bridge line, then question 1 |
+| Miss | Short unsure line (`I'm not sure about your question.`), keep the text as a pending handoff note, then question 1 (no transfer) |
+| Staff | Transfer (partial lead saved as today) |
+
+`leads_opening_handled` marks the opening as answered so the post-qualify help path does not repeat it or transfer on the same miss. Product search and order status are not part of this flow.
+
 ## Shared runner behavior
 
 TiQR Leads uses a leads-only ask path (not the shared ecommerce FAQ stop) for criterion and capture asks.
@@ -38,7 +49,7 @@ TiQR Leads uses a leads-only ask path (not the shared ecommerce FAQ stop) for cr
 | Default flow | On a new session, flow keywords are checked first. `matchDefaultCodedFlow` starts an enabled default binding only when the message matches no coded-flow or visual flow keyword |
 | Translation | Outbound lines go through `Conv.text()`; language is stored when intent returns it. Detection is limited by the store’s `supported_languages` (same as ecommerce). Empty list = open detection; failed store load = `["en"]` |
 | Intent | Choice paraphrases are classified onto the current buttons/rules. Exact button or list taps do not need intent |
-| FAQ / side question | After the existing-lead check, `LoadFaqs("faqs", "list_faqs")` and `LoadStoreInfo("store_info", "get_store_info")`. Empty or failed loads do not transfer. A grounded FAQ answer, a confident store-info answer (About us / policies, confidence ≥ 0.9), refuse line, or short unsure line is sent and the **same lead prompt is re-asked in the same turn**. Side questions are not stored as lead answers and do not change the score. Free-text capture fields only divert when the reply looks like a question or matches FAQ/store-info/refuse/staff |
+| FAQ / side question | After the existing-lead check, `LoadFaqs("faqs", "list_faqs")` and `LoadStoreInfo("store_info", "get_store_info")`. Empty or failed loads do not transfer. Lookup order: exact FAQ → intent FAQ / refuse / staff → structured store facts from `get_store` (name, address, map link, pickup/delivery, radii; no model) → store-info policies (About us / privacy / terms / refund / shipping, confidence ≥ 0.9). A grounded answer, refuse line, or short unsure line is sent and the **same lead prompt is re-asked in the same turn**. Side questions are not stored as lead answers and do not change the score. Free-text and number capture fields always run this classifier before accepting a reply; a miss without a question shape is stored as the answer |
 | Call replay | Each lead ask only consumes a `_coded_calls` record whose `name` matches that step (`lead_q_*` / `lead_f_*`). Skipping an already-answered step drains that step’s call + `answer_*` marker so later steps cannot steal it. Empty answers do not count as answered and are replaced when the real choice/text lands. Post-qualify help (`How can I help you?`) must not see the last capture field’s inbound — the field accept path sets consumed before `finishQualified` |
 | Refuse | Off-topic or unsafe asks hear `I can't help you with that.` and the criterion is re-asked (no invented answer, no transfer) |
 | Staff request | Explicit ask for a person still transfers. Before transfer, a (partial) lead is saved (live) or classification is written for preview |
@@ -83,10 +94,11 @@ Thank-you is sent once, then a FAQ-first help path runs (no guide model, no inve
 
 | Opening / reply | Behavior |
 | --- | --- |
-| Opening `question` | Match grounded FAQ (exact, then intent). Send stored answer, then ask if anything else. Refuse → `I can't help you with that.` then ask again. FAQ miss → answer from store information (`about_us`, privacy, terms, refund, shipping) only when confidence is at least 0.9; otherwise unsure line and `Transfer`. Explicit “talk to staff” skips store info and transfers. |
+| Opening `question` already handled during the quiz | Ask `How can I help you?` (do not re-answer or transfer on the same opening) |
+| Opening `question` not yet handled (re-entry / edge) | Match FAQ → store facts → store-info. Send answer, then ask if anything else. Refuse → refuse line then ask again. Miss → unsure connect and `Transfer`. Explicit “talk to staff” transfers. |
 | Opening `generic` | Ask `How can I help you?` and wait |
 | Follow-up decline (`no`, `thanks`, …) | Apply completion action (`record` → `End`; `handoff_high` → transfer only when High; `always_handoff` → transfer). Re-entry decline → `End` only (no re-save) |
-| Follow-up store question | Same FAQ / store-info / refuse / transfer rules |
+| Follow-up store question | Same FAQ / store facts / store-info / refuse / transfer rules |
 
 Unsure transfer line: `I'm not sure about {customer question}. I'm connecting you to a staff member who can help.` (topic cleaned from the pending unanswered text). The same unanswered question is also added to the staff-only handoff summary.
 
@@ -107,8 +119,9 @@ Transfer body includes name, phone, score, category, qualified flag, each answer
 5. Bind evaluation / completion from the account settings once.
 6. `Store("lead_criteria", "get_lead_criteria", {mode})` — snapshotted on the session; later turns replay the call so a mid-chat criteria edit does not change the question list.
 7. Stash default Name answer; send welcome prefixed with WhatsApp name.
-8. Ask each enabled criterion; FAQ / store-info / refuse stay; choice/rule matches advance.
-9. Write classification onto the session, `Store("lead", "create_lead", …)` once (upsert by phone), thank-you once, then help path.
+8. If the opening was a `question`, answer it before question 1 (miss stays; staff transfers).
+9. Ask each enabled criterion; FAQ / store facts / store-info / refuse stay; choice/rule matches advance.
+10. Write classification onto the session, `Store("lead", "create_lead", …)` once (upsert by phone), thank-you once, then help path.
 
 If the selected mode has no enabled criteria, the flow sends one customer-safe line and `End` (no transfer).
 

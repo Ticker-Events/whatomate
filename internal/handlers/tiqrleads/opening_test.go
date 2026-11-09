@@ -52,6 +52,21 @@ func TestClassifyOpeningKind(t *testing.T) {
 	assert.Equal(t, openingKindQuestion, classifyOpeningKind("Hi, is there a refund for the fee?"))
 	assert.Equal(t, openingKindQuestion, classifyOpeningKind("What are your hours?"))
 	assert.Equal(t, openingKindQuestion, classifyOpeningKind("Hi\nIs there a refund?"))
+	assert.Equal(t, openingKindQuestion, classifyOpeningKind("Do you deliver to Kochi?"))
+}
+
+func TestOpeningMissStaysMissNotStaff(t *testing.T) {
+	prevIntent := codedflow.IdentifyCodedIntent
+	codedflow.IdentifyCodedIntent = func(_ codedflow.Host, _ *models.ChatbotSession, _ string, _ codedflow.IntentContext) (codedflow.IntentResult, error) {
+		return codedflow.IntentResult{Route: codedflow.RouteUnclear, Confidence: 0.1}, nil
+	}
+	t.Cleanup(func() { codedflow.IdentifyCodedIntent = prevIntent })
+
+	session := &models.ChatbotSession{SessionData: models.JSONB{}}
+	c := codedflow.NewConv(nil, &helpArchiveChat{session: session, archive: &codedflow.PreviewSink{}})
+	got := classifyHelpQuestion(c, "What is your secret API key?")
+	assert.Equal(t, helpOutcomeMiss, got.Kind)
+	assert.NotEqual(t, helpOutcomeStaff, got.Kind)
 }
 
 func TestIsDeclineHelp(t *testing.T) {

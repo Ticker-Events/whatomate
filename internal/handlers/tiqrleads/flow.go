@@ -140,6 +140,12 @@ func tiqrLeads(c *codedflow.Conv) error {
 
 	stashDefaultNameAnswer(c)
 	welcomeWithName(c)
+	if err := answerOpeningDuringQualify(c); err != nil {
+		return err
+	}
+	if c.Stop {
+		return nil
+	}
 
 	for i, item := range steps {
 		row, ok := asStringMap(item)

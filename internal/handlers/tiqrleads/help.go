@@ -89,7 +89,8 @@ func runHelpPath(c *codedflow.Conv, reentry bool) error {
 	})
 
 	kind := asString(c.Session().SessionData[sessionOpeningKind])
-	if kind == openingKindQuestion {
+	alreadyHandled := asString(c.Session().SessionData[sessionOpeningHandled]) == "1"
+	if kind == openingKindQuestion && !alreadyHandled {
 		if err := answerOpeningQuestion(c); err != nil {
 			return err
 		}
@@ -98,7 +99,53 @@ func runHelpPath(c *codedflow.Conv, reentry bool) error {
 		}
 	}
 
-	return helpFollowUpLoop(c, kind == openingKindGeneric || kind == "")
+	// Opening already answered during the quiz → ask if they need more help.
+	startWithHowCanIHelp := kind == openingKindGeneric || kind == "" || alreadyHandled
+	return helpFollowUpLoop(c, startWithHowCanIHelp)
+}
+
+// answerOpeningDuringQualify answers a non-greeting first message before
+// question 1. A miss stays on the quiz. Staff still transfers.
+func answerOpeningDuringQualify(c *codedflow.Conv) error {
+	bindOpeningKind(c)
+	kind := asString(c.Session().SessionData[sessionOpeningKind])
+	if kind != openingKindQuestion {
+		return nil
+	}
+	if asString(c.Session().SessionData[sessionOpeningHandled]) == "1" {
+		return nil
+	}
+
+	c.Once("leads_open_pre_qualify", func() {
+		text := asString(c.Session().SessionData[sessionOpeningText])
+		outcome := classifyHelpQuestion(c, text)
+		c.Session().SessionData[sessionOpenOutcome] = outcome.Kind
+		c.Session().SessionData[sessionOpenAnswer] = outcome.Answer
+		if outcome.Kind == helpOutcomeMiss || outcome.Kind == helpOutcomeStaff {
+			c.Session().SessionData[sessionPendingQuestion] = text
+		}
+		c.Session().SessionData[sessionOpeningHandled] = "1"
+	})
+
+	outcome := asString(c.Session().SessionData[sessionOpenOutcome])
+	switch outcome {
+	case helpOutcomeFAQ, helpOutcomeStoreInfo, helpOutcomeStoreFacts:
+		answer := asString(c.Session().SessionData[sessionOpenAnswer])
+		if answer != "" {
+			c.Say(answer)
+		}
+		c.Say(openingBridgeMessage)
+		return nil
+	case helpOutcomeRefuse:
+		c.Say(codedflow.RefuseMessage)
+		c.Say(openingBridgeMessage)
+		return nil
+	case helpOutcomeStaff:
+		return c.Transfer(codedflow.AgentHandoff)
+	default:
+		c.Say(midFlowUnsureMessage)
+		return nil
+	}
 }
 
 func answerOpeningQuestion(c *codedflow.Conv) error {
@@ -110,11 +157,12 @@ func answerOpeningQuestion(c *codedflow.Conv) error {
 		if outcome.Kind == helpOutcomeMiss || outcome.Kind == helpOutcomeStaff {
 			c.Session().SessionData[sessionPendingQuestion] = text
 		}
+		c.Session().SessionData[sessionOpeningHandled] = "1"
 	})
 
 	outcome := asString(c.Session().SessionData[sessionOpenOutcome])
 	switch outcome {
-	case helpOutcomeFAQ, helpOutcomeStoreInfo:
+	case helpOutcomeFAQ, helpOutcomeStoreInfo, helpOutcomeStoreFacts:
 		answer := asString(c.Session().SessionData[sessionOpenAnswer])
 		if answer != "" {
 			c.Say(answer)
@@ -174,7 +222,7 @@ func helpFollowUpLoop(c *codedflow.Conv, startWithHowCanIHelp bool) error {
 				c.Session().SessionData[sessionPendingQuestion] = text
 			}
 			switch outcome.Kind {
-			case helpOutcomeFAQ, helpOutcomeStoreInfo:
+			case helpOutcomeFAQ, helpOutcomeStoreInfo, helpOutcomeStoreFacts:
 				deliverHelpLine(c, step+"_ans", outcome.Answer)
 				c.Session().SessionData[sessionHelpTurn] = turn + 1
 			case helpOutcomeRefuse:
@@ -187,7 +235,7 @@ func helpFollowUpLoop(c *codedflow.Conv, startWithHowCanIHelp bool) error {
 		switch action {
 		case "decline":
 			return finishAfterHelp(c)
-		case helpOutcomeFAQ, helpOutcomeStoreInfo, helpOutcomeRefuse:
+		case helpOutcomeFAQ, helpOutcomeStoreInfo, helpOutcomeStoreFacts, helpOutcomeRefuse:
 			startWithHowCanIHelp = false
 			continue
 		case helpOutcomeStaff:

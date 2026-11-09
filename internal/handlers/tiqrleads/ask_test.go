@@ -17,6 +17,23 @@ func TestLooksLikeQuestion(t *testing.T) {
 	assert.False(t, looksLikeQuestion("John"))
 	assert.False(t, looksLikeQuestion("yes"))
 	assert.False(t, looksLikeQuestion("a@b.com"))
+	assert.False(t, looksLikeQuestion("Need delivery in Kochi tomorrow"))
+}
+
+func TestShouldDivertFreeTextExactFAQWithoutQuestionMark(t *testing.T) {
+	session := &models.ChatbotSession{
+		SessionData: models.JSONB{
+			"faqs": []any{
+				map[string]any{
+					"id":       "1",
+					"question": "Need delivery in Kochi tomorrow",
+					"answer":   "Yes, we deliver in Kochi.",
+				},
+			},
+		},
+	}
+	c := codedflow.NewConv(nil, &helpArchiveChat{session: session, archive: &codedflow.PreviewSink{}})
+	assert.True(t, shouldDivertFreeText(c, "Need delivery in Kochi tomorrow"))
 }
 
 func TestStepAlreadyAnswered(t *testing.T) {
