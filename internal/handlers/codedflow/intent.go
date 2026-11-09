@@ -321,89 +321,16 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 	ctx := c.intentContext(cfg, opts)
 	message := c.chat.UserInput()
 	if local, ok := c.matchLocalIntent(message, ctx); ok {
-		call := CodedPreviewAICall{
-			Role:       "intent",
-			Prompt:     "(local exact match)",
-			Language:   local.Language,
-			Route:      local.Route,
-			Reasoning:  local.Reasoning,
-			Response:   formatIntentResponse(local),
-			Confidence: local.Confidence,
-			Parsed: map[string]any{
-				"language":      local.Language,
-				"route":         local.Route,
-				"choice_id":     local.ChoiceID,
-				"collection_id": local.CollectionID,
-				"product_query": local.ProductQuery,
-				"answer":        local.Answer,
-				"faq_id":        local.FaqID,
-				"confidence":    local.Confidence,
-				"reasoning":     local.Reasoning,
-			},
-		}
-		grounded := true
-		call.Grounded = &grounded
-		c.notePreviewAI(call)
-		c.app.LogCodedFlowAI(c.session(), "intent", call.Prompt, call.Response, "",
-			"route", local.Route,
-			"confidence", local.Confidence,
-			"grounded", true,
-			"choice_id", local.ChoiceID,
-			"collection_id", local.CollectionID,
-			"faq_id", local.FaqID,
-			"language", local.Language,
-			"reasoning", local.Reasoning,
-		)
+		c.NoteLocalIntent(local)
 		c.rememberLanguage(local.Language)
 		return c.acceptIntentResult(name, cfg, ctx, local)
 	}
-	prompt := BuildIntentPrompt(message, ctx)
-	raw, err := IdentifyCodedIntent(c.app, c.session(), message, ctx)
-	raw.Reasoning = LimitWords(raw.Reasoning, 200)
-	call := CodedPreviewAICall{
-		Role:      "intent",
-		Prompt:    prompt,
-		Language:  raw.Language,
-		Route:     raw.Route,
-		Reasoning: raw.Reasoning,
-	}
+	raw, err := c.ClassifyIntent(message, ctx)
 	if err != nil {
-		call.Error = err.Error()
-		c.notePreviewAI(call)
-		c.app.LogCodedFlowAI(c.session(), "intent", prompt, "", err.Error())
 		_ = c.Transfer(AgentHandoff)
 		return Route{}, false
 	}
-	call.Response = formatIntentResponse(raw)
-	call.Parsed = map[string]any{
-		"language":      raw.Language,
-		"route":         raw.Route,
-		"choice_id":     raw.ChoiceID,
-		"collection_id": raw.CollectionID,
-		"product_query": raw.ProductQuery,
-		"answer":        raw.Answer,
-		"faq_id":        raw.FaqID,
-		"confidence":    raw.Confidence,
-		"reasoning":     raw.Reasoning,
-	}
-	call.Confidence = raw.Confidence
 	result, grounded := ValidateCodedIntent(raw, ctx)
-	call.Grounded = &grounded
-	call.Route = result.Route
-	call.Language = result.Language
-	c.notePreviewAI(call)
-	c.app.LogCodedFlowAI(c.session(), "intent", prompt, call.Response, "",
-		"route", result.Route,
-		"confidence", result.Confidence,
-		"grounded", grounded,
-		"choice_id", result.ChoiceID,
-		"collection_id", result.CollectionID,
-		"product_query", result.ProductQuery,
-		"answer", result.Answer,
-		"faq_id", result.FaqID,
-		"language", result.Language,
-		"reasoning", raw.Reasoning,
-	)
 	c.rememberLanguage(result.Language)
 	if !grounded {
 		_ = c.Transfer(AgentHandoff)
@@ -588,6 +515,113 @@ func (c *Conv) notePreviewAI(call CodedPreviewAICall) {
 	if sink := c.chat.Archive(); sink != nil {
 		sink.NoteAI(call)
 	}
+}
+
+func intentParsedMap(r IntentResult) map[string]any {
+	return map[string]any{
+		"language":      r.Language,
+		"route":         r.Route,
+		"choice_id":     r.ChoiceID,
+		"collection_id": r.CollectionID,
+		"product_query": r.ProductQuery,
+		"answer":        r.Answer,
+		"faq_id":        r.FaqID,
+		"confidence":    r.Confidence,
+		"reasoning":     r.Reasoning,
+	}
+}
+
+// NoteLocalIntent records a deterministic exact-match intent for preview/archive.
+// Flow packages should use this instead of calling IdentifyCodedIntent for local hits.
+func (c *Conv) NoteLocalIntent(result IntentResult) {
+	if c == nil {
+		return
+	}
+	grounded := true
+	call := CodedPreviewAICall{
+		Role:       "intent",
+		Prompt:     "(local exact match)",
+		Language:   result.Language,
+		Route:      result.Route,
+		Reasoning:  result.Reasoning,
+		Response:   formatIntentResponse(result),
+		Confidence: result.Confidence,
+		Parsed:     intentParsedMap(result),
+		Grounded:   &grounded,
+	}
+	c.notePreviewAI(call)
+	if c.app == nil {
+		return
+	}
+	c.app.LogCodedFlowAI(c.session(), "intent", call.Prompt, call.Response, "",
+		"route", result.Route,
+		"confidence", result.Confidence,
+		"grounded", true,
+		"choice_id", result.ChoiceID,
+		"collection_id", result.CollectionID,
+		"faq_id", result.FaqID,
+		"language", result.Language,
+		"reasoning", result.Reasoning,
+	)
+}
+
+// ClassifyIntent runs IdentifyCodedIntent and always notes the call for preview.
+// It does not validate or transfer; callers own ValidateCodedIntent / miss handling.
+func (c *Conv) ClassifyIntent(message string, ctx IntentContext) (IntentResult, error) {
+	return c.classifyIntentWithPrompt(message, ctx, BuildIntentPrompt(message, ctx))
+}
+
+// ClassifyIntentWithPrompt is ClassifyIntent with a caller-built prompt (quoted reply).
+func (c *Conv) ClassifyIntentWithPrompt(message string, ctx IntentContext, prompt string) (IntentResult, error) {
+	return c.classifyIntentWithPrompt(message, ctx, prompt)
+}
+
+func (c *Conv) classifyIntentWithPrompt(message string, ctx IntentContext, prompt string) (IntentResult, error) {
+	var host Host
+	var session *models.ChatbotSession
+	if c != nil {
+		host = c.app
+		session = c.session()
+	}
+	raw, err := IdentifyCodedIntent(host, session, message, ctx)
+	raw.Reasoning = LimitWords(raw.Reasoning, 200)
+	call := CodedPreviewAICall{
+		Role:      "intent",
+		Prompt:    prompt,
+		Language:  raw.Language,
+		Route:     raw.Route,
+		Reasoning: raw.Reasoning,
+	}
+	if err != nil {
+		call.Error = err.Error()
+		if c != nil {
+			c.notePreviewAI(call)
+			if c.app != nil {
+				c.app.LogCodedFlowAI(session, "intent", prompt, "", err.Error())
+			}
+		}
+		return raw, err
+	}
+	call.Response = formatIntentResponse(raw)
+	call.Parsed = intentParsedMap(raw)
+	call.Confidence = raw.Confidence
+	if c != nil {
+		c.notePreviewAI(call)
+		if c.app != nil {
+			c.app.LogCodedFlowAI(session, "intent", prompt, call.Response, "",
+				"route", raw.Route,
+				"confidence", raw.Confidence,
+				"choice_id", raw.ChoiceID,
+				"collection_id", raw.CollectionID,
+				"product_query", raw.ProductQuery,
+				"answer", raw.Answer,
+				"faq_id", raw.FaqID,
+				"language", raw.Language,
+				"reasoning", raw.Reasoning,
+			)
+		}
+	}
+	return raw, nil
 }
 
 func formatIntentResponse(raw IntentResult) string {

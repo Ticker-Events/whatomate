@@ -216,7 +216,7 @@ func normalizeHelpText(s string) string {
 }
 
 // classifyHelpQuestion maps free text to a grounded FAQ, refuse, staff handoff, or miss.
-// It does not send messages or transfer.
+// It does not send messages or transfer. Intent AI is always noted via Conv helpers.
 func classifyHelpQuestion(c *codedflow.Conv, message string) helpLookupResult {
 	message = strings.TrimSpace(message)
 	if message == "" {
@@ -225,6 +225,12 @@ func classifyHelpQuestion(c *codedflow.Conv, message string) helpLookupResult {
 	faqs := faqsFromSession(c.Session().SessionData)
 	if id := exactFAQID(message, faqs); id != "" {
 		if answer := faqAnswerFromSession(c.Session().SessionData, id); answer != "" {
+			c.NoteLocalIntent(codedflow.IntentResult{
+				Route:      codedflow.RouteFAQ,
+				FaqID:      id,
+				Confidence: 1,
+				Reasoning:  "exact FAQ question match",
+			})
 			return helpLookupResult{Kind: helpOutcomeFAQ, Answer: answer}
 		}
 	}
@@ -244,7 +250,7 @@ func classifyHelpQuestion(c *codedflow.Conv, message string) helpLookupResult {
 		ctx.SupportedLanguages = c.App().CodedFlowSupportedLanguages(c.Session())
 	}
 
-	raw, err := codedflow.IdentifyCodedIntent(c.App(), c.Session(), message, ctx)
+	raw, err := c.ClassifyIntent(message, ctx)
 	if err != nil {
 		return helpLookupResult{Kind: helpOutcomeMiss}
 	}

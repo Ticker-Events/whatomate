@@ -1,12 +1,48 @@
 package tiqrleads
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type helpArchiveChat struct {
+	session *models.ChatbotSession
+	archive *codedflow.PreviewSink
+}
+
+func (c *helpArchiveChat) Session() *models.ChatbotSession             { return c.session }
+func (c *helpArchiveChat) Account() *models.WhatsAppAccount           { return nil }
+func (c *helpArchiveChat) Contact() *models.Contact                   { return nil }
+func (c *helpArchiveChat) UserInput() string                          { return "" }
+func (c *helpArchiveChat) SetUserInput(string)                        {}
+func (c *helpArchiveChat) InboundMedia() codedflow.InboundMedia       { return codedflow.InboundMedia{} }
+func (c *helpArchiveChat) ButtonID() string                           { return "" }
+func (c *helpArchiveChat) SetButtonID(string)                         {}
+func (c *helpArchiveChat) FlowResponseData() map[string]any           { return nil }
+func (c *helpArchiveChat) SetFlowResponseData(map[string]any)         {}
+func (c *helpArchiveChat) QuotedMessage() *codedflow.QuotedMessage    { return nil }
+func (c *helpArchiveChat) Consumed() bool                             { return false }
+func (c *helpArchiveChat) SetConsumed(bool)                           {}
+func (c *helpArchiveChat) Capturing() bool                            { return false }
+func (c *helpArchiveChat) LastTiqr() map[string]any                   { return nil }
+func (c *helpArchiveChat) SetLastTiqr(map[string]any)                 {}
+func (c *helpArchiveChat) LastTiqrErr() string                        { return "" }
+func (c *helpArchiveChat) SetLastTiqrErr(string)                      {}
+func (c *helpArchiveChat) LastTiqrStatus() int                        { return 0 }
+func (c *helpArchiveChat) SetLastTiqrStatus(int)                      {}
+func (c *helpArchiveChat) Preview() *codedflow.PreviewSink            { return nil }
+func (c *helpArchiveChat) SetPreview(*codedflow.PreviewSink)          {}
+func (c *helpArchiveChat) Archive() *codedflow.PreviewSink            { return c.archive }
+func (c *helpArchiveChat) SetArchive(p *codedflow.PreviewSink)        { c.archive = p }
+func (c *helpArchiveChat) Native() any                                { return nil }
 
 func TestClassifyOpeningKind(t *testing.T) {
 	assert.Equal(t, openingKindGeneric, classifyOpeningKind(""))
@@ -76,4 +112,95 @@ func TestBuildHandoffSummaryIncludesPendingQuestion(t *testing.T) {
 	summary := buildHandoffSummary(session)
 	assert.Contains(t, summary, "Name: Asha")
 	assert.Contains(t, summary, "Unanswered question: What is your API key?")
+}
+
+func TestClassifyHelpQuestionNotesLocalFAQMatch(t *testing.T) {
+	sink := &codedflow.PreviewSink{}
+	session := &models.ChatbotSession{
+		SessionData: models.JSONB{
+			"faqs": []any{
+				map[string]any{"id": "1", "question": "Is there a refund for the fee?", "answer": "Yes, within 7 days."},
+			},
+		},
+	}
+	c := codedflow.NewConv(nil, &helpArchiveChat{session: session, archive: sink})
+
+	got := classifyHelpQuestion(c, "is there a refund for the fee")
+	assert.Equal(t, helpOutcomeFAQ, got.Kind)
+	assert.Equal(t, "Yes, within 7 days.", got.Answer)
+
+	require.Len(t, sink.AICalls, 1)
+	assert.Equal(t, "(local exact match)", sink.AICalls[0].Prompt)
+	assert.Equal(t, codedflow.RouteFAQ, sink.AICalls[0].Route)
+}
+
+func TestClassifyHelpQuestionNotesIntentSuccess(t *testing.T) {
+	prev := codedflow.IdentifyCodedIntent
+	codedflow.IdentifyCodedIntent = func(_ codedflow.Host, _ *models.ChatbotSession, _ string, _ codedflow.IntentContext) (codedflow.IntentResult, error) {
+		return codedflow.IntentResult{
+			Route:      codedflow.RouteFAQ,
+			FaqID:      "1",
+			Confidence: 0.95,
+			Reasoning:  "customer asked about refunds",
+		}, nil
+	}
+	t.Cleanup(func() { codedflow.IdentifyCodedIntent = prev })
+
+	sink := &codedflow.PreviewSink{}
+	session := &models.ChatbotSession{
+		SessionData: models.JSONB{
+			"faqs": []any{
+				map[string]any{"id": "1", "question": "Is there a refund for the fee?", "answer": "Yes, within 7 days."},
+			},
+		},
+	}
+	c := codedflow.NewConv(nil, &helpArchiveChat{session: session, archive: sink})
+
+	got := classifyHelpQuestion(c, "can I get my money back?")
+	assert.Equal(t, helpOutcomeFAQ, got.Kind)
+	assert.Equal(t, "Yes, within 7 days.", got.Answer)
+
+	require.Len(t, sink.AICalls, 1)
+	assert.Equal(t, "intent", sink.AICalls[0].Role)
+	assert.NotEqual(t, "(local exact match)", sink.AICalls[0].Prompt)
+	assert.Empty(t, sink.AICalls[0].Error)
+	assert.Equal(t, 0.95, sink.AICalls[0].Confidence)
+}
+
+func TestClassifyHelpQuestionNotesIntentErrorAsMiss(t *testing.T) {
+	prev := codedflow.IdentifyCodedIntent
+	codedflow.IdentifyCodedIntent = func(_ codedflow.Host, _ *models.ChatbotSession, _ string, _ codedflow.IntentContext) (codedflow.IntentResult, error) {
+		return codedflow.IntentResult{}, errors.New("ai is not configured")
+	}
+	t.Cleanup(func() { codedflow.IdentifyCodedIntent = prev })
+
+	sink := &codedflow.PreviewSink{}
+	session := &models.ChatbotSession{
+		SessionData: models.JSONB{
+			"faqs": []any{
+				map[string]any{"id": "1", "question": "Is there a refund for the fee?", "answer": "Yes, within 7 days."},
+			},
+		},
+	}
+	c := codedflow.NewConv(nil, &helpArchiveChat{session: session, archive: sink})
+
+	got := classifyHelpQuestion(c, "Pg courses available?")
+	assert.Equal(t, helpOutcomeMiss, got.Kind)
+
+	require.Len(t, sink.AICalls, 1)
+	assert.Equal(t, "ai is not configured", sink.AICalls[0].Error)
+}
+
+func TestTiqrLeadsDoesNotCallIdentifyCodedIntentDirectly(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(".", e.Name()))
+		require.NoError(t, err)
+		assert.NotContains(t, string(body), "IdentifyCodedIntent",
+			"%s must use Conv.ClassifyIntent so preview AI is always noted", e.Name())
+	}
 }

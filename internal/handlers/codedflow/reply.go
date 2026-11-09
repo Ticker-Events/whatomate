@@ -513,47 +513,12 @@ func (c *Conv) resolveQuotedFreeText(step string, cfg map[string]any, opts Route
 	}
 
 	prompt := BuildQuotedReplyIntentPrompt(c.chat.UserInput(), ctx)
-	raw, err := IdentifyCodedIntent(c.app, c.session(), c.chat.UserInput(), ctx)
-	raw.Reasoning = LimitWords(raw.Reasoning, 200)
-	call := CodedPreviewAICall{
-		Role:      "intent",
-		Prompt:    prompt,
-		Language:  raw.Language,
-		Route:     raw.Route,
-		Reasoning: raw.Reasoning,
-	}
+	raw, err := c.ClassifyIntentWithPrompt(c.chat.UserInput(), ctx, prompt)
 	if err != nil {
-		call.Error = err.Error()
-		c.notePreviewAI(call)
-		c.app.LogCodedFlowAI(c.session(), "intent", prompt, "", err.Error())
 		_ = c.Transfer(AgentHandoff)
 		return Route{}, false
 	}
-	call.Response = formatIntentResponse(raw)
 	result, grounded := ValidateQuotedReplyIntent(raw, ctx)
-	call.Grounded = &grounded
-	call.Route = result.Route
-	call.Language = result.Language
-	call.Parsed = map[string]any{
-		"language":      result.Language,
-		"route":         result.Route,
-		"choice_id":     result.ChoiceID,
-		"collection_id": result.CollectionID,
-		"product_query": result.ProductQuery,
-		"answer":        result.Answer,
-		"faq_id":        result.FaqID,
-		"confidence":    result.Confidence,
-		"reasoning":     raw.Reasoning,
-	}
-	call.Confidence = result.Confidence
-	c.notePreviewAI(call)
-	c.app.LogCodedFlowAI(c.session(), "intent", prompt, call.Response, "",
-		"route", result.Route,
-		"confidence", result.Confidence,
-		"grounded", grounded,
-		"faq_id", result.FaqID,
-		"quoted", true,
-	)
 	c.rememberLanguage(result.Language)
 	if !grounded {
 		return c.askQuotedReplyGuide(step, ctx)
