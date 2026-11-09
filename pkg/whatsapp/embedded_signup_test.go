@@ -56,6 +56,28 @@ func TestClient_ExchangeCodeForToken(t *testing.T) {
 			wantErr:       false,
 		},
 		{
+			name:        "keeps hash inside xd_arbiter redirect_uri",
+			code:        "test_auth_code_arbiter",
+			appID:       "123456",
+			appSecret:   "secret123",
+			apiVersion:  "v21.0",
+			redirectURI: "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#cb=abc&domain=agent.tiqr.store&origin=https%3A%2F%2Fagent.tiqr.store%2Ff1",
+			serverResponse: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#cb=abc&domain=agent.tiqr.store&origin=https%3A%2F%2Fagent.tiqr.store%2Ff1", r.URL.Query().Get("redirect_uri"))
+				assert.NotContains(t, r.URL.RawQuery, "redirect_uri=https://staticxx.facebook.com/x/connect/xd_arbiter/?version=46#")
+
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"access_token": "EAABwzLixnjYBO111",
+					"token_type":   "bearer",
+					"expires_in":   5184000,
+				})
+			},
+			wantToken:     "EAABwzLixnjYBO111",
+			wantExpiresIn: 5184000,
+			wantErr:       false,
+		},
+		{
 			name:        "successful token exchange with redirect_uri",
 			code:        "test_auth_code_456",
 			appID:       "123456",

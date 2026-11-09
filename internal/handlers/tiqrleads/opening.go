@@ -28,9 +28,8 @@ const (
 	helpOutcomeMiss   = "miss"
 	helpOutcomeStaff  = "staff"
 
-	unsureTransferMessage = "I'm not sure about your question. I'm transferring you to a staff member who can help."
-	howCanIHelpMessage    = "How can I help you?"
-	anythingElseMessage   = "Is there anything else I can help with?"
+	howCanIHelpMessage  = "How can I help you?"
+	anythingElseMessage = "Is there anything else I can help with?"
 )
 
 // EnsureOpeningText stores unanswered pre-flow inbound text once on the session.

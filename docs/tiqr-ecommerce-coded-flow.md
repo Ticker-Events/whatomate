@@ -386,7 +386,7 @@ The model must return one route and leave the other slots empty. Go then checks 
 
 At or above 0.75 and grounded: the route is applied in the same turn. A confident `previous` or welcome-menu result does not go to the guide. `checkout` sets `c.divert` and does not record a shopping call, so the script can leave the step. `faq` sends the stored FAQ answer (translated when the session language is not English) and stays on the same step without recording a shopping call, so buttons already on screen stay usable. Below 0.75, or route `unclear`: one guide question, staying on the same step.
 
-Ungrounded output, a grounded `handoff`, or an intent error transfers immediately with `codedAgentHandoff`. The customer does not get a guide question in those cases.
+Ungrounded output, a grounded `handoff`, or an intent error transfers immediately. When the customer asked for a person, the line is `AgentHandoff` (`I'm connecting you with a team member who can help.`). Otherwise the line is `UnsureConnect` built from their message (`I'm not sure about {topic}. I'm connecting you to a staff member who can help.`). The customer does not get a guide question in those cases. Explicit menu taps such as `talk_to_agent` still use `AgentHandoff`.
 
 Language from the first successful intent call is stored as `customer_language` only if the session does not already have one. Button taps never set it.
 
@@ -394,7 +394,7 @@ Ecommerce language detection reads `supported_languages` from the store (`sessio
 
 ### Guide
 
-`askGuide`. One short question, in the stored language (default `en`). Up to 3 questions per step, counted in `SessionData._coded_guide`. The 4th unclear reply transfers. An empty question or a guide error also transfers. A later confident route clears the counter.
+`askGuide`. One short question, in the stored language (default `en`). Up to 3 questions per step, counted in `SessionData._coded_guide`. The 4th unclear reply transfers with `UnsureConnect` (or `AgentHandoff` if they asked for a person). An empty question or a guide error also transfers the same way. A later confident route clears the counter.
 
 Catalog add-on selection also uses the guide role to parse free text into indexed quantities. Clarify turns for missing quantity or unclear replies share the same 3-turn cap on that add-on step before transfer.
 

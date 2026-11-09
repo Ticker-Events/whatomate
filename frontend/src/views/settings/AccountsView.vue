@@ -140,6 +140,15 @@ function loadFacebookSDK() {
   document.body.appendChild(script)
 }
 
+function dialogRedirectUri(url: string | URL | null | undefined): string {
+  if (url == null || url === '') return ''
+  try {
+    return new URL(String(url), window.location.origin).searchParams.get('redirect_uri') || ''
+  } catch {
+    return ''
+  }
+}
+
 function launchWhatsAppSignup(isCoexistence: boolean = true) {
   if (!isFBSDKLoaded.value) {
     toast.error('Facebook SDK not loaded yet. Please wait...')
@@ -173,43 +182,53 @@ function launchWhatsAppSignup(isCoexistence: boolean = true) {
     }
   }
 
-  window.FB.login(
-    (response: any) => {
-      if (response.authResponse) {
-        const code = response.authResponse.code
-        const phoneNumberId = response.authResponse.phone_number_id
-        const wabaId = response.authResponse.waba_id
+  // FB.login puts a session-specific xd_arbiter URL on the dialog, not this page.
+  // The code exchange is rejected unless that same string is sent back.
+  const originalOpen = window.open.bind(window)
+  let oauthRedirectUri = ''
+  window.open = (url?: string | URL, target?: string, features?: string) => {
+    const captured = dialogRedirectUri(url)
+    if (captured) oauthRedirectUri = captured
+    return originalOpen(url, target, features)
+  }
+  try {
+    window.FB.login(
+      (response: any) => {
+        if (response.authResponse) {
+          const code = response.authResponse.code
+          const phoneNumberId = response.authResponse.phone_number_id
+          const wabaId = response.authResponse.waba_id
 
-        if (!code) {
-          toast.error('Incomplete data from Facebook: missing authorization code')
+          if (!code) {
+            toast.error('Incomplete data from Facebook: missing authorization code')
+            isConnectingFB.value = false
+            return
+          }
+
+          exchangeCodeForToken(code, phoneNumberId, wabaId, oauthRedirectUri)
+        } else if (response.error) {
+          console.error('Facebook SDK error:', response.error)
+          toast.error(`Facebook error: ${response.error.message || 'Unknown error'}`)
           isConnectingFB.value = false
-          return
+        } else {
+          toast.error('Facebook login was cancelled')
+          isConnectingFB.value = false
         }
-
-        exchangeCodeForToken(code, phoneNumberId, wabaId)
-      } else if (response.error) {
-        console.error('Facebook SDK error:', response.error)
-        toast.error(`Facebook error: ${response.error.message || 'Unknown error'}`)
-        isConnectingFB.value = false
-      } else {
-        toast.error('Facebook login was cancelled')
-        isConnectingFB.value = false
-      }
-    },
-    loginOptions
-  )
+      },
+      loginOptions
+    )
+  } finally {
+    window.open = originalOpen
+  }
 }
 
-async function exchangeCodeForToken(code: string, phoneNumberId: string, wabaId: string) {
+async function exchangeCodeForToken(code: string, phoneNumberId: string, wabaId: string, redirectUri: string) {
   try {
-    // FB.login() with config_id sets the dialog redirect_uri to Facebook's
-    // xd_arbiter URL (staticxx.facebook.com), not this page. The page URL is
-    // only fallback_redirect_uri. Sending it makes Meta reject the code with
-    // "redirect_uri is identical to the one you used in the OAuth dialog".
     const response = await api.post('/accounts/exchange-token', {
       code,
       phone_id: phoneNumberId,
-      waba_id: wabaId
+      waba_id: wabaId,
+      redirect_uri: redirectUri
     })
 
     const account = response.data.data.account

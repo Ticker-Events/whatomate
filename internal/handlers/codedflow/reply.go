@@ -395,7 +395,11 @@ func (c *Conv) acceptQuotedRoute(step string, route Route) bool {
 		c.ReplyRoute = Route{}
 		return true
 	case codedRouteHandoff:
-		_ = c.Transfer(AgentHandoff)
+		message := ""
+		if c.chat != nil {
+			message = c.chat.UserInput()
+		}
+		_ = c.Transfer(HandoffMessage(message))
 		return true
 	default:
 		c.ReplyRoute = route
@@ -512,10 +516,11 @@ func (c *Conv) resolveQuotedFreeText(step string, cfg map[string]any, opts Route
 		}
 	}
 
-	prompt := BuildQuotedReplyIntentPrompt(c.chat.UserInput(), ctx)
-	raw, err := c.ClassifyIntentWithPrompt(c.chat.UserInput(), ctx, prompt)
+	message := c.chat.UserInput()
+	prompt := BuildQuotedReplyIntentPrompt(message, ctx)
+	raw, err := c.ClassifyIntentWithPrompt(message, ctx, prompt)
 	if err != nil {
-		_ = c.Transfer(AgentHandoff)
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	result, grounded := ValidateQuotedReplyIntent(raw, ctx)
@@ -557,17 +562,21 @@ func (c *Conv) resolveQuotedFreeText(step string, cfg map[string]any, opts Route
 }
 
 func (c *Conv) askQuotedReplyGuide(step string, ctx IntentContext) (Route, bool) {
+	message := ""
+	if c.chat != nil {
+		message = c.chat.UserInput()
+	}
 	turns := c.replyGuideTurns()
 	if turns >= 1 {
 		c.clearReplyGuide()
-		_ = c.Transfer(AgentHandoff)
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	lang := asString(c.session().SessionData[customerLanguageKey])
 	if lang == "" {
 		lang = "en"
 	}
-	prompt := buildQuotedReplyGuidePrompt(c.chat.UserInput(), lang, ctx)
+	prompt := buildQuotedReplyGuidePrompt(message, lang, ctx)
 	question, err := c.app.CompleteCodedRoleText(c.session(), codedFlowRoleGuide, prompt)
 	call := CodedPreviewAICall{Role: "guide", Prompt: prompt, Language: lang}
 	if err != nil || strings.TrimSpace(question) == "" {
@@ -578,7 +587,7 @@ func (c *Conv) askQuotedReplyGuide(step string, ctx IntentContext) (Route, bool)
 		}
 		c.notePreviewAI(call)
 		c.app.LogCodedFlowAI(c.session(), "guide", prompt, question, call.Error, "quoted", true)
-		_ = c.Transfer(AgentHandoff)
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	call.Response = question
@@ -586,8 +595,8 @@ func (c *Conv) askQuotedReplyGuide(step string, ctx IntentContext) (Route, bool)
 	c.app.LogCodedFlowAI(c.session(), "guide", prompt, question, "", "quoted", true, "language", lang)
 	c.setReplyGuide(turns + 1)
 	c.chat.SetConsumed(true)
-	message := c.text(replyUnclearLead) + "\n\n" + strings.TrimSpace(question)
-	if err := c.app.DeliverCodedText(c.chat, step, message); err != nil {
+	guideLine := c.text(replyUnclearLead) + "\n\n" + strings.TrimSpace(question)
+	if err := c.app.DeliverCodedText(c.chat, step, guideLine); err != nil {
 		c.fail(err)
 		return Route{}, false
 	}

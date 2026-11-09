@@ -87,7 +87,7 @@ Thank-you is sent once, then a FAQ-only help path runs (no guide model, no inven
 | Follow-up decline (`no`, `thanks`, …) | Apply completion action (`record` → `End`; `handoff_high` → transfer only when High; `always_handoff` → transfer). Re-entry decline → `End` only (no re-save) |
 | Follow-up store question | Same FAQ / refuse / transfer rules |
 
-Unsure transfer line: `I'm not sure about your question. I'm transferring you to a staff member who can help.` The unanswered question is added to the handoff summary.
+Unsure transfer line: `I'm not sure about {customer question}. I'm connecting you to a staff member who can help.` (topic cleaned from the pending unanswered text). The same unanswered question is also added to the staff-only handoff summary.
 
 | Setting | Value | After help decline |
 | --- | --- | --- |

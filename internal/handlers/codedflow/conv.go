@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/shridarpatil/whatomate/internal/models"
 )
@@ -1036,6 +1037,82 @@ func (c *Conv) rememberList(name, operation, apiType string, params map[string]s
 }
 
 const AgentHandoff = "I'm connecting you with a team member who can help."
+
+const unsureConnectMaxTopic = 160
+
+// UnsureConnect is the customer-facing line when the flow cannot answer a topic
+// and is connecting them to staff. Empty topic falls back to "that".
+func UnsureConnect(topic string) string {
+	return "I'm not sure about " + formatUnsureTopic(topic) + ". I'm connecting you to a staff member who can help."
+}
+
+func formatUnsureTopic(topic string) string {
+	topic = strings.Join(strings.Fields(strings.TrimSpace(topic)), " ")
+	if topic == "" {
+		return "that"
+	}
+	for len(topic) > 0 {
+		last := topic[len(topic)-1]
+		if last == '?' || last == '.' || last == '!' {
+			topic = strings.TrimSpace(topic[:len(topic)-1])
+			continue
+		}
+		break
+	}
+	if topic == "" {
+		return "that"
+	}
+	runes := []rune(topic)
+	if unicode.IsUpper(runes[0]) {
+		if len(runes) == 1 || unicode.IsLower(runes[1]) {
+			runes[0] = unicode.ToLower(runes[0])
+			topic = string(runes)
+		}
+	}
+	if len([]rune(topic)) > unsureConnectMaxTopic {
+		topic = strings.TrimSpace(string([]rune(topic)[:unsureConnectMaxTopic]))
+	}
+	if topic == "" {
+		return "that"
+	}
+	return topic
+}
+
+// WantsPerson reports whether the message is asking for a human, agent, or staff.
+func WantsPerson(message string) bool {
+	t := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(message)), " "))
+	if t == "" {
+		return false
+	}
+	if t == "agent" || t == "staff" || t == "human" || t == "person" {
+		return true
+	}
+	phrases := []string{
+		"talk to a person", "talk to person", "talk to an agent", "talk to agent",
+		"talk to a staff", "talk to staff", "talk to a human", "talk to human",
+		"speak to a person", "speak to person", "speak to an agent", "speak to agent",
+		"speak to a staff", "speak to staff", "speak to a human", "speak to human",
+		"connect me", "connect to agent", "connect to staff",
+		"real person", "live agent", "live person",
+		"customer service", "customer support",
+		"human please", "agent please", "staff please",
+	}
+	for _, p := range phrases {
+		if strings.Contains(t, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// HandoffMessage returns AgentHandoff when the customer asked for a person,
+// otherwise UnsureConnect built from their message.
+func HandoffMessage(message string) string {
+	if WantsPerson(message) {
+		return AgentHandoff
+	}
+	return UnsureConnect(message)
+}
 
 func (c *Conv) matchingButton(cfg map[string]any) bool {
 	return c.offeredButtonID(cfg) != ""

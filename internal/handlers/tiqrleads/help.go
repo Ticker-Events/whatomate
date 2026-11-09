@@ -126,7 +126,8 @@ func answerOpeningQuestion(c *codedflow.Conv) error {
 	case helpOutcomeStaff:
 		return c.Transfer(codedflow.AgentHandoff)
 	default:
-		return c.Transfer(unsureTransferMessage)
+		pending := asString(c.Session().SessionData[sessionPendingQuestion])
+		return c.Transfer(codedflow.UnsureConnect(pending))
 	}
 }
 
@@ -192,7 +193,8 @@ func helpFollowUpLoop(c *codedflow.Conv, startWithHowCanIHelp bool) error {
 		case helpOutcomeStaff:
 			return c.Transfer(codedflow.AgentHandoff)
 		default:
-			return c.Transfer(unsureTransferMessage)
+			pending := asString(c.Session().SessionData[sessionPendingQuestion])
+			return c.Transfer(codedflow.UnsureConnect(pending))
 		}
 	}
 }

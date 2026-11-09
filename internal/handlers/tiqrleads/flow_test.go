@@ -227,7 +227,7 @@ func (c *handoffTestChat) SetArchive(*codedflow.PreviewSink)          {}
 func (c *handoffTestChat) Native() any                                { return nil }
 
 func TestPrepareHandoffReturnsCustomerMessageAndStashesSummary(t *testing.T) {
-	customerLine := "I'm not sure about your question. I'm transferring you to a staff member who can help."
+	customerLine := codedflow.UnsureConnect("Pg courses available?")
 	session := &models.ChatbotSession{
 		PhoneNumber: "919999999999",
 		SessionData: models.JSONB{

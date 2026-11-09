@@ -327,18 +327,18 @@ func (c *Conv) resolveFreeText(name string, cfg map[string]any, opts RouteOption
 	}
 	raw, err := c.ClassifyIntent(message, ctx)
 	if err != nil {
-		_ = c.Transfer(AgentHandoff)
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	result, grounded := ValidateCodedIntent(raw, ctx)
 	c.rememberLanguage(result.Language)
 	if !grounded {
-		_ = c.Transfer(AgentHandoff)
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	if result.Route == codedRouteHandoff && result.Confidence >= IntentSettings.IntentThreshold {
 		c.clearGuide()
-		_ = c.Transfer(AgentHandoff)
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	if result.Confidence >= IntentSettings.IntentThreshold {
@@ -426,7 +426,11 @@ func (c *Conv) deliverRefuse(step string) (Route, bool) {
 func (c *Conv) deliverFAQAnswer(step, faqID string) (Route, bool) {
 	answer := faqAnswerByID(c.session().SessionData, faqID)
 	if answer == "" {
-		_ = c.Transfer(AgentHandoff)
+		message := ""
+		if c.chat != nil {
+			message = c.chat.UserInput()
+		}
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	text := c.text(answer)
@@ -457,18 +461,22 @@ func faqAnswerByID(data models.JSONB, id string) string {
 }
 
 func (c *Conv) askGuide(name string, ctx IntentContext) (Route, bool) {
+	message := ""
+	if c.chat != nil {
+		message = c.chat.UserInput()
+	}
 	turns := c.guideTurns(name)
 	if turns >= IntentSettings.MaxGuideTurns {
 		c.clearGuide()
-		_ = c.Transfer(AgentHandoff)
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	lang := asString(c.session().SessionData[customerLanguageKey])
 	if lang == "" {
 		lang = "en"
 	}
-	prompt := buildGuidePrompt(c.chat.UserInput(), lang, ctx)
-	question, err := GuideCodedIntent(c.app, c.session(), c.chat.UserInput(), lang, ctx)
+	prompt := buildGuidePrompt(message, lang, ctx)
+	question, err := GuideCodedIntent(c.app, c.session(), message, lang, ctx)
 	call := CodedPreviewAICall{
 		Role:     "guide",
 		Prompt:   prompt,
@@ -478,7 +486,7 @@ func (c *Conv) askGuide(name string, ctx IntentContext) (Route, bool) {
 		call.Error = err.Error()
 		c.notePreviewAI(call)
 		c.app.LogCodedFlowAI(c.session(), "guide", prompt, "", err.Error(), "language", lang)
-		_ = c.Transfer(AgentHandoff)
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	call.Response = question
@@ -486,7 +494,7 @@ func (c *Conv) askGuide(name string, ctx IntentContext) (Route, bool) {
 		call.Error = "empty guide question"
 		c.notePreviewAI(call)
 		c.app.LogCodedFlowAI(c.session(), "guide", prompt, "", "empty guide question", "language", lang)
-		_ = c.Transfer(AgentHandoff)
+		_ = c.Transfer(HandoffMessage(message))
 		return Route{}, false
 	}
 	c.notePreviewAI(call)
