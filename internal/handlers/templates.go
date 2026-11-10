@@ -707,12 +707,12 @@ func (a *App) UploadTemplateMedia(r *fastglue.Request) error {
 
 	ctx := context.Background()
 	var handle string
-	if account.IsAiSensy() {
-		// AiSensy has no Meta resumable-upload API; host the sample and use the HTTPS URL as handle.
+	if account.IsAiSensy() || account.IsMSG91() {
+		// AiSensy/MSG91 have no Meta resumable-upload API; host the sample and use the HTTPS URL as handle.
 		var uploadErr error
 		handle, uploadErr = a.uploadAiSensyTemplateSample(ctx, fileData, mimeType, fileHeader.Filename)
 		if uploadErr != nil {
-			a.Log.Error("Failed to upload AiSensy template media", "error", uploadErr)
+			a.Log.Error("Failed to upload template media for provider", "error", uploadErr, "provider", account.Provider)
 			return r.SendErrorEnvelope(
 				fasthttp.StatusBadGateway,
 				fmt.Sprintf("Failed to upload media to provider: %v", uploadErr),

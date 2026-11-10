@@ -327,7 +327,7 @@ type WhatsAppAccount struct {
 	CreatedByID            *uuid.UUID `gorm:"type:uuid" json:"created_by_id,omitempty"`
 	UpdatedByID            *uuid.UUID `gorm:"type:uuid" json:"updated_by_id,omitempty"`
 
-	// Provider identifies the messaging backend: "meta" (default) or "aisensy".
+	// Provider identifies the messaging backend: "meta" (default), "aisensy", or "msg91".
 	Provider string `gorm:"size:20;default:'meta'" json:"provider"`
 
 	// AiSensy-specific credentials (populated when Provider == "aisensy")
@@ -336,7 +336,11 @@ type WhatsAppAccount struct {
 	AiSensyProjectID string `gorm:"size:100" json:"aisensy_project_id,omitempty"`
 	AiSensyToken     string `gorm:"type:text" json:"-"` // cached JWT, encrypted
 
-	// Meta long-lived user token expiry / refresh tracking (ignored for AiSensy).
+	// MSG91-specific credentials (populated when Provider == "msg91").
+	// PhoneID stores the integrated WhatsApp number (with country code).
+	MSG91AuthKey string `gorm:"type:text" json:"-"` // encrypted
+
+	// Meta long-lived user token expiry / refresh tracking (ignored for AiSensy/MSG91).
 	TokenExpiresAt       *time.Time `json:"token_expires_at,omitempty"`
 	TokenLastRefreshedAt *time.Time `json:"token_last_refreshed_at,omitempty"`
 	TokenRefreshFailed   bool       `gorm:"default:false" json:"token_refresh_failed"`
@@ -353,7 +357,7 @@ func (WhatsAppAccount) TableName() string {
 }
 
 // ToWAAccount converts the model to the whatsapp client's Account type.
-// It populates both Meta and AiSensy fields so either client can use it.
+// It populates Meta, AiSensy, and MSG91 fields so any client can use it.
 func (a *WhatsAppAccount) ToWAAccount() *whatsapp.Account {
 	provider := a.Provider
 	if provider == "" {
@@ -369,6 +373,7 @@ func (a *WhatsAppAccount) ToWAAccount() *whatsapp.Account {
 		AiSensyPassword:  a.AiSensyPassword,
 		AiSensyProjectID: a.AiSensyProjectID,
 		AiSensyToken:     a.AiSensyToken,
+		MSG91AuthKey:     a.MSG91AuthKey,
 		Provider:         provider,
 	}
 }
@@ -378,9 +383,14 @@ func (a *WhatsAppAccount) IsAiSensy() bool {
 	return a.Provider == "aisensy"
 }
 
-// DecryptSecrets decrypts all encrypted credential fields (Meta + AiSensy + PIN).
+// IsMSG91 returns true when the account uses the MSG91 WhatsApp provider.
+func (a *WhatsAppAccount) IsMSG91() bool {
+	return a.Provider == "msg91"
+}
+
+// DecryptSecrets decrypts all encrypted credential fields (Meta + AiSensy + MSG91 + PIN).
 func (a *WhatsAppAccount) DecryptSecrets(encryptionKey string) {
-	crypto.DecryptFields(encryptionKey, &a.AccessToken, &a.AppSecret, &a.Pin, &a.AiSensyPassword, &a.AiSensyToken)
+	crypto.DecryptFields(encryptionKey, &a.AccessToken, &a.AppSecret, &a.Pin, &a.AiSensyPassword, &a.AiSensyToken, &a.MSG91AuthKey)
 }
 
 // Contact represents a WhatsApp contact/profile

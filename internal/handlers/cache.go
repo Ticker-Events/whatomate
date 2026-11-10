@@ -226,6 +226,7 @@ type whatsAppAccountCache struct {
 	AiSensyEmail    string `json:"aisensy_email"`
 	AiSensyPassword string `json:"aisensy_password"`
 	AiSensyToken    string `json:"aisensy_token"`
+	MSG91AuthKey    string `json:"msg91_authkey"`
 }
 
 // getWhatsAppAccountCached retrieves WhatsApp account by phone_id from cache or database
@@ -239,9 +240,11 @@ func (a *App) getWhatsAppAccountCached(phoneID string) (*models.WhatsAppAccount,
 		var cacheData whatsAppAccountCache
 		if err := json.Unmarshal([]byte(cached), &cacheData); err == nil {
 			restoreWhatsAppAccountSecrets(&cacheData)
-			// Older cache entries omitted AiSensy secrets (json:"-"); treat as miss.
+			// Older cache entries omitted provider secrets (json:"-"); treat as miss.
 			if cacheData.WhatsAppAccount.Provider == "aisensy" &&
 				(cacheData.WhatsAppAccount.AiSensyEmail == "" || cacheData.WhatsAppAccount.AiSensyPassword == "") {
+				a.Redis.Del(ctx, cacheKey)
+			} else if cacheData.WhatsAppAccount.Provider == "msg91" && cacheData.WhatsAppAccount.MSG91AuthKey == "" {
 				a.Redis.Del(ctx, cacheKey)
 			} else {
 				a.decryptAccountSecrets(&cacheData.WhatsAppAccount)
@@ -265,6 +268,7 @@ func (a *App) getWhatsAppAccountCached(phoneID string) (*models.WhatsAppAccount,
 		AiSensyEmail:    account.AiSensyEmail,
 		AiSensyPassword: account.AiSensyPassword,
 		AiSensyToken:    account.AiSensyToken,
+		MSG91AuthKey:    account.MSG91AuthKey,
 	}
 	if data, err := json.Marshal(cacheData); err == nil {
 		a.Redis.Set(ctx, cacheKey, data, whatsappAccountCacheTTL)
@@ -282,6 +286,7 @@ func restoreWhatsAppAccountSecrets(cacheData *whatsAppAccountCache) {
 	cacheData.WhatsAppAccount.AiSensyEmail = cacheData.AiSensyEmail
 	cacheData.WhatsAppAccount.AiSensyPassword = cacheData.AiSensyPassword
 	cacheData.WhatsAppAccount.AiSensyToken = cacheData.AiSensyToken
+	cacheData.WhatsAppAccount.MSG91AuthKey = cacheData.MSG91AuthKey
 }
 
 // decryptAccountSecrets decrypts the encrypted secrets on a WhatsApp account.

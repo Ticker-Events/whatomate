@@ -15,6 +15,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/pkg/aisensy"
+	"github.com/shridarpatil/whatomate/pkg/msg91"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/zerodha/logf"
 	"gorm.io/gorm"
@@ -28,6 +29,7 @@ type Worker struct {
 	Log       logf.Logger
 	WhatsApp  *whatsapp.Client
 	AiSensy   *aisensy.Client
+	MSG91     *msg91.Client
 	Consumer  *queue.RedisConsumer
 	Publisher *queue.Publisher
 }
@@ -39,6 +41,9 @@ var _ queue.JobHandler = (*Worker)(nil)
 func (w *Worker) getMessagingClient(account *models.WhatsAppAccount) whatsapp.MessagingClient {
 	if account != nil && account.IsAiSensy() && w.AiSensy != nil {
 		return w.AiSensy
+	}
+	if account != nil && account.IsMSG91() && w.MSG91 != nil {
+		return w.MSG91
 	}
 	return w.WhatsApp
 }
@@ -53,6 +58,7 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 	publisher := queue.NewPublisher(rdb, log)
 
 	aiSensyClient := aisensy.New(cfg.AiSensy, log)
+	msg91Client := msg91.New(cfg.MSG91, log)
 	w := &Worker{
 		Config:    cfg,
 		DB:        db,
@@ -60,6 +66,7 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, log logf.Logger) (*
 		Log:       log,
 		WhatsApp:  whatsapp.New(log),
 		AiSensy:   aiSensyClient,
+		MSG91:     msg91Client,
 		Consumer:  consumer,
 		Publisher: publisher,
 	}

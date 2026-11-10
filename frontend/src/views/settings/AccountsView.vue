@@ -426,6 +426,7 @@ async function confirmDelete() {
                 <template #cell-app_id="{ item: account }">
                   <div class="flex flex-col gap-1">
                     <Badge v-if="account.provider === 'aisensy'" variant="outline" class="text-[10px] border-violet-600 text-violet-500 w-fit">AiSensy</Badge>
+                    <Badge v-else-if="account.provider === 'msg91'" variant="outline" class="text-[10px] border-sky-600 text-sky-500 w-fit">MSG91</Badge>
                     <code v-else-if="account.app_id" class="text-xs bg-muted px-1.5 py-0.5 rounded">{{ account.app_id }}</code>
                     <span v-else class="text-muted-foreground">—</span>
                   </div>

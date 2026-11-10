@@ -3,7 +3,7 @@ package whatsapp
 import "context"
 
 // MessagingClient is the provider-agnostic interface for WhatsApp messaging operations.
-// Both the Meta WhatsApp Cloud API client and the AiSensy Direct API client implement it.
+// Meta, AiSensy, and MSG91 clients implement it.
 type MessagingClient interface {
 	// Core messaging
 	SendTextMessage(ctx context.Context, account *Account, rcpt Recipient, text string, replyToMsgID ...string) (string, error)

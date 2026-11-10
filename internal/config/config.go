@@ -23,6 +23,7 @@ type Config struct {
 	JWT          JWTConfig          `koanf:"jwt"`
 	WhatsApp     WhatsAppConfig     `koanf:"whatsapp"`
 	AiSensy      AiSensyConfig      `koanf:"aisensy"`
+	MSG91        MSG91Config        `koanf:"msg91"`
 	AI           AIConfig           `koanf:"ai"`
 	Storage      StorageConfig      `koanf:"storage"`
 	DefaultAdmin DefaultAdminConfig `koanf:"default_admin"`
@@ -81,6 +82,16 @@ type AiSensyConfig struct {
 	// Defaults to https://backend.aisensy.com/direct-apis/t1/api
 	BaseURL string `koanf:"base_url"`
 	// WebhookSecret is the HMAC-SHA256 shared secret used to verify AiSensy webhook signatures.
+	WebhookSecret string `koanf:"webhook_secret"`
+}
+
+// MSG91Config holds MSG91 WhatsApp API configuration.
+type MSG91Config struct {
+	// BaseURL is the MSG91 Control API base URL.
+	// Defaults to https://control.msg91.com
+	BaseURL string `koanf:"base_url"`
+	// WebhookSecret is a shared secret sent as the X-MSG91-Secret header from the
+	// MSG91 webhook dashboard and verified on POST /api/webhook/msg91.
 	WebhookSecret string `koanf:"webhook_secret"`
 }
 
@@ -342,6 +353,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.AiSensy.BaseURL == "" {
 		cfg.AiSensy.BaseURL = "https://backend.aisensy.com/direct-apis/t1/api"
+	}
+	if cfg.MSG91.BaseURL == "" {
+		cfg.MSG91.BaseURL = "https://control.msg91.com"
 	}
 	if cfg.Storage.Type == "" {
 		cfg.Storage.Type = "local"
