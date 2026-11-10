@@ -253,10 +253,13 @@ func TestTiqrCartUpsertAndUnitCount(t *testing.T) {
 	assert.Equal(t, 1, tiqrecommerce.CartLen(tiqrecommerce.Wrap(c)))
 
 	summary := tiqrecommerce.FormatTiqrCartSummary(tiqrecommerce.Wrap(c))
-	assert.Contains(t, summary, "1. *Kunafa Cake(Kunafa)* x5")
-	assert.Contains(t, summary, "₹200.00")
-	assert.NotContains(t, summary, "each")
-	assert.Contains(t, summary, "*Subtotal:* ₹200.00")
+	assert.Contains(t, summary, "{{cart_lines}}")
+	assert.Contains(t, summary, "{{cart_subtotal}}")
+	lines := asString(session.SessionData["cart_lines"])
+	assert.Contains(t, lines, "1. *Kunafa Cake(Kunafa)* x5")
+	assert.Contains(t, lines, "₹200.00")
+	assert.NotContains(t, lines, "each")
+	assert.Equal(t, "₹200.00", session.SessionData["cart_subtotal"])
 
 	ok, name := tiqrecommerce.RemoveTiqrCartLine(tiqrecommerce.Wrap(c), "9")
 	require.True(t, ok)
@@ -397,9 +400,10 @@ func TestTiqrCartKeepsDistinctCaptureAnswers(t *testing.T) {
 	tiqrecommerce.UpsertCartItem(tiqrecommerce.Wrap(c), "9", "1", map[string]any{"writing": "Happy birthday"})
 	tiqrecommerce.UpsertCartItem(tiqrecommerce.Wrap(c), "9", "1", map[string]any{"writing": "Congrats"})
 	assert.Equal(t, 2, tiqrecommerce.CartLen(tiqrecommerce.Wrap(c)))
-	summary := tiqrecommerce.FormatTiqrCartSummary(tiqrecommerce.Wrap(c))
-	assert.Contains(t, summary, "Cake writing: Happy birthday")
-	assert.Contains(t, summary, "Cake writing: Congrats")
+	_ = tiqrecommerce.FormatTiqrCartSummary(tiqrecommerce.Wrap(c))
+	lines := asString(session.SessionData["cart_lines"])
+	assert.Contains(t, lines, "Cake writing: Happy birthday")
+	assert.Contains(t, lines, "Cake writing: Congrats")
 
 	tiqrecommerce.UpsertCartItem(tiqrecommerce.Wrap(c), "9", "2", map[string]any{"writing": "Happy birthday"})
 	assert.Equal(t, 2, tiqrecommerce.CartLen(tiqrecommerce.Wrap(c)))
@@ -495,19 +499,22 @@ func TestFormatTiqrCartSummaryNumbered(t *testing.T) {
 	}}
 	c := codedflow.NewConv(nil, newCodedChat(&chatNodeCtx{session: session}))
 	summary := tiqrecommerce.FormatTiqrCartSummary(tiqrecommerce.Wrap(c))
-	assert.Contains(t, summary, "1. *Kunafa Cake(Kunafa)* x2 — ₹80.00")
-	assert.Contains(t, summary, "2. *Chocolate Cake(Chocolate)* x1 — ₹50.00")
-	assert.Contains(t, summary, "*Subtotal:* ₹130.00")
-	assert.NotContains(t, summary, "each")
-	assert.Less(t, strings.Index(summary, "1. *Kunafa Cake(Kunafa)*"), strings.Index(summary, "2. *Chocolate Cake(Chocolate)*"))
+	assert.Contains(t, summary, "{{cart_lines}}")
+	lines := asString(session.SessionData["cart_lines"])
+	assert.Contains(t, lines, "1. *Kunafa Cake(Kunafa)* x2 — ₹80.00")
+	assert.Contains(t, lines, "2. *Chocolate Cake(Chocolate)* x1 — ₹50.00")
+	assert.Equal(t, "₹130.00", session.SessionData["cart_subtotal"])
+	assert.NotContains(t, lines, "each")
+	assert.Less(t, strings.Index(lines, "1. *Kunafa Cake(Kunafa)*"), strings.Index(lines, "2. *Chocolate Cake(Chocolate)*"))
 
 	// Older cart lines without product_name keep option-only labels.
 	session.SessionData["tiqr_cart"] = []any{
 		map[string]any{"product_option": "9", "quantity": "2", "option_name": "Kunafa", "price": 40.0},
 	}
-	summary = tiqrecommerce.FormatTiqrCartSummary(tiqrecommerce.Wrap(c))
-	assert.Contains(t, summary, "1. *Kunafa* x2 — ₹80.00")
-	assert.NotContains(t, summary, "Kunafa Cake")
+	_ = tiqrecommerce.FormatTiqrCartSummary(tiqrecommerce.Wrap(c))
+	lines = asString(session.SessionData["cart_lines"])
+	assert.Contains(t, lines, "1. *Kunafa* x2 — ₹80.00")
+	assert.NotContains(t, lines, "Kunafa Cake")
 }
 
 func useStoreREST(t *testing.T, srv *httptest.Server) {

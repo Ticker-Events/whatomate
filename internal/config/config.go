@@ -52,7 +52,13 @@ type CodedFlowConfig struct {
 	// OrderRetries is how many times create_order may be retried after the
 	// first failure (for missing customer fields). Default 2 when unset or negative.
 	OrderRetries *int `koanf:"order_retries"`
+	// CatalogCacheTTL is how long stable TiQR catalog reads stay in Redis
+	// (for example "24h" or "168h"). Unset or invalid values use 24h.
+	// Freshness still comes from invalidate-on-save; this is the backstop only.
+	CatalogCacheTTL string `koanf:"catalog_cache_ttl"`
 }
+
+const defaultCatalogCacheTTL = 24 * time.Hour
 
 // TraceEnabled returns whether coded-flow tracing is on. Nil means enabled.
 func (c CodedFlowConfig) TraceEnabled() bool {
@@ -68,6 +74,19 @@ func (c CodedFlowConfig) OrderRetryCount() int {
 		return 2
 	}
 	return *c.OrderRetries
+}
+
+// CatalogCacheDuration returns the Redis TTL for commerce catalog payloads.
+func (c CodedFlowConfig) CatalogCacheDuration() time.Duration {
+	raw := strings.TrimSpace(c.CatalogCacheTTL)
+	if raw == "" {
+		return defaultCatalogCacheTTL
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultCatalogCacheTTL
+	}
+	return d
 }
 
 // FirebaseConfig holds Firebase Admin SDK settings for Firestore real-time sync.

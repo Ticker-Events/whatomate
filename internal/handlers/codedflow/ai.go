@@ -16,6 +16,13 @@ func (c *Conv) text(src string) string {
 		return hit
 	}
 	lang := asString(c.session().SessionData[customerLanguageKey])
+	if c.app != nil {
+		if hit, ok := c.app.GetCodedTranslation(lang, src); ok {
+			cache[src] = hit
+			c.session().SessionData[codedTranslationsKey] = cache
+			return hit
+		}
+	}
 	prompt := translationPrompt(lang, src)
 	translated, err := TranslateCodedLine(c.app, c.session(), lang, src)
 	call := CodedPreviewAICall{
@@ -42,6 +49,7 @@ func (c *Conv) text(src string) string {
 		c.notePreviewAI(call)
 		if c.app != nil {
 			c.app.LogCodedFlowAI(c.session(), "translate", prompt, translated, "", "language", lang)
+			c.app.SetCodedTranslation(lang, src, translated)
 		}
 	}
 	cache[src] = translated

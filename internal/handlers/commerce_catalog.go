@@ -509,9 +509,16 @@ func (a *App) commerceCatalogStorePage(
 	client := newTiqrStoreRESTClient(settings.AI.CommerceRESTURL)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	raw, err := invokeTiqrStoreRESTOperation(ctx, client, operation, storeID, "", params)
-	if err != nil {
-		return nil, err
+	var raw any
+	if hit, ok := a.getCommerceCatalogCached(storeID, operation, params); ok {
+		raw = hit
+	} else {
+		var callErr error
+		raw, callErr = invokeTiqrStoreRESTOperation(ctx, client, operation, storeID, "", params)
+		if callErr != nil {
+			return nil, callErr
+		}
+		a.setCommerceCatalogCached(storeID, operation, params, raw)
 	}
 	payload := tiqrStoreResultMap(operation, raw)
 	aliasBuyerListResults(payload)

@@ -169,7 +169,14 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 				a.LogCodedFlowTiqrResponse(ctx.session, apiType, operation, status, parsed, errMsg)
 			}
 		}
-		raw, err = invokeTiqrStoreRESTOperation(callCtx, client, operation, storeID, ctx.session.PhoneNumber, params)
+		if hit, ok := a.getCommerceCatalogCached(storeID, operation, params); ok {
+			raw = hit
+		} else {
+			raw, err = invokeTiqrStoreRESTOperation(callCtx, client, operation, storeID, ctx.session.PhoneNumber, params)
+			if err == nil {
+				a.setCommerceCatalogCached(storeID, operation, params, raw)
+			}
+		}
 	} else {
 		a.LogCodedFlowTiqrRequest(ctx.session, apiType, operation, "", params)
 		invoker := newTiqrStoreInvoker(settings.AI.CommerceMCPURL, settings.AI.CommerceMCPAPIKey)
