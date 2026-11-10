@@ -46,6 +46,8 @@ func TestTranslationPromptRules(t *testing.T) {
 	assert.Contains(t, got, "native script only")
 	assert.Contains(t, got, "Never use Manglish")
 	assert.Contains(t, got, "simple translation of the source text only")
+	assert.Contains(t, got, "Translate only the source after the blank line below")
+	assert.Contains(t, got, "do not translate earlier customer messages from the conversation")
 	assert.Contains(t, got, "do not paste, summarize, or restate that context")
 	assert.Contains(t, got, "never leave part of it untranslated")
 	assert.Contains(t, got, "Keep every line of the source, including numbered lists")

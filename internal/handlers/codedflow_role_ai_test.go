@@ -8,14 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCodedRoleAccountSettings_UsesRoleSystemPromptAndHistory(t *testing.T) {
+func TestCodedRoleAccountSettings_GuideKeepsHistory(t *testing.T) {
 	settings := &models.ChatbotSettings{}
 	settings.AI.IncludeHistory = false
 	settings.AI.SystemPrompt = "You are a chatty store assistant."
 	settings.AI.Provider = models.AIProviderGoogle
 	settings.AI.APIKey = "secret"
 
-	got := codedRoleAccountSettings(settings)
+	got := codedRoleAccountSettings(settings, "guide")
 	require.NotNil(t, got)
 	assert.True(t, got.AI.IncludeHistory)
 	assert.Equal(t, codedRoleSystemPrompt, got.AI.SystemPrompt)
@@ -29,6 +29,33 @@ func TestCodedRoleAccountSettings_UsesRoleSystemPromptAndHistory(t *testing.T) {
 	assert.Equal(t, "You are a chatty store assistant.", settings.AI.SystemPrompt)
 }
 
+func TestCodedRoleAccountSettings_RecoverKeepsHistory(t *testing.T) {
+	settings := &models.ChatbotSettings{}
+	settings.AI.IncludeHistory = false
+
+	got := codedRoleAccountSettings(settings, "recover")
+	require.NotNil(t, got)
+	assert.True(t, got.AI.IncludeHistory)
+	assert.Equal(t, codedRoleSystemPrompt, got.AI.SystemPrompt)
+}
+
+func TestCodedRoleAccountSettings_TranslateOmitsHistory(t *testing.T) {
+	settings := &models.ChatbotSettings{}
+	settings.AI.IncludeHistory = true
+	settings.AI.SystemPrompt = "You are a chatty store assistant."
+
+	got := codedRoleAccountSettings(settings, "translate")
+	require.NotNil(t, got)
+	assert.False(t, got.AI.IncludeHistory)
+	assert.Equal(t, codedRoleSystemPrompt, got.AI.SystemPrompt)
+	assert.True(t, skipCodedRoleAIMedia(got))
+
+	// Original settings must stay unchanged for normal chat AI.
+	assert.True(t, settings.AI.IncludeHistory)
+	assert.Equal(t, "You are a chatty store assistant.", settings.AI.SystemPrompt)
+}
+
 func TestCodedRoleAccountSettings_Nil(t *testing.T) {
-	assert.Nil(t, codedRoleAccountSettings(nil))
+	assert.Nil(t, codedRoleAccountSettings(nil, "guide"))
+	assert.Nil(t, codedRoleAccountSettings(nil, "translate"))
 }

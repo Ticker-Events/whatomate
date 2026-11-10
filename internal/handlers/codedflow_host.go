@@ -394,19 +394,21 @@ func (a *App) CompleteCodedRoleText(session *models.ChatbotSession, role, prompt
 		if !settings.AI.Enabled || settings.AI.Provider == "" || strings.TrimSpace(settings.AI.APIKey) == "" {
 			return "", fmt.Errorf("ai is not configured")
 		}
-		return a.completeCodedRoleAccountText(settings, session, prompt)
+		return a.completeCodedRoleAccountText(settings, session, role, prompt)
 	}
 }
 
 // codedRoleAccountSettings copies settings for an Account AI role call.
-// History text may be included for a valid reply; media is skipped via
-// skipCodedRoleAIMedia (keyed off codedRoleSystemPrompt).
-func codedRoleAccountSettings(settings *models.ChatbotSettings) *models.ChatbotSettings {
+// Guide and recover keep session history so the model can ask a valid follow-up.
+// Translate turns history off: the source string is the whole input, and prior
+// customer turns can make the model echo the customer instead of the source.
+// Media is skipped via skipCodedRoleAIMedia (keyed off codedRoleSystemPrompt).
+func codedRoleAccountSettings(settings *models.ChatbotSettings, role string) *models.ChatbotSettings {
 	if settings == nil {
 		return nil
 	}
 	out := *settings
-	out.AI.IncludeHistory = true
+	out.AI.IncludeHistory = role != "translate"
 	out.AI.SystemPrompt = codedRoleSystemPrompt
 	return &out
 }
@@ -419,9 +421,10 @@ func skipCodedRoleAIMedia(settings *models.ChatbotSettings) bool {
 }
 
 // completeCodedRoleAccountText runs translate/guide/recover on Account AI.
-// Session text history is passed for context; media attachments are omitted.
-func (a *App) completeCodedRoleAccountText(settings *models.ChatbotSettings, session *models.ChatbotSession, prompt string) (string, error) {
-	roleSettings := codedRoleAccountSettings(settings)
+// Guide and recover pass session text history for context; translate does not.
+// Media attachments are omitted for every role.
+func (a *App) completeCodedRoleAccountText(settings *models.ChatbotSettings, session *models.ChatbotSession, role, prompt string) (string, error) {
+	roleSettings := codedRoleAccountSettings(settings, role)
 	if roleSettings == nil {
 		return "", fmt.Errorf("ai is not configured")
 	}

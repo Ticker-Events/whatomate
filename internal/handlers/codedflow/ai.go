@@ -88,6 +88,8 @@ func translationPrompt(lang, text string) string {
 		"(for example Malayalam in Malayalam script, Hindi in Devanagari). " +
 		"Never use Manglish, Latin romanization, or a mix of scripts.\n" +
 		"Return a simple translation of the source text only. " +
+		"Translate only the source after the blank line below; " +
+		"do not translate earlier customer messages from the conversation.\n" +
 		"If any other context appears in this prompt, use it only to keep the wording valid — " +
 		"do not paste, summarize, or restate that context in the output.\n" +
 		"Preserve the full meaning of the source. Do not invent content or add extra sentences.\n" +
