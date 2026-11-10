@@ -23,7 +23,7 @@ import (
 // AccountRequest represents the request body for creating/updating an account
 type AccountRequest struct {
 	Name string `json:"name" validate:"required"`
-	// Provider selects the messaging backend: "meta" (default) or "aisensy"
+	// Provider selects the messaging backend: "meta" (default), "aisensy", or "msg91"
 	Provider    string `json:"provider"`
 	AppID       string `json:"app_id"`
 	PhoneID     string `json:"phone_id" validate:"required"`
@@ -42,6 +42,10 @@ type AccountRequest struct {
 	AiSensyEmail     string `json:"aisensy_email"`
 	AiSensyPassword  string `json:"aisensy_password"`
 	AiSensyProjectID string `json:"aisensy_project_id"`
+
+	// MSG91-specific fields (required when Provider == "msg91")
+	// phone_id is the integrated WhatsApp number (with country code).
+	MSG91AuthKey string `json:"msg91_authkey"`
 }
 
 // AccountResponse represents the response for an account (without sensitive data)
@@ -64,6 +68,7 @@ type AccountResponse struct {
 	AiSensyEmail           string     `json:"aisensy_email,omitempty"`
 	AiSensyProjectID       string     `json:"aisensy_project_id,omitempty"`
 	HasAiSensyPassword     bool       `json:"has_aisensy_password"`
+	HasMSG91AuthKey        bool       `json:"has_msg91_authkey"`
 	PhoneNumber            string     `json:"phone_number,omitempty"`
 	DisplayName            string     `json:"display_name,omitempty"`
 	TokenExpiresAt         *string    `json:"token_expires_at,omitempty"`
@@ -188,6 +193,15 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 	if provider == "aisensy" && (req.AiSensyEmail == "" || req.AiSensyPassword == "" || req.AiSensyProjectID == "") {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "aisensy_email, aisensy_password, and aisensy_project_id are required for AiSensy accounts", nil, "")
 	}
+	if provider == "msg91" && req.MSG91AuthKey == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "msg91_authkey is required for MSG91 accounts", nil, "")
+	}
+	if provider != "meta" && provider != "aisensy" && provider != "msg91" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "provider must be meta, aisensy, or msg91", nil, "")
+	}
+	if provider == "msg91" && req.BusinessID == "" {
+		req.BusinessID = "msg91"
+	}
 
 	// Generate webhook verify token if not provided
 	webhookVerifyToken := req.WebhookVerifyToken
@@ -222,6 +236,7 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		AiSensyEmail:           req.AiSensyEmail,
 		AiSensyPassword:        req.AiSensyPassword,
 		AiSensyProjectID:       req.AiSensyProjectID,
+		MSG91AuthKey:           req.MSG91AuthKey,
 	}
 
 	if provider == "meta" && req.AccessToken != "" {
@@ -333,7 +348,7 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 		}
 		account.AccessToken = enc
 		tokenChanged = true
-		if !account.IsAiSensy() {
+		if !account.IsAiSensy() && !account.IsMSG91() {
 			a.applyMetaTokenExpiry(account, 0, req.AccessToken)
 		}
 	}
@@ -365,6 +380,14 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	}
 	if req.AiSensyProjectID != "" {
 		account.AiSensyProjectID = req.AiSensyProjectID
+	}
+	if req.MSG91AuthKey != "" {
+		enc, err := crypto.Encrypt(req.MSG91AuthKey, a.Config.App.EncryptionKey)
+		if err != nil {
+			a.Log.Error("Failed to encrypt msg91 authkey", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account", nil, "")
+		}
+		account.MSG91AuthKey = enc
 	}
 	account.AutoReadReceipt = req.AutoReadReceipt
 	account.BusinessCallingEnabled = req.BusinessCallingEnabled
@@ -475,8 +498,8 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 		})
 	}
 
-	// AiSensy accounts have no Meta access token — skip the Graph API call.
-	if account.Provider == "aisensy" {
+	// AiSensy / MSG91 accounts have no Meta access token — skip the Graph API call.
+	if account.IsAiSensy() || account.IsMSG91() {
 		return r.SendEnvelope(map[string]any{
 			"success":              true,
 			"verified_name":        validationResult.VerifiedName,
@@ -612,6 +635,7 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		AiSensyEmail:           acc.AiSensyEmail,
 		AiSensyProjectID:       acc.AiSensyProjectID,
 		HasAiSensyPassword:     acc.AiSensyPassword != "",
+		HasMSG91AuthKey:        acc.MSG91AuthKey != "",
 		TokenRefreshFailed:     acc.TokenRefreshFailed,
 		TokenRefreshError:      acc.TokenRefreshError,
 		CreatedByID:            acc.CreatedByID,
@@ -675,6 +699,9 @@ func (a *App) validateAccountCredentials(account *whatsapp.Account) (*whatsapp.C
 	var client whatsapp.MessagingClient = a.WhatsApp
 	if account.Provider == "aisensy" && a.AiSensy != nil {
 		client = a.AiSensy
+	}
+	if account.Provider == "msg91" && a.MSG91 != nil {
+		client = a.MSG91
 	}
 	result, err := client.ValidateCredentials(ctx, account)
 	if err != nil {
@@ -1216,6 +1243,12 @@ func (a *App) encryptAccountSecrets(account *models.WhatsAppAccount) error {
 		account.AiSensyToken, err = crypto.Encrypt(account.AiSensyToken, encKey)
 		if err != nil {
 			return fmt.Errorf("failed to encrypt aisensy token: %w", err)
+		}
+	}
+	if account.MSG91AuthKey != "" && !crypto.IsEncrypted(account.MSG91AuthKey) {
+		account.MSG91AuthKey, err = crypto.Encrypt(account.MSG91AuthKey, encKey)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt msg91 authkey: %w", err)
 		}
 	}
 	return nil

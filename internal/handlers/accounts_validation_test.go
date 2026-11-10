@@ -468,3 +468,48 @@ func TestApp_CreateAccount_DefaultIncomingFlipsExisting(t *testing.T) {
 	require.NoError(t, app.DB.Where("name = ?", "new-default").First(&fresh).Error)
 	assert.True(t, fresh.IsDefaultIncoming)
 }
+
+func TestApp_CreateAccount_MSG91RequiresAuthKey(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := createAdminUser(t, app, org.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"name":     "msg91-missing-key",
+		"provider": "msg91",
+		"phone_id": "919876543210",
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	require.NoError(t, app.CreateAccount(req))
+	assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+}
+
+func TestApp_CreateAccount_MSG91EncryptsAuthKey(t *testing.T) {
+	app := newTestApp(t)
+	app.Config = &config.Config{
+		App: config.AppConfig{EncryptionKey: "this-is-a-32-character-test-key-XX"},
+		JWT: config.JWTConfig{Secret: testutil.TestJWTSecret, AccessExpiryMins: 15, RefreshExpiryDays: 7},
+	}
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := createAdminUser(t, app, org.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"name":          "msg91-ok",
+		"provider":      "msg91",
+		"phone_id":      "919876543210",
+		"msg91_authkey": "PLAIN-MSG91-KEY",
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	require.NoError(t, app.CreateAccount(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var stored models.WhatsAppAccount
+	require.NoError(t, app.DB.Where("name = ?", "msg91-ok").First(&stored).Error)
+	assert.Equal(t, "msg91", stored.Provider)
+	assert.Equal(t, "msg91", stored.BusinessID)
+	assert.True(t, stored.IsMSG91())
+	assert.NotEqual(t, "PLAIN-MSG91-KEY", stored.MSG91AuthKey)
+	assert.True(t, strings.HasPrefix(stored.MSG91AuthKey, "enc:"))
+}

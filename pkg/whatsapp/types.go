@@ -8,7 +8,7 @@ import (
 )
 
 // Account represents WhatsApp Business Account credentials.
-// Both Meta and AiSensy providers use this struct; the active fields depend on Provider.
+// Meta, AiSensy, and MSG91 providers use this struct; the active fields depend on Provider.
 type Account struct {
 	// Meta fields
 	PhoneID     string
@@ -23,7 +23,11 @@ type Account struct {
 	AiSensyProjectID string
 	AiSensyToken     string // cached JWT; refreshed automatically on 401
 
-	// Provider identifies the messaging backend: "meta" (default) or "aisensy"
+	// MSG91 fields (populated when Provider == "msg91")
+	// PhoneID stores the integrated WhatsApp number (with country code).
+	MSG91AuthKey string
+
+	// Provider identifies the messaging backend: "meta" (default), "aisensy", or "msg91"
 	Provider string
 }
 

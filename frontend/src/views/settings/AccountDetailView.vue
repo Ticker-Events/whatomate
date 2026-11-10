@@ -65,6 +65,7 @@ interface WhatsAppAccount {
   aisensy_email?: string
   aisensy_project_id?: string
   has_aisensy_password?: boolean
+  has_msg91_authkey?: boolean
   business_calling_enabled?: boolean
   phone_number?: string
   display_name?: string
@@ -123,6 +124,7 @@ const form = ref({
   aisensy_email: '',
   aisensy_password: '',
   aisensy_project_id: '',
+  msg91_authkey: '',
   webhook_verify_token: '',
   api_version: 'v21.0',
   is_default_incoming: false,
@@ -132,6 +134,8 @@ const form = ref({
 })
 
 const isAiSensy = computed(() => form.value.provider === 'aisensy')
+const isMSG91 = computed(() => form.value.provider === 'msg91')
+const isMeta = computed(() => !isAiSensy.value && !isMSG91.value)
 
 const breadcrumbs = computed(() => [
   { label: t('nav.settings'), href: '/settings' },
@@ -140,7 +144,10 @@ const breadcrumbs = computed(() => [
 ])
 
 const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
-const webhookUrl = window.location.origin + basePath + '/api/webhook'
+const webhookUrl = computed(() => {
+  const path = isMSG91.value ? '/api/webhook/msg91' : '/api/webhook'
+  return window.location.origin + basePath + path
+})
 
 // Track form changes
 watch(form, () => { hasChanges.value = true }, { deep: true })
@@ -174,6 +181,7 @@ function syncForm() {
     aisensy_email: account.value.aisensy_email || '',
     aisensy_password: '',
     aisensy_project_id: account.value.aisensy_project_id || '',
+    msg91_authkey: '',
     webhook_verify_token: account.value.webhook_verify_token || '',
     api_version: account.value.api_version,
     is_default_incoming: account.value.is_default_incoming,
@@ -188,7 +196,7 @@ async function save() {
     toast.error(t('accounts.fillRequired', 'Name and Phone ID are required'))
     return
   }
-  if (!isAiSensy.value && !form.value.business_id.trim()) {
+  if (isMeta.value && !form.value.business_id.trim()) {
     toast.error(t('accounts.businessIdRequired', 'Business Account ID is required for Meta accounts'))
     return
   }
@@ -196,7 +204,11 @@ async function save() {
     toast.error(t('accounts.aisensyFieldsRequired', 'Email, Password, and Project ID are required for AiSensy accounts'))
     return
   }
-  if (!isAiSensy.value && isNew.value && !form.value.access_token.trim()) {
+  if (isMSG91.value && isNew.value && !form.value.msg91_authkey.trim()) {
+    toast.error(t('accounts.msg91AuthKeyRequired', 'MSG91 Auth Key is required'))
+    return
+  }
+  if (isMeta.value && isNew.value && !form.value.access_token.trim()) {
     toast.error(t('accounts.accessTokenRequired', 'Access token is required'))
     return
   }
@@ -207,6 +219,7 @@ async function save() {
     if (!isNew.value && !payload.access_token) delete payload.access_token
     if (!isNew.value && !payload.app_secret) delete payload.app_secret
     if (!isNew.value && !payload.aisensy_password) delete payload.aisensy_password
+    if (!isNew.value && !payload.msg91_authkey) delete payload.msg91_authkey
 
     if (isNew.value) {
       const response = await api.post('/accounts', payload)
@@ -413,7 +426,7 @@ onMounted(async () => {
             <Button
               variant="outline"
               size="sm"
-              :class="!isAiSensy ? 'border-primary text-primary' : ''"
+              :class="isMeta ? 'border-primary text-primary' : ''"
               :disabled="!canWrite || !isNew"
               @click="form.provider = 'meta'"
             >Meta</Button>
@@ -424,6 +437,13 @@ onMounted(async () => {
               :disabled="!canWrite || !isNew"
               @click="form.provider = 'aisensy'"
             >AiSensy</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              :class="isMSG91 ? 'border-primary text-primary' : ''"
+              :disabled="!canWrite || !isNew"
+              @click="form.provider = 'msg91'"
+            >MSG91</Button>
           </div>
           <p v-if="!isNew" class="text-[11px] text-muted-foreground">Provider cannot be changed after account creation.</p>
         </div>
@@ -433,12 +453,14 @@ onMounted(async () => {
         <!-- Phone Number ID (always required) -->
         <div class="grid grid-cols-2 gap-4">
           <div class="space-y-1.5">
-            <Label class="text-xs">{{ $t('accounts.phoneNumberId', 'Phone Number ID') }} *</Label>
-            <Input v-model="form.phone_id" :disabled="!canWrite" />
+            <Label class="text-xs">
+              {{ isMSG91 ? $t('accounts.integratedNumber', 'Integrated Number') : $t('accounts.phoneNumberId', 'Phone Number ID') }} *
+            </Label>
+            <Input v-model="form.phone_id" :disabled="!canWrite" :placeholder="isMSG91 ? '9198XXXXXXXX' : ''" />
           </div>
 
           <!-- Meta-only fields -->
-          <template v-if="!isAiSensy">
+          <template v-if="isMeta">
             <div class="space-y-1.5">
               <Label class="text-xs">{{ $t('accounts.businessAccountId', 'Business Account ID') }} *</Label>
               <Input v-model="form.business_id" :disabled="!canWrite" />
@@ -475,10 +497,25 @@ onMounted(async () => {
               </Badge>
             </div>
           </template>
+
+          <!-- MSG91-only fields -->
+          <template v-if="isMSG91">
+            <div class="space-y-1.5">
+              <Label class="text-xs">
+                {{ $t('accounts.msg91AuthKey', 'MSG91 Auth Key') }}
+                <span v-if="isNew" class="text-destructive">*</span>
+                <span v-else class="text-muted-foreground text-[10px]">{{ $t('accounts.accessTokenKeepExisting', '(leave empty to keep existing)') }}</span>
+              </Label>
+              <Input v-model="form.msg91_authkey" type="password" :disabled="!canWrite" />
+              <Badge v-if="account?.has_msg91_authkey" variant="outline" class="border-green-600 text-green-600">
+                <Check class="h-3 w-3 mr-1" /> {{ $t('accounts.configured', 'Configured') }}
+              </Badge>
+            </div>
+          </template>
         </div>
 
         <!-- Meta credential fields -->
-        <template v-if="!isAiSensy">
+        <template v-if="isMeta">
           <Separator />
 
           <div class="grid grid-cols-2 gap-4">
@@ -546,8 +583,11 @@ onMounted(async () => {
             <code class="px-2 py-1 bg-muted rounded text-xs font-mono flex-1 truncate">{{ webhookUrl }}</code>
             <IconButton :icon="Copy" label="Copy" @click="copyToClipboard(webhookUrl)" />
           </div>
+          <p v-if="isMSG91" class="text-[11px] text-muted-foreground mt-1">
+            {{ $t('accounts.msg91WebhookHint', 'In MSG91 Webhook (New), set a custom header X-MSG91-Secret to match your server [msg91] webhook_secret.') }}
+          </p>
         </div>
-        <div>
+        <div v-if="!isMSG91">
           <Label class="text-xs text-muted-foreground">{{ $t('accounts.verifyToken', 'Verify Token') }}</Label>
           <div class="flex items-center gap-2 mt-1">
             <code class="px-2 py-1 bg-muted rounded text-xs font-mono flex-1 truncate">{{ account?.webhook_verify_token }}</code>
@@ -581,7 +621,7 @@ onMounted(async () => {
         </CardHeader>
         <CardContent>
           <!-- Meta setup guide -->
-          <ol v-if="!isAiSensy" class="list-decimal list-inside space-y-2.5 text-sm text-muted-foreground">
+          <ol v-if="isMeta" class="list-decimal list-inside space-y-2.5 text-sm text-muted-foreground">
             <li>{{ $t('accounts.setupStep1', 'Go to') }} <a href="https://developers.facebook.com" target="_blank" class="text-primary hover:underline">Meta Developer Console</a> {{ $t('accounts.setupStep1End', 'and create an app') }}</li>
             <li>{{ $t('accounts.setupStep2', 'Add WhatsApp product to your app') }}</li>
             <li>{{ $t('accounts.setupStep3', 'Copy') }} <strong>{{ $t('accounts.setupStep3Bold1', 'Phone Number ID') }}</strong> {{ $t('accounts.setupStep3And', 'and') }} <strong>{{ $t('accounts.setupStep3Bold2', 'Business Account ID') }}</strong></li>
@@ -590,13 +630,22 @@ onMounted(async () => {
             <li>{{ $t('accounts.setupStep6', 'Click Test Connection to verify') }}</li>
           </ol>
           <!-- AiSensy setup guide -->
-          <ol v-else class="list-decimal list-inside space-y-2.5 text-sm text-muted-foreground">
+          <ol v-else-if="isAiSensy" class="list-decimal list-inside space-y-2.5 text-sm text-muted-foreground">
             <li>{{ $t('accounts.aisensySetupStep1', 'Log in to your') }} <a href="https://app.aisensy.com" target="_blank" class="text-primary hover:underline">AiSensy Dashboard</a></li>
             <li>{{ $t('accounts.aisensySetupStep2', 'Go to Settings → Direct API to find your') }} <strong>{{ $t('accounts.aisensySetupStep2Bold', 'Project ID') }}</strong></li>
             <li>{{ $t('accounts.aisensySetupStep3', 'Copy the') }} <strong>{{ $t('accounts.aisensySetupStep3Bold', 'Phone Number ID') }}</strong> {{ $t('accounts.aisensySetupStep3End', 'from your WhatsApp account in AiSensy') }}</li>
             <li>{{ $t('accounts.aisensySetupStep4', 'Enter your AiSensy account email and password') }}</li>
             <li>{{ $t('accounts.aisensySetupStep5', 'Configure the webhook URL in the AiSensy dashboard') }}</li>
             <li>{{ $t('accounts.aisensySetupStep6', 'Click Test Connection to verify') }}</li>
+          </ol>
+          <!-- MSG91 setup guide -->
+          <ol v-else class="list-decimal list-inside space-y-2.5 text-sm text-muted-foreground">
+            <li>{{ $t('accounts.msg91SetupStep1', 'Log in to your') }} <a href="https://control.msg91.com" target="_blank" class="text-primary hover:underline">MSG91 Dashboard</a></li>
+            <li>{{ $t('accounts.msg91SetupStep2', 'Copy your') }} <strong>{{ $t('accounts.msg91SetupStep2Bold', 'Auth Key') }}</strong> {{ $t('accounts.msg91SetupStep2End', 'from the dashboard') }}</li>
+            <li>{{ $t('accounts.msg91SetupStep3', 'Enter the') }} <strong>{{ $t('accounts.msg91SetupStep3Bold', 'Integrated Number') }}</strong> {{ $t('accounts.msg91SetupStep3End', '(WhatsApp number with country code)') }}</li>
+            <li>{{ $t('accounts.msg91SetupStep4', 'Create a Webhook (New) pointing to this app’s /api/webhook/msg91 URL') }}</li>
+            <li>{{ $t('accounts.msg91SetupStep5', 'Add custom header X-MSG91-Secret matching [msg91] webhook_secret') }}</li>
+            <li>{{ $t('accounts.msg91SetupStep6', 'Click Test Connection to verify') }}</li>
           </ol>
         </CardContent>
       </Card>

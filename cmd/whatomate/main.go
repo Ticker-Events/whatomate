@@ -24,6 +24,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/internal/worker"
 	"github.com/shridarpatil/whatomate/pkg/aisensy"
+	"github.com/shridarpatil/whatomate/pkg/msg91"
 	firestoresync "github.com/shridarpatil/whatomate/pkg/firestore"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
@@ -215,6 +216,9 @@ func runServer(args []string) {
 	// Initialize AiSensy client
 	aiSensyClient := aisensy.New(cfg.AiSensy, lo)
 
+	// Initialize MSG91 client
+	msg91Client := msg91.New(cfg.MSG91, lo)
+
 	// Initialize WebSocket hub
 	wsHub := websocket.NewHub(lo)
 	wsHub.SetPublisher(queue.NewPublisher(rdb, lo))
@@ -240,13 +244,14 @@ func runServer(args []string) {
 		Log:        lo,
 		WhatsApp:   waClient,
 		AiSensy:    aiSensyClient,
+		MSG91:      msg91Client,
 		WSHub:      wsHub,
 		Queue:      jobQueue,
 		HTTPClient: httpClient,
 	}
 	aiSensyClient.PersistToken = app.PersistAiSensyToken
 
-	// Initialize S3 client when bucket is configured (call recordings + AiSensy media links)
+	// Initialize S3 client when bucket is configured (call recordings + AiSensy/MSG91 media links)
 	var s3Client *storage.S3Client
 	if cfg.Storage.S3Bucket != "" {
 		var err error
@@ -616,9 +621,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		g.GET("/api/auth/sso/{provider}/callback", app.CallbackSSO)
 	}
 
-	// Webhook routes (public - for Meta)
+	// Webhook routes (public - for Meta/AiSensy and MSG91)
 	g.GET("/api/webhook", app.WebhookVerify)
 	g.POST("/api/webhook", app.WebhookHandler)
+	g.POST("/api/webhook/msg91", app.MSG91WebhookHandler)
 
 	// WebSocket route (auth via message-based flow after upgrade)
 	g.GET("/ws", app.WebSocketHandler)
@@ -634,7 +640,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		// Skip auth for public routes
 		if path == "/health" || path == "/ready" || path == "/api/app" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||
-			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" {
+			path == "/api/auth/logout" || path == "/api/webhook" || path == "/api/webhook/msg91" || path == "/ws" {
 			return r
 		}
 		// Skip auth for SSO routes (they handle their own auth via state tokens)

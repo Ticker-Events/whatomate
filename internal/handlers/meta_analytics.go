@@ -172,8 +172,8 @@ func (a *App) GetMetaAnalytics(r *fastglue.Request) error {
 		a.decryptAccountSecrets(&accounts[i])
 		account := accounts[i]
 
-		// Meta Analytics is not available for AiSensy accounts
-		if account.IsAiSensy() {
+		// Meta Analytics is not available for AiSensy / MSG91 accounts
+		if account.IsAiSensy() || account.IsMSG91() {
 			results = append(results, MetaAnalyticsResponse{
 				AccountID:   account.ID.String(),
 				AccountName: account.Name,

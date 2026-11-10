@@ -18,6 +18,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/pkg/aisensy"
 	firestoresync "github.com/shridarpatil/whatomate/pkg/firestore"
+	"github.com/shridarpatil/whatomate/pkg/msg91"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -33,7 +34,9 @@ type App struct {
 	Log      logf.Logger
 	WhatsApp *whatsapp.Client
 	// AiSensy is the AiSensy Direct API client (nil when not configured).
-	AiSensy           *aisensy.Client
+	AiSensy *aisensy.Client
+	// MSG91 is the MSG91 WhatsApp API client (nil when not configured).
+	MSG91             *msg91.Client
 	WSHub             *websocket.Hub
 	Queue             queue.Queue
 	CampaignSubCancel context.CancelFunc
@@ -55,10 +58,13 @@ type App struct {
 }
 
 // getMessagingClient returns the appropriate MessagingClient for the account.
-// AiSensy accounts use the AiSensy Direct API; all others use the Meta WhatsApp Cloud API.
+// AiSensy / MSG91 accounts use their providers; all others use the Meta WhatsApp Cloud API.
 func (a *App) getMessagingClient(account *models.WhatsAppAccount) whatsapp.MessagingClient {
 	if account != nil && account.IsAiSensy() && a.AiSensy != nil {
 		return a.AiSensy
+	}
+	if account != nil && account.IsMSG91() && a.MSG91 != nil {
+		return a.MSG91
 	}
 	return a.WhatsApp
 }

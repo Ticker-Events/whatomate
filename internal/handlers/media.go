@@ -36,7 +36,7 @@ func (a *App) ensureMediaDir(subdir string) error {
 }
 
 // resolveOutgoingMediaRef prepares media for sending via the account's provider.
-// Meta accounts upload bytes and return a media ID. AiSensy requires a publicly
+// Meta accounts upload bytes and return a media ID. AiSensy/MSG91 require a publicly
 // accessible HTTPS URL, so we host the file on S3/Spaces and return a presigned link.
 // WebP is transcoded to JPEG first — WhatsApp rejects image/webp for images and headers.
 func (a *App) resolveOutgoingMediaRef(ctx context.Context, account *models.WhatsAppAccount, data []byte, mimeType, filename string) (string, error) {
@@ -46,7 +46,7 @@ func (a *App) resolveOutgoingMediaRef(ctx context.Context, account *models.Whats
 	}
 	data, mimeType, filename = converted, outMIME, outName
 
-	if account != nil && account.IsAiSensy() {
+	if account != nil && (account.IsAiSensy() || account.IsMSG91()) {
 		return a.uploadAiSensyMediaLink(ctx, data, mimeType, filename)
 	}
 	waAccount := a.toWhatsAppAccount(account)
@@ -170,6 +170,9 @@ func (a *App) DownloadAndSaveMedia(ctx context.Context, mediaID string, mimeType
 	var client whatsapp.MessagingClient = a.WhatsApp
 	if account.Provider == "aisensy" && a.AiSensy != nil {
 		client = a.AiSensy
+	}
+	if account.Provider == "msg91" && a.MSG91 != nil {
+		client = a.MSG91
 	}
 
 	// Get the media URL (or sentinel for AiSensy)
