@@ -787,6 +787,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/commerce-catalog", app.GetCommerceCatalogStatus)
 	g.GET("/api/commerce-catalog/collections", app.ListCommerceCatalogCollections)
 	g.GET("/api/commerce-catalog/collections/{collection_id}/products", app.ListCommerceCatalogProducts)
+	g.POST("/api/internal/commerce-catalog/invalidate", app.InvalidateCommerceCatalog)
 	g.POST("/api/messages", app.SendMessage) // Legacy route
 	g.POST("/api/messages/template", app.SendTemplateMessage)
 	g.POST("/api/messages/media", app.SendMediaMessage)

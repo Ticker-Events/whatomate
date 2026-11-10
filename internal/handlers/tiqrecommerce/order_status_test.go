@@ -3,9 +3,41 @@ package tiqrecommerce
 import (
 	"testing"
 
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type orderStatusTestChat struct {
+	session *models.ChatbotSession
+}
+
+func (c *orderStatusTestChat) Session() *models.ChatbotSession             { return c.session }
+func (c *orderStatusTestChat) Account() *models.WhatsAppAccount           { return nil }
+func (c *orderStatusTestChat) Contact() *models.Contact                   { return nil }
+func (c *orderStatusTestChat) UserInput() string                          { return "" }
+func (c *orderStatusTestChat) SetUserInput(string)                        {}
+func (c *orderStatusTestChat) InboundMedia() codedflow.InboundMedia       { return codedflow.InboundMedia{} }
+func (c *orderStatusTestChat) ButtonID() string                           { return "" }
+func (c *orderStatusTestChat) SetButtonID(string)                         {}
+func (c *orderStatusTestChat) FlowResponseData() map[string]any           { return nil }
+func (c *orderStatusTestChat) SetFlowResponseData(map[string]any)         {}
+func (c *orderStatusTestChat) QuotedMessage() *codedflow.QuotedMessage    { return nil }
+func (c *orderStatusTestChat) Consumed() bool                             { return false }
+func (c *orderStatusTestChat) SetConsumed(bool)                           {}
+func (c *orderStatusTestChat) Capturing() bool                            { return false }
+func (c *orderStatusTestChat) LastTiqr() map[string]any                   { return nil }
+func (c *orderStatusTestChat) SetLastTiqr(map[string]any)                 {}
+func (c *orderStatusTestChat) LastTiqrErr() string                        { return "" }
+func (c *orderStatusTestChat) SetLastTiqrErr(string)                      {}
+func (c *orderStatusTestChat) LastTiqrStatus() int                        { return 0 }
+func (c *orderStatusTestChat) SetLastTiqrStatus(int)                      {}
+func (c *orderStatusTestChat) Preview() *codedflow.PreviewSink            { return nil }
+func (c *orderStatusTestChat) SetPreview(*codedflow.PreviewSink)          {}
+func (c *orderStatusTestChat) Archive() *codedflow.PreviewSink            { return nil }
+func (c *orderStatusTestChat) SetArchive(*codedflow.PreviewSink)          {}
+func (c *orderStatusTestChat) Native() any                                { return nil }
 
 func TestReshapeOrdersForList(t *testing.T) {
 	rows := reshapeOrdersForList([]any{
@@ -37,10 +69,13 @@ func TestReshapeOrdersForList(t *testing.T) {
 }
 
 func TestFormatOrderStatusSummary_Delivery(t *testing.T) {
-	summary := formatOrderStatusSummary(map[string]any{
-		"display_uid":  "ORD-9",
-		"status":       "PENDING_PAYMENT",
-		"total_amount": 15000,
+	c := Wrap(codedflow.NewConv(nil, &orderStatusTestChat{
+		session: &models.ChatbotSession{SessionData: models.JSONB{}},
+	}))
+	summary := formatOrderStatusSummary(c, map[string]any{
+		"display_uid":   "ORD-9",
+		"status":        "PENDING_PAYMENT",
+		"total_amount":  15000,
 		"delivery_mode": ModeDelivery,
 		"items": []any{
 			map[string]any{
@@ -64,17 +99,25 @@ func TestFormatOrderStatusSummary_Delivery(t *testing.T) {
 		},
 	}, "INR")
 
-	assert.Contains(t, summary, "Order *ORD-9*")
-	assert.Contains(t, summary, "pending payment")
-	assert.Contains(t, summary, "Kunafa (Large) × 2 — ₹100.00")
-	assert.Contains(t, summary, "Total: ₹150.00")
+	assert.Contains(t, summary, "Order *{{order_id}}*")
+	assert.Contains(t, summary, "Status: {{order_status}}")
+	assert.Contains(t, summary, "{{order_items}}")
+	assert.Contains(t, summary, "Total: {{order_total}}")
 	assert.Contains(t, summary, "Fulfillment: Delivery")
-	assert.Contains(t, summary, "12 MG Road")
-	assert.Contains(t, summary, "Bengaluru, KA")
+	assert.Contains(t, summary, "{{order_address}}")
+	assert.Equal(t, "ORD-9", c.Session().SessionData["order_id"])
+	assert.Equal(t, "pending payment", c.Session().SessionData["order_status"])
+	assert.Contains(t, asString(c.Session().SessionData["order_items"]), "Kunafa (Large) × 2 — ₹100.00")
+	assert.Equal(t, "₹150.00", c.Session().SessionData["order_total"])
+	assert.Contains(t, asString(c.Session().SessionData["order_address"]), "12 MG Road")
+	assert.Contains(t, asString(c.Session().SessionData["order_address"]), "Bengaluru, KA")
 }
 
 func TestFormatOrderStatusSummary_PickupOmitsAddress(t *testing.T) {
-	summary := formatOrderStatusSummary(map[string]any{
+	c := Wrap(codedflow.NewConv(nil, &orderStatusTestChat{
+		session: &models.ChatbotSession{SessionData: models.JSONB{}},
+	}))
+	summary := formatOrderStatusSummary(c, map[string]any{
 		"display_uid":   "ORD-1",
 		"status":        "CONFIRMED",
 		"total_amount":  5000,
@@ -97,6 +140,7 @@ func TestFormatOrderStatusSummary_PickupOmitsAddress(t *testing.T) {
 	}, "INR")
 
 	assert.Contains(t, summary, "Fulfillment: Store pickup")
+	assert.NotContains(t, summary, "order_address")
 	assert.NotContains(t, summary, "should not appear")
 	assert.NotContains(t, summary, "Address")
 }

@@ -52,10 +52,8 @@ func radiusKmLabel(v any) string {
 // formatOutOfRangeDeliveryMessage builds the WhatsApp copy shown when a pin
 // is outside delivery_radius. It uses store.address, free_delivery_radius,
 // and delivery_radius from get_store — never invents those values.
-func formatOutOfRangeDeliveryMessageWithPickup(store map[string]any, offerPickup bool) string {
-	var b strings.Builder
-	b.WriteString("Sorry, we're currently unable to deliver to this location.")
-
+// Dynamic values are left as placeholders so AI translation stays cacheable.
+func formatOutOfRangeDeliveryMessageWithPickup(c *Conv, store map[string]any, offerPickup bool) string {
 	address := ""
 	var freeLabel, maxLabel string
 	if store != nil {
@@ -63,21 +61,29 @@ func formatOutOfRangeDeliveryMessageWithPickup(store map[string]any, offerPickup
 		freeLabel = radiusKmLabel(store["free_delivery_radius"])
 		maxLabel = radiusKmLabel(store["delivery_radius"])
 	}
+	if c != nil && c.Session() != nil {
+		if c.Session().SessionData == nil {
+			c.Session().SessionData = models.JSONB{}
+		}
+		c.Session().SessionData["store_address"] = address
+		c.Session().SessionData["free_delivery_km"] = freeLabel
+		c.Session().SessionData["max_delivery_km"] = maxLabel
+	}
 
 	offers := make([]string, 0, 2)
 	if freeLabel != "" {
-		offers = append(offers, "- Free delivery within "+freeLabel+" km of our store")
+		offers = append(offers, "- Free delivery within {{free_delivery_km}} km of our store")
 	}
 	if maxLabel != "" {
-		offers = append(offers, "- Delivery up to "+maxLabel+" km for an additional delivery fee")
+		offers = append(offers, "- Delivery up to {{max_delivery_km}} km for an additional delivery fee")
 	}
 
+	var b strings.Builder
+	b.WriteString("Sorry, we're currently unable to deliver to this location.")
 	if address != "" || len(offers) > 0 {
 		b.WriteString("\n\n")
 		if address != "" {
-			b.WriteString("Our store is located in ")
-			b.WriteString(address)
-			b.WriteString(".")
+			b.WriteString("Our store is located in {{store_address}}.")
 			if len(offers) > 0 {
 				b.WriteString(" We offer:")
 			}
@@ -168,7 +174,9 @@ func formatOrderPlacedDate(raw string) string {
 
 // formatOrderStatusSummary builds the WhatsApp body for a selected store order.
 // Amounts on the owner API are minor units and are converted once here.
-func formatOrderStatusSummary(order map[string]any, currency string) string {
+// Dynamic ids, amounts, and addresses are stored as placeholders so translation
+// of the instructional labels can be cached.
+func formatOrderStatusSummary(c *Conv, order map[string]any, currency string) string {
 	if order == nil {
 		return tiqrEcommerceOrderUnavailable
 	}
@@ -180,17 +188,26 @@ func formatOrderStatusSummary(order map[string]any, currency string) string {
 	if status == "" {
 		status = "unknown"
 	}
+	if c != nil && c.Session() != nil {
+		if c.Session().SessionData == nil {
+			c.Session().SessionData = models.JSONB{}
+		}
+		c.Session().SessionData["order_id"] = id
+		c.Session().SessionData["order_status"] = status
+	}
 
 	var b strings.Builder
 	if id != "" {
-		fmt.Fprintf(&b, "Order *%s*\nStatus: %s", id, status)
+		b.WriteString("Order *{{order_id}}*\nStatus: {{order_status}}")
 	} else {
-		fmt.Fprintf(&b, "Status: %s", status)
+		b.WriteString("Status: {{order_status}}")
 	}
 
 	if lines := formatOrderStatusItems(order["items"], currency); lines != "" {
-		b.WriteString("\n\nItems\n")
-		b.WriteString(lines)
+		if c != nil && c.Session() != nil {
+			c.Session().SessionData["order_items"] = lines
+		}
+		b.WriteString("\n\nItems\n{{order_items}}")
 	}
 
 	totalMinor, ok := anyToFloat64(order["total_amount"])
@@ -198,7 +215,10 @@ func formatOrderStatusSummary(order map[string]any, currency string) string {
 		totalMinor, ok = anyToFloat64(order["amount"])
 	}
 	if ok {
-		fmt.Fprintf(&b, "\n\nTotal: %s", formatMoney(ticker.PaiseToRupees(totalMinor), currency))
+		if c != nil && c.Session() != nil {
+			c.Session().SessionData["order_total"] = formatMoney(ticker.PaiseToRupees(totalMinor), currency)
+		}
+		b.WriteString("\n\nTotal: {{order_total}}")
 	}
 
 	mode := strings.TrimSpace(asString(order["delivery_mode"]))
@@ -208,8 +228,10 @@ func formatOrderStatusSummary(order map[string]any, currency string) string {
 	case tiqrModeDelivery:
 		b.WriteString("\nFulfillment: Delivery")
 		if addr := formatOrderAddress(order["address"]); addr != "" {
-			b.WriteString("\n\nAddress\n")
-			b.WriteString(addr)
+			if c != nil && c.Session() != nil {
+				c.Session().SessionData["order_address"] = addr
+			}
+			b.WriteString("\n\nAddress\n{{order_address}}")
 		}
 	}
 

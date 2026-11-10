@@ -27,7 +27,10 @@ const (
 
 	tiqrEcommerceUnavailable = "Sorry, this item isn't available right now.\n\nPlease choose another item from our collections."
 
-	tiqrEcommerceAdded = "*{{option_name}}* has been added to your cart.\n\n{{cart_summary}}\n\nYou now have *{{cart_count}}* items in your cart. Add something else, edit your cart, or check out when you're ready."
+	tiqrEcommerceAdded = "*{{option_name}}* has been added to your cart.\n\n*Your cart:*\n{{cart_lines}}\n\n*Subtotal:* {{cart_subtotal}}\n\nYou now have *{{cart_count}}* items in your cart. Add something else, edit your cart, or check out when you're ready."
+
+	tiqrCartSummaryTemplate = "*Your cart:*\n{{cart_lines}}\n\n*Subtotal:* {{cart_subtotal}}"
+	tiqrCartEmptyLabel      = "Your cart is empty."
 
 	tiqrEcommerceFailed = "We couldn't place your order just now.\n\nPlease try again in a moment. If it still doesn't go through, message us and we'll help you complete it."
 
@@ -734,7 +737,7 @@ func resolveDeliveryLocation(c *Conv, pickupAllowed bool) bool {
 			}
 		})
 		if result.Deliverable && result.Zone != deliveryZoneOutOfRange {
-			c.Say(formatDeliveryEligibilityMessage(store, result))
+			c.Say(formatDeliveryEligibilityMessage(c, store, result))
 			c.Session().SessionData["delivery_mode"] = tiqrModeDelivery
 			c.Session().SessionData["delivery_zone"] = result.Zone
 			if result.HasDistance {
@@ -745,7 +748,7 @@ func resolveDeliveryLocation(c *Conv, pickupAllowed bool) bool {
 			}
 			return true
 		}
-		c.Say(formatOutOfRangeDeliveryMessageWithPickup(store, pickupAllowed))
+		c.Say(formatOutOfRangeDeliveryMessageWithPickup(c, store, pickupAllowed))
 		if !pickupAllowed {
 			continue
 		}
@@ -809,7 +812,27 @@ func deliveryModesContain(modes []string, want string) bool {
 	return false
 }
 
-func formatDeliveryEligibilityMessage(store map[string]any, result storeDeliveryEligibility) string {
+func formatDeliveryEligibilityMessage(c *Conv, store map[string]any, result storeDeliveryEligibility) string {
+	var freeLabel, maxLabel string
+	if store != nil {
+		freeLabel = radiusKmLabel(store["free_delivery_radius"])
+		maxLabel = radiusKmLabel(store["delivery_radius"])
+	}
+	offers := make([]string, 0, 2)
+	if freeLabel != "" {
+		offers = append(offers, "- Free delivery within {{free_delivery_km}} km of our store")
+	}
+	if maxLabel != "" {
+		offers = append(offers, "- Delivery up to {{max_delivery_km}} km for an additional delivery fee")
+	}
+	if c != nil && c.Session() != nil {
+		if c.Session().SessionData == nil {
+			c.Session().SessionData = models.JSONB{}
+		}
+		c.Session().SessionData["free_delivery_km"] = freeLabel
+		c.Session().SessionData["max_delivery_km"] = maxLabel
+	}
+
 	var b strings.Builder
 	switch {
 	case result.Zone == deliveryZoneFree:
@@ -821,24 +844,14 @@ func formatDeliveryEligibilityMessage(store map[string]any, result storeDelivery
 				currency = strings.ToUpper(code)
 			}
 		}
-		b.WriteString(fmt.Sprintf("We can deliver there. Delivery fee: %s.", formatMoney(ticker.PaiseToRupees(float64(result.ShippingFeePaise)), currency)))
+		if c != nil && c.Session() != nil {
+			c.Session().SessionData["delivery_fee"] = formatMoney(ticker.PaiseToRupees(float64(result.ShippingFeePaise)), currency)
+		}
+		b.WriteString("We can deliver there. Delivery fee: {{delivery_fee}}.")
 	case result.Zone == deliveryZonePaid:
 		b.WriteString("We can deliver there. An additional delivery fee may apply.")
 	default:
 		b.WriteString("Thanks — we can deliver to that location.")
-	}
-
-	var freeLabel, maxLabel string
-	if store != nil {
-		freeLabel = radiusKmLabel(store["free_delivery_radius"])
-		maxLabel = radiusKmLabel(store["delivery_radius"])
-	}
-	offers := make([]string, 0, 2)
-	if freeLabel != "" {
-		offers = append(offers, "- Free delivery within "+freeLabel+" km of our store")
-	}
-	if maxLabel != "" {
-		offers = append(offers, "- Delivery up to "+maxLabel+" km for an additional delivery fee")
 	}
 	if len(offers) > 0 {
 		b.WriteString("\n\nFor reference, we offer:\n\n")
@@ -926,17 +939,33 @@ func CartUnitCount(c *Conv) int {
 
 func refreshCartSessionFields(c *Conv) {
 	c.Session().SessionData["cart_count"] = float64(CartUnitCount(c))
-	c.Session().SessionData["cart_summary"] = FormatTiqrCartSummary(c)
+	tmpl := FormatTiqrCartSummary(c)
+	if tmpl == tiqrCartEmptyLabel {
+		c.Session().SessionData["cart_summary"] = tiqrCartEmptyLabel
+		return
+	}
+	c.Session().SessionData["cart_summary"] = strings.TrimSpace(
+		"*Your cart:*\n" + asString(c.Session().SessionData["cart_lines"]) +
+			"\n\n*Subtotal:* " + asString(c.Session().SessionData["cart_subtotal"]),
+	)
 }
 
+// FormatTiqrCartSummary returns a stable translation template and stores
+// cart_lines / cart_subtotal for processTemplate after translation.
 func FormatTiqrCartSummary(c *Conv) string {
 	lines := tiqrCartLines(c)
 	if len(lines) == 0 {
-		return "Your cart is empty."
+		if c != nil && c.Session() != nil {
+			if c.Session().SessionData == nil {
+				c.Session().SessionData = models.JSONB{}
+			}
+			c.Session().SessionData["cart_lines"] = ""
+			c.Session().SessionData["cart_subtotal"] = ""
+		}
+		return tiqrCartEmptyLabel
 	}
 	currency := sessionCurrencyCode(c.Session())
 	var b strings.Builder
-	b.WriteString("*Your cart:*\n")
 	var total float64
 	for i, line := range lines {
 		qty := line.Qty
@@ -951,8 +980,14 @@ func FormatTiqrCartSummary(c *Conv) string {
 			b.WriteString(extra)
 		}
 	}
-	fmt.Fprintf(&b, "\n*Subtotal:* %s", formatMoney(total, currency))
-	return strings.TrimSpace(b.String())
+	if c != nil && c.Session() != nil {
+		if c.Session().SessionData == nil {
+			c.Session().SessionData = models.JSONB{}
+		}
+		c.Session().SessionData["cart_lines"] = strings.TrimRight(b.String(), "\n")
+		c.Session().SessionData["cart_subtotal"] = formatMoney(total, currency)
+	}
+	return tiqrCartSummaryTemplate
 }
 
 type TiqrCartLine struct {
@@ -1943,18 +1978,27 @@ func editCartByInstruction(c *Conv, attempt int) bool {
 		if removed == "" {
 			removed = "that item"
 		}
+		if c.Session().SessionData == nil {
+			c.Session().SessionData = models.JSONB{}
+		}
+		c.Session().SessionData["removed_item"] = removed
 		if CartLen(c) == 0 {
-			c.Say("Removed *" + removed + "* from your cart.\n\nYour cart is empty.")
+			c.Say("Removed *{{removed_item}}* from your cart.\n\nYour cart is empty.")
 			return true
 		}
-		c.Say("Removed *" + removed + "* from your cart.\n\n" + FormatTiqrCartSummary(c))
+		_ = FormatTiqrCartSummary(c)
+		c.Say("Removed *{{removed_item}}* from your cart.\n\n" + tiqrCartSummaryTemplate)
 		return true
 	}
 
 	qty := intent.Qty
 	if qty < 1 {
+		if c.Session().SessionData == nil {
+			c.Session().SessionData = models.JSONB{}
+		}
+		c.Session().SessionData["cart_item_name"] = name
 		qtyText, ok := c.AskNumber(fmt.Sprintf("cart_edit_qty_%d", attempt), codedflow.NumberPrompt{
-			Body:    "What quantity would you like for *" + name + "*?\n\nReply with a whole number of 1 or more.",
+			Body:    "What quantity would you like for *{{cart_item_name}}*?\n\nReply with a whole number of 1 or more.",
 			Pattern: `^[1-9][0-9]*$`,
 			Step: codedflow.StepNote{
 				Doing:  "Collecting the new quantity for a cart line.",
@@ -1969,7 +2013,13 @@ func editCartByInstruction(c *Conv, attempt int) bool {
 	c.Once(fmt.Sprintf("cart_edit_setqty_%d", attempt), func() {
 		SetTiqrCartLineQty(c, optionID, qty)
 	})
-	c.Say(fmt.Sprintf("Updated *%s* to quantity %d.\n\n%s", name, qty, FormatTiqrCartSummary(c)))
+	if c.Session().SessionData == nil {
+		c.Session().SessionData = models.JSONB{}
+	}
+	c.Session().SessionData["cart_item_name"] = name
+	c.Session().SessionData["cart_item_qty"] = strconv.Itoa(qty)
+	_ = FormatTiqrCartSummary(c)
+	c.Say("Updated *{{cart_item_name}}* to quantity {{cart_item_qty}}.\n\n" + tiqrCartSummaryTemplate)
 	return true
 }
 
@@ -2798,6 +2848,6 @@ func orderStatus(c *Conv) error {
 		c.Say(tiqrEcommerceOrderUnavailable)
 		return c.End()
 	}
-	c.Say(formatOrderStatusSummary(order, sessionCurrencyCode(c.Session())))
+	c.Say(formatOrderStatusSummary(c, order, sessionCurrencyCode(c.Session())))
 	return c.End()
 }

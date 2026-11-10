@@ -97,6 +97,10 @@ type Host interface {
 	GenerateAnthropicResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage, contextData string) (string, error)
 	GenerateGoogleResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage, contextData string) (string, error)
 
+	// Shared translation cache (Redis). Miss or unset Redis returns ok=false.
+	GetCodedTranslation(lang, source string) (string, bool)
+	SetCodedTranslation(lang, source, translated string)
+
 	GetChatbotSettingsCached(orgID uuid.UUID, accountName string) (*models.ChatbotSettings, error)
 	IsWithinBusinessHours(hours models.JSONBArray) bool
 	SendAndSaveTextMessage(account *models.WhatsAppAccount, contact *models.Contact, text string) error
