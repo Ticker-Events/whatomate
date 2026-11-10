@@ -1090,16 +1090,30 @@ func (a *App) execChatAIResponse(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome,
 //	  "notes":   "Last seen {{last_query}}"      // optional; templated
 //	}
 func (a *App) execChatTransfer(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
-	if body := stringFromConfig(node.Config, "body", "message", "text"); body != "" {
-		message := processTemplate(body, ctx.session.SessionData)
+	body := stringFromConfig(node.Config, "body", "message", "text")
+	message := ""
+	if body != "" {
+		message = processTemplate(body, ctx.session.SessionData)
+	}
+	if ctx.capturing() {
+		if message != "" {
+			if err := a.deliverCodedText(ctx, node.ID, message); err != nil {
+				a.Log.Error("transfer node failed to send body",
+					"node", node.ID, "session", ctx.session.ID, "error", err)
+			}
+		}
+		ctx.session.Status = models.SessionStatusCompleted
+		return nodeOutcome{yield: true}, nil
+	}
+
+	settings, _ := a.getChatbotSettingsCached(ctx.account.OrganizationID, ctx.account.Name)
+	message = a.PrepareEnquiryHandoff(ctx.account, ctx.contact, ctx.session, settings, message)
+
+	if message != "" {
 		if err := a.deliverCodedText(ctx, node.ID, message); err != nil {
 			a.Log.Error("transfer node failed to send body",
 				"node", node.ID, "session", ctx.session.ID, "error", err)
 		}
-	}
-	if ctx.capturing() {
-		ctx.session.Status = models.SessionStatusCompleted
-		return nodeOutcome{yield: true}, nil
 	}
 
 	notes := ""

@@ -71,6 +71,7 @@ func (c *Conv) transferTiqrEcommerce(message string) error {
 	if err := c.stageEcommerceHandoffDraft(settings); err != nil {
 		return err
 	}
+	body = c.App().PrepareEnquiryHandoff(account, contact, session, settings, body)
 	_ = c.App().SendAndSaveTextMessage(account, contact, body)
 	return c.finishEcommerceHandoffTransfer(settings)
 }

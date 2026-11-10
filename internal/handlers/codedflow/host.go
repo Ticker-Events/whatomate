@@ -147,6 +147,17 @@ type Host interface {
 	// transfer line (unchanged). handled is true when the session is TiQR Leads.
 	TryLeadsTransfer(chat Chat, message string) (handled bool, body string, err error)
 
+	// PrepareEnquiryHandoff creates a store enquiry for a coded-flow handoff
+	// that will reach the agent queue, appends the enquiry number to body, and
+	// fills title/summary asynchronously. Returns body unchanged on skip/failure.
+	PrepareEnquiryHandoff(
+		account *models.WhatsAppAccount,
+		contact *models.Contact,
+		session *models.ChatbotSession,
+		settings *models.ChatbotSettings,
+		body string,
+	) string
+
 	// Trace
 	ShouldTraceCodedFlow(session *models.ChatbotSession) bool
 	LogCodedFlow(event string, session *models.ChatbotSession, attrs ...any)

@@ -193,6 +193,51 @@ func (c *Client) CreateLead(ctx context.Context, storeID string, body CreateLead
 	return raw, nil
 }
 
+// CreateEnquiryRequest creates an enquiry from a coded-flow handoff.
+type CreateEnquiryRequest struct {
+	SessionID         string `json:"session_id"`
+	PhoneNumber       string `json:"phone_number"`
+	ContactName       string `json:"contact_name,omitempty"`
+	FlowKey           string `json:"flow_key,omitempty"`
+	TranscriptExcerpt string `json:"transcript_excerpt,omitempty"`
+}
+
+// CreateEnquiry creates or returns the enquiry for a chatbot session.
+func (c *Client) CreateEnquiry(ctx context.Context, storeID string, body CreateEnquiryRequest) (map[string]any, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	var raw map[string]any
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/enquiries/"
+	if err := c.postJSON(ctx, path, body, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// AiFillEnquiryRequest fills AI title/summary while staff fields stay untouched.
+type AiFillEnquiryRequest struct {
+	Title             string `json:"title,omitempty"`
+	Summary           string `json:"summary,omitempty"`
+	TranscriptExcerpt string `json:"transcript_excerpt,omitempty"`
+}
+
+// AiFillEnquiry patches AI-generated fields onto an enquiry.
+func (c *Client) AiFillEnquiry(ctx context.Context, storeID string, enquiryID int, body AiFillEnquiryRequest) (map[string]any, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return nil, fmt.Errorf("store_id is required")
+	}
+	if enquiryID <= 0 {
+		return nil, fmt.Errorf("enquiry_id is required")
+	}
+	var raw map[string]any
+	path := "/service/buyer/store/" + url.PathEscape(storeID) + "/enquiries/" + strconv.Itoa(enquiryID) + "/ai-fill/"
+	if err := c.patchJSON(ctx, path, body, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // GetLeadByPhone fetches the store lead for a phone number.
 // A 404 returns an empty map (not an error) so the coded flow can continue.
 func (c *Client) GetLeadByPhone(ctx context.Context, storeID, phoneNumber string) (map[string]any, error) {
@@ -652,6 +697,20 @@ func (c *Client) postJSON(ctx context.Context, path string, body any, dest any) 
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	return c.doJSON(req, payload, dest)
+}
+
+func (c *Client) patchJSON(ctx context.Context, path string, body any, dest any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.BaseURL+path, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
