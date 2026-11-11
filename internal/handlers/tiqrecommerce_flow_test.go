@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
@@ -153,12 +154,19 @@ func TestFormatFailedOrderHandoff(t *testing.T) {
 		"country":          "India",
 		"pincode":          "682042",
 		"tiqr_cart": []any{
-			map[string]any{"option_name": "Kunafa", "product_option": "9", "quantity": "2"},
+			map[string]any{
+				"product_name":   "Kunafa Cake",
+				"option_name":    "1 KG",
+				"product_option": "9",
+				"quantity":       "2",
+			},
+			map[string]any{"option_name": "Kunafa", "product_option": "8", "quantity": "1"},
 			map[string]any{"product_option": "10", "quantity": "1"},
 		},
 	})
 	assert.Contains(t, msg, "Placing order for the following items failed.")
-	assert.Contains(t, msg, "Kunafa x 2")
+	assert.Contains(t, msg, "Kunafa Cake(1 KG) x 2")
+	assert.Contains(t, msg, "Kunafa x 1")
 	assert.Contains(t, msg, "Option 10 x 1")
 	assert.Contains(t, msg, "Address\nAswin Divakar\nInfopark Rd, TCS\nKakkanad, Keralam\nIndia 682042")
 	assert.Contains(t, msg, tiqrecommerce.HandoffConnect)
@@ -716,6 +724,8 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 				}
 			}
 			_ = json.NewEncoder(w).Encode(pageStoreResults(r, products, testPageSize(store)))
+		case strings.Contains(r.URL.Path, "/enquiries/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 7, "number": 2042})
 		default:
 			if counts != nil {
 				counts.store++
@@ -1497,6 +1507,7 @@ func TestTiqrEcommerce_EarlyHandoffCompletes(t *testing.T) {
 	assert.Nil(t, session.SessionData[codedflow.DataKey])
 	blob = outgoingBlob(t, app, session)
 	assert.Contains(t, blob, "A baker will review this")
+	assert.Contains(t, blob, "Your enquiry number is 2042.")
 	_, hasCart := session.SessionData["tiqr_cart"]
 	assert.False(t, hasCart)
 
@@ -1532,6 +1543,92 @@ func TestTiqrEcommerce_EarlyHandoffCompletes(t *testing.T) {
 	assert.Equal(t, "9", fieldString(line, "product_option"))
 	assert.Equal(t, "Regular", fieldString(line, "option_name"))
 	assert.Equal(t, "Themed Cake", fieldString(line, "product_name"))
+}
+
+func TestTiqrEcommerce_EarlyHandoffCompletes_OutsideHours(t *testing.T) {
+	product := []any{
+		map[string]any{
+			"id": "101", "name": "Themed Cake", "min_price": "500",
+			"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "500"}},
+		},
+	}
+	store := map[string]any{
+		"id":   42,
+		"name": "Demo",
+		"test_collections": []any{
+			map[string]any{
+				"id":              "57",
+				"name":            "Custom Cakes",
+				"description":     "Made to order",
+				"handoff_policy":  "after_capture",
+				"handoff_message": "A baker will review this and continue with you here.",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "writing", "label": "Cake writing", "type": "text", "required": true,
+					},
+				},
+			},
+		},
+	}
+	srv := newStoreServerWith(t, product, nil, store)
+	useStoreREST(t, srv)
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	s := models.ChatbotSettings{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		IsEnabled:       true,
+		AI: models.AIConfig{
+			CommerceRESTURL: srv.URL,
+			CommerceStoreID: "42",
+		},
+		BusinessHours: models.BusinessHoursConfig{
+			Enabled: true,
+			Hours: models.JSONBArray{
+				map[string]any{
+					"day":        float64((int(time.Now().Weekday()) + 1) % 7),
+					"enabled":    true,
+					"start_time": "00:00",
+					"end_time":   "23:59",
+				},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(&s).Error)
+
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Custom Cakes", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happy Birthday", "", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "early_handoff_details", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
+		"customer_name":  "Ada",
+		"customer_email": "ada@example.com",
+		"customer_phone": "910000000000",
+	}))
+	reloadSession(t, app, session)
+
+	assert.Equal(t, models.SessionStatusCancelled, session.Status)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "A baker will review this")
+	assert.Contains(t, blob, "We're currently outside business hours. An agent will help you during business hours.")
+	assert.Contains(t, blob, "Your enquiry number is 2042.")
+	assert.NotContains(t, blob, "connecting you with a team member")
+	assert.Equal(t, 1, strings.Count(blob, "outside business hours"))
+
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(0), transfers)
+
+	var drafts int64
+	require.NoError(t, app.DB.Model(&models.CommerceDraft{}).Where("contact_id = ?", contact.ID).Count(&drafts).Error)
+	assert.Equal(t, int64(1), drafts)
 }
 
 func TestTiqrEcommerce_UsesConfiguredPickupFlowID(t *testing.T) {
@@ -3277,6 +3374,8 @@ func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"email":["This field is required."]}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/enquiries/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 7, "number": 1042})
 		default:
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "Demo"})
 		}
@@ -3317,18 +3416,123 @@ func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 	blob := outgoingBlob(t, app, session)
 	assert.Contains(t, blob, "Placing order for the following items failed.")
-	assert.Contains(t, blob, "Regular x 1")
+	assert.Contains(t, blob, "Kunafa(Regular) x 1")
 	assert.Contains(t, blob, "Address")
 	assert.Contains(t, blob, "Ada")
 	assert.Contains(t, blob, "1 Main")
 	assert.Contains(t, blob, "Kochi")
 	assert.Contains(t, blob, "connecting you with a team member")
+	assert.Contains(t, blob, "Your enquiry number is 1042.")
 	assert.NotContains(t, blob, "Thank you for shopping")
 	assert.NotContains(t, blob, "ticker api")
 	assert.NotContains(t, blob, "https://")
 	var transfers int64
 	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
 	assert.Equal(t, int64(1), transfers)
+}
+
+func TestTiqrEcommerce_CreateOrderRetryExhausted_OutsideHours(t *testing.T) {
+	prev := codedflow.IntentSettings.OrderRetries
+	codedflow.IntentSettings.OrderRetries = 0
+	t.Cleanup(func() { codedflow.IntentSettings.OrderRetries = prev })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/category/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count":   1,
+				"results": []any{map[string]any{"id": "57", "name": "Sweets", "description": "Desserts"}},
+			})
+		case strings.Contains(r.URL.Path, "/product/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"count": 1,
+				"results": []any{map[string]any{
+					"id": "101", "name": "Kunafa", "min_price": "40",
+					"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "40"}},
+				}},
+			})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"email":["This field is required."]}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/enquiries/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 7, "number": 1042})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "Demo"})
+		}
+	}))
+	t.Cleanup(srv.Close)
+	useStoreREST(t, srv)
+	useCodedRecover(t, func(codedflow.RecoverContext) (codedflow.RecoverResult, error) {
+		return codedflow.RecoverResult{
+			Kind: codedflow.RecoverGiveUp, Message: "We could not place your order just now.", Confidence: 0.9,
+		}, nil
+	})
+
+	app, org, account, contact, session := newGraphTestFixtures(t)
+	s := models.ChatbotSettings{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		IsEnabled:       true,
+		AI: models.AIConfig{
+			CommerceRESTURL: srv.URL,
+			CommerceStoreID: "42",
+		},
+		BusinessHours: models.BusinessHoursConfig{
+			Enabled: true,
+			// Only another weekday is open → always outside hours today.
+			Hours: models.JSONBArray{
+				map[string]any{
+					"day":        float64((int(time.Now().Weekday()) + 1) % 7),
+					"enabled":    true,
+					"start_time": "00:00",
+					"end_time":   "23:59",
+				},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(&s).Error)
+
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "shop", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrecommerce.Checkout, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrecommerce.ConfirmItems, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "", "", map[string]any{
+		"customer_name": "Ada", "customer_phone": "910000000000",
+		"address_line_one": "1 Main", "city": "Kochi", "state": "KL", "country": "India", "pincode": "682001",
+	}))
+	reloadSession(t, app, session)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Placing order for the following items failed.")
+	assert.Contains(t, blob, "Kunafa(Regular) x 1")
+	assert.Contains(t, blob, "Ada")
+	assert.NotContains(t, blob, "connecting you with a team member")
+	assert.Contains(t, blob, "We're currently outside business hours. An agent will help you during business hours.")
+	assert.Contains(t, blob, "Your enquiry number is 1042.")
+	assert.NotContains(t, blob, "We're closed until") // no custom store OOH in this case
+
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(0), transfers)
+
+	var drafts int64
+	require.NoError(t, app.DB.Model(&models.CommerceDraft{}).Where("contact_id = ?", contact.ID).Count(&drafts).Error)
+	assert.Equal(t, int64(1), drafts)
+
+	// No duplicate raw OutOfHoursMessage (store message empty; only composed notice).
+	assert.Equal(t, 1, strings.Count(blob, "outside business hours"))
 }
 
 // fillCartAndConfirmItems browses to collections, adds one Kunafa, and confirms

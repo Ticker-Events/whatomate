@@ -151,9 +151,11 @@ type Host interface {
 	// transfer line (unchanged). handled is true when the session is TiQR Leads.
 	TryLeadsTransfer(chat Chat, message string) (handled bool, body string, err error)
 
-	// PrepareEnquiryHandoff creates a store enquiry for a coded-flow handoff
-	// that will reach the agent queue, appends the enquiry number to body, and
-	// fills title/summary asynchronously. Returns body unchanged on skip/failure.
+	// PrepareEnquiryHandoff creates a store enquiry for a coded-flow handoff,
+	// appends the enquiry number to body, and fills title/summary asynchronously.
+	// Runs even with an active transfer or outside business hours. Outside hours
+	// the customer is told an agent will help during business hours.
+	// Returns body unchanged (or with the outside-hours notice) on skip/failure.
 	PrepareEnquiryHandoff(
 		account *models.WhatsAppAccount,
 		contact *models.Contact,

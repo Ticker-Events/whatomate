@@ -2659,26 +2659,27 @@ func FormatFailedOrderHandoff(data map[string]any) string {
 		if !ok {
 			continue
 		}
-		name := strings.TrimSpace(asString(item["option_name"]))
 		optionID := strings.TrimSpace(asString(item["product_option"]))
 		qty := strings.TrimSpace(asString(item["quantity"]))
 		if qty == "" {
 			qty = "1"
 		}
+		line := TiqrCartLine{
+			OptionID:    optionID,
+			Name:        strings.TrimSpace(asString(item["option_name"])),
+			ProductName: strings.TrimSpace(asString(item["product_name"])),
+			Capture:     lineCaptureMap(item["capture_fields"]),
+			Labels:      lineLabelMap(item["capture_labels"]),
+		}
+		name := tiqrCartLineDisplayName(line)
 		if name == "" {
-			if optionID == "" {
-				continue
-			}
-			name = "Option " + optionID
+			continue
 		}
 		b.WriteString("\n")
 		b.WriteString(name)
 		b.WriteString(" x ")
 		b.WriteString(qty)
-		if extra := formatLineCapture(TiqrCartLine{
-			Capture: lineCaptureMap(item["capture_fields"]),
-			Labels:  lineLabelMap(item["capture_labels"]),
-		}); extra != "" {
+		if extra := formatLineCapture(line); extra != "" {
 			b.WriteByte('\n')
 			b.WriteString(strings.TrimRight(extra, "\n"))
 		}

@@ -656,9 +656,10 @@ func (a *App) latestPendingLocationRequestBody(account *models.WhatsAppAccount, 
 }
 
 // handleInboundAudioUnsupported tells the customer voice notes are unsupported
-// and hands the chat to a person. Ecommerce coded-flow sessions snapshot the
-// cart first. Outside business hours the voice notice is still sent; an
-// out-of-hours message may follow, and no agent is queued.
+// and hands the chat to a person. Coded-flow sessions create an enquiry and
+// send one composed notice (OOH strips the connect clause). Ecommerce also
+// stages a draft; outside hours skips agent transfer. Non-coded contacts keep
+// the queue / raw OutOfHoursMessage path.
 func (a *App) handleInboundAudioUnsupported(account *models.WhatsAppAccount, contact *models.Contact, settings *models.ChatbotSettings) {
 	if account == nil || contact == nil {
 		return
@@ -680,46 +681,64 @@ func (a *App) handleInboundAudioUnsupported(account *models.WhatsAppAccount, con
 			}
 		}
 	}
+
+	outsideHours := settings != nil && settings.BusinessHours.Enabled &&
+		len(settings.BusinessHours.Hours) > 0 &&
+		!a.isWithinBusinessHours(settings.BusinessHours.Hours)
+
+	flowKey := ""
+	if session != nil {
+		flowKey = codedflow.SessionKey(session)
+	}
+
+	if session != nil && isCodedEnquiryFlow(flowKey) {
+		if flowKey == tiqrecommerce.FlowKey {
+			chat := newCodedChat(&chatNodeCtx{
+				account: account,
+				contact: contact,
+				session: session,
+			})
+			if err := tiqrecommerce.TransferEcommerce(codedflow.NewConv(a, chat), notice); err != nil {
+				a.Log.Warn("ecommerce handoff after voice note failed; queueing transfer",
+					"error", err, "session", session.ID)
+				notice = a.PrepareEnquiryHandoff(account, contact, session, settings, notice)
+				_ = a.sendAndSaveTextMessage(account, contact, notice)
+				if !outsideHours {
+					a.createTransferToQueue(account, contact, models.TransferSourceAudio, "")
+				}
+				codedflow.FinishSession(session)
+				if err := a.persistChatSession(session); err != nil {
+					a.Log.Error("Failed to finish ecommerce session after voice note fallback",
+						"error", err, "session", session.ID)
+				}
+			}
+			return
+		}
+
+		notice = a.PrepareEnquiryHandoff(account, contact, session, settings, notice)
+		if err := a.sendAndSaveTextMessage(account, contact, notice); err != nil {
+			a.Log.Error("Failed to send voice-unsupported notice", "error", err, "contact", contact.PhoneNumber)
+		}
+		if outsideHours {
+			a.Log.Info("Outside business hours after voice note; enquiry notice sent without agent transfer",
+				"contact_id", contact.ID, "flow", flowKey)
+			return
+		}
+		a.createTransferToQueue(account, contact, models.TransferSourceAudio, "")
+		return
+	}
+
 	if err := a.sendAndSaveTextMessage(account, contact, notice); err != nil {
 		a.Log.Error("Failed to send voice-unsupported notice", "error", err, "contact", contact.PhoneNumber)
 	}
-
-	if settings != nil && settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 &&
-		!a.isWithinBusinessHours(settings.BusinessHours.Hours) {
+	if outsideHours {
 		a.Log.Info("Outside business hours after voice note; not creating agent transfer",
 			"contact_id", contact.ID)
 		if settings.BusinessHours.OutOfHoursMessage != "" {
 			_ = a.sendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
 		}
-		if session != nil && codedflow.SessionKey(session) == tiqrecommerce.FlowKey {
-			codedflow.FinishSession(session)
-			if err := a.persistChatSession(session); err != nil {
-				a.Log.Error("Failed to finish ecommerce session after voice note outside hours",
-					"error", err, "session", session.ID)
-			}
-		}
 		return
 	}
-
-	if session != nil && codedflow.SessionKey(session) == tiqrecommerce.FlowKey {
-		chat := newCodedChat(&chatNodeCtx{
-			account: account,
-			contact: contact,
-			session: session,
-		})
-		if err := tiqrecommerce.CompleteEcommerceHandoff(codedflow.NewConv(a, chat)); err != nil {
-			a.Log.Warn("ecommerce handoff after voice note failed; queueing transfer",
-				"error", err, "session", session.ID)
-			a.createTransferToQueue(account, contact, models.TransferSourceAudio, "")
-			codedflow.FinishSession(session)
-			if err := a.persistChatSession(session); err != nil {
-				a.Log.Error("Failed to finish ecommerce session after voice note fallback",
-					"error", err, "session", session.ID)
-			}
-		}
-		return
-	}
-
 	a.createTransferToQueue(account, contact, models.TransferSourceAudio, "")
 }
 

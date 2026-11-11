@@ -823,6 +823,79 @@ func TestHandleInboundAudioUnsupported_CreatesTransfer(t *testing.T) {
 	assert.Equal(t, models.TransferStatusActive, transfers[0].Status)
 }
 
+func TestHandleInboundAudioUnsupported_CodedOutsideHoursCreatesEnquiry(t *testing.T) {
+	app := newProcessorTestApp(t)
+	org, account := createProcessorTestOrg(t, app)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+
+	enquirySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/enquiries/") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 9, "number": 55})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+	}))
+	t.Cleanup(enquirySrv.Close)
+
+	s := models.ChatbotSettings{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		IsEnabled:       true,
+		AI: models.AIConfig{
+			CommerceRESTURL: enquirySrv.URL,
+			CommerceStoreID: "42",
+		},
+		BusinessHours: models.BusinessHoursConfig{
+			Enabled:           true,
+			OutOfHoursMessage: "Custom closed notice.",
+			Hours: models.JSONBArray{
+				map[string]any{
+					"day":        float64((int(time.Now().Weekday()) + 1) % 7),
+					"enabled":    true,
+					"start_time": "00:00",
+					"end_time":   "23:59",
+				},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(&s).Error)
+
+	session := models.ChatbotSession{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		ContactID:       contact.ID,
+		WhatsAppAccount: account.Name,
+		PhoneNumber:     contact.PhoneNumber,
+		Status:          models.SessionStatusActive,
+		LastActivityAt:  time.Now(),
+		SessionData: models.JSONB{
+			codedflow.DataKey: "tiqr_leads",
+		},
+	}
+	require.NoError(t, app.DB.Create(&session).Error)
+
+	settings, err := app.getChatbotSettingsCached(org.ID, account.Name)
+	require.NoError(t, err)
+	app.handleInboundAudioUnsupported(account, contact, settings)
+
+	var msgs []models.Message
+	require.NoError(t, app.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionOutgoing).
+		Order("created_at ASC").Find(&msgs).Error)
+	require.Len(t, msgs, 1)
+	body := msgs[0].Content
+	assert.Contains(t, body, "unable to handle voice messages")
+	assert.NotContains(t, body, "connecting you with a team member")
+	assert.Contains(t, body, "Custom closed notice.")
+	assert.Contains(t, body, "Your enquiry number is 55.")
+	assert.NotEqual(t, "Custom closed notice.", body)
+
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(0), transfers)
+}
+
 func assertUnsupportedLocationReask(t *testing.T, outs []models.Message, pendingID uuid.UUID) {
 	t.Helper()
 	foundNotice := false

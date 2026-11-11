@@ -21,9 +21,10 @@ const (
 
 // transferTiqrEcommerce snapshots the coded-flow cart and checkout fields onto a
 // commerce draft, creates a commerce agent transfer, and ends the session.
-// Outside business hours it sends the out-of-hours message and ends without a
-// draft. Any other failure returns an error so Transfer can fall back to the
-// queue transfer.
+// Outside business hours it still stages the draft and creates an enquiry,
+// sends one composed WhatsApp (no connect-now closer), and ends without an
+// agent transfer. Any other failure returns an error so Transfer can fall
+// back to the queue transfer.
 func TransferEcommerce(base *codedflow.Conv, message string) error {
 	return wrap(base).transferTiqrEcommerce(message)
 }
@@ -55,24 +56,22 @@ func (c *Conv) transferTiqrEcommerce(message string) error {
 		body = codedflow.AgentHandoff
 	}
 
-	if settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 &&
-		!c.App().IsWithinBusinessHours(settings.BusinessHours.Hours) {
-		c.App().LogInfo("Outside business hours, sending out-of-hours message instead of ecommerce handoff",
-			"contact_id", contact.ID)
-		if settings.BusinessHours.OutOfHoursMessage != "" {
-			_ = c.App().SendAndSaveTextMessage(account, contact, settings.BusinessHours.OutOfHoursMessage)
-		} else {
-			_ = c.App().SendAndSaveTextMessage(account, contact, body)
-		}
-		codedflow.FinishSession(session)
-		return nil
-	}
+	outsideHours := settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 &&
+		!c.App().IsWithinBusinessHours(settings.BusinessHours.Hours)
 
 	if err := c.stageEcommerceHandoffDraft(settings); err != nil {
 		return err
 	}
+	// Keep the handoff body (cart / reason). Outside hours PrepareEnquiryHandoff
+	// strips connect closers and appends store/default OOH + enquiry number.
 	body = c.App().PrepareEnquiryHandoff(account, contact, session, settings, body)
 	_ = c.App().SendAndSaveTextMessage(account, contact, body)
+	if outsideHours {
+		c.App().LogInfo("Outside business hours, staged draft and enquiry without agent transfer",
+			"contact_id", contact.ID)
+		codedflow.FinishSession(session)
+		return nil
+	}
 	return c.finishEcommerceHandoffTransfer(settings)
 }
 

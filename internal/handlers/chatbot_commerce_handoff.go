@@ -198,6 +198,22 @@ func (a *App) completeCommerceCaptureWithCategory(account *models.WhatsAppAccoun
 		a.Log.Error("persist commerce capture before handoff failed", "error", err)
 		return true
 	}
+
+	reply := strings.TrimSpace(category.HandoffMessage)
+	if reply == "" {
+		reply = "Thanks — your request is saved. A specialist will review it and continue with you here."
+	}
+	earlyHandoff := st != nil && st.Flow == checkoutFlowEarlyHandoff
+	// Match talk-to-staff: outside hours keep the draft and send one enquiry
+	// message; do not create an agent transfer.
+	if earlyHandoff && outsideBusinessHours(settings, a) {
+		reply = a.PrepareEnquiryHandoff(account, contact, session, settings, reply)
+		_ = a.sendAndSaveTextMessage(account, contact, reply)
+		a.Log.Info("commerce early handoff outside hours: draft kept, no agent transfer",
+			"session", session.ID)
+		return true
+	}
+
 	transfer, created, err := a.createCommerceTransfer(account, contact, session, settings, category)
 	if err != nil {
 		a.Log.Error("commerce handoff failed", "error", err)
@@ -205,9 +221,8 @@ func (a *App) completeCommerceCaptureWithCategory(account *models.WhatsAppAccoun
 		return true
 	}
 	if created {
-		reply := strings.TrimSpace(category.HandoffMessage)
-		if reply == "" {
-			reply = "Thanks — your request is saved. A specialist will review it and continue with you here."
+		if earlyHandoff {
+			reply = a.PrepareEnquiryHandoff(account, contact, session, settings, reply)
 		}
 		_ = a.sendAndSaveTextMessage(account, contact, reply)
 	}

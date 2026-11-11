@@ -188,7 +188,7 @@ Code: `runEarlyHandoff` in `internal/handlers/tiqrecommerce/early_handoff.go`.
 3. Add-ons: shared numbered catalog add-on step when the product has catalog add-ons. Products with no catalog add-ons skip this step.
 4. Fulfillment: same `resolveFulfillment` as checkout (mode and location pin when needed).
 5. Customer details via the same WhatsApp Flow as checkout (`AskFlow`): pickup or delivery Meta flow ID from the account's TiQR Flow binding (`pickup_flow_id` / `delivery_flow_id`), falling back to `1484028330223507` (pickup: name, email, phone) or `1557965846018132` (delivery: name, phone, address). Prefill uses the same phone and (for delivery) reverse-geocoded address data as checkout. Flow fields are copied onto the commerce draft address snapshot and notes; blank email falls back to `support+<digits>@tiqr.events`.
-6. Commerce draft + `completeCommerceCapture` creates an agent transfer with source commerce, sends `handoff_message` (or the default specialist line), and cancels the bot session. Before the draft sync, capture answers are formatted with `CodedOrderNotes` into `commerce_notes.order_notes` (same string as checkout orders), including product/option headers from the staged early-handoff cart line. The cart and order paths are skipped.
+6. Commerce draft + `completeCommerceCapture` finishes the handoff. In hours it creates an agent transfer with source commerce, sends one WhatsApp of `handoff_message` (or the default specialist line) plus `Your enquiry number is N.` when enquiry create succeeds, and cancels the bot session. Outside hours it keeps the draft, skips the agent transfer, and sends the same handoff line through `PrepareEnquiryHandoff` (store `OutOfHoursMessage` or the default closed-hours line, then the enquiry number). Before the draft sync, capture answers are formatted with `CodedOrderNotes` into `commerce_notes.order_notes` (same string as checkout orders), including product/option headers from the staged early-handoff cart line. The cart and order paths are skipped.
 
 Fulfillment time (`list_fulfillment_slots` / `propose_fulfillment_time`) is skipped for now.
 
@@ -335,7 +335,7 @@ Every `Transfer` from this flow (talk to staff, failed order, ungrounded intent,
 | `notes` | `codedOrderNotes` / customer notes |
 | `missing_fields` | Last `create_order` recover plan asks, when present |
 
-Outside business hours the out-of-hours message is sent and no draft transfer is created. If the draft cannot be saved, Transfer falls back to the generic queue transfer so the customer still reaches a person. Staff Create Order in tiqr.store prefills from this handoff; the order is not placed automatically.
+Outside business hours the commerce draft is still staged, then one WhatsApp is sent: handoff context with the “connecting you with a team member” closer stripped, plus the store `OutOfHoursMessage` (or a default closed-hours line), plus the enquiry number when create succeeds. No agent transfer is created, and queue/team helpers do not send a second out-of-hours message. Voice notes on an active ecommerce session use the same path (enquiry + draft; transfer only in hours). If the draft cannot be saved, Transfer falls back to the generic queue transfer so the customer still reaches a person in hours. Staff Create Order in tiqr.store prefills from this handoff; the order is not placed automatically.
 
 ### 7. Order status
 

@@ -25,30 +25,23 @@ func isCodedEnquiryFlow(flowKey string) bool {
 	}
 }
 
-// willCreateAgentTransfer mirrors createTransferToQueue / createTransferToTeam
-// gates so we do not allocate an enquiry when no transfer will be created.
-func (a *App) willCreateAgentTransfer(
-	account *models.WhatsAppAccount,
-	contact *models.Contact,
-	settings *models.ChatbotSettings,
-) bool {
-	if account == nil || contact == nil {
-		return false
-	}
-	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
-		return false
-	}
-	if settings != nil && settings.BusinessHours.Enabled && len(settings.BusinessHours.Hours) > 0 {
-		if !a.isWithinBusinessHours(settings.BusinessHours.Hours) {
-			return false
-		}
-	}
-	return true
-}
+const (
+	enquiryNumberLine = "Your enquiry number is %d."
+	// outsideHoursDefaultNotice is used when the store has no OutOfHoursMessage.
+	outsideHoursDefaultNotice = "We're currently outside business hours. An agent will help you during business hours."
+	// EnquiryOOHNotifiedKey marks that PrepareEnquiryHandoff already included
+	// outside-hours copy so createTransferToQueue/Team must not resend it.
+	EnquiryOOHNotifiedKey = "enquiry_ooh_notified"
 
-// PrepareEnquiryHandoff creates a flow enquiry when a coded handoff will reach
-// the agent queue, appends the enquiry number to body, and kicks off AI fill.
-// On any failure it returns the original body unchanged.
+)
+
+// PrepareEnquiryHandoff creates a flow enquiry on coded-flow handoff, appends
+// the enquiry number to body, and kicks off AI fill. Runs whether or not an
+// agent transfer already exists and whether or not the store is inside
+// business hours. Outside hours it strips immediate-connect closers, appends
+// the store OutOfHoursMessage (or a default closed-hours line), then the
+// enquiry number. On create failure it still appends closed-hours copy when
+// outside hours.
 func (a *App) PrepareEnquiryHandoff(
 	account *models.WhatsAppAccount,
 	contact *models.Contact,
@@ -63,13 +56,29 @@ func (a *App) PrepareEnquiryHandoff(
 	if !isCodedEnquiryFlow(flowKey) {
 		return body
 	}
-	if !a.willCreateAgentTransfer(account, contact, settings) {
-		return body
+	outsideHours := outsideBusinessHours(settings, a)
+	storeOOH := ""
+	if settings != nil {
+		storeOOH = strings.TrimSpace(settings.BusinessHours.OutOfHoursMessage)
 	}
+
+	finish := func(number int) string {
+		out := formatEnquiryHandoffBody(body, number, outsideHours, storeOOH)
+		if outsideHours {
+			markEnquiryOOHNotified(session)
+			// Persist so createTransferToQueue/Team can see the flag via findActiveSession.
+			if err := a.PersistSessionData(session); err != nil {
+				a.Log.Warn("persist enquiry_ooh_notified failed",
+					"error", err, "session", session.ID)
+			}
+		}
+		return out
+	}
+
 	if settings == nil || !commerceRESTConfigured(settings.AI) {
 		a.Log.Warn("enquiry handoff skipped: commerce REST not configured",
 			"session", session.ID, "flow", flowKey)
-		return body
+		return finish(0)
 	}
 
 	storeID := strings.TrimSpace(settings.AI.CommerceStoreID)
@@ -92,7 +101,7 @@ func (a *App) PrepareEnquiryHandoff(
 	if err != nil {
 		a.Log.Error("enquiry create failed; continuing handoff without number",
 			"error", err, "session", session.ID, "flow", flowKey)
-		return body
+		return finish(0)
 	}
 
 	number := enquiryNumberFromPayload(raw)
@@ -100,19 +109,118 @@ func (a *App) PrepareEnquiryHandoff(
 	if number <= 0 {
 		a.Log.Warn("enquiry create returned no number",
 			"session", session.ID, "payload", raw)
-		return body
+		return finish(0)
 	}
-
-	out := strings.TrimSpace(body)
-	if out == "" {
-		out = codedflow.AgentHandoff
-	}
-	out = out + "\n\nYour enquiry number is " + strconv.Itoa(number) + "."
 
 	if enquiryID > 0 {
 		go a.fillEnquirySummary(settings, session, storeID, enquiryID, excerpt, contactName, flowKey)
 	}
-	return out
+	return finish(number)
+}
+
+func outsideBusinessHours(settings *models.ChatbotSettings, a *App) bool {
+	if a == nil || settings == nil || !settings.BusinessHours.Enabled || len(settings.BusinessHours.Hours) == 0 {
+		return false
+	}
+	return !a.isWithinBusinessHours(settings.BusinessHours.Hours)
+}
+
+func markEnquiryOOHNotified(session *models.ChatbotSession) {
+	if session == nil {
+		return
+	}
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
+	session.SessionData[EnquiryOOHNotifiedKey] = "1"
+}
+
+func sessionEnquiryOOHNotified(session *models.ChatbotSession) bool {
+	if session == nil || session.SessionData == nil {
+		return false
+	}
+	return strings.TrimSpace(asString(session.SessionData[EnquiryOOHNotifiedKey])) != ""
+}
+
+// enquiryOOHAlreadyNotified is true when PrepareEnquiryHandoff already put
+// outside-hours copy on the active coded session for this contact.
+func (a *App) enquiryOOHAlreadyNotified(
+	account *models.WhatsAppAccount,
+	contact *models.Contact,
+	settings *models.ChatbotSettings,
+) bool {
+	if a == nil || account == nil || contact == nil {
+		return false
+	}
+	timeoutMins := 30
+	if settings != nil && settings.SessionTimeoutMins > 0 {
+		timeoutMins = settings.SessionTimeoutMins
+	}
+	session := a.findActiveSession(account.OrganizationID, contact.ID, account.Name, timeoutMins)
+	if session == nil || !isCodedEnquiryFlow(codedflow.SessionKey(session)) {
+		return false
+	}
+	return sessionEnquiryOOHNotified(session)
+}
+
+// stripConnectClosers removes trailing "connecting you with a team member"
+// closers so outside-hours messages do not promise an immediate connect.
+// Also strips the connect clause on codedflow.VoiceUnsupportedMessage.
+func stripConnectClosers(body string) string {
+	out := strings.TrimSpace(body)
+	if out == "" {
+		return ""
+	}
+	for {
+		prev := out
+		for _, closer := range []string{
+			tiqrecommerce.HandoffConnect,
+			codedflow.AgentHandoff,
+		} {
+			if strings.HasSuffix(out, closer) {
+				out = strings.TrimSpace(strings.TrimSuffix(out, closer))
+				out = strings.TrimRight(out, "\n")
+				out = strings.TrimSpace(out)
+			}
+		}
+		if out == prev {
+			return out
+		}
+	}
+}
+
+// formatEnquiryHandoffBody appends enquiry / outside-hours trailers.
+// number <= 0 omits the enquiry number line.
+func formatEnquiryHandoffBody(body string, number int, outsideHours bool, storeOOH string) string {
+	out := strings.TrimSpace(body)
+	if outsideHours {
+		out = stripConnectClosers(out)
+	}
+	if out == "" && !outsideHours {
+		out = codedflow.AgentHandoff
+	}
+
+	var parts []string
+	if out != "" {
+		parts = append(parts, out)
+	}
+	if outsideHours {
+		ooh := strings.TrimSpace(storeOOH)
+		if ooh == "" {
+			ooh = outsideHoursDefaultNotice
+		}
+		parts = append(parts, ooh)
+	}
+	if number > 0 {
+		parts = append(parts, fmt.Sprintf(enquiryNumberLine, number))
+	}
+	if len(parts) == 0 {
+		if outsideHours {
+			return outsideHoursDefaultNotice
+		}
+		return codedflow.AgentHandoff
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func enquiryNumberFromPayload(raw map[string]any) int {
