@@ -27,8 +27,6 @@ const (
 
 	tiqrEcommerceUnavailable = "Sorry, this item isn't available right now.\n\nPlease choose another item from our collections."
 
-	tiqrEcommerceAdded = "*{{option_name}}* has been added to your cart.\n\n*Your cart:*\n{{cart_lines}}\n\n*Subtotal:* {{cart_subtotal}}\n\nYou now have *{{cart_count}}* items in your cart. Add something else, edit your cart, or check out when you're ready."
-
 	tiqrCartSummaryTemplate = "*Your cart:*\n{{cart_lines}}\n\n*Subtotal:* {{cart_subtotal}}"
 	tiqrCartEmptyLabel      = "Your cart is empty."
 
@@ -600,7 +598,8 @@ func restoreSelectedProduct(c *Conv, productID, title string) bool {
 }
 
 // askAfterCartAdd offers Add more / Edit cart / Checkout until the shopper
-// either continues browsing or starts checkout.
+// either continues browsing or starts checkout. The cart confirmation and
+// the three buttons are one WhatsApp interactive message.
 func askAfterCartAdd(c *Conv) (string, bool) {
 	for attempt := 1; ; attempt++ {
 		if CartLen(c) == 0 {
@@ -608,16 +607,15 @@ func askAfterCartAdd(c *Conv) (string, bool) {
 			return tiqrAddMore, true
 		}
 		name := "next"
+		kind := cartButtonAdded
 		if attempt > 1 {
 			name = fmt.Sprintf("next_%d", attempt)
+			kind = cartButtonNext
 		}
+		body := prepareCartButtonBody(c, kind, cartButtonTitles(cartNextButtons))
 		next, ok := c.AskButtons(name, codedflow.ButtonPrompt{
-			Body: "Would you like to add anything else, edit your cart, or place your order?",
-			Buttons: []codedflow.Button{
-				{ID: tiqrAddMore, Title: "Add more items"},
-				{ID: tiqrEditCart, Title: "Edit cart"},
-				{ID: tiqrCheckout, Title: "Checkout"},
-			},
+			Body:    body,
+			Buttons: cartNextButtons,
 			Step: codedflow.StepNote{
 				Doing:  "The customer just added an item and can edit the cart or check out.",
 				Expect: "They may add more, edit the cart, or check out.",
@@ -639,7 +637,6 @@ func askAfterCartAdd(c *Conv) (string, bool) {
 				c.Say(tiqrEcommerceCartEmpty)
 				return tiqrAddMore, true
 			}
-			c.Say(FormatTiqrCartSummary(c))
 			continue
 		default:
 			return tiqrAddMore, true
@@ -1314,7 +1311,6 @@ func askQuantityAndAdd(c *Conv) bool {
 		UpsertCartItem(c, optionID, quantity, captured, order)
 	})
 	refreshCartSessionFields(c)
-	c.Say(tiqrEcommerceAdded)
 	return true
 }
 
@@ -1875,14 +1871,10 @@ func reviewCartBeforeOrder(c *Conv) (ready bool, ok bool) {
 			c.Say(tiqrEcommerceCartEmpty)
 			return false, true
 		}
-		refreshCartSessionFields(c)
+		body := prepareCartButtonBody(c, cartButtonReview, cartButtonTitles(cartReviewButtons))
 		choice, got := c.AskButtons(fmt.Sprintf("cart_review_%d", attempt), codedflow.ButtonPrompt{
-			Body: FormatTiqrCartSummary(c) + "\n\nPlease confirm these items before we continue checkout.\n\nYou can edit quantities or remove items first.",
-			Buttons: []codedflow.Button{
-				{ID: tiqrConfirmItems, Title: "Confirm items"},
-				{ID: tiqrEditCart, Title: "Edit cart"},
-				{ID: tiqrAddMore, Title: "Add more"},
-			},
+			Body:    body,
+			Buttons: cartReviewButtons,
 			Step: codedflow.StepNote{
 				Doing:  "The customer is reviewing the full cart before checkout.",
 				Expect: "They confirm items, edit the cart, or add more products.",

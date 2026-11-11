@@ -620,6 +620,23 @@ func outgoingBlob(t *testing.T, app *App, session *models.ChatbotSession) string
 	return b.String()
 }
 
+func latestOutgoingContent(t *testing.T, app *App, session *models.ChatbotSession) string {
+	t.Helper()
+	var msg models.Message
+	err := app.DB.Where("contact_id = ? AND direction = ?", session.ContactID, models.DirectionOutgoing).
+		Order("id desc").First(&msg).Error
+	require.NoError(t, err)
+	var b strings.Builder
+	b.WriteString(msg.Content)
+	if msg.InteractiveData != nil {
+		raw, err := json.Marshal(msg.InteractiveData)
+		require.NoError(t, err)
+		b.WriteByte('\n')
+		b.Write(raw)
+	}
+	return b.String()
+}
+
 func reloadSession(t *testing.T, app *App, session *models.ChatbotSession) {
 	t.Helper()
 	require.NoError(t, app.DB.First(session, session.ID).Error)
@@ -1255,8 +1272,11 @@ func TestTiqrEcommerce_AppendsCartAndAddMoreSkipsCollections(t *testing.T) {
 	assert.Equal(t, "9", item["product_option"])
 	assert.Equal(t, "2", item["quantity"])
 	assert.Contains(t, asString(session.SessionData["cart_summary"]), "Your cart")
-	assert.Contains(t, outgoingBlob(t, app, session), "Edit cart")
-	assert.Contains(t, outgoingBlob(t, app, session), "Checkout")
+	addedBody := latestOutgoingContent(t, app, session)
+	assert.Contains(t, addedBody, "has been added to your cart")
+	assert.Contains(t, addedBody, "Would you like to add anything else")
+	assert.Contains(t, addedBody, "Edit cart")
+	assert.Contains(t, addedBody, "Checkout")
 
 	before := counts.collections
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Add more items", tiqrecommerce.AddMore, nil))
@@ -1264,6 +1284,37 @@ func TestTiqrEcommerce_AppendsCartAndAddMoreSkipsCollections(t *testing.T) {
 	assert.Equal(t, "collection", session.CurrentStep)
 	assert.Equal(t, before, counts.collections)
 	assert.Equal(t, 1, counts.store)
+}
+
+func TestTiqrEcommerce_EditCartReusesSingleButtonMessage(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "2", "", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "next", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Edit cart", tiqrecommerce.EditCart, nil))
+	reloadSession(t, app, session)
+	assert.Contains(t, session.CurrentStep, "cart_edit_text")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "change item 1 to 1", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "next_2", session.CurrentStep)
+	assert.Equal(t, float64(1), session.SessionData["cart_count"])
+
+	body := latestOutgoingContent(t, app, session)
+	assert.Contains(t, body, "Your cart")
+	assert.Contains(t, body, "Would you like to add anything else")
+	assert.Contains(t, body, "Edit cart")
+	assert.NotContains(t, body, "has been added to your cart")
 }
 
 func TestTiqrEcommerce_AsksCollectionCaptureBeforeCart(t *testing.T) {

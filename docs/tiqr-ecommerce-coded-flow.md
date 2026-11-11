@@ -267,7 +267,9 @@ Answers are stored on the session as `commerce_captured_fields` (latest value pe
 
 A blank line separates products. When the customer also typed a form note, a final `Note: {customer note}` line is appended.
 
-Then buttons `add_more`, `edit_cart`, and `checkout`. Add more returns to the collection list. Checkout reviews the cart, then breaks the loop.
+Then one WhatsApp reply-button message covers both the cart confirmation and the next step. After an add, the body is the “has been added” line, the cart list with subtotal and unit count, and “Would you like to add anything else, edit your cart, or place your order?” with buttons `add_more`, `edit_cart`, and `checkout`. After an edit from those buttons, the same three buttons are used without the “has been added” or unit-count lines. Add more returns to the collection list. Checkout opens the confirm-items review, then breaks the loop.
+
+WhatsApp caps a button body at 1024 characters. Before send, the flow fits the cart list into that budget (leaving room for the non-English option legend): it drops custom-field lines under each item first, then hides the oldest rows and appends “…and 1 more item.” / “…and N more items.” (N is hidden rows). Subtotal and unit count stay the real cart. The question is never shortened; if one remaining name still does not fit, that name is truncated in the button text only. Edit-cart’s free-text prompt still shows every row with capture details. Confirm items uses the same fitting with its own confirm copy.
 
 ### 6. Checkout
 

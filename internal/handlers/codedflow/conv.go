@@ -1346,15 +1346,26 @@ func (c *Conv) applyOptionLegend(cfg map[string]any) {
 	cfg["body"] = c.bodyWithOptionLegend(asString(cfg["body"]), titles)
 }
 
-func (c *Conv) bodyWithOptionLegend(body string, titles []string) string {
-	if body == "" || len(titles) == 0 {
-		return body
+// AuthoredText translates an authored line for the customer language.
+// Placeholders stay intact for processTemplate after this runs.
+func (c *Conv) AuthoredText(src string) string {
+	if c == nil {
+		return src
+	}
+	return c.text(src)
+}
+
+// OptionLegendSuffix returns the "English — translation" lines that
+// applyOptionLegend appends under a button body, or "" when none apply.
+func (c *Conv) OptionLegendSuffix(titles []string) string {
+	if c == nil || len(titles) == 0 {
+		return ""
 	}
 	if englishLanguage(asString(c.session().SessionData[customerLanguageKey])) {
-		return body
+		return ""
 	}
 	if len(titles) >= ExplainInteractiveOptionsBelow {
-		return body
+		return ""
 	}
 	seen := make(map[string]struct{}, len(titles))
 	var lines []string
@@ -1374,9 +1385,17 @@ func (c *Conv) bodyWithOptionLegend(body string, titles []string) string {
 		lines = append(lines, title+" — "+translated)
 	}
 	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (c *Conv) bodyWithOptionLegend(body string, titles []string) string {
+	legend := c.OptionLegendSuffix(titles)
+	if body == "" || legend == "" {
 		return body
 	}
-	return truncateRunes(body+"\n\n"+strings.Join(lines, "\n"), InteractiveBodyMaxRunes)
+	return truncateRunes(body+"\n\n"+legend, InteractiveBodyMaxRunes)
 }
 
 func optionLegendTitles(buttons []map[string]any) []string {
