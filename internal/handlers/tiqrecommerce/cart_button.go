@@ -15,8 +15,8 @@ const (
 
 	tiqrCartReviewSuffix = "Please confirm these items before we continue checkout.\n\nYou can edit quantities or remove items first."
 
-	tiqrCartMoreOne = "…and 1 more item."
-	tiqrCartMoreN   = "…and {{hidden_count}} more items."
+	// WhatsApp plain-text body limit. Interactive button bodies are 1024.
+	tiqrTextBodyMaxRunes = 4096
 )
 
 type cartButtonKind int
@@ -47,45 +47,97 @@ func cartButtonTitles(buttons []codedflow.Button) []string {
 	return out
 }
 
-func cartSummaryTemplate(hidden int) string {
-	var b strings.Builder
-	b.WriteString("*Your cart:*\n{{cart_lines}}\n\n")
-	if hidden == 1 {
-		b.WriteString(tiqrCartMoreOne)
-		b.WriteString("\n\n")
-	} else if hidden > 1 {
-		b.WriteString(tiqrCartMoreN)
-		b.WriteString("\n\n")
-	}
-	b.WriteString("*Subtotal:* {{cart_subtotal}}")
-	return b.String()
+func cartSummaryTemplate() string {
+	return "*Your cart:*\n{{cart_lines}}\n\n*Subtotal:* {{cart_subtotal}}"
 }
 
-func cartButtonTemplate(kind cartButtonKind, hidden int) string {
-	summary := cartSummaryTemplate(hidden)
+func cartButtonDetailsTemplate(kind cartButtonKind) string {
+	summary := cartSummaryTemplate()
 	switch kind {
 	case cartButtonAdded:
 		return "*{{option_name}}* has been added to your cart.\n\n" +
 			summary +
-			"\n\nYou now have *{{cart_count}}* items in your cart.\n\n" +
-			tiqrCartQuestion
+			"\n\nYou now have *{{cart_count}}* items in your cart."
 	case cartButtonNext:
-		return summary + "\n\n" + tiqrCartQuestion
+		return summary
 	default:
-		return summary + "\n\n" + tiqrCartReviewSuffix
+		return summary
 	}
 }
 
-// prepareCartButtonBody refreshes cart session fields, fits cart_lines into the
-// WhatsApp interactive body budget (leaving room for the option legend), and
-// returns the authored template for AskButtons.
+func cartButtonQuestion(kind cartButtonKind) string {
+	if kind == cartButtonReview {
+		return tiqrCartReviewSuffix
+	}
+	return tiqrCartQuestion
+}
+
+func cartButtonCombinedTemplate(kind cartButtonKind) string {
+	details := cartButtonDetailsTemplate(kind)
+	question := cartButtonQuestion(kind)
+	if details == "" {
+		return question
+	}
+	return details + "\n\n" + question
+}
+
+// prepareCartButtonBody refreshes cart session fields and stores the full
+// cart_lines. It returns the authored template for a single button message
+// when the filled body fits; callers that need the split path should use
+// askCartActionButtons instead.
 func prepareCartButtonBody(c *Conv, kind cartButtonKind, buttonTitles []string) string {
+	_ = buttonTitles
 	refreshCartSessionFields(c)
 	lines := tiqrCartLines(c)
-	if len(lines) == 0 {
-		return cartButtonTemplate(kind, 0)
-	}
 	currency := sessionCurrencyCode(c.Session())
+	if len(lines) > 0 {
+		rendered := formatCartLinesForButton(lines, currency, true, 0)
+		if c != nil && c.Session() != nil {
+			if c.Session().SessionData == nil {
+				c.Session().SessionData = models.JSONB{}
+			}
+			c.Session().SessionData["cart_lines"] = rendered
+			delete(c.Session().SessionData, "hidden_count")
+		}
+	}
+	return cartButtonCombinedTemplate(kind)
+}
+
+// askCartActionButtons sends either one button message (when the cart fits in
+// 1024 characters) or the full cart as text plus a short button question.
+func askCartActionButtons(
+	c *Conv,
+	name string,
+	kind cartButtonKind,
+	buttons []codedflow.Button,
+	step codedflow.StepNote,
+) (codedflow.Choice, bool) {
+	body := prepareCartButtonBody(c, kind, cartButtonTitles(buttons))
+	titles := cartButtonTitles(buttons)
+	budget := interactiveBodyBudget(c, titles)
+	if cartButtonBodyRunes(c, body) <= budget {
+		return c.AskButtons(name, codedflow.ButtonPrompt{
+			Body:    body,
+			Buttons: buttons,
+			Step:    step,
+		})
+	}
+	details := cartButtonDetailsTemplate(kind)
+	filled := fillCartButtonPlaceholders(authoredOrRaw(c, details), cartButtonPlaceholderData(c))
+	if utf8.RuneCountInString(filled) <= tiqrTextBodyMaxRunes {
+		// Template keeps placeholders so Say can translate, then processTemplate fills them.
+		c.Say(details)
+	} else {
+		sayTextChunks(c, filled)
+	}
+	return c.AskButtons(name, codedflow.ButtonPrompt{
+		Body:    cartButtonQuestion(kind),
+		Buttons: buttons,
+		Step:    step,
+	})
+}
+
+func interactiveBodyBudget(c *Conv, buttonTitles []string) int {
 	budget := codedflow.InteractiveBodyMaxRunes
 	if c != nil && c.Conv != nil {
 		if legend := c.OptionLegendSuffix(buttonTitles); legend != "" {
@@ -95,53 +147,78 @@ func prepareCartButtonBody(c *Conv, kind cartButtonKind, buttonTitles []string) 
 	if budget < 64 {
 		budget = 64
 	}
+	return budget
+}
 
-	includeCapture := true
-	start := 0
-	nameMax := 0
-	var lastTmpl string
-	for {
-		hidden := start
-		visible := lines[start:]
-		rendered := formatCartLinesForButton(visible, currency, includeCapture, nameMax)
-		if c != nil && c.Session() != nil {
-			if c.Session().SessionData == nil {
-				c.Session().SessionData = models.JSONB{}
-			}
-			c.Session().SessionData["cart_lines"] = rendered
-			if hidden > 0 {
-				c.Session().SessionData["hidden_count"] = strconv.Itoa(hidden)
-			} else {
-				delete(c.Session().SessionData, "hidden_count")
-			}
-		}
-		tmpl := cartButtonTemplate(kind, hidden)
-		lastTmpl = tmpl
-		if cartButtonBodyRunes(c, tmpl) <= budget {
-			return tmpl
-		}
-		if includeCapture && cartLinesHaveCapture(visible) {
-			includeCapture = false
-			continue
-		}
-		if start < len(lines)-1 {
-			start++
-			includeCapture = false
-			continue
-		}
-		if nameMax == 0 {
-			nameMax = 48
-			continue
-		}
-		if nameMax > 8 {
-			nameMax = nameMax * 3 / 4
-			if nameMax < 8 {
-				nameMax = 8
-			}
-			continue
-		}
-		return lastTmpl
+func authoredOrRaw(c *Conv, tmpl string) string {
+	if c != nil && c.Conv != nil {
+		return c.AuthoredText(tmpl)
 	}
+	return tmpl
+}
+
+// sayTextChunks sends one or more Say messages so no chunk exceeds the
+// WhatsApp text body limit. Splits between newlines when possible.
+func sayTextChunks(c *Conv, text string) {
+	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		return
+	}
+	for _, chunk := range splitTextChunks(text, tiqrTextBodyMaxRunes) {
+		c.Say(chunk)
+	}
+}
+
+func splitTextChunks(text string, maxRunes int) []string {
+	if maxRunes < 1 {
+		maxRunes = tiqrTextBodyMaxRunes
+	}
+	if utf8.RuneCountInString(text) <= maxRunes {
+		return []string{text}
+	}
+	lines := strings.Split(text, "\n")
+	var chunks []string
+	var b strings.Builder
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		chunks = append(chunks, strings.TrimRight(b.String(), "\n"))
+		b.Reset()
+	}
+	for _, line := range lines {
+		candidate := line
+		if b.Len() > 0 {
+			candidate = b.String() + "\n" + line
+		}
+		if utf8.RuneCountInString(candidate) <= maxRunes {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(line)
+			continue
+		}
+		flush()
+		if utf8.RuneCountInString(line) <= maxRunes {
+			b.WriteString(line)
+			continue
+		}
+		// A single line longer than the limit: hard-split by runes.
+		runes := []rune(line)
+		for len(runes) > 0 {
+			n := maxRunes
+			if n > len(runes) {
+				n = len(runes)
+			}
+			chunks = append(chunks, string(runes[:n]))
+			runes = runes[n:]
+		}
+	}
+	flush()
+	if len(chunks) == 0 {
+		return []string{text}
+	}
+	return chunks
 }
 
 func cartButtonBodyRunes(c *Conv, tmpl string) int {
@@ -158,7 +235,6 @@ func cartButtonPlaceholderData(c *Conv) map[string]string {
 		"cart_subtotal": "",
 		"cart_count":    "",
 		"option_name":   "",
-		"hidden_count":  "",
 	}
 	if c == nil || c.Session() == nil || c.Session().SessionData == nil {
 		return out
@@ -168,7 +244,6 @@ func cartButtonPlaceholderData(c *Conv) map[string]string {
 	out["cart_subtotal"] = asString(data["cart_subtotal"])
 	out["cart_count"] = formatCartCount(data["cart_count"])
 	out["option_name"] = asString(data["option_name"])
-	out["hidden_count"] = asString(data["hidden_count"])
 	return out
 }
 
@@ -193,15 +268,6 @@ func fillCartButtonPlaceholders(tmpl string, data map[string]string) string {
 		out = strings.ReplaceAll(out, "{{"+key+"}}", value)
 	}
 	return out
-}
-
-func cartLinesHaveCapture(lines []TiqrCartLine) bool {
-	for _, line := range lines {
-		if formatLineCapture(line) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func formatCartLinesForButton(lines []TiqrCartLine, currency string, includeCapture bool, nameMax int) string {
@@ -242,58 +308,4 @@ func truncateCartLineName(name string, max int) string {
 		return string(r[:1])
 	}
 	return string(r[:max-1]) + "…"
-}
-
-// FitCartLinesForButton is exported for unit tests of the shrinking rules.
-// fixedOverhead is the rune count of the button body outside {{cart_lines}}
-// and the optional “…and N more items.” line.
-func FitCartLinesForButton(lines []TiqrCartLine, currency string, fixedOverhead int, maxRunes int) (cartLines string, hidden int, includeCapture bool) {
-	if maxRunes < 1 {
-		maxRunes = codedflow.InteractiveBodyMaxRunes
-	}
-	includeCapture = true
-	start := 0
-	nameMax := 0
-	var lastLines string
-	var lastHidden int
-	var lastCapture bool
-	for {
-		hidden = start
-		visible := lines[start:]
-		rendered := formatCartLinesForButton(visible, currency, includeCapture, nameMax)
-		more := ""
-		if hidden == 1 {
-			more = "\n\n" + tiqrCartMoreOne
-		} else if hidden > 1 {
-			more = "\n\n" + strings.ReplaceAll(tiqrCartMoreN, "{{hidden_count}}", strconv.Itoa(hidden))
-		}
-		total := fixedOverhead + utf8.RuneCountInString(rendered) + utf8.RuneCountInString(more)
-		lastLines = rendered
-		lastHidden = hidden
-		lastCapture = includeCapture
-		if total <= maxRunes {
-			return rendered, hidden, includeCapture
-		}
-		if includeCapture && cartLinesHaveCapture(visible) {
-			includeCapture = false
-			continue
-		}
-		if start < len(lines)-1 {
-			start++
-			includeCapture = false
-			continue
-		}
-		if nameMax == 0 {
-			nameMax = 48
-			continue
-		}
-		if nameMax > 8 {
-			nameMax = nameMax * 3 / 4
-			if nameMax < 8 {
-				nameMax = 8
-			}
-			continue
-		}
-		return lastLines, lastHidden, lastCapture
-	}
 }

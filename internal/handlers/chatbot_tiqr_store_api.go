@@ -313,6 +313,12 @@ func invokeTiqrStoreRESTOperation(
 			return nil, err
 		}
 		return client.CreateOrder(ctx, body)
+	case "checkout_preview":
+		body, err := buildCheckoutPreviewRequest(params)
+		if err != nil {
+			return nil, err
+		}
+		return client.PreviewCheckout(ctx, body)
 	case "get_order":
 		uuid := strings.TrimSpace(params["order_uuid"])
 		if uuid == "" {
@@ -860,6 +866,74 @@ func coerceOrderItemNumbers(items any) any {
 	return arr
 }
 
+func buildCheckoutPreviewRequest(params map[string]string) (ticker.CheckoutPreviewRequest, error) {
+	itemsRaw := strings.TrimSpace(params["items"])
+	if itemsRaw == "" {
+		return ticker.CheckoutPreviewRequest{}, fmt.Errorf("items is required")
+	}
+	parsed, err := parseJSONParam(itemsRaw)
+	if err != nil {
+		return ticker.CheckoutPreviewRequest{}, fmt.Errorf("items must be JSON: %w", err)
+	}
+	parsed = coerceOrderItemNumbers(parsed)
+	arr, ok := parsed.([]any)
+	if !ok || len(arr) == 0 {
+		return ticker.CheckoutPreviewRequest{}, fmt.Errorf("items must be a non-empty list")
+	}
+	items := make([]ticker.OrderItem, 0, len(arr))
+	for _, raw := range arr {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		optionID := anyToInt(item["product_option"])
+		qty := anyToInt(item["quantity"])
+		if optionID <= 0 || qty < 1 {
+			continue
+		}
+		items = append(items, ticker.OrderItem{ProductOption: optionID, Quantity: qty})
+	}
+	if len(items) == 0 {
+		return ticker.CheckoutPreviewRequest{}, fmt.Errorf("items must include at least one product_option")
+	}
+	body := ticker.CheckoutPreviewRequest{
+		Items:        items,
+		DeliveryMode: strings.TrimSpace(params["delivery_mode"]),
+		DiscountCode: strings.TrimSpace(params["discount_code"]),
+	}
+	if addonsRaw := strings.TrimSpace(params["addons"]); addonsRaw != "" {
+		addonParsed, err := parseJSONParam(addonsRaw)
+		if err != nil {
+			return ticker.CheckoutPreviewRequest{}, fmt.Errorf("addons must be JSON: %w", err)
+		}
+		addonParsed = coerceOrderAddonNumbers(addonParsed)
+		if addonArr, ok := addonParsed.([]any); ok && len(addonArr) > 0 {
+			addons := make([]map[string]any, 0, len(addonArr))
+			for _, raw := range addonArr {
+				if item, ok := raw.(map[string]any); ok {
+					addons = append(addons, item)
+				}
+			}
+			body.Addons = addons
+		}
+	}
+	if latRaw := strings.TrimSpace(params["latitude"]); latRaw != "" {
+		lat, err := strconv.ParseFloat(latRaw, 64)
+		if err != nil {
+			return ticker.CheckoutPreviewRequest{}, fmt.Errorf("latitude must be a number")
+		}
+		body.Latitude = &lat
+	}
+	if lngRaw := strings.TrimSpace(params["longitude"]); lngRaw != "" {
+		lng, err := strconv.ParseFloat(lngRaw, 64)
+		if err != nil {
+			return ticker.CheckoutPreviewRequest{}, fmt.Errorf("longitude must be a number")
+		}
+		body.Longitude = &lng
+	}
+	return body, nil
+}
+
 func applyLimitOffset(args map[string]any, params map[string]string) {
 	if n, ok := optionalPositiveInt(params["limit"]); ok {
 		args["limit"] = n
@@ -939,6 +1013,8 @@ func normalizeTiqrStoreMoney(operation string, payload map[string]any) {
 		if data, ok := payload["data"].([]any); ok {
 			ticker.NormalizeProductListMoney(data)
 		}
+	case "checkout_preview":
+		ticker.NormalizeCheckoutPreviewMoney(payload)
 	case "create_order", "get_order", "lookup_order_status", "list_orders_by_phone":
 		ticker.NormalizeOrderMoney(payload)
 		if data, ok := payload["data"].(map[string]any); ok {

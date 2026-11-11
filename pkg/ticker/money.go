@@ -41,6 +41,63 @@ func NormalizeOrderMoney(raw map[string]any) {
 	}
 }
 
+var checkoutPreviewMoneyKeys = []string{
+	"original_amount",
+	"amount",
+	"original_shipping_fee",
+	"shipping_fee",
+	"order_discount_total",
+	"shipping_discount_total",
+	"discount_total",
+	"items_discount_total",
+}
+
+var checkoutPreviewDiscountMoneyKeys = []string{
+	"amount", "price_before", "price_after", "price_change",
+}
+
+// NormalizeCheckoutPreviewMoney converts checkout-preview money fields from
+// paise to major units in place. Call once immediately after an API response.
+func NormalizeCheckoutPreviewMoney(raw map[string]any) {
+	if raw == nil {
+		return
+	}
+	divideMoneyKeys(raw, checkoutPreviewMoneyKeys)
+	normalizeCheckoutPreviewLines(raw["items"])
+	normalizeCheckoutPreviewAddons(raw["addons"])
+	normalizeCheckoutPreviewDiscounts(raw["applied_discounts"])
+	if delivery, ok := raw["delivery"].(map[string]any); ok {
+		NormalizeDeliveryMoney(delivery)
+	}
+}
+
+func normalizeCheckoutPreviewLines(raw any) {
+	switch list := raw.(type) {
+	case []any:
+		for _, entry := range list {
+			item, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			divideMoneyKeys(item, []string{"original_amount", "amount"})
+			normalizeCheckoutPreviewDiscounts(item["applied_discounts"])
+		}
+	case []map[string]any:
+		for _, item := range list {
+			divideMoneyKeys(item, []string{"original_amount", "amount"})
+			normalizeCheckoutPreviewDiscounts(item["applied_discounts"])
+		}
+	}
+}
+
+func normalizeCheckoutPreviewAddons(raw any) {
+	normalizeMoneyList(raw, []string{"amount"})
+}
+
+func normalizeCheckoutPreviewDiscounts(raw any) {
+	normalizeMoneyList(raw, checkoutPreviewDiscountMoneyKeys)
+}
+
 // NormalizeDeliveryMoney adds shipping_fee in major units from shipping_fee_paise.
 // Leaves shipping_fee_paise unchanged for callers that still need minor units.
 func NormalizeDeliveryMoney(raw map[string]any) {

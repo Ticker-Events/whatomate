@@ -143,6 +143,26 @@ func (c *Client) CreateOrder(ctx context.Context, body CreateOrderRequest) (map[
 	return raw, nil
 }
 
+// CheckoutPreviewRequest prices guest buy-now lines without placing an order.
+type CheckoutPreviewRequest struct {
+	Items        []OrderItem      `json:"items"`
+	Addons       []map[string]any `json:"addons,omitempty"`
+	DeliveryMode string           `json:"delivery_mode,omitempty"`
+	Latitude     *float64         `json:"latitude,omitempty"`
+	Longitude    *float64         `json:"longitude,omitempty"`
+	DiscountCode string           `json:"discount_code,omitempty"`
+}
+
+// PreviewCheckout calls POST /service/buyer/cart/checkout-preview/ with explicit items.
+func (c *Client) PreviewCheckout(ctx context.Context, body CheckoutPreviewRequest) (map[string]any, error) {
+	var raw map[string]any
+	if err := c.postJSON(ctx, "/service/buyer/cart/checkout-preview/", body, &raw); err != nil {
+		return nil, err
+	}
+	NormalizeCheckoutPreviewMoney(raw)
+	return raw, nil
+}
+
 // CreateDiningBookingRequest creates a token dining booking.
 type CreateDiningBookingRequest struct {
 	GuestName   string `json:"guest_name"`

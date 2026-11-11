@@ -196,3 +196,53 @@ func TestClientGetStoreAndFaqs(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, list, 1)
 }
+
+func TestClientPreviewCheckout(t *testing.T) {
+	var gotPath string
+	var gotBody ticker.CheckoutPreviewRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		assert.Equal(t, http.MethodPost, r.Method)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []any{
+				map[string]any{
+					"product_option":  map[string]any{"id": 9, "name": "Regular"},
+					"quantity":        2,
+					"original_amount": 8000,
+					"amount":          8000,
+				},
+			},
+			"original_amount":         8000,
+			"amount":                  12000,
+			"original_shipping_fee":   4000,
+			"shipping_fee":            4000,
+			"discount_total":          0,
+			"shipping_discount_total": 0,
+			"applied_discounts":       []any{},
+		})
+	}))
+	defer srv.Close()
+
+	lat, lng := 11.2, 75.8
+	c := ticker.NewClient(srv.URL, srv.Client())
+	raw, err := c.PreviewCheckout(context.Background(), ticker.CheckoutPreviewRequest{
+		Items:        []ticker.OrderItem{{ProductOption: 9, Quantity: 2}},
+		DeliveryMode: "DELIVERY_TO_LOCATION",
+		Latitude:     &lat,
+		Longitude:    &lng,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "/service/buyer/cart/checkout-preview/", gotPath)
+	assert.Equal(t, "DELIVERY_TO_LOCATION", gotBody.DeliveryMode)
+	require.Len(t, gotBody.Items, 1)
+	assert.Equal(t, 9, gotBody.Items[0].ProductOption)
+	assert.Equal(t, 2, gotBody.Items[0].Quantity)
+	require.NotNil(t, gotBody.Latitude)
+	require.NotNil(t, gotBody.Longitude)
+	assert.Equal(t, 11.2, *gotBody.Latitude)
+	assert.Equal(t, 75.8, *gotBody.Longitude)
+	assert.Equal(t, 80.0, raw["original_amount"])
+	assert.Equal(t, 120.0, raw["amount"])
+	assert.Equal(t, 40.0, raw["original_shipping_fee"])
+}

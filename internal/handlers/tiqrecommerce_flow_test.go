@@ -743,6 +743,21 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 			_ = json.NewEncoder(w).Encode(pageStoreResults(r, products, testPageSize(store)))
 		case strings.Contains(r.URL.Path, "/enquiries/"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 7, "number": 2042})
+		case strings.Contains(r.URL.Path, "/cart/checkout-preview"):
+			if fail, _ := store["test_preview_fail"].(bool); fail {
+				http.Error(w, `{"detail":"preview unavailable"}`, http.StatusBadGateway)
+				return
+			}
+			if remaining := previewFailRemaining(store); remaining > 0 {
+				store["test_preview_fail_remaining"] = remaining - 1
+				http.Error(w, `{"detail":"preview unavailable"}`, http.StatusBadGateway)
+				return
+			}
+			if custom, ok := store["test_checkout_preview"].(map[string]any); ok {
+				_ = json.NewEncoder(w).Encode(custom)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(defaultCheckoutPreviewResponse(r, products, store))
 		default:
 			if counts != nil {
 				counts.store++
@@ -761,8 +776,159 @@ func newStoreServerWith(t *testing.T, products []any, counts *storeCounts, store
 	return srv
 }
 
+func defaultCheckoutPreviewResponse(r *http.Request, products []any, store map[string]any) map[string]any {
+	var body struct {
+		Items []struct {
+			ProductOption int `json:"product_option"`
+			Quantity      int `json:"quantity"`
+		} `json:"items"`
+		Addons []struct {
+			Addon    int `json:"addon"`
+			Quantity int `json:"quantity"`
+		} `json:"addons"`
+		DeliveryMode string   `json:"delivery_mode"`
+		Latitude     *float64 `json:"latitude"`
+		Longitude    *float64 `json:"longitude"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	optionPrice := map[int]float64{}
+	optionMeta := map[int]map[string]any{}
+	for _, product := range products {
+		item, ok := product.(map[string]any)
+		if !ok {
+			continue
+		}
+		productName := asString(item["name"])
+		opts, _ := item["options"].([]any)
+		for _, raw := range opts {
+			opt, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			id := 0
+			switch v := opt["id"].(type) {
+			case float64:
+				id = int(v)
+			case int:
+				id = v
+			case string:
+				id, _ = strconv.Atoi(v)
+			}
+			if id == 0 {
+				continue
+			}
+			price := 0.0
+			switch v := opt["price"].(type) {
+			case float64:
+				price = v
+			case int:
+				price = float64(v)
+			case string:
+				price, _ = strconv.ParseFloat(v, 64)
+			}
+			// Test fixtures often store major units as strings; API uses paise.
+			if price < 1000 && price == float64(int(price)) {
+				price = price * 100
+			}
+			optionPrice[id] = price
+			optionMeta[id] = map[string]any{
+				"id":   id,
+				"name": asString(opt["name"]),
+				"product": map[string]any{
+					"id":   item["id"],
+					"name": productName,
+				},
+			}
+		}
+	}
+
+	items := make([]map[string]any, 0, len(body.Items))
+	var merchandise float64
+	for _, line := range body.Items {
+		price := optionPrice[line.ProductOption]
+		if price == 0 {
+			price = 4000
+		}
+		qty := line.Quantity
+		if qty < 1 {
+			qty = 1
+		}
+		amount := price * float64(qty)
+		merchandise += amount
+		meta := optionMeta[line.ProductOption]
+		if meta == nil {
+			meta = map[string]any{
+				"id":   line.ProductOption,
+				"name": "Option",
+				"product": map[string]any{
+					"name": "Product",
+				},
+			}
+		}
+		items = append(items, map[string]any{
+			"product_option":  meta,
+			"quantity":        qty,
+			"original_amount": amount,
+			"amount":          amount,
+			"applied_discounts": []any{},
+		})
+	}
+	addons := make([]map[string]any, 0, len(body.Addons))
+	var addonTotal float64
+	for _, row := range body.Addons {
+		qty := row.Quantity
+		if qty < 1 {
+			qty = 1
+		}
+		amount := 500.0 * float64(qty)
+		addonTotal += amount
+		addons = append(addons, map[string]any{
+			"addon":    map[string]any{"id": row.Addon, "name": fmt.Sprintf("Addon %d", row.Addon)},
+			"quantity": qty,
+			"amount":   amount,
+		})
+	}
+
+	shipping := 0.0
+	if strings.EqualFold(strings.TrimSpace(body.DeliveryMode), "DELIVERY_TO_LOCATION") {
+		shipping = 4000
+		if fee, ok := store["test_shipping_fee_paise"].(float64); ok {
+			shipping = fee
+		} else if fee, ok := store["test_shipping_fee_paise"].(int); ok {
+			shipping = float64(fee)
+		}
+	}
+	original := merchandise + addonTotal
+	return map[string]any{
+		"store":                   map[string]any{"id": store["id"], "currency": "INR"},
+		"items":                   items,
+		"addons":                  addons,
+		"original_amount":         original,
+		"amount":                  original + shipping,
+		"original_shipping_fee":   shipping,
+		"shipping_fee":            shipping,
+		"order_discount_total":    0,
+		"shipping_discount_total": 0,
+		"discount_total":          0,
+		"applied_discounts":       []any{},
+		"discount_codes_invalid":  []any{},
+	}
+}
+
 func testPageSize(store map[string]any) int {
 	switch n := store["test_page_size"].(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+func previewFailRemaining(store map[string]any) int {
+	switch n := store["test_preview_fail_remaining"].(type) {
 	case int:
 		return n
 	case float64:
@@ -3033,26 +3199,33 @@ func TestTiqrEcommerce_CheckoutWithCartOpensDetails(t *testing.T) {
 	useCodedIntent(t, func(string, codedflow.IntentContext) (codedflow.IntentResult, error) {
 		return codedflow.IntentResult{Language: "en", Route: codedflow.RouteCheckout, Confidence: 0.95}, nil
 	}, nil)
-	app, account, contact, session := startEcommerce(t, twoProducts(nil), nil)
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerce(t, products, nil)
 	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
 	reloadSession(t, app, session)
 
-	session.SessionData["tiqr_cart"] = []any{map[string]any{"product_option": "9", "quantity": "1"}}
+	session.SessionData["tiqr_cart"] = []any{map[string]any{
+		"product_option": "9", "quantity": "1", "option_name": "Regular", "product_name": "Kunafa", "price": 40.0,
+	}}
 	session.SessionData["cart_count"] = float64(1)
 	require.NoError(t, app.DB.Save(session).Error)
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I want to checkout", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "cart_review_1", session.CurrentStep)
-	assert.Contains(t, outgoingBlob(t, app, session), "Confirm items")
-	assert.Contains(t, outgoingBlob(t, app, session), "Edit cart")
-	assert.NotContains(t, outgoingBlob(t, app, session), "cart is empty")
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "Confirm items")
+	assert.Contains(t, blob, "Edit cart")
+	assert.Contains(t, blob, "*Your order:*")
+	assert.Contains(t, blob, "*Total:*")
+	assert.NotContains(t, blob, "cart is empty")
+	assert.NotContains(t, blob, "*Shipping:*")
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrecommerce.ConfirmItems, nil))
 	reloadSession(t, app, session)
 	assert.Equal(t, "details", session.CurrentStep)
-	blob := outgoingBlob(t, app, session)
+	blob = outgoingBlob(t, app, session)
 	assert.Contains(t, blob, tiqrecommerce.TiqrEcommercePickupFlowID)
 	assert.Contains(t, blob, "name, email, and phone number")
 	assert.NotContains(t, blob, "and address")
@@ -3122,6 +3295,22 @@ func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
 					},
 				},
 			})
+		case strings.Contains(r.URL.Path, "/cart/checkout-preview"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"store": map[string]any{"id": 42, "currency": "INR"},
+				"items": []any{map[string]any{
+					"product_option": map[string]any{
+						"id": 9, "name": "Regular",
+						"product": map[string]any{"name": "Kunafa"},
+					},
+					"quantity": 1, "original_amount": 4000, "amount": 4000,
+					"applied_discounts": []any{},
+				}},
+				"addons": []any{}, "original_amount": 4000, "amount": 4000,
+				"original_shipping_fee": 0, "shipping_fee": 0,
+				"order_discount_total": 0, "shipping_discount_total": 0, "discount_total": 0,
+				"applied_discounts": []any{}, "discount_codes_invalid": []any{},
+			})
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
 			orderCalls++
 			if orderCalls == 1 {
@@ -3163,7 +3352,7 @@ func TestTiqrEcommerce_CreateOrderMissingEmailRetry(t *testing.T) {
 	reloadSession(t, app, session)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrecommerce.Checkout, nil))
 	reloadSession(t, app, session)
-	require.Equal(t, "cart_review_1", session.CurrentStep)
+	require.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrecommerce.ConfirmItems, nil))
 	reloadSession(t, app, session)
 	require.Equal(t, "details", session.CurrentStep)
@@ -3226,6 +3415,22 @@ func TestTiqrEcommerce_CreateOrderAsksEveryMissingFieldBeforeRetry(t *testing.T)
 					},
 				},
 			})
+		case strings.Contains(r.URL.Path, "/cart/checkout-preview"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"store": map[string]any{"id": 42, "currency": "INR"},
+				"items": []any{map[string]any{
+					"product_option": map[string]any{
+						"id": 9, "name": "Regular",
+						"product": map[string]any{"name": "Kunafa"},
+					},
+					"quantity": 1, "original_amount": 4000, "amount": 4000,
+					"applied_discounts": []any{},
+				}},
+				"addons": []any{}, "original_amount": 4000, "amount": 8000,
+				"original_shipping_fee": 4000, "shipping_fee": 4000,
+				"order_discount_total": 0, "shipping_discount_total": 0, "discount_total": 0,
+				"applied_discounts": []any{}, "discount_codes_invalid": []any{},
+			})
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
 			orderCalls++
 			if orderCalls == 1 {
@@ -3270,7 +3475,7 @@ func TestTiqrEcommerce_CreateOrderAsksEveryMissingFieldBeforeRetry(t *testing.T)
 	reloadSession(t, app, session)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrecommerce.Checkout, nil))
 	reloadSession(t, app, session)
-	require.Equal(t, "cart_review_1", session.CurrentStep)
+	require.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
 
 	session.SessionData["delivery_mode"] = tiqrecommerce.ModeDelivery
 	require.NoError(t, app.DB.Save(session).Error)
@@ -3321,6 +3526,24 @@ func TestTiqrEcommerce_CreateOrderAsksEveryMissingFieldBeforeRetry(t *testing.T)
 	assert.NotContains(t, blob, "This field is required")
 }
 
+func writeStubCheckoutPreview(w http.ResponseWriter) {
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"store": map[string]any{"id": 42, "currency": "INR"},
+		"items": []any{map[string]any{
+			"product_option": map[string]any{
+				"id": 9, "name": "Regular",
+				"product": map[string]any{"name": "Kunafa"},
+			},
+			"quantity": 1, "original_amount": 4000, "amount": 4000,
+			"applied_discounts": []any{},
+		}},
+		"addons": []any{}, "original_amount": 4000, "amount": 4000,
+		"original_shipping_fee": 0, "shipping_fee": 0,
+		"order_discount_total": 0, "shipping_discount_total": 0, "discount_total": 0,
+		"applied_discounts": []any{}, "discount_codes_invalid": []any{},
+	})
+}
+
 func TestTiqrEcommerce_CreateOrderSendsPayNowCTA(t *testing.T) {
 	var placed map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -3342,6 +3565,8 @@ func TestTiqrEcommerce_CreateOrderSendsPayNowCTA(t *testing.T) {
 					},
 				},
 			})
+		case strings.Contains(r.URL.Path, "/cart/checkout-preview"):
+			writeStubCheckoutPreview(w)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&placed))
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -3422,6 +3647,8 @@ func TestTiqrEcommerce_CreateOrderRetryExhausted(t *testing.T) {
 					"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "40"}},
 				}},
 			})
+		case strings.Contains(r.URL.Path, "/cart/checkout-preview"):
+			writeStubCheckoutPreview(w)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"email":["This field is required."]}`))
@@ -3502,6 +3729,8 @@ func TestTiqrEcommerce_CreateOrderRetryExhausted_OutsideHours(t *testing.T) {
 					"options": []any{map[string]any{"id": "9", "name": "Regular", "price": "40"}},
 				}},
 			})
+		case strings.Contains(r.URL.Path, "/cart/checkout-preview"):
+			writeStubCheckoutPreview(w)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/order/"):
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"email":["This field is required."]}`))
@@ -3586,8 +3815,9 @@ func TestTiqrEcommerce_CreateOrderRetryExhausted_OutsideHours(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(blob, "outside business hours"))
 }
 
-// fillCartAndConfirmItems browses to collections, adds one Kunafa, and confirms
-// the cart so the next step is fulfillment or the details form.
+// fillCartAndConfirmItems browses to collections, adds one Kunafa, and taps
+// Checkout so the next step is fulfillment (or the priced preview when the
+// store has a single delivery mode).
 func fillCartAndConfirmItems(
 	t *testing.T,
 	app *App,
@@ -3607,9 +3837,6 @@ func fillCartAndConfirmItems(
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
 	reloadSession(t, app, session)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrecommerce.Checkout, nil))
-	reloadSession(t, app, session)
-	require.Equal(t, "cart_review_1", session.CurrentStep)
-	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrecommerce.ConfirmItems, nil))
 	reloadSession(t, app, session)
 }
 
@@ -3635,13 +3862,18 @@ func TestTiqrEcommerce_PickupOnlySkipsPromptAtCheckout(t *testing.T) {
 	reloadSession(t, app, session)
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrecommerce.Checkout, nil))
 	reloadSession(t, app, session)
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
+	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "*Your order:*")
+	assert.Contains(t, blob, "*Total:*")
+	assert.NotContains(t, blob, "*Shipping:*")
+	assert.NotContains(t, blob, "Proceed")
+	assert.NotContains(t, blob, "store pickup only")
+
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrecommerce.ConfirmItems, nil))
 	reloadSession(t, app, session)
 	assert.Equal(t, "details", session.CurrentStep)
-	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
-	blob := outgoingBlob(t, app, session)
-	assert.NotContains(t, blob, "Proceed")
-	assert.NotContains(t, blob, "store pickup only")
 }
 
 func TestTiqrEcommerce_BothModesPickupSkipsLocation(t *testing.T) {
@@ -3661,8 +3893,15 @@ func TestTiqrEcommerce_BothModesPickupSkipsLocation(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Store pickup", tiqrecommerce.PickupMode, nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "details", session.CurrentStep)
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
 	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "*Your order:*")
+	assert.NotContains(t, blob, "*Shipping:*")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrecommerce.ConfirmItems, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "details", session.CurrentStep)
 }
 
 func TestTiqrEcommerce_DeliveryInRangeContinuesToDetails(t *testing.T) {
@@ -3686,15 +3925,21 @@ func TestTiqrEcommerce_DeliveryInRangeContinuesToDetails(t *testing.T) {
 	pin := `{"latitude":11.2,"longitude":75.8}`
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, pin, "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "details", session.CurrentStep)
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
 	assert.Equal(t, "DELIVERY_TO_LOCATION", session.SessionData["delivery_mode"])
 	assert.Equal(t, 11.2, session.SessionData["delivery_latitude"])
 	assert.Equal(t, 75.8, session.SessionData["delivery_longitude"])
 	assert.Equal(t, "free", session.SessionData["delivery_zone"])
 	blob := outgoingBlob(t, app, session)
-	assert.Contains(t, blob, "delivery is free")
-	assert.Contains(t, blob, "8 km")
-	assert.Contains(t, blob, "16 km")
+	assert.Contains(t, blob, "We can deliver to that location.")
+	assert.NotContains(t, blob, "delivery is free")
+	assert.Contains(t, blob, "*Your order:*")
+	assert.Contains(t, blob, "*Shipping:*")
+	assert.Contains(t, blob, "*Total:*")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Confirm items", tiqrecommerce.ConfirmItems, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "details", session.CurrentStep)
 }
 
 func TestTiqrEcommerce_DeliveryMapsLinkWithCoordsAccepted(t *testing.T) {
@@ -3718,7 +3963,7 @@ func TestTiqrEcommerce_DeliveryMapsLinkWithCoordsAccepted(t *testing.T) {
 	mapsURL := "https://www.google.com/maps/@11.2,75.8,17z"
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, mapsURL, "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "details", session.CurrentStep)
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
 	assert.Equal(t, 11.2, session.SessionData["delivery_latitude"])
 	assert.Equal(t, 75.8, session.SessionData["delivery_longitude"])
 	assert.Equal(t, "free", session.SessionData["delivery_zone"])
@@ -3781,7 +4026,7 @@ func TestTiqrEcommerce_DeliveryOutOfRangeOffersPickup(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Store pickup", tiqrecommerce.PickupMode, nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "details", session.CurrentStep)
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
 	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
 }
 
@@ -3838,7 +4083,7 @@ func TestTiqrEcommerce_LocationStepPickupButtonSwitchesMode(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Store pickup", tiqrecommerce.PickupMode, nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "details", session.CurrentStep)
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
 	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
 	assert.Nil(t, session.SessionData["delivery_latitude"])
 	blob := outgoingBlob(t, app, session)
@@ -3869,7 +4114,7 @@ func TestTiqrEcommerce_LocationStepPickupParaphraseSwitchesMode(t *testing.T) {
 
 	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "I'd rather pick up from the store", "", nil))
 	reloadSession(t, app, session)
-	assert.Equal(t, "details", session.CurrentStep)
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
 	assert.Equal(t, "PICKUP_FROM_STORE", session.SessionData["delivery_mode"])
 	assert.NotContains(t, outgoingBlob(t, app, session), codedflow.AgentHandoff)
 }
@@ -4437,4 +4682,214 @@ func TestCheckoutImageCaptureContinuesAndNotesLink(t *testing.T) {
 	retry := outgoingBlob(t, app, session)
 	assert.Contains(t, retry, "Please send the photo again.")
 	assert.Contains(t, retry, "Please send a photo.")
+}
+
+func TestTiqrEcommerce_CheckoutPreviewFailsThenRetries(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	store := map[string]any{
+		"id":                          42,
+		"name":                        "Demo",
+		"delivery_modes":              []any{"PICKUP_FROM_STORE"},
+		"test_preview_fail_remaining": 1,
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	session.SessionData["tiqr_cart"] = []any{map[string]any{
+		"product_option": "9", "quantity": "1", "option_name": "Regular", "product_name": "Kunafa", "price": 40.0,
+	}}
+	session.SessionData["cart_count"] = float64(1)
+	require.NoError(t, app.DB.Save(session).Error)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrecommerce.Checkout, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "checkout_preview_fail_1", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "couldn't load your order total")
+	assert.Contains(t, blob, "Try again")
+	assert.Contains(t, blob, "Edit cart")
+	assert.NotEqual(t, "details", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Try again", "try_again", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "checkout_preview_confirm_2", session.CurrentStep)
+	blob = outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "*Your order:*")
+	assert.Contains(t, blob, "Confirm items")
+}
+
+func TestTiqrEcommerce_CheckoutPreviewFailsTwiceHandsOff(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	store := map[string]any{
+		"id":                42,
+		"name":              "Demo",
+		"delivery_modes":    []any{"PICKUP_FROM_STORE"},
+		"test_preview_fail": true,
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	session.SessionData["tiqr_cart"] = []any{map[string]any{
+		"product_option": "9", "quantity": "2", "option_name": "Regular", "product_name": "Kunafa", "price": 40.0,
+	}}
+	session.SessionData["cart_count"] = float64(1)
+	require.NoError(t, app.DB.Save(session).Error)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrecommerce.Checkout, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "checkout_preview_fail_1", session.CurrentStep)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Try again", "try_again", nil))
+	reloadSession(t, app, session)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "couldn't load your order total")
+	assert.Contains(t, blob, "Here is what was in the cart:")
+	assert.Contains(t, blob, "Kunafa(Regular) x 2")
+	assert.Contains(t, blob, tiqrecommerce.HandoffConnect)
+	assert.NotContains(t, blob, "Placing order for the following items failed.")
+	assert.NotEqual(t, "details", session.CurrentStep)
+	var transfers int64
+	require.NoError(t, app.DB.Model(&models.AgentTransfer{}).Where("contact_id = ?", contact.ID).Count(&transfers).Error)
+	assert.Equal(t, int64(1), transfers)
+}
+
+func TestTiqrEcommerce_CheckoutPreviewShowsCaptureAnswers(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	store := map[string]any{
+		"id":             42,
+		"name":           "Demo",
+		"delivery_modes": []any{"PICKUP_FROM_STORE"},
+		"test_collections": []any{
+			map[string]any{
+				"id":   "57",
+				"name": "Sweets",
+				"required_capture_fields": []any{
+					map[string]any{
+						"key": "writing", "label": "Message", "type": "text", "required": true,
+					},
+				},
+			},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Happy birthday", "", nil))
+	reloadSession(t, app, session)
+	require.Equal(t, "next", session.CurrentStep)
+	assert.Contains(t, outgoingBlob(t, app, session), "Message: Happy birthday")
+	assert.Contains(t, asString(session.SessionData["cart_subtotal"]), "40")
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrecommerce.Checkout, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, "*Your order:*")
+	assert.Contains(t, blob, "Message: Happy birthday")
+	assert.NotContains(t, blob, "*Shipping:*")
+}
+
+func TestTiqrEcommerce_LongCartSplitsDetailsAndButtons(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	longName := strings.Repeat("Chocolate Celebration Cake Special ", 4)
+	items := make([]any, 0, 25)
+	cart := make([]any, 0, 25)
+	for i := 0; i < 25; i++ {
+		id := i + 1
+		name := longName + strconv.Itoa(id)
+		items = append(items, map[string]any{
+			"product_option": map[string]any{
+				"id":   id,
+				"name": name,
+				"product": map[string]any{
+					"id":   id,
+					"name": "Dessert",
+				},
+			},
+			"quantity":        1,
+			"original_amount": 45000,
+			"amount":          45000,
+		})
+		cart = append(cart, map[string]any{
+			"product_option": strconv.Itoa(id),
+			"quantity":       "1",
+			"option_name":    name,
+			"product_name":   "Dessert",
+			"price":          450.0,
+		})
+	}
+	store := map[string]any{
+		"id":             42,
+		"name":           "Demo",
+		"delivery_modes": []any{"PICKUP_FROM_STORE"},
+		"test_checkout_preview": map[string]any{
+			"store":                 map[string]any{"id": 42, "currency": "INR"},
+			"items":                 items,
+			"addons":                []any{},
+			"original_amount":       45000 * 25,
+			"amount":                45000 * 25,
+			"original_shipping_fee": 0,
+			"shipping_fee":          0,
+			"order_discount_total":  0,
+			"shipping_discount_total": 0,
+			"discount_total":        0,
+			"applied_discounts":     []any{},
+		},
+	}
+	app, account, contact, session := startEcommerceWithStore(t, products, nil, store, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	session.SessionData["tiqr_cart"] = cart
+	session.SessionData["cart_count"] = float64(len(cart))
+	require.NoError(t, app.DB.Save(session).Error)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Checkout", tiqrecommerce.Checkout, nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "checkout_preview_confirm_1", session.CurrentStep)
+
+	blob := outgoingBlob(t, app, session)
+	assert.Contains(t, blob, longName+"1")
+	assert.Contains(t, blob, longName+"25")
+	assert.NotContains(t, blob, "more items.")
+
+	latest := latestOutgoingContent(t, app, session)
+	assert.Contains(t, latest, "Please confirm these items before we continue checkout.")
+	assert.NotContains(t, latest, longName+"1")
+	assert.Contains(t, latest, "Confirm items")
+}
+
+func TestTiqrEcommerce_ShortCartStaysOneButtonMessage(t *testing.T) {
+	products := twoProducts([]any{map[string]any{"id": "9", "name": "Regular", "price": "40"}})
+	app, account, contact, session := startEcommerce(t, products, nil)
+	flow := codedflow.ByKey(tiqrecommerce.FlowKey)
+
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Buy products", tiqrecommerce.BuyProducts, nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Sweets", "57", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "Kunafa", "101", nil))
+	reloadSession(t, app, session)
+	require.NoError(t, app.runCodedFlow(account, contact, session, flow, "1", "", nil))
+	reloadSession(t, app, session)
+	assert.Equal(t, "next", session.CurrentStep)
+
+	latest := latestOutgoingContent(t, app, session)
+	assert.Contains(t, latest, "has been added to your cart")
+	assert.Contains(t, latest, "Would you like to add anything else")
+	assert.Contains(t, latest, "Checkout")
+	assert.NotContains(t, latest, "more items.")
 }

@@ -55,10 +55,13 @@ flowchart TD
   skip --> next[Add more or Checkout]
   cart --> next
   next -->|Add more| list
-  next -->|Checkout and cart has lines| review[Confirm items]
+  next -->|Checkout and cart has lines| ful[Fulfillment]
+  ful --> preview[checkout-preview]
+  preview -->|fail twice| xfer
+  preview -->|ok| review[Confirm priced items]
   review -->|Add more| list
-  review -->|Confirm items| ful[Fulfillment]
-  ful --> flow[WhatsApp Flow by delivery mode]
+  review -->|Edit cart| preview
+  review -->|Confirm items| flow[WhatsApp Flow by delivery mode]
   flow -->|pickup flow id from binding or default| create[create_order]
   flow -->|delivery flow id from binding or default| create
   create -->|success| done[Confirm, thanks, end]
@@ -116,12 +119,12 @@ Admins edit the welcome on the TiQR Flows screen (`/chatbot/coded-flows`) and ca
 
 ### 3. Fulfillment
 
-`resolveFulfillment` runs after the cart is confirmed (Confirm items), before the details WhatsApp Flow. Early-handoff collections run the same helper after capture and add-ons, before their details form. It reads `delivery_modes` already stored on the session.
+`resolveFulfillment` runs when the customer checks out with a non-empty session cart, before checkout-preview and the details WhatsApp Flow. Early-handoff collections run the same helper after capture and add-ons, before their details form. It reads `delivery_modes` already stored on the session.
 
 | Store modes | Behaviour |
 | --- | --- |
-| Missing or empty | No prompt. `delivery_mode` is set to `PICKUP_FROM_STORE` inside `Once`, then the details form opens |
-| Only `PICKUP_FROM_STORE` | No prompt. `delivery_mode` is set to pickup inside `Once`, then the details form opens |
+| Missing or empty | No prompt. `delivery_mode` is set to `PICKUP_FROM_STORE` inside `Once`, then checkout-preview runs |
+| Only `PICKUP_FROM_STORE` | No prompt. `delivery_mode` is set to pickup inside `Once`, then checkout-preview runs |
 | Both | Store pickup or Delivery |
 | Only `DELIVERY_TO_LOCATION` | No mode buttons. Goes straight to a location pin. `delivery_mode` is set inside `Once` |
 
@@ -129,13 +132,13 @@ Delivery asks for a WhatsApp location pin (`AskLocation`). Distance is computed 
 
 | Zone | Next step |
 | --- | --- |
-| `free` | Say free delivery, store the zone and distance, open the details form |
-| `paid` | Say a fee may apply. `ShippingFeePaise` from this function is always 0, so the rupee amount is not filled in. Then the details form |
-| `unconfigured` | Treated as deliverable. The customer is told delivery is possible, then the details form |
+| `free` | Say “We can deliver to that location.”, store the zone and distance, then checkout-preview |
+| `paid` | Same in-range line (no fee quote on the pin message), store the zone, then checkout-preview |
+| `unconfigured` | Treated as deliverable. Same in-range line, then checkout-preview |
 | `out_of_range` and pickup exists | Offer Store pickup or Share again |
 | `out_of_range` and delivery only | Say the out-of-range line and ask for another pin. The loop has no attempt cap |
 
-A deliverable pin stores `delivery_mode`, `delivery_zone`, `delivery_distance_km`, and `shipping_fee_paise` when the fee is greater than 0. The pin itself is stored by `AskLocation` as `delivery_latitude` and `delivery_longitude`.
+A deliverable pin stores `delivery_mode`, `delivery_zone`, `delivery_distance_km`, and `shipping_fee_paise` when the fee is greater than 0. The pin itself is stored by `AskLocation` as `delivery_latitude` and `delivery_longitude`. Shipping amounts shown to the customer come from checkout-preview, not from this pin message.
 
 #### Answering the previous step / welcome menu mid-flow
 
@@ -267,11 +270,13 @@ Answers are stored on the session as `commerce_captured_fields` (latest value pe
 
 A blank line separates products. When the customer also typed a form note, a final `Note: {customer note}` line is appended.
 
-Then one WhatsApp reply-button message covers both the cart confirmation and the next step. After an add, the body is the “has been added” line, the cart list with subtotal and unit count, and “Would you like to add anything else, edit your cart, or place your order?” with buttons `add_more`, `edit_cart`, and `checkout`. After an edit from those buttons, the same three buttons are used without the “has been added” or unit-count lines. Add more returns to the collection list. Checkout opens the confirm-items review, then breaks the loop.
+Then one WhatsApp reply-button message covers both the cart confirmation and the next step when the filled body fits in 1024 characters (after placeholders and the non-English option legend). After an add, the body is the “has been added” line, the cart list with subtotal and unit count, and “Would you like to add anything else, edit your cart, or place your order?” with buttons `add_more`, `edit_cart`, and `checkout`. After an edit from those buttons, the same three buttons are used without the “has been added” or unit-count lines. Add more returns to the collection list. Checkout skips a session-priced confirm and opens fulfillment, then checkout-preview.
 
-WhatsApp caps a button body at 1024 characters. Before send, the flow fits the cart list into that budget (leaving room for the non-English option legend): it drops custom-field lines under each item first, then hides the oldest rows and appends “…and 1 more item.” / “…and N more items.” (N is hidden rows). Subtotal and unit count stay the real cart. The question is never shortened; if one remaining name still does not fit, that name is truncated in the button text only. Edit-cart’s free-text prompt still shows every row with capture details. Confirm items uses the same fitting with its own confirm copy.
+When that filled body would exceed 1024 characters, the flow does not drop capture lines, hide oldest rows, or shorten names. In the same turn it `Say`s the full cart details as plain text (every row, capture answer, subtotal, and unit-count / “has been added” lines when it is an add), then `AskButtons` with only the question and the same buttons. The option legend stays on the button message. If the details text exceeds WhatsApp’s 4096-character text limit, it is sent as consecutive text messages split between lines. Edit-cart’s free-text prompt still lists every row in one text message.
 
 ### 6. Checkout
+
+After fulfillment, `reviewCheckoutPreview` calls guest `checkout_preview` with `items` from `tiqr_cart` (via `OrderItemsForAPI`), optional `commerce_addons`, `delivery_mode`, and pin coordinates for delivery. No discount code is sent. Amounts are paise and are converted once. The customer sees a priced summary (line amounts, capture answers under matching options, add-ons, subtotal from `original_amount`, applied discounts, shipping for delivery from `original_shipping_fee`, total from `amount`) with Confirm items / Edit cart / Add more. The same 1024 split rule applies: one button message when it fits; full details text plus a short confirm question otherwise. First preview failure offers Try again / Edit cart; a second failure transfers with the cart and copy that the total could not be loaded. Confirm continues into the details form below.
 
 `AskFlow` opens a WhatsApp Flow by delivery mode, button Enter details. Meta flow ids come from the TiQR Ecommerce binding for the WhatsApp account (`pickup_flow_id` / `delivery_flow_id`). When unset, the defaults below apply and must exist as published flows on that account.
 
@@ -466,11 +471,11 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 
 ## Gaps
 
-1. **Checkout phrases during fulfillment stay on the step.** Fulfillment runs after Confirm items. A free-text "checkout" while choosing mode or sharing a pin does not re-open the details form in that turn; the same fulfillment step waits on the next message. Checkout from the menu, collection list, product, option, quantity, and add-more steps still reviews the cart and then runs fulfillment.
+1. **Checkout phrases during fulfillment stay on the step.** Fulfillment runs before checkout-preview. A free-text "checkout" while choosing mode or sharing a pin does not re-open the details form in that turn; the same fulfillment step waits on the next message. Checkout from the menu, collection list, product, option, quantity, and add-more steps runs fulfillment, then the priced preview.
 
 2. **Naming a product on a product card transfers.** Product, option, fulfillment, quantity, location, and the details form call `resolveFreeText` with catalog routes off. A grounded `product` or `collection` route is rejected and the customer is transferred. Only the menu and the collection list can search or jump to a collection.
 
-3. **Delivery fee is never priced or charged.** `evaluateStoreDelivery` documents that the flat store shipping fee is not on the `get_store` payload, so `ShippingFeePaise` stays 0. The paid-zone sentence falls through to "an additional delivery fee may apply." `pickupOrderParams` does not send `shipping_fee_paise` even if it were set.
+3. **Pin eligibility does not quote a fee.** `evaluateStoreDelivery` still classifies free / paid / out of range from store radii; the in-range WhatsApp line no longer states a rupee fee or “delivery is free.” Charged shipping appears on checkout-preview (`original_shipping_fee` / shipping discount). `pickupOrderParams` does not send `shipping_fee_paise` even if it were set on the session.
 
 4. **Delivery-only and out of range does not end.** `resolveDeliveryLocation` asks for another pin forever when pickup is not allowed. There is no attempt limit and no automatic transfer. A typed handoff can still transfer, because a non-pin message goes through intent.
 

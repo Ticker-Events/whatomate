@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/shridarpatil/whatomate/pkg/ticker"
 )
 
 // TiQR Ecommerce loads the store and its collections, then lets the
@@ -323,26 +322,14 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 				return nil
 			}
 			if action == tiqrCheckout {
-				ready, ok := reviewCartBeforeOrder(c)
-				if !ok {
-					cont, err := continueAfterAskFail(c)
-					if err != nil || c.Ended || c.Stop {
-						return err
-					}
-					if cont {
-						first = c.TakeReplyRoute()
-						continue
-					}
-					return nil
-				}
-				if !ready {
-					continue
-				}
-				if err := checkout(c); err != nil || c.Ended || c.Stop {
+				keepShopping, err := checkout(c)
+				if err != nil || c.Ended || c.Stop {
 					return err
 				}
-				if c.HasReplyRoute() {
-					first = c.TakeReplyRoute()
+				if keepShopping || c.HasReplyRoute() {
+					if c.HasReplyRoute() {
+						first = c.TakeReplyRoute()
+					}
 					continue
 				}
 				return nil
@@ -469,26 +456,14 @@ func buyProducts(c *Conv, collections []any, first codedflow.Route) error {
 			return nil
 		}
 		if action == tiqrCheckout {
-			ready, ok := reviewCartBeforeOrder(c)
-			if !ok {
-				cont, err := continueAfterAskFail(c)
-				if err != nil || c.Ended || c.Stop {
-					return err
-				}
-				if cont {
-					first = c.TakeReplyRoute()
-					continue
-				}
-				return nil
-			}
-			if !ready {
-				continue
-			}
-			if err := checkout(c); err != nil || c.Ended || c.Stop {
+			keepShopping, err := checkout(c)
+			if err != nil || c.Ended || c.Stop {
 				return err
 			}
-			if c.HasReplyRoute() {
-				first = c.TakeReplyRoute()
+			if keepShopping || c.HasReplyRoute() {
+				if c.HasReplyRoute() {
+					first = c.TakeReplyRoute()
+				}
 				continue
 			}
 			return nil
@@ -612,14 +587,9 @@ func askAfterCartAdd(c *Conv) (string, bool) {
 			name = fmt.Sprintf("next_%d", attempt)
 			kind = cartButtonNext
 		}
-		body := prepareCartButtonBody(c, kind, cartButtonTitles(cartNextButtons))
-		next, ok := c.AskButtons(name, codedflow.ButtonPrompt{
-			Body:    body,
-			Buttons: cartNextButtons,
-			Step: codedflow.StepNote{
-				Doing:  "The customer just added an item and can edit the cart or check out.",
-				Expect: "They may add more, edit the cart, or check out.",
-			},
+		next, ok := askCartActionButtons(c, name, kind, cartNextButtons, codedflow.StepNote{
+			Doing:  "The customer just added an item and can edit the cart or check out.",
+			Expect: "They may add more, edit the cart, or check out.",
 		})
 		if !ok {
 			return "", false
@@ -810,51 +780,11 @@ func deliveryModesContain(modes []string, want string) bool {
 }
 
 func formatDeliveryEligibilityMessage(c *Conv, store map[string]any, result storeDeliveryEligibility) string {
-	var freeLabel, maxLabel string
-	if store != nil {
-		freeLabel = radiusKmLabel(store["free_delivery_radius"])
-		maxLabel = radiusKmLabel(store["delivery_radius"])
-	}
-	offers := make([]string, 0, 2)
-	if freeLabel != "" {
-		offers = append(offers, "- Free delivery within {{free_delivery_km}} km of our store")
-	}
-	if maxLabel != "" {
-		offers = append(offers, "- Delivery up to {{max_delivery_km}} km for an additional delivery fee")
-	}
-	if c != nil && c.Session() != nil {
-		if c.Session().SessionData == nil {
-			c.Session().SessionData = models.JSONB{}
-		}
-		c.Session().SessionData["free_delivery_km"] = freeLabel
-		c.Session().SessionData["max_delivery_km"] = maxLabel
-	}
-
-	var b strings.Builder
-	switch {
-	case result.Zone == deliveryZoneFree:
-		b.WriteString("Great news — delivery is free to that location.")
-	case result.Zone == deliveryZonePaid && result.ShippingFeePaise > 0:
-		currency := "INR"
-		if store != nil {
-			if code := strings.TrimSpace(asString(store["currency"])); code != "" {
-				currency = strings.ToUpper(code)
-			}
-		}
-		if c != nil && c.Session() != nil {
-			c.Session().SessionData["delivery_fee"] = formatMoney(ticker.PaiseToRupees(float64(result.ShippingFeePaise)), currency)
-		}
-		b.WriteString("We can deliver there. Delivery fee: {{delivery_fee}}.")
-	case result.Zone == deliveryZonePaid:
-		b.WriteString("We can deliver there. An additional delivery fee may apply.")
-	default:
-		b.WriteString("Thanks — we can deliver to that location.")
-	}
-	if len(offers) > 0 {
-		b.WriteString("\n\nFor reference, we offer:\n\n")
-		b.WriteString(strings.Join(offers, "\n"))
-	}
-	return b.String()
+	_ = c
+	_ = store
+	_ = result
+	// Fee and free-shipping copy live on the checkout-preview confirmation.
+	return "We can deliver to that location."
 }
 
 type divertResult int
@@ -866,7 +796,7 @@ const (
 )
 
 // applyCheckoutDivert clears divert. Empty cart: message and continue shopping.
-// Non-empty cart: review items, then run checkout.
+// Non-empty cart: run checkout (fulfillment, then priced preview).
 func (c *Conv) applyCheckoutDivert() (divertResult, error) {
 	if c.Divert != codedflow.RouteCheckout {
 		return divertNone, nil
@@ -876,17 +806,11 @@ func (c *Conv) applyCheckoutDivert() (divertResult, error) {
 		c.Say(tiqrEcommerceCartEmpty)
 		return divertEmptyCart, nil
 	}
-	ready, ok := reviewCartBeforeOrder(c)
-	if !ok {
-		return divertCheckoutDone, nil
-	}
-	if !ready {
-		return divertEmptyCart, nil
-	}
-	if err := checkout(c); err != nil || c.Ended || c.Stop {
+	keepShopping, err := checkout(c)
+	if err != nil || c.Ended || c.Stop {
 		return divertCheckoutDone, err
 	}
-	if c.HasReplyRoute() {
+	if keepShopping || c.HasReplyRoute() {
 		return divertEmptyCart, nil
 	}
 	return divertCheckoutDone, nil
@@ -1871,14 +1795,9 @@ func reviewCartBeforeOrder(c *Conv) (ready bool, ok bool) {
 			c.Say(tiqrEcommerceCartEmpty)
 			return false, true
 		}
-		body := prepareCartButtonBody(c, cartButtonReview, cartButtonTitles(cartReviewButtons))
-		choice, got := c.AskButtons(fmt.Sprintf("cart_review_%d", attempt), codedflow.ButtonPrompt{
-			Body:    body,
-			Buttons: cartReviewButtons,
-			Step: codedflow.StepNote{
-				Doing:  "The customer is reviewing the full cart before checkout.",
-				Expect: "They confirm items, edit the cart, or add more products.",
-			},
+		choice, got := askCartActionButtons(c, fmt.Sprintf("cart_review_%d", attempt), cartButtonReview, cartReviewButtons, codedflow.StepNote{
+			Doing:  "The customer is reviewing the full cart before checkout.",
+			Expect: "They confirm items, edit the cart, or add more products.",
 		})
 		if !got {
 			return false, false
@@ -2497,29 +2416,39 @@ func formatCodedCaptureBlock(productName, optionName string, fields map[string]a
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func checkout(c *Conv) error {
+// checkout resolves fulfillment, shows the priced preview, then collects
+// details and places the order. keepShopping is true when the customer chose
+// Add more from the preview confirmation.
+func checkout(c *Conv) (keepShopping bool, err error) {
 	if !resolveFulfillment(c) {
 		if c.HasReplyRoute() {
 			route := c.TakeReplyRoute()
-			if handled, err := handleBuyReplyRoute(c, route); handled {
-				if err != nil || c.Ended || c.Stop {
-					return err
+			if handled, routeErr := handleBuyReplyRoute(c, route); handled {
+				if routeErr != nil || c.Ended || c.Stop {
+					return false, routeErr
 				}
-				// Previous-step pickup switch completes fulfillment; continue to details.
+				// Previous-step pickup switch completes fulfillment; continue to preview.
 				if route.Kind == codedflow.RoutePrevious && strings.TrimSpace(route.ID) == tiqrPickupMode {
 					// fall through
 				} else {
-					return nil
+					return false, nil
 				}
 			} else if route.Kind != "" {
 				c.SetReplyRoute(route)
-				return nil
+				return false, nil
 			} else {
-				return nil
+				return false, nil
 			}
 		} else {
-			return nil
+			return false, nil
 		}
+	}
+	ready, ok := reviewCheckoutPreview(c)
+	if !ok {
+		return false, nil
+	}
+	if !ready {
+		return true, nil
 	}
 	detailsBody := "Please share your name, email, and phone number so we can place your pickup order."
 	delivery := asString(c.Session().SessionData["delivery_mode"]) == tiqrModeDelivery
@@ -2527,7 +2456,7 @@ func checkout(c *Conv) error {
 		detailsBody = "Please share your name, phone number, and address so we can place your delivery order."
 	}
 	flowID := resolveEcommerceMetaFlowID(c, delivery)
-	ok := c.AskFlow("details", codedflow.FlowPrompt{
+	ok = c.AskFlow("details", codedflow.FlowPrompt{
 		FlowID: flowID,
 		CTA:    "Enter details",
 		Header: "Your details",
@@ -2539,7 +2468,7 @@ func checkout(c *Conv) error {
 		},
 	})
 	if !ok {
-		return nil
+		return false, nil
 	}
 	retries := codedflow.DefaultOrderRetries()
 	if c.App() != nil {
@@ -2557,24 +2486,24 @@ func checkout(c *Conv) error {
 		if attempt > 0 {
 			name = fmt.Sprintf("order_retry_%d", attempt)
 		}
-		order, ok := c.Store(name, "create_order", params)
-		if ok {
+		order, orderOK := c.Store(name, "create_order", params)
+		if orderOK {
 			c.SayPaymentCTA(order)
-			return c.End()
+			return false, c.End()
 		}
 		if c.Stop || c.Ended {
-			return nil
+			return false, nil
 		}
 		result := c.CreateRecoverPlan(name+"_recover", tiqrEcommerceFailed)
 		if result.Kind == /*recover*/ "missing_field" && len(result.Fields) > 0 && attempt < retries {
 			if !collectRecoverFields(c, name, result.Fields) {
-				return nil
+				return false, nil
 			}
 			continue
 		}
-		return c.Transfer(FormatFailedOrderHandoff(c.Session().SessionData))
+		return false, c.Transfer(FormatFailedOrderHandoff(c.Session().SessionData))
 	}
-	return c.Transfer(FormatFailedOrderHandoff(c.Session().SessionData))
+	return false, c.Transfer(FormatFailedOrderHandoff(c.Session().SessionData))
 }
 
 // orderItemsForAPI returns cart lines with only product_option and quantity for create_order.
