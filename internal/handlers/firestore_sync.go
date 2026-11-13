@@ -12,6 +12,22 @@ import (
 	fs "github.com/shridarpatil/whatomate/pkg/firestore"
 )
 
+// appendSessionArchiveTurnFn writes one archive turn. Tests replace it.
+var appendSessionArchiveTurnFn = func(
+	a *App,
+	ctx context.Context,
+	meta fs.SessionArchiveDoc,
+	index int,
+	turn map[string]any,
+) error {
+	return a.Firestore.AppendSessionArchiveTurn(ctx, meta, index, turn)
+}
+
+// syncContactForArchiveFn merges the contact document. Tests replace it.
+var syncContactForArchiveFn = func(a *App, ctx context.Context, contact *models.Contact, maskPhone bool) error {
+	return a.Firestore.SyncContact(ctx, contact.OrganizationID, contact, maskPhone)
+}
+
 // syncMessageToFirestore writes a new or updated message and contact summary to Firestore.
 func (a *App) syncMessageToFirestore(orgID uuid.UUID, msg *models.Message, contact *models.Contact) {
 	if a.Firestore == nil || !a.Firestore.Enabled() {
@@ -168,33 +184,69 @@ func sessionArchiveDocFromMeta(archive *codedflow.SessionArchive) fs.SessionArch
 	}
 }
 
-// appendSessionArchiveTurnToFirestore writes one full turn and merges parent metadata.
-func (a *App) appendSessionArchiveTurnToFirestore(committed *codedflow.CommittedArchiveTurn) {
+// writeSessionArchiveTurnToFirestore writes one full turn synchronously with one retry.
+// Copy Log reads Firestore only; a failed write leaves the Postgres marker ahead
+// of Firebase, so this path must succeed whenever Firestore is enabled.
+func (a *App) writeSessionArchiveTurnToFirestore(committed *codedflow.CommittedArchiveTurn) error {
 	if a == nil || a.Firestore == nil || !a.Firestore.Enabled() || committed == nil || committed.Meta == nil {
-		return
+		return nil
 	}
+	return a.writeSessionArchiveTurn(committed)
+}
+
+func (a *App) writeSessionArchiveTurn(committed *codedflow.CommittedArchiveTurn) error {
 	turnMap, err := codedflow.TurnToMap(committed.Turn)
 	if err != nil {
 		a.Log.Error("Failed to marshal session archive turn",
 			"error", err, "session_id", committed.Meta.SessionID)
-		return
+		return err
 	}
 	meta := sessionArchiveDocFromMeta(committed.Meta)
 	index := committed.Index
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
+
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := a.Firestore.AppendSessionArchiveTurn(ctx, meta, index, turnMap); err != nil {
-			a.Log.Error("Failed to append session archive turn to Firestore",
-				"error", err, "session_id", meta.SessionID, "turn_index", index)
+		a.ensureContactSyncedForArchive(ctx, meta.ContactID)
+		lastErr = appendSessionArchiveTurnFn(a, ctx, meta, index, turnMap)
+		cancel()
+		if lastErr == nil {
+			return nil
 		}
-	}()
+	}
+	a.Log.Error("Failed to append session archive turn to Firestore",
+		"error", lastErr, "session_id", meta.SessionID, "turn_index", index)
+	return lastErr
+}
+
+// ensureContactSyncedForArchive writes the contact document so Copy Log rules
+// can resolve organizationId under contacts/{contactId}.
+func (a *App) ensureContactSyncedForArchive(ctx context.Context, contactID string) {
+	if a == nil || a.DB == nil {
+		return
+	}
+	id, err := uuid.Parse(strings.TrimSpace(contactID))
+	if err != nil || id == uuid.Nil {
+		return
+	}
+	var contact models.Contact
+	if err := a.DB.Where("id = ?", id).First(&contact).Error; err != nil {
+		a.Log.Warn("session archive contact lookup failed",
+			"error", err, "contact_id", contactID)
+		return
+	}
+	maskPhone := false
+	if a.Firestore != nil && a.Firestore.Enabled() {
+		maskPhone = a.ShouldMaskPhoneNumbers(contact.OrganizationID)
+	}
+	if err := syncContactForArchiveFn(a, ctx, &contact, maskPhone); err != nil {
+		a.Log.Warn("session archive contact sync failed",
+			"error", err, "contact_id", contact.ID)
+	}
 }
 
 // flushSessionArchiveToFirestore updates ended_at and status on the parent
-// document only. Turns were written per-turn via appendSessionArchiveTurnToFirestore.
+// document only. Turns were written per-turn via writeSessionArchiveTurnToFirestore.
 func (a *App) flushSessionArchiveToFirestore(session *models.ChatbotSession) {
 	if a == nil || a.Firestore == nil || !a.Firestore.Enabled() || session == nil {
 		return

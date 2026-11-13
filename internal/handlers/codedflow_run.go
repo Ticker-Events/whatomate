@@ -145,7 +145,10 @@ func (a *App) runCodedFlowPreview(
 			err = perr
 		}
 		if committed != nil {
-			a.appendSessionArchiveTurnToFirestore(committed)
+			if werr := a.writeSessionArchiveTurnToFirestore(committed); werr != nil {
+				a.Log.Error("session archive turn not stored in Firestore",
+					"error", werr, "session_id", session.ID, "turn_index", committed.Index)
+			}
 		}
 		if codedflow.SessionEnded(session) {
 			a.flushSessionArchiveToFirestore(session)

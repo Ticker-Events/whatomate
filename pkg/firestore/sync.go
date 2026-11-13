@@ -167,7 +167,23 @@ func sessionArchiveMetaData(meta SessionArchiveDoc) map[string]any {
 	return data
 }
 
-// AppendSessionArchiveTurn merges parent metadata and writes one turn document
+// sessionArchiveTurnDoc prepares the turn document id and payload.
+// Parent meta is only written in the same batch as this turn so turn_count
+// never advances without the matching turns/{index} document.
+func sessionArchiveTurnDoc(turnIndex int, turn map[string]any) (docID string, payload map[string]any, err error) {
+	if turnIndex < 0 {
+		return "", nil, fmt.Errorf("firestore append session archive turn: invalid index %d", turnIndex)
+	}
+	docID = fmt.Sprintf("%04d", turnIndex)
+	payload = make(map[string]any, len(turn)+1)
+	for key, value := range turn {
+		payload[key] = value
+	}
+	payload["index"] = turnIndex
+	return docID, payload, nil
+}
+
+// AppendSessionArchiveTurn writes one turn and parent metadata in a single batch
 // under contacts/{contactId}/sessionArchives/{sessionId}/turns/{index}.
 func (c *Client) AppendSessionArchiveTurn(
 	ctx context.Context,
@@ -183,20 +199,16 @@ func (c *Client) AppendSessionArchiveTurn(
 	if contactID == "" || sessionID == "" {
 		return fmt.Errorf("firestore append session archive turn: missing contact or session id")
 	}
-	if turnIndex < 0 {
-		return fmt.Errorf("firestore append session archive turn: invalid index %d", turnIndex)
+	docID, payload, err := sessionArchiveTurnDoc(turnIndex, turn)
+	if err != nil {
+		return err
 	}
 	parent := sessionArchiveParent(c, contactID, sessionID)
-	if _, err := parent.Set(ctx, sessionArchiveMetaData(meta), firestore.MergeAll); err != nil {
-		return fmt.Errorf("firestore append session archive meta %s: %w", sessionID, err)
-	}
-	docID := fmt.Sprintf("%04d", turnIndex)
-	payload := map[string]any{}
-	for key, value := range turn {
-		payload[key] = value
-	}
-	payload["index"] = turnIndex
-	if _, err := parent.Collection(collectionArchiveTurns).Doc(docID).Set(ctx, payload); err != nil {
+	batch := c.firestore.Batch()
+	// Turn first, then parent meta — both commit together.
+	batch.Set(parent.Collection(collectionArchiveTurns).Doc(docID), payload)
+	batch.Set(parent, sessionArchiveMetaData(meta), firestore.MergeAll)
+	if _, err := batch.Commit(ctx); err != nil {
 		return fmt.Errorf("firestore append session archive turn %s/%s: %w", sessionID, docID, err)
 	}
 	return nil
@@ -413,12 +425,12 @@ func (c *Client) SyncContact(ctx context.Context, orgID uuid.UUID, contact *mode
 	}
 
 	contactData := map[string]any{
-		"organizationId":     orgID.String(),
-		"phoneNumber":        phoneNumber,
-		"profileName":        profileName,
-		"whatsappAccount":    contact.WhatsAppAccount,
-		"tags":               stringTags(contact.Tags),
-		"staffAiAssistance":  contact.StaffAIAssistance,
+		"organizationId":    orgID.String(),
+		"phoneNumber":       phoneNumber,
+		"profileName":       profileName,
+		"whatsappAccount":   contact.WhatsAppAccount,
+		"tags":              stringTags(contact.Tags),
+		"staffAiAssistance": contact.StaffAIAssistance,
 	}
 	applyAssignedUserField(contactData, contact)
 	if contact.LastMessageAt != nil {
