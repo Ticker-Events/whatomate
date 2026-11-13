@@ -109,9 +109,6 @@ type MSG91Config struct {
 	// BaseURL is the MSG91 Control API base URL.
 	// Defaults to https://control.msg91.com
 	BaseURL string `koanf:"base_url"`
-	// WebhookSecret is a shared secret sent as the X-MSG91-Secret header from the
-	// MSG91 webhook dashboard and verified on POST /api/webhook/msg91.
-	WebhookSecret string `koanf:"webhook_secret"`
 }
 
 type TTSConfig struct {

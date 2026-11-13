@@ -66,6 +66,7 @@ interface WhatsAppAccount {
   aisensy_project_id?: string
   has_aisensy_password?: boolean
   has_msg91_authkey?: boolean
+  msg91_webhook_secret?: string
   business_calling_enabled?: boolean
   phone_number?: string
   display_name?: string
@@ -584,8 +585,15 @@ onMounted(async () => {
             <IconButton :icon="Copy" label="Copy" @click="copyToClipboard(webhookUrl)" />
           </div>
           <p v-if="isMSG91" class="text-[11px] text-muted-foreground mt-1">
-            {{ $t('accounts.msg91WebhookHint', 'In MSG91 Webhook (New), set a custom header X-MSG91-Secret to match your server [msg91] webhook_secret.') }}
+            {{ $t('accounts.msg91WebhookHint', 'In MSG91 Webhook (New), add custom header X-MSG91-Secret using this account’s webhook secret below.') }}
           </p>
+        </div>
+        <div v-if="isMSG91">
+          <Label class="text-xs text-muted-foreground">{{ $t('accounts.msg91WebhookSecret', 'MSG91 Webhook Secret (X-MSG91-Secret)') }}</Label>
+          <div class="flex items-center gap-2 mt-1">
+            <code class="px-2 py-1 bg-muted rounded text-xs font-mono flex-1 truncate">{{ account?.msg91_webhook_secret }}</code>
+            <IconButton :icon="Copy" label="Copy" @click="copyToClipboard(account?.msg91_webhook_secret || '')" />
+          </div>
         </div>
         <div v-if="!isMSG91">
           <Label class="text-xs text-muted-foreground">{{ $t('accounts.verifyToken', 'Verify Token') }}</Label>
@@ -644,7 +652,7 @@ onMounted(async () => {
             <li>{{ $t('accounts.msg91SetupStep2', 'Copy your') }} <strong>{{ $t('accounts.msg91SetupStep2Bold', 'Auth Key') }}</strong> {{ $t('accounts.msg91SetupStep2End', 'from the dashboard') }}</li>
             <li>{{ $t('accounts.msg91SetupStep3', 'Enter the') }} <strong>{{ $t('accounts.msg91SetupStep3Bold', 'Integrated Number') }}</strong> {{ $t('accounts.msg91SetupStep3End', '(WhatsApp number with country code)') }}</li>
             <li>{{ $t('accounts.msg91SetupStep4', 'Create a Webhook (New) pointing to this app’s /api/webhook/msg91 URL') }}</li>
-            <li>{{ $t('accounts.msg91SetupStep5', 'Add custom header X-MSG91-Secret matching [msg91] webhook_secret') }}</li>
+            <li>{{ $t('accounts.msg91SetupStep5', 'Add custom header X-MSG91-Secret using this account’s webhook secret') }}</li>
             <li>{{ $t('accounts.msg91SetupStep6', 'Click Test Connection to verify') }}</li>
           </ol>
         </CardContent>

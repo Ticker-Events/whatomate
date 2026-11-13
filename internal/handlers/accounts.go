@@ -45,7 +45,8 @@ type AccountRequest struct {
 
 	// MSG91-specific fields (required when Provider == "msg91")
 	// phone_id is the integrated WhatsApp number (with country code).
-	MSG91AuthKey string `json:"msg91_authkey"`
+	MSG91AuthKey       string `json:"msg91_authkey"`
+	MSG91WebhookSecret string `json:"msg91_webhook_secret"`
 }
 
 // AccountResponse represents the response for an account (without sensitive data)
@@ -69,6 +70,7 @@ type AccountResponse struct {
 	AiSensyProjectID       string     `json:"aisensy_project_id,omitempty"`
 	HasAiSensyPassword     bool       `json:"has_aisensy_password"`
 	HasMSG91AuthKey        bool       `json:"has_msg91_authkey"`
+	MSG91WebhookSecret     string     `json:"msg91_webhook_secret,omitempty"`
 	PhoneNumber            string     `json:"phone_number,omitempty"`
 	DisplayName            string     `json:"display_name,omitempty"`
 	TokenExpiresAt         *string    `json:"token_expires_at,omitempty"`
@@ -209,6 +211,12 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		webhookVerifyToken = generateVerifyToken()
 	}
 
+	// Per-account MSG91 webhook secret (X-MSG91-Secret); auto-generate when omitted.
+	msg91WebhookSecret := req.MSG91WebhookSecret
+	if provider == "msg91" && msg91WebhookSecret == "" {
+		msg91WebhookSecret = generateVerifyToken()
+	}
+
 	// Set default API version
 	apiVersion := req.APIVersion
 	if apiVersion == "" {
@@ -237,6 +245,7 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 		AiSensyPassword:        req.AiSensyPassword,
 		AiSensyProjectID:       req.AiSensyProjectID,
 		MSG91AuthKey:           req.MSG91AuthKey,
+		MSG91WebhookSecret:     msg91WebhookSecret,
 	}
 
 	if provider == "meta" && req.AccessToken != "" {
@@ -388,6 +397,9 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account", nil, "")
 		}
 		account.MSG91AuthKey = enc
+	}
+	if req.MSG91WebhookSecret != "" {
+		account.MSG91WebhookSecret = req.MSG91WebhookSecret
 	}
 	account.AutoReadReceipt = req.AutoReadReceipt
 	account.BusinessCallingEnabled = req.BusinessCallingEnabled
@@ -636,6 +648,7 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		AiSensyProjectID:       acc.AiSensyProjectID,
 		HasAiSensyPassword:     acc.AiSensyPassword != "",
 		HasMSG91AuthKey:        acc.MSG91AuthKey != "",
+		MSG91WebhookSecret:     acc.MSG91WebhookSecret,
 		TokenRefreshFailed:     acc.TokenRefreshFailed,
 		TokenRefreshError:      acc.TokenRefreshError,
 		CreatedByID:            acc.CreatedByID,

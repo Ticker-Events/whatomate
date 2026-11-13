@@ -512,4 +512,31 @@ func TestApp_CreateAccount_MSG91EncryptsAuthKey(t *testing.T) {
 	assert.True(t, stored.IsMSG91())
 	assert.NotEqual(t, "PLAIN-MSG91-KEY", stored.MSG91AuthKey)
 	assert.True(t, strings.HasPrefix(stored.MSG91AuthKey, "enc:"))
+	assert.NotEmpty(t, stored.MSG91WebhookSecret, "per-account webhook secret should be auto-generated")
+}
+
+func TestApp_CreateAccount_MSG91UsesProvidedWebhookSecret(t *testing.T) {
+	app := newTestApp(t)
+	app.Config = &config.Config{
+		App: config.AppConfig{EncryptionKey: "this-is-a-32-character-test-key-XX"},
+		JWT: config.JWTConfig{Secret: testutil.TestJWTSecret, AccessExpiryMins: 15, RefreshExpiryDays: 7},
+	}
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := createAdminUser(t, app, org.ID)
+
+	req := testutil.NewJSONRequest(t, map[string]any{
+		"name":                 "msg91-secret",
+		"provider":             "msg91",
+		"phone_id":             "919811122233",
+		"msg91_authkey":        "KEY",
+		"msg91_webhook_secret": "acct-specific-secret",
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	require.NoError(t, app.CreateAccount(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var stored models.WhatsAppAccount
+	require.NoError(t, app.DB.Where("name = ?", "msg91-secret").First(&stored).Error)
+	assert.Equal(t, "acct-specific-secret", stored.MSG91WebhookSecret)
 }

@@ -64,3 +64,7 @@ func TestStripMSG91UUIDSuffix(t *testing.T) {
 	assert.Equal(t, "wamid.ABC", stripMSG91UUIDSuffix("wamid.ABC_hello"))
 	assert.Equal(t, "req-1", stripMSG91UUIDSuffix("req-1"))
 }
+
+func TestMSG91WebhookSecretHeaderConstant(t *testing.T) {
+	assert.Equal(t, "X-MSG91-Secret", msg91WebhookSecretHeader)
+}

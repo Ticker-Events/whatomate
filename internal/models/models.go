@@ -339,6 +339,9 @@ type WhatsAppAccount struct {
 	// MSG91-specific credentials (populated when Provider == "msg91").
 	// PhoneID stores the integrated WhatsApp number (with country code).
 	MSG91AuthKey string `gorm:"type:text" json:"-"` // encrypted
+	// MSG91WebhookSecret is the per-account shared secret for X-MSG91-Secret
+	// webhook header verification (shown in the UI for dashboard configuration).
+	MSG91WebhookSecret string `gorm:"size:255" json:"msg91_webhook_secret,omitempty"`
 
 	// Meta long-lived user token expiry / refresh tracking (ignored for AiSensy/MSG91).
 	TokenExpiresAt       *time.Time `json:"token_expires_at,omitempty"`

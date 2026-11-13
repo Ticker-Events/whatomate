@@ -56,17 +56,6 @@ type MSG91WebhookPayload struct {
 func (a *App) MSG91WebhookHandler(r *fastglue.Request) error {
 	body := r.RequestCtx.PostBody()
 
-	if secret := strings.TrimSpace(a.Config.MSG91.WebhookSecret); secret != "" {
-		got := string(r.RequestCtx.Request.Header.Peek(msg91WebhookSecretHeader))
-		if got == "" {
-			got = string(r.RequestCtx.Request.Header.Peek("x-msg91-secret"))
-		}
-		if got != secret {
-			a.Log.Warn("MSG91 webhook rejected: invalid or missing secret header")
-			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid webhook secret", nil, "")
-		}
-	}
-
 	var payload MSG91WebhookPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		a.Log.Error("Failed to parse MSG91 webhook payload", "error", err)
@@ -85,6 +74,19 @@ func (a *App) MSG91WebhookHandler(r *fastglue.Request) error {
 		// Return 200 to avoid MSG91 auto-pause on 4xx when misconfigured numbers arrive.
 		r.RequestCtx.SetStatusCode(fasthttp.StatusOK)
 		return nil
+	}
+
+	// Per-account webhook secret (configured as X-MSG91-Secret in MSG91 dashboard).
+	if expected := strings.TrimSpace(account.MSG91WebhookSecret); expected != "" {
+		got := string(r.RequestCtx.Request.Header.Peek(msg91WebhookSecretHeader))
+		if got == "" {
+			got = string(r.RequestCtx.Request.Header.Peek("x-msg91-secret"))
+		}
+		if got != expected {
+			a.Log.Warn("MSG91 webhook rejected: invalid or missing secret header",
+				"phone_id", account.PhoneID)
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid webhook secret", nil, "")
+		}
 	}
 
 	customer := msg91FirstNonEmpty(payload.CustomerNumber, payload.CustomerNumberSnake)
