@@ -136,10 +136,11 @@ udp_port_max = 10100          # WebRTC UDP port range end
 base_url = "https://backend.aisensy.com/direct-apis/t1/api"
 webhook_secret = ""  # Shared HMAC secret for AiSensy webhook signature verification
 
-# MSG91 WhatsApp API configuration (required for MSG91 provider accounts)
+# MSG91 WhatsApp API configuration (optional; defaults shown)
+# Per-account webhook secrets are stored on each WhatsApp account (X-MSG91-Secret),
+# not in this global section.
 [msg91]
 base_url = "https://control.msg91.com"
-webhook_secret = ""  # Shared secret header (X-MSG91-Secret) for POST /api/webhook/msg91
 
 # Default admin credentials (only used during initial setup when no users exist)
 [default_admin]
