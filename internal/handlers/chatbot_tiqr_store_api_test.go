@@ -260,6 +260,22 @@ func TestBuildGuestOrderPayload_ForwardsBuyerMetaData(t *testing.T) {
 	}, order["buyer_meta_data"])
 }
 
+func TestBuildTiqrStoreToolArgs_GetProductAcceptsIDAlias(t *testing.T) {
+	tool, args, err := buildTiqrStoreToolArgs("get_product", 1, "", map[string]string{"product_id": "9"})
+	require.NoError(t, err)
+	assert.Equal(t, "get_product", tool)
+	assert.Equal(t, 9, args["product_id"])
+
+	tool, args, err = buildTiqrStoreToolArgs("get_product", 1, "", map[string]string{"id": "9"})
+	require.NoError(t, err)
+	assert.Equal(t, "get_product", tool)
+	assert.Equal(t, 9, args["product_id"])
+
+	_, _, err = buildTiqrStoreToolArgs("get_product", 1, "", map[string]string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "product_id is required")
+}
+
 func TestBuildTiqrStoreToolArgs_SearchCollectionsRequiresQuery(t *testing.T) {
 	_, _, err := buildTiqrStoreToolArgs("search_collections", 1, "", map[string]string{})
 	require.Error(t, err)
@@ -479,8 +495,8 @@ func TestInvokeTiqrStoreRESTOperation_FulfillmentSlots(t *testing.T) {
 
 func TestBuildTiqrStoreToolArgs_FulfillmentSlots(t *testing.T) {
 	name, args, err := buildTiqrStoreToolArgs("list_fulfillment_slots", 42, "", map[string]string{
-		"delivery_mode":       "DELIVERY_TO_LOCATION",
-		"product_option_ids":  "9,10",
+		"delivery_mode":      "DELIVERY_TO_LOCATION",
+		"product_option_ids": "9,10",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "list_fulfillment_slots", name)

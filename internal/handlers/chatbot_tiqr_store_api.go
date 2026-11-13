@@ -121,6 +121,16 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 	defer cancel()
 
 	var raw any
+	noted := false
+	noteCall := func(note codedflow.CodedPreviewAPICall) {
+		noted = true
+		if ctx.capturing() && ctx.preview != nil {
+			ctx.preview.NoteAPI(note)
+		}
+		if ctx.archive != nil {
+			ctx.archive.NoteAPI(note)
+		}
+	}
 	if apiType == "rest" {
 		client := newTiqrStoreRESTClient(settings.AI.CommerceRESTURL)
 		trace := a.ShouldTraceCodedFlow(ctx.session) && !ctx.capturing()
@@ -148,20 +158,14 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 				if u, err := url.Parse(rawURL); err == nil {
 					path = u.RequestURI()
 				}
-				note := codedflow.CodedPreviewAPICall{
+				noteCall(codedflow.CodedPreviewAPICall{
 					Name:       operation,
 					Path:       path,
 					Curl:       curl,
 					HTTPStatus: status,
 					Response:   parsed,
 					Error:      errMsg,
-				}
-				if preview {
-					ctx.preview.NoteAPI(note)
-				}
-				if archive {
-					ctx.archive.NoteAPI(note)
-				}
+				})
 				if !trace {
 					return
 				}
@@ -171,6 +175,14 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 		}
 		if hit, ok := a.getCommerceCatalogCached(storeID, operation, params); ok {
 			raw = hit
+			if (preview || archive) && !noted {
+				noteCall(codedflow.CodedPreviewAPICall{
+					Name:       operation,
+					Path:       "cache",
+					HTTPStatus: http.StatusOK,
+					Response:   hit,
+				})
+			}
 		} else {
 			raw, err = invokeTiqrStoreRESTOperation(callCtx, client, operation, storeID, ctx.session.PhoneNumber, params)
 			if err == nil {
@@ -187,6 +199,20 @@ func (a *App) execChatTiqrStoreAPI(node *ChatNode, ctx *chatNodeCtx) (nodeOutcom
 			errMsg = err.Error()
 		}
 		a.LogCodedFlowTiqrResponse(ctx.session, apiType, operation, 0, raw, errMsg)
+		if (ctx.capturing() && ctx.preview != nil) || ctx.archive != nil {
+			noteCall(codedflow.CodedPreviewAPICall{
+				Name:     operation,
+				Path:     "mcp",
+				Response: raw,
+				Error:    errMsg,
+			})
+		}
+	}
+	if err != nil && !noted {
+		noteCall(codedflow.CodedPreviewAPICall{
+			Name:  operation,
+			Error: err.Error(),
+		})
 	}
 	if err != nil {
 		a.Log.Error("tiqr_store_api node request failed",
@@ -282,7 +308,7 @@ func invokeTiqrStoreRESTOperation(
 			Offset:     offset,
 		})
 	case "get_product":
-		productID := strings.TrimSpace(params["product_id"])
+		productID := tiqrProductID(params)
 		if productID == "" {
 			return nil, fmt.Errorf("product_id is required")
 		}
@@ -565,7 +591,7 @@ func buildTiqrStoreToolArgs(operation string, storeID int, phone string, params 
 		args, err := productToolArgs(storeID, params, true)
 		return "list_products", args, err
 	case "get_product":
-		productID := strings.TrimSpace(params["product_id"])
+		productID := tiqrProductID(params)
 		if productID == "" {
 			return "", nil, fmt.Errorf("product_id is required")
 		}
@@ -962,6 +988,17 @@ func templateTiqrParams(raw any, replace func(string) string) map[string]string 
 		out[key] = replace(s)
 	}
 	return out
+}
+
+// tiqrProductID reads the product id. Callers may send product_id or id.
+func tiqrProductID(params map[string]string) string {
+	if params == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(params["product_id"]); id != "" {
+		return id
+	}
+	return strings.TrimSpace(params["id"])
 }
 
 // aliasBuyerListResults keeps the buyer JSON list key. REST and MCP list

@@ -138,6 +138,9 @@ func (a *App) runCodedFlowPreview(
 	err := codedflow.RunPreview(a, session, flow, chat, preview)
 	if archive != nil {
 		committed := codedflow.CommitArchiveTurn(session, flow.Key, archive, inbound)
+		if committed != nil && (a.Firestore == nil || !a.Firestore.Enabled()) {
+			codedflow.AppendLocalArchiveTurn(session, committed.Turn)
+		}
 		if perr := a.persistSessionData(session); perr != nil && err == nil {
 			err = perr
 		}

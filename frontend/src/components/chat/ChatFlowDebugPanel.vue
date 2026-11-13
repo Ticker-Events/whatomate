@@ -75,14 +75,25 @@ function normalizeText(value: unknown): string {
 
 function messageText(message: Message): string {
   const content = message.content
-  if (typeof content === 'string') return content
-  if (message.interactive_data?.body) return message.interactive_data.body
+  if (typeof content === 'string' && content.trim()) return content
+  const data = message.interactive_data
+  if (data?.body) return data.body
+  const cardBody = typeof data?.card_body === 'string' ? data.card_body.trim() : ''
+  const title = typeof data?.title === 'string' ? data.title.trim() : ''
+  if (cardBody && title) return `${cardBody}\n${title}`
+  if (cardBody) return cardBody
+  if (title) return title
   if (content && typeof content === 'object') {
     const body = (content as { body?: string; text?: string }).body
       || (content as { text?: string }).text
     if (body) return body
   }
   return ''
+}
+
+function messageButtonID(message: Message): string {
+  const id = message.interactive_data?.button_id
+  return typeof id === 'string' ? id.trim() : ''
 }
 
 /** Map chat message id → archive turn index (best-effort content match). */
@@ -97,9 +108,21 @@ const messageTurnMap = computed(() => {
     const candidates: Array<{ text: string; prefer: 'incoming' | 'outgoing' }> = []
     const inboundText = normalizeText(turn.inbound?.text)
     if (inboundText) candidates.push({ text: inboundText, prefer: 'incoming' })
+    const inboundButton = typeof turn.inbound?.button_id === 'string' ? turn.inbound.button_id.trim() : ''
     for (const msg of turn.messages || []) {
       const text = normalizeText(msg.content)
       if (text) candidates.push({ text, prefer: 'outgoing' })
+    }
+    if (inboundButton) {
+      const byButton = props.messages.find((m) => {
+        if (usedMessageIds.has(m.id)) return false
+        if (m.direction !== 'incoming') return false
+        return messageButtonID(m) === inboundButton
+      })
+      if (byButton) {
+        map.set(byButton.id, turnIdx)
+        usedMessageIds.add(byButton.id)
+      }
     }
     for (const candidate of candidates) {
       const match = props.messages.find((m) => {

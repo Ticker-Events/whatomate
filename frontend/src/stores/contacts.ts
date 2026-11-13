@@ -61,6 +61,10 @@ export interface Message {
   interactive_data?: {
     type?: string
     body?: string
+    title?: string
+    button_id?: string
+    card_body?: string
+    card_media_url?: string
     buttons?: Array<{
       type?: string
       reply?: { id: string; title: string }

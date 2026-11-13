@@ -91,6 +91,13 @@ func runAgentTurn(c *codedflow.Conv) error {
 		}
 	}
 
+	// Add to cart on a shown product is binding. Advance to options or quantity
+	// here so a failed model guess cannot drop the customer back on the catalog.
+	if handled, err := rt.tryBindProductTap(buttonID); handled {
+		rt.persist()
+		return err
+	}
+
 	modelID := ModelFromSettings(bindingSettings(account.OrganizationID, account.Name))
 
 	ctx := context.Background()
@@ -203,6 +210,7 @@ Rules:
 - Waiting steps: welcome, collections, products, options, quantity, capture, addons, cart, cart_edit, fulfillment, delivery_pin, delivery_fallback, checkout_preview, checkout_preview_fail, details, order_placed, order_status, order_status_summary.
 - Required order: option (when more than one) → quantity → capture fields → addons → cart. Checkout: fulfillment → delivery_pin (when delivery) → checkout_preview → details Flow → create_order. Do not skip required steps.
 - A tap or exact title is binding. If the customer tapped buy_products, reply step=collections. confirm_items → details (not create_order). talk_to_agent → transfer_to_staff.
+- A product-card Add to cart tap is handled before you run when that product is on screen. If you still see a product button_id, call get_product with that product id, then reply step=options when there is more than one option, or step=quantity when there is exactly one. Never pass the product id to add_cart_line. Do not apologize and reshow the catalog when the product loaded.
 - Optional deviation_line: one short text bubble before the shell (FAQ answer, clarify, or jump explanation). If the step did not change, the shell is resent after that bubble.
 - Fixed action ids: buy_products, check_order_status, talk_to_agent, add_more, checkout, edit_cart, confirm_items, pickup, delivery, share_again, try_again.
 - create_order is allowed only after the details Flow is submitted. transfer_to_staff is gated on the customer asking for staff.

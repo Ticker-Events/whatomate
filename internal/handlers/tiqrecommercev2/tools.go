@@ -184,7 +184,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		if !rt.State.isGrounded(in.ProductID) {
 			return errResult(rt.rejectUngrounded(in.ProductID)), nil
 		}
-		payload, ok := rt.callTiqr("product", "get_product", map[string]string{"id": strings.TrimSpace(in.ProductID)})
+		payload, ok := rt.callTiqr("product", "get_product", getProductParams(in.ProductID))
 		if !ok {
 			return errResult("get_product failed"), nil
 		}
