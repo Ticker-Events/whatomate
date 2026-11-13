@@ -1,6 +1,8 @@
 package codedflow
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +97,61 @@ func TestSanitizeArchiveContextDropsPrivateKeys(t *testing.T) {
 	assert.NotContains(t, out, "agent_instruction")
 	assert.NotContains(t, out, "api_token")
 	assert.NotContains(t, out, ArchiveKey)
+}
+
+func TestCommitArchiveTurnOmitsPerMessageContext(t *testing.T) {
+	session := &models.ChatbotSession{
+		ContactID:      uuid.New(),
+		OrganizationID: uuid.New(),
+		Status:         models.SessionStatusActive,
+		CurrentStep:    "products",
+		StartedAt:      time.Now().UTC(),
+		SessionData: models.JSONB{
+			"_coded_flow": "tiqr_ecommerce_v2",
+			"store":       map[string]any{"name": "Demo", "blob": strings.Repeat("x", 5000)},
+		},
+	}
+	session.ID = uuid.New()
+	sink := &PreviewSink{Session: session}
+	sink.Text("products", "Pick one")
+	require.NotEmpty(t, sink.Messages)
+	require.NotEmpty(t, sink.Messages[0].Context)
+
+	committed := CommitArchiveTurn(session, "tiqr_ecommerce_v2", sink, map[string]any{"text": "hi"})
+	require.NotNil(t, committed)
+	require.Len(t, committed.Turn.Messages, 1)
+	assert.Nil(t, committed.Turn.Messages[0].Context)
+	require.NotNil(t, committed.Turn.Context)
+	store, ok := committed.Turn.Context["store"].(string)
+	require.True(t, ok, "oversized store value should be truncated to string")
+	assert.LessOrEqual(t, len([]rune(store)), archiveContextValueMax)
+}
+
+func TestTurnToMapForFirestoreCapsOversizedTurn(t *testing.T) {
+	huge := strings.Repeat("z", 200_000)
+	turn := SessionArchiveTurn{
+		At:   time.Now().UTC().Format(time.RFC3339),
+		Step: "products",
+		APICalls: []CodedPreviewAPICall{
+			{Name: "list_products", Path: "/products", Curl: "curl " + huge, Response: map[string]any{"body": huge}},
+			{Name: "get_store", Path: "/store", Response: map[string]any{"body": huge}},
+			{Name: "list_collections", Path: "/collections", Response: map[string]any{"body": huge}},
+			{Name: "checkout_preview", Path: "/checkout", Response: map[string]any{"body": huge}},
+			{Name: "get_product", Path: "/product", Response: map[string]any{"body": huge}},
+		},
+		Context: map[string]any{"dump": huge, "store": map[string]any{"raw": huge}},
+		Messages: []CodedPreviewMessage{
+			{Type: "text", Content: "hi", Context: map[string]any{"dump": huge}},
+		},
+		AICalls: []CodedPreviewAICall{
+			{Role: "adk_tool", Prompt: huge, Response: huge, Parsed: map[string]any{"data": huge}},
+		},
+	}
+	row, err := TurnToMapForFirestore(turn)
+	require.NoError(t, err)
+	b, err := json.Marshal(row)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(b), firestoreTurnMaxBytes)
 }
 
 func TestHasSessionArchiveFromTurnCountAndLegacyTurns(t *testing.T) {

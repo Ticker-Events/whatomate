@@ -195,7 +195,7 @@ func (a *App) writeSessionArchiveTurnToFirestore(committed *codedflow.CommittedA
 }
 
 func (a *App) writeSessionArchiveTurn(committed *codedflow.CommittedArchiveTurn) error {
-	turnMap, err := codedflow.TurnToMap(committed.Turn)
+	turnMap, err := codedflow.TurnToMapForFirestore(committed.Turn)
 	if err != nil {
 		a.Log.Error("Failed to marshal session archive turn",
 			"error", err, "session_id", committed.Meta.SessionID)

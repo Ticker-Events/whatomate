@@ -114,6 +114,7 @@ Live V2 turns write the same **session archive** as V1 (Firestore turns + Chat *
 - Outbound shells via `DeliverCoded*` / `ExecChat*`
 - TiQR REST/MCP via `NoteAPI`
 - Each ADK tool result as `ai_calls` with role `adk_tool` (name, ok/error, truncated args/result, waiting step). Full Gemini prompts are not stored.
+- Turn documents are size-capped before Firestore write (no per-message session dumps; truncated API/AI bodies) so Copy Log stays under the 1MiB doc limit.
 
 ## Interactive preview
 

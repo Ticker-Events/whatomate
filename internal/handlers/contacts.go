@@ -1533,7 +1533,7 @@ type ContactSessionArchiveResponse struct {
 
 // GetContactSessionArchive returns the full flow archive for one chatbot session
 // (visual graph or coded). Prefers Firestore turns; falls back to legacy marker
-// turns and local SessionData turns when Firestore is disabled.
+// turns, and to local SessionData turns only when Firestore is disabled.
 func (a *App) GetContactSessionArchive(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
@@ -1598,7 +1598,8 @@ func (a *App) GetContactSessionArchive(r *fastglue.Request) error {
 		resp.Version = 1
 	}
 
-	if a.Firestore != nil && a.Firestore.Enabled() {
+	fsEnabled := a.Firestore != nil && a.Firestore.Enabled()
+	if fsEnabled {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		meta, turnMaps, ok, fsErr := a.Firestore.GetSessionArchive(ctx, contactID.String(), sessionID.String())
@@ -1607,7 +1608,7 @@ func (a *App) GetContactSessionArchive(r *fastglue.Request) error {
 				"error", fsErr, "contact_id", contactID, "session_id", sessionID)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to load session archive", nil, "")
 		}
-		if ok {
+		if ok && len(turnMaps) > 0 {
 			if meta.Version != 0 {
 				resp.Version = meta.Version
 			}
@@ -1649,17 +1650,18 @@ func (a *App) GetContactSessionArchive(r *fastglue.Request) error {
 		return r.SendEnvelope(resp)
 	}
 
-	// Local/dev: turns stored on SessionData when Firestore is disabled.
-	if localTurns := codedflow.LoadLocalArchiveTurns(&session); len(localTurns) > 0 {
-		resp.Turns = localTurns
-		if resp.TurnCount == 0 {
-			resp.TurnCount = len(localTurns)
+	// Local/dev only when Firestore is off. Production Copy Log is Firestore-only.
+	if !fsEnabled {
+		if localTurns := codedflow.LoadLocalArchiveTurns(&session); len(localTurns) > 0 {
+			resp.Turns = localTurns
+			if resp.TurnCount == 0 {
+				resp.TurnCount = len(localTurns)
+			}
+			return r.SendEnvelope(resp)
 		}
-		return r.SendEnvelope(resp)
 	}
 
-	// Marker says archive exists but turns are only in Firestore and unavailable.
-	return r.SendEnvelope(resp)
+	return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Session archive not found", nil, "")
 }
 
 // UpdateContactTagsRequest represents the request body for updating contact tags
