@@ -2,6 +2,8 @@
 
 Code: `internal/handlers/tiqrecommerce/`. Key: `tiqr_ecommerce`. Engine: `internal/handlers/codedflow/`.
 
+Per-step debug sheet (message sent, valid input, invalid-input customer text, and the model prompt): [tiqr-ecommerce-step-debug.md](./tiqr-ecommerce-step-debug.md). Current bugs and stale notes in the Gaps section below are listed there.
+
 This is the code-level map of that function: the customer path, where AI actually runs, and the gaps. The admin-facing page is `docs/src/content/docs/features/coded-flows.mdx`. AI role settings are in `docs/coded-flow-ai.md`.
 
 The function is a script. It does not let a model browse the catalog or place the order. A button, list row, or carousel card that this step offered is accepted in code. AI runs only for free text, for translating authored lines, and for classifying a failed `create_order`.
@@ -470,6 +472,8 @@ Collection `AIInstructions` are not read aloud. Required capture fields on the l
 `phone_number` and `contact_name` are written by `runCodedFlow` on every turn, before this function runs.
 
 ## Gaps
+
+Issues that are still true, and notes here that the code has moved past, are in [tiqr-ecommerce-step-debug.md](./tiqr-ecommerce-step-debug.md#gaps-and-issues).
 
 1. **Checkout phrases during fulfillment stay on the step.** Fulfillment runs before checkout-preview. A free-text "checkout" while choosing mode or sharing a pin does not re-open the details form in that turn; the same fulfillment step waits on the next message. Checkout from the menu, collection list, product, option, quantity, and add-more steps runs fulfillment, then the priced preview.
 
