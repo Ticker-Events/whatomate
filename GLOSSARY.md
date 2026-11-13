@@ -15,3 +15,19 @@ The priced quote returned by `POST /service/buyer/cart/checkout-preview/` for th
 ## Capture answer
 
 An extra answer stored on a session-cart line (for example a message on a cake). It is shown under that line in cart and preview messages and later sent as part of the order notes.
+
+## Waiting step
+
+A named pause in the shopping conversation where the customer is expected to answer before the flow continues (for example welcome, collections, quantity, or details).
+
+## Step shell
+
+The WhatsApp message Go sends for a waiting step: the same widget and English copy as V1 for that step (reply buttons, list, carousel, image, location request, details Flow, or a text question).
+
+## Deviation line
+
+The optional single text bubble sent before a step shell when the agent clarifies, answers a FAQ, or explains a jump to another step.
+
+## Binding tap
+
+A customer tap on a button, list row, or carousel card, or the exact title of that control. The agent must perform the V1 action for that id; a contradicting tool call is rejected.

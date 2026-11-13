@@ -133,22 +133,26 @@ func TestFlowRegistered(t *testing.T) {
 }
 
 type stubChat struct {
-	session *models.ChatbotSession
+	session   *models.ChatbotSession
+	buttonID  string
+	userInput string
+	flowData  map[string]any
+	consumed  bool
 }
 
 func (c *stubChat) Session() *models.ChatbotSession             { return c.session }
 func (c *stubChat) Account() *models.WhatsAppAccount           { return nil }
 func (c *stubChat) Contact() *models.Contact                   { return nil }
-func (c *stubChat) UserInput() string                          { return "" }
-func (c *stubChat) SetUserInput(string)                        {}
+func (c *stubChat) UserInput() string                          { return c.userInput }
+func (c *stubChat) SetUserInput(v string)                      { c.userInput = v }
 func (c *stubChat) InboundMedia() codedflow.InboundMedia       { return codedflow.InboundMedia{} }
-func (c *stubChat) ButtonID() string                           { return "" }
-func (c *stubChat) SetButtonID(string)                         {}
-func (c *stubChat) FlowResponseData() map[string]any           { return nil }
-func (c *stubChat) SetFlowResponseData(map[string]any)         {}
+func (c *stubChat) ButtonID() string                           { return c.buttonID }
+func (c *stubChat) SetButtonID(v string)                       { c.buttonID = v }
+func (c *stubChat) FlowResponseData() map[string]any           { return c.flowData }
+func (c *stubChat) SetFlowResponseData(v map[string]any)       { c.flowData = v }
 func (c *stubChat) QuotedMessage() *codedflow.QuotedMessage    { return nil }
-func (c *stubChat) Consumed() bool                             { return false }
-func (c *stubChat) SetConsumed(bool)                           {}
+func (c *stubChat) Consumed() bool                             { return c.consumed }
+func (c *stubChat) SetConsumed(v bool)                         { c.consumed = v }
 func (c *stubChat) Capturing() bool                            { return false }
 func (c *stubChat) LastTiqr() map[string]any                   { return nil }
 func (c *stubChat) SetLastTiqr(map[string]any)                 {}

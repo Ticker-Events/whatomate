@@ -9,6 +9,7 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
@@ -105,8 +106,12 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 				"ai_instructions": asString(m["ai_instructions"]),
 			})
 		}
-		if s := rt.session(); s != nil && s.SessionData != nil {
+		if s := rt.session(); s != nil {
+			if s.SessionData == nil {
+				s.SessionData = models.JSONB{}
+			}
 			s.SessionData["collections"] = rows
+			codedflow.SetCursor(s.SessionData, "collections", 0)
 		}
 		return okResult(summaries, ""), nil
 	})); err != nil {
@@ -130,7 +135,9 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		if !ok {
 			return errResult("list_products failed"), nil
 		}
-		return okResult(groundProducts(rt, payload, ""), ""), nil
+		grounded := groundProducts(rt, payload, "")
+		storeProductsSession(rt, grounded, in.CollectionID)
+		return okResult(grounded, ""), nil
 	})); err != nil {
 		return nil, err
 	}
@@ -154,7 +161,9 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return errResult("search_products failed"), nil
 		}
 		rt.State.SearchLabel = q
-		return okResult(groundProducts(rt, payload, q), "search results for: "+q), nil
+		grounded := groundProducts(rt, payload, q)
+		storeProductsSession(rt, grounded, "")
+		return okResult(grounded, "search results for: "+q), nil
 	})); err != nil {
 		return nil, err
 	}
@@ -177,6 +186,19 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return errResult("get_product failed"), nil
 		}
 		groundProductDetail(rt, payload)
+		if s := rt.session(); s != nil {
+			if s.SessionData == nil {
+				s.SessionData = models.JSONB{}
+			}
+			if opts, ok := anySlice(payload["options"]); ok {
+				s.SessionData["options"] = enrichOptionsForShell(opts)
+			}
+			if addons, ok := anySlice(payload["addons"]); ok {
+				s.SessionData["product_addons"] = addons
+			}
+			s.SessionData["product_id"] = fieldID(payload)
+			s.SessionData["product_name"] = asString(payload["name"])
+		}
 		return okResult(payload, ""), nil
 	})); err != nil {
 		return nil, err
@@ -405,13 +427,26 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		if !ok {
 			// Fallback: surface session cart for the agent to describe while
 			// still requiring a successful preview before create_order in production.
+			summary := formatCartSummary(lines)
+			if s := rt.session(); s != nil {
+				if s.SessionData == nil {
+					s.SessionData = models.JSONB{}
+				}
+				s.SessionData["checkout_preview"] = map[string]any{"customer_summary": summary}
+			}
 			return okResult(map[string]any{
 				"cart":    lines,
-				"summary": formatCartSummary(lines),
-				"note":    "preview API unavailable in this environment; show cart and ask confirm before create_order",
-			}, formatCartSummary(lines)), nil
+				"summary": summary,
+				"note":    "preview API unavailable; reply step=checkout_preview then details after confirm",
+			}, summary), nil
 		}
-		return okResult(payload, "show this priced summary and ask the customer to confirm"), nil
+		if s := rt.session(); s != nil {
+			if s.SessionData == nil {
+				s.SessionData = models.JSONB{}
+			}
+			s.SessionData["checkout_preview"] = payload
+		}
+		return okResult(payload, "reply step=checkout_preview; confirm_items opens details"), nil
 	})); err != nil {
 		return nil, err
 	}
@@ -421,46 +456,38 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	}
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "open_details_flow",
-		Description: "Open the WhatsApp Flow for customer details (pickup or delivery).",
+		Description: "Open the details waiting-step shell (WhatsApp Flow). Prefer reply step=details after confirm_items.",
 	}, func(_ agent.ToolContext, in detailsArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
-		account := rt.Conv.ChatCtx().Account()
-		if account == nil {
-			return errResult("no account"), nil
+		if s := rt.session(); s != nil {
+			if s.SessionData == nil {
+				s.SessionData = models.JSONB{}
+			}
+			if in.Delivery {
+				s.SessionData["delivery_mode"] = modeDelivery
+			} else if strings.TrimSpace(asString(s.SessionData["delivery_mode"])) == "" {
+				s.SessionData["delivery_mode"] = modePickup
+			}
 		}
-		flowID := metaFlowIDFromBinding(account.OrganizationID, account.Name, in.Delivery)
-		if flowID == "" {
-			flowID = rt.Conv.App().ResolveEcommerceMetaFlowID(account.OrganizationID, account.Name, in.Delivery)
-		}
-		body := "Please share your name, email, and phone number so we can place your pickup order."
-		if in.Delivery {
-			body = "Please share your name, phone number, and address so we can place your delivery order."
-		}
-		_, err := rt.Conv.App().ExecChatWhatsAppFlow(rt.Conv.ChatCtx(), "details", map[string]any{
-			"flow_id":     flowID,
-			"body":        body,
-			"header":      "Your details",
-			"button_text": "Enter details",
-		})
-		if err != nil {
+		if err := rt.sendShell(stepDetails, ShellChrome{}); err != nil {
 			return errResult(err.Error()), nil
 		}
-		rt.State.AwaitingDetails = true
-		rt.Replied = true
-		rt.State.appendTranscript("assistant", body)
-		return okResult(map[string]any{"flow_id": flowID}, "details form sent"), nil
+		return okResult(nil, "details form sent"), nil
 	})); err != nil {
 		return nil, err
 	}
 
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "create_order",
-		Description: "Place the order after the customer confirmed. Refused until confirmation.",
+		Description: "Place the order after the details Flow is submitted. Refused on confirm_items alone.",
 	}, func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
+		}
+		if msg := rt.rejectContradictingBindingTool("create_order", ""); msg != "" {
+			return errResult(msg), nil
 		}
 		if msg := rt.GateCreateOrder(); msg != "" {
 			return errResult(msg), nil
@@ -513,6 +540,12 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 				rt.State.rememberID(fieldID(m))
 			}
 		}
+		if s := rt.session(); s != nil {
+			if s.SessionData == nil {
+				s.SessionData = models.JSONB{}
+			}
+			s.SessionData["orders"] = rows
+		}
 		return okResult(rows, ""), nil
 	})); err != nil {
 		return nil, err
@@ -550,76 +583,56 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	}
 
 	type replyArgs struct {
-		Body        string `json:"body"`
-		Kind        string `json:"kind"` // text | buttons | location
-		ButtonIDs   string `json:"button_ids"`
-		ButtonTitles string `json:"button_titles"`
-		PaymentURL  string `json:"payment_url"`
+		Step          string `json:"step"`
+		DeviationLine string `json:"deviation_line"`
+		ChromeBody    string `json:"chrome_body"`
+		ChromeHeader  string `json:"chrome_header"`
+		ChromeFooter  string `json:"chrome_footer"`
+		ChromeButton  string `json:"chrome_button"`
+		ChromeTitles  string `json:"chrome_titles"` // "id=Title,id2=Title2"
+		PaymentURL    string `json:"payment_url"`
+		CaptureLabel  string `json:"capture_label"`
+		OptionName    string `json:"option_name"`
+		SummaryText   string `json:"summary_text"`
 	}
 	if err := add(functiontool.New(functiontool.Config{
-		Name:        "reply",
-		Description: "Send the customer-facing WhatsApp message for this turn. Call exactly once. button_ids/titles are comma-separated and must be grounded or fixed actions.",
+		Name: "reply",
+		Description: "Name the V1 waiting step so Go sends that WhatsApp shell. Call exactly once per turn. " +
+			"Steps: welcome, collections, products, options, quantity, capture, addons, cart, cart_edit, " +
+			"fulfillment, delivery_pin, delivery_fallback, checkout_preview, checkout_preview_fail, details, " +
+			"order_placed, order_status, order_status_summary. " +
+			"Optional deviation_line is one text bubble before the shell. " +
+			"chrome_* is translated chrome only when the session language is not English.",
 	}, func(_ agent.ToolContext, in replyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
-		body := strings.TrimSpace(in.Body)
-		if body == "" {
-			return errResult("body is required"), nil
+		step := strings.TrimSpace(strings.ToLower(in.Step))
+		if step == "" {
+			return errResult("step is required (name a V1 waiting step)"), nil
 		}
-		kind := strings.ToLower(strings.TrimSpace(in.Kind))
-		if kind == "" {
-			kind = "text"
+		if !knownWaitingSteps()[step] {
+			return errResult("unknown waiting step; use a documented V1 step name"), nil
 		}
-		switch kind {
-		case "location":
-			if err := rt.Conv.App().DeliverCodedLocationRequest(rt.Conv.ChatCtx(), "v2_location", body); err != nil {
-				return errResult(err.Error()), nil
-			}
-			rt.State.AwaitingLocation = true
-		case "buttons":
-			ids := splitCSV(in.ButtonIDs)
-			titles := splitCSV(in.ButtonTitles)
-			buttons := make([]map[string]any, 0, len(ids))
-			for i, id := range ids {
-				if !rt.State.isGrounded(id) {
-					return errResult(rt.rejectUngrounded(id)), nil
-				}
-				title := id
-				if i < len(titles) && titles[i] != "" {
-					title = titles[i]
-				} else if t, ok := rt.State.FixedActions[id]; ok {
-					title = t
-				}
-				buttons = append(buttons, map[string]any{"id": id, "title": truncate(title, 20)})
-			}
-			if len(buttons) == 0 || len(buttons) > 3 {
-				return errResult("buttons need 1–3 grounded ids"), nil
-			}
-			_, err := rt.Conv.App().ExecChatButtons(rt.Conv.ChatCtx(), "v2_buttons", map[string]any{
-				"body":    body,
-				"buttons": buttons,
-			})
-			if err != nil {
-				return errResult(err.Error()), nil
-			}
-		case "cta", "pay":
-			url := strings.TrimSpace(in.PaymentURL)
-			if url == "" {
-				return errResult("payment_url required for pay reply"), nil
-			}
-			if err := rt.Conv.App().DeliverCodedCTAURL(rt.Conv.ChatCtx(), "v2_pay", body, "Pay now", url); err != nil {
-				_ = rt.Conv.App().DeliverCodedText(rt.Conv.ChatCtx(), "v2_pay", body+"\n\nPay here: "+url)
-			}
-		default:
-			if err := rt.Conv.App().DeliverCodedText(rt.Conv.ChatCtx(), "v2_reply", body); err != nil {
-				return errResult(err.Error()), nil
-			}
+		if msg := rt.rejectContradictingBindingTool("reply", step); msg != "" {
+			return errResult(msg), nil
 		}
-		rt.Replied = true
-		rt.State.appendTranscript("assistant", body)
-		rt.session().CurrentStep = "v2_wait"
-		return okResult(nil, "sent"), nil
+		chrome := ShellChrome{
+			Body:         strings.TrimSpace(in.ChromeBody),
+			Header:       strings.TrimSpace(in.ChromeHeader),
+			Footer:       strings.TrimSpace(in.ChromeFooter),
+			Button:       strings.TrimSpace(in.ChromeButton),
+			ButtonTitles: parseChromeTitles(in.ChromeTitles),
+			Deviation:    strings.TrimSpace(in.DeviationLine),
+			CaptureLabel: strings.TrimSpace(in.CaptureLabel),
+			OptionName:   strings.TrimSpace(in.OptionName),
+			PaymentURL:   strings.TrimSpace(in.PaymentURL),
+			SummaryText:  strings.TrimSpace(in.SummaryText),
+		}
+		if err := rt.sendShell(step, chrome); err != nil {
+			return errResult(err.Error()), nil
+		}
+		return okResult(map[string]any{"step": step}, "shell sent"), nil
 	})); err != nil {
 		return nil, err
 	}
@@ -666,6 +679,133 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 }
 
 const codedflowAgentHandoff = "I'm connecting you with a team member who can help."
+
+func storeProductsSession(rt *Runtime, grounded map[string]any, collectionID string) {
+	s := rt.session()
+	if s == nil {
+		return
+	}
+	if s.SessionData == nil {
+		s.SessionData = models.JSONB{}
+	}
+	items, _ := anySlice(grounded["items"])
+	s.SessionData["products"] = items
+	codedflow.SetCursor(s.SessionData, "products", 0)
+	if collectionID != "" {
+		rt.State.ActiveCollection = collectionID
+		s.SessionData["collection_id"] = collectionID
+		// Resolve collection name from loaded collections.
+		if rows, ok := anySlice(s.SessionData["collections"]); ok {
+			for _, row := range rows {
+				m, ok := asStringMap(row)
+				if !ok {
+					continue
+				}
+				if fieldID(m) == collectionID {
+					name := asString(m["name"])
+					if name == "" {
+						name = asString(m["title"])
+					}
+					s.SessionData["collection_name"] = name
+					if ai := strings.TrimSpace(asString(m["ai_instructions"])); ai != "" {
+						rt.State.AIInstructions = ai
+					}
+					break
+				}
+			}
+		}
+		rt.State.SearchLabel = ""
+	}
+}
+
+func enrichOptionsForShell(opts []any) []any {
+	out := make([]any, 0, len(opts))
+	for _, opt := range opts {
+		m, ok := asStringMap(opt)
+		if !ok {
+			continue
+		}
+		name := asString(m["name"])
+		price := asString(m["price"])
+		if price == "" {
+			price = asString(m["amount"])
+		}
+		title := name
+		if price != "" {
+			title = name + " — " + price
+		}
+		m["row_title"] = title
+		m["row_description"] = asString(m["description"])
+		out = append(out, m)
+	}
+	return out
+}
+
+func parseChromeTitles(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	out := map[string]string{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, title, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		id = strings.TrimSpace(id)
+		title = strings.TrimSpace(title)
+		if id != "" && title != "" {
+			out[id] = title
+		}
+	}
+	return out
+}
+
+// rejectContradictingBindingTool rejects tools that disagree with a binding tap.
+func (rt *Runtime) rejectContradictingBindingTool(toolName, replyStep string) string {
+	id := strings.TrimSpace(rt.BindingButtonID)
+	if id == "" {
+		return ""
+	}
+	if codedflow.IsShowMoreID(id) {
+		return ""
+	}
+	switch id {
+	case fixedTalkToStaff:
+		if toolName == "reply" {
+			return "binding tap talk_to_agent requires transfer_to_staff, not a shell"
+		}
+		return ""
+	case fixedConfirmItems:
+		if toolName == "create_order" {
+			return "binding tap confirm_items requires the details shell first; create_order waits for the Flow submission"
+		}
+		if toolName == "reply" && replyStep != stepDetails {
+			return "binding tap confirm_items requires step details"
+		}
+	case fixedBuyProducts, fixedAddMore:
+		if toolName == "reply" && replyStep != stepCollections {
+			return "binding tap requires step collections"
+		}
+	case fixedCheckOrderStatus:
+		if toolName == "reply" && replyStep != stepOrderStatus {
+			return "binding tap requires step order_status"
+		}
+	case fixedEditCart:
+		if toolName == "reply" && replyStep != stepCartEdit {
+			return "binding tap requires step cart_edit"
+		}
+	case fixedCheckout:
+		if toolName == "reply" && replyStep != stepFulfillment && replyStep != stepDeliveryPin && replyStep != stepCheckoutPreview {
+			return "binding tap checkout requires fulfillment, delivery_pin, or checkout_preview"
+		}
+	}
+	return ""
+}
 
 func groundProducts(rt *Runtime, payload map[string]any, searchQuery string) map[string]any {
 	rows, _ := pageResults(payload)

@@ -16,6 +16,10 @@ type Runtime struct {
 
 	AllowCreateOrder bool
 	AllowTransfer    bool
+	FlowSubmitted    bool
+
+	BindingButtonID string
+	BindingShowMore bool
 
 	Replied  bool
 	Ended    bool
@@ -28,17 +32,43 @@ func newRuntime(c *codedflow.Conv) *Runtime {
 	st := loadState(session)
 	userText := ""
 	buttonID := ""
+	flowSubmitted := false
 	if chat := c.ChatCtx(); chat != nil {
 		userText = chat.UserInput()
 		buttonID = chat.ButtonID()
+		flowSubmitted = len(chat.FlowResponseData()) > 0
+	}
+	// create_order is allowed only after the details Flow is submitted (or a prior
+	// pending confirm that was set after a successful Flow turn).
+	allowCreate := flowSubmitted || (st.PendingConfirm == "create_order" && !st.AwaitingDetails)
+	bindingID := strings.TrimSpace(buttonID)
+	if bindingID == "" {
+		bindingID = fixedActionIDForTitle(userText)
 	}
 	rt := &Runtime{
 		Conv:             c,
 		State:            st,
-		AllowCreateOrder: LooksLikeCheckoutConfirm(userText, buttonID) || st.PendingConfirm == "create_order",
-		AllowTransfer:    LooksLikeStaffRequest(userText) || buttonID == fixedTalkToStaff || st.PendingConfirm == "transfer",
+		AllowCreateOrder: allowCreate,
+		AllowTransfer:    LooksLikeStaffRequest(userText) || bindingID == fixedTalkToStaff || st.PendingConfirm == "transfer",
+		FlowSubmitted:    flowSubmitted,
+		BindingButtonID:  bindingID,
+		BindingShowMore:  codedflow.IsShowMoreRequest(buttonID, userText),
 	}
 	return rt
+}
+
+// fixedActionIDForTitle maps an exact V1 button title to its fixed action id.
+func fixedActionIDForTitle(title string) string {
+	n := strings.TrimSpace(title)
+	if n == "" {
+		return ""
+	}
+	for id, t := range defaultFixedActions() {
+		if strings.EqualFold(n, t) {
+			return id
+		}
+	}
+	return ""
 }
 
 func (rt *Runtime) session() *models.ChatbotSession {
@@ -209,14 +239,14 @@ func (rt *Runtime) SetDeliveryPin(lat, lng float64, store map[string]any, pickup
 	return out, ""
 }
 
-// GateCreateOrder refuses unless the customer already confirmed this turn or earlier.
+// GateCreateOrder refuses until the details Flow has been submitted.
 func (rt *Runtime) GateCreateOrder() string {
 	if rt.AllowCreateOrder {
 		rt.State.PendingConfirm = ""
 		return ""
 	}
 	rt.State.PendingConfirm = "create_order"
-	return "refused: ask the customer to confirm the priced order, then call create_order after they confirm"
+	return "refused: confirm_items must open the details Flow first; call create_order only after the Flow is submitted"
 }
 
 // GateTransfer refuses unless the customer asked for staff this turn or earlier.

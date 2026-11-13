@@ -17,8 +17,8 @@ func TestMissingGoogleKeyPolicy(t *testing.T) {
 }
 
 func TestWelcomeOnlyWhenNoRequest(t *testing.T) {
-	// Empty first message → welcome path (no agent). Non-empty → agent.
-	assert.Equal(t, "", "")
+	// Keyword-only first turn uses the welcome shell builder (no agent).
+	assert.True(t, knownWaitingSteps()[stepWelcome])
 	assert.True(t, LooksLikeStaffRequest("talk to staff"))
 	assert.False(t, LooksLikeStaffRequest(""))
 }

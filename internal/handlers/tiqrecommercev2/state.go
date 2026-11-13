@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/models"
 )
 
@@ -22,6 +23,7 @@ type TurnState struct {
 	ActiveCollection  string            `json:"active_collection,omitempty"`
 	AIInstructions    string            `json:"ai_instructions,omitempty"`
 	FixedActions      map[string]string `json:"fixed_actions,omitempty"`
+	WaitingStep       string            `json:"waiting_step,omitempty"`
 }
 
 type TranscriptTurn struct {
@@ -73,6 +75,11 @@ func defaultFixedActions() map[string]string {
 		fixedCheckout:         "Checkout",
 		fixedEditCart:         "Edit cart",
 		fixedConfirmItems:     "Confirm items",
+		fixedPickup:           "Store pickup",
+		fixedDelivery:         "Delivery",
+		fixedShareAgain:       "Share again",
+		fixedTryAgain:         "Try again",
+		codedflow.ShowMoreID:  codedflow.ShowMoreTitle,
 	}
 }
 

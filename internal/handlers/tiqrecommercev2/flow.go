@@ -28,12 +28,37 @@ const (
 	fixedCheckout         = "checkout"
 	fixedEditCart         = "edit_cart"
 	fixedConfirmItems     = "confirm_items"
+	fixedPickup           = "pickup"
+	fixedDelivery         = "delivery"
+	fixedShareAgain       = "share_again"
+	fixedTryAgain         = "try_again"
+
+	stepWelcome             = "welcome"
+	stepCollections         = "collections"
+	stepProducts            = "products"
+	stepOptions             = "options"
+	stepQuantity            = "quantity"
+	stepCapture             = "capture"
+	stepAddons              = "addons"
+	stepCart                = "cart"
+	stepCartEdit            = "cart_edit"
+	stepFulfillment         = "fulfillment"
+	stepDeliveryPin         = "delivery_pin"
+	stepDeliveryFallback    = "delivery_fallback"
+	stepCheckoutPreview     = "checkout_preview"
+	stepCheckoutPreviewFail = "checkout_preview_fail"
+	stepDetails             = "details"
+	stepOrderPlaced         = "order_placed"
+	stepOrderStatus         = "order_status"
+	stepOrderStatusSummary  = "order_status_summary"
 
 	modePickup   = "PICKUP_FROM_STORE"
 	modeDelivery = "DELIVERY_TO_LOCATION"
 
 	notReadyLine = "This shopping assistant is not ready yet. I'm connecting you with a team member who can help."
 	retryLine    = "I need a moment — please send that again."
+
+	shellFallbackMedia = "https://tickerevents.sgp1.cdn.digitaloceanspaces.com/tickerevents/media/images/products/124656/d592fabca6314ee5a749da835b40cf5a-589041f37b35417d8122b31a1b645eee-p.jpg"
 )
 
 func init() {
