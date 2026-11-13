@@ -194,7 +194,7 @@ func TestRegenerateCodedFlowWelcome_FromREST(t *testing.T) {
 	}
 	t.Cleanup(func() { generateCodedFlowWelcomeAI = prev })
 
-	welcome, generatedAt, err := app.regenerateCodedFlowWelcome(org.ID, account.Name, settings)
+	welcome, generatedAt, err := app.regenerateCodedFlowWelcome(org.ID, account.Name, tiqrecommerce.FlowKey, settings)
 	require.NoError(t, err)
 	assert.Contains(t, welcome, "Warm hello from Demo Bakery")
 	assert.NotEmpty(t, generatedAt)

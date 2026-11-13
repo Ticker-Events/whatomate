@@ -12,6 +12,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommercev2"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrleads"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
@@ -26,7 +27,17 @@ const (
 	codedSettingWelcomeGeneratedAt = "welcome_generated_at"
 	codedSettingEvaluationMode     = "evaluation_mode"
 	codedSettingCompletionAction   = "completion_action"
+	codedSettingModel              = "model"
 )
+
+func isEcommerceCodedFlow(flowKey string) bool {
+	switch flowKey {
+	case tiqrecommerce.FlowKey, tiqrecommercev2.FlowKey:
+		return true
+	default:
+		return false
+	}
+}
 
 // CodedFlowBindingResponse is one compiled-in flow plus its account settings.
 // Steps are read-only.
@@ -47,9 +58,11 @@ type CodedFlowBindingResponse struct {
 	// (empty means use the built-in default).
 	StoredPickupFlowID   string `json:"stored_pickup_flow_id,omitempty"`
 	StoredDeliveryFlowID string `json:"stored_delivery_flow_id,omitempty"`
-	// WelcomeMessage is the cached first-menu body for tiqr_ecommerce.
+	// WelcomeMessage is the cached first-menu body for tiqr_ecommerce / v2.
 	WelcomeMessage     string `json:"welcome_message,omitempty"`
 	WelcomeGeneratedAt string `json:"welcome_generated_at,omitempty"`
+	// Model is the Gemini model id for tiqr_ecommerce_v2 (default gemini-2.5-flash).
+	Model string `json:"model,omitempty"`
 	// EvaluationMode / CompletionAction are tiqr_leads binding settings.
 	EvaluationMode   string `json:"evaluation_mode,omitempty"`
 	CompletionAction string `json:"completion_action,omitempty"`
@@ -103,6 +116,7 @@ func (a *App) ListCodedFlows(r *fastglue.Request) error {
 		}
 		applyEcommerceFlowIDs(&item, flow.Key, binding)
 		applyEcommerceWelcome(&item, flow.Key, binding)
+		applyEcommerceModel(&item, flow.Key, binding)
 		applyLeadsSettings(&item, flow.Key, binding)
 		response = append(response, item)
 	}
@@ -146,6 +160,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		PickupFlowID     *string  `json:"pickup_flow_id"`
 		DeliveryFlowID   *string  `json:"delivery_flow_id"`
 		WelcomeMessage   *string  `json:"welcome_message"`
+		Model            *string  `json:"model"`
 		EvaluationMode   *string  `json:"evaluation_mode"`
 		CompletionAction *string  `json:"completion_action"`
 	}
@@ -173,7 +188,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 		binding.IsDefault = req.IsDefault
 		merged, mergeErr := mergeCodedFlowSettings(
 			flow.Key, binding.Settings,
-			req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage,
+			req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage, req.Model,
 			req.EvaluationMode, req.CompletionAction,
 		)
 		if mergeErr != nil {
@@ -195,7 +210,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 	case errors.Is(findErr, gorm.ErrRecordNotFound):
 		settings, mergeErr := mergeCodedFlowSettings(
 			flow.Key, nil,
-			req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage,
+			req.PickupFlowID, req.DeliveryFlowID, req.WelcomeMessage, req.Model,
 			req.EvaluationMode, req.CompletionAction,
 		)
 		if mergeErr != nil {
@@ -247,6 +262,7 @@ func (a *App) UpdateCodedFlowBinding(r *fastglue.Request) error {
 	}
 	applyEcommerceFlowIDs(&resp, flow.Key, &binding)
 	applyEcommerceWelcome(&resp, flow.Key, &binding)
+	applyEcommerceModel(&resp, flow.Key, &binding)
 	applyLeadsSettings(&resp, flow.Key, &binding)
 	return r.SendEnvelope(resp)
 }
@@ -297,7 +313,7 @@ func normalizeCodedFlowKeywords(raw []string) (models.StringArray, error) {
 }
 
 func applyEcommerceFlowIDs(item *CodedFlowBindingResponse, flowKey string, binding *models.CodedFlowBinding) {
-	if item == nil || flowKey != tiqrecommerce.FlowKey {
+	if item == nil || !isEcommerceCodedFlow(flowKey) {
 		return
 	}
 	storedPickup, storedDelivery := ecommerceFlowIDsFromSettings(nil)
@@ -311,7 +327,7 @@ func applyEcommerceFlowIDs(item *CodedFlowBindingResponse, flowKey string, bindi
 }
 
 func applyEcommerceWelcome(item *CodedFlowBindingResponse, flowKey string, binding *models.CodedFlowBinding) {
-	if item == nil || flowKey != tiqrecommerce.FlowKey || binding == nil || binding.Settings == nil {
+	if item == nil || !isEcommerceCodedFlow(flowKey) || binding == nil || binding.Settings == nil {
 		return
 	}
 	if msg, ok := binding.Settings[codedSettingWelcomeMessage].(string); ok {
@@ -331,10 +347,21 @@ func ecommerceFlowIDsFromSettings(settings models.JSONB) (pickup, delivery strin
 	return strings.TrimSpace(pickup), strings.TrimSpace(delivery)
 }
 
+func applyEcommerceModel(item *CodedFlowBindingResponse, flowKey string, binding *models.CodedFlowBinding) {
+	if item == nil || flowKey != tiqrecommercev2.FlowKey {
+		return
+	}
+	item.Model = tiqrecommercev2.DefaultModel
+	if binding == nil || binding.Settings == nil {
+		return
+	}
+	item.Model = tiqrecommercev2.ModelFromSettings(binding.Settings)
+}
+
 func mergeCodedFlowSettings(
 	flowKey string,
 	existing models.JSONB,
-	pickupID, deliveryID, welcomeMessage *string,
+	pickupID, deliveryID, welcomeMessage, model *string,
 	evaluationMode, completionAction *string,
 ) (models.JSONB, error) {
 	out := models.JSONB{}
@@ -342,7 +369,7 @@ func mergeCodedFlowSettings(
 		out[k] = v
 	}
 	// Legacy binding key "supported_languages" is left untouched when present.
-	if flowKey == tiqrecommerce.FlowKey {
+	if isEcommerceCodedFlow(flowKey) {
 		if pickupID != nil {
 			normalized, err := normalizeMetaFlowID(*pickupID)
 			if err != nil {
@@ -372,6 +399,17 @@ func mergeCodedFlowSettings(
 				delete(out, codedSettingWelcomeGeneratedAt)
 			} else {
 				out[codedSettingWelcomeMessage] = msg
+			}
+		}
+		if flowKey == tiqrecommercev2.FlowKey && model != nil {
+			normalized, err := tiqrecommercev2.NormalizeModelID(*model)
+			if err != nil {
+				return nil, err
+			}
+			if normalized == "" {
+				delete(out, codedSettingModel)
+			} else {
+				out[codedSettingModel] = normalized
 			}
 		}
 	}

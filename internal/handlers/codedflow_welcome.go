@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommercev2"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -55,7 +56,7 @@ func (a *App) RefreshCodedFlowWelcome(r *fastglue.Request) error {
 
 	key, _ := r.RequestCtx.UserValue("key").(string)
 	key = strings.TrimSpace(key)
-	if key != tiqrecommerce.FlowKey {
+	if key != tiqrecommerce.FlowKey && key != tiqrecommercev2.FlowKey {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Welcome refresh is only available for TiQR Ecommerce", nil, "")
 	}
 	if codedflow.ByKey(key) == nil {
@@ -81,7 +82,7 @@ func (a *App) RefreshCodedFlowWelcome(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "AI provider must be configured to generate a welcome message", nil, "")
 	}
 
-	welcome, generatedAt, err := a.regenerateCodedFlowWelcome(orgID, accountName, settings)
+	welcome, generatedAt, err := a.regenerateCodedFlowWelcome(orgID, accountName, key, settings)
 	if err != nil {
 		a.Log.Error("Failed to refresh coded flow welcome", "error", err, "org", orgID, "account", accountName)
 		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Failed to generate welcome message", map[string]any{
@@ -97,7 +98,7 @@ func (a *App) RefreshCodedFlowWelcome(r *fastglue.Request) error {
 
 func (a *App) regenerateCodedFlowWelcome(
 	orgID uuid.UUID,
-	accountName string,
+	accountName, flowKey string,
 	settings *models.ChatbotSettings,
 ) (string, string, error) {
 	facts, err := a.fetchCodedFlowWelcomeFacts(settings)
@@ -116,7 +117,7 @@ func (a *App) regenerateCodedFlowWelcome(
 
 	now := time.Now().UTC()
 	generatedAt := now.Format(time.RFC3339)
-	if err := a.persistCodedFlowWelcome(orgID, accountName, reply, generatedAt); err != nil {
+	if err := a.persistCodedFlowWelcome(orgID, accountName, flowKey, reply, generatedAt); err != nil {
 		return "", "", err
 	}
 	return reply, generatedAt, nil
@@ -292,11 +293,14 @@ func writeFact(b *strings.Builder, key, value string) {
 	b.WriteByte('\n')
 }
 
-func (a *App) persistCodedFlowWelcome(orgID uuid.UUID, accountName, welcome, generatedAt string) error {
+func (a *App) persistCodedFlowWelcome(orgID uuid.UUID, accountName, flowKey, welcome, generatedAt string) error {
+	if flowKey == "" {
+		flowKey = tiqrecommerce.FlowKey
+	}
 	var binding models.CodedFlowBinding
 	err := a.DB.Where(
 		"organization_id = ? AND whats_app_account = ? AND flow_key = ?",
-		orgID, accountName, tiqrecommerce.FlowKey,
+		orgID, accountName, flowKey,
 	).First(&binding).Error
 	switch {
 	case err == nil:
@@ -313,7 +317,7 @@ func (a *App) persistCodedFlowWelcome(orgID uuid.UUID, accountName, welcome, gen
 			BaseModel:       models.BaseModel{ID: uuid.New()},
 			OrganizationID:  orgID,
 			WhatsAppAccount: accountName,
-			FlowKey:         tiqrecommerce.FlowKey,
+			FlowKey:         flowKey,
 			Keywords:        models.StringArray{},
 			IsEnabled:       false,
 			IsDefault:       false,

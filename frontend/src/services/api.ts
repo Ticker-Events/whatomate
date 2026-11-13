@@ -370,6 +370,7 @@ export type CodedFlowBinding = {
   stored_delivery_flow_id?: string
   welcome_message?: string
   welcome_generated_at?: string
+  model?: string
   evaluation_mode?: string
   completion_action?: string
 }
@@ -529,6 +530,7 @@ export const chatbotService = {
       pickup_flow_id?: string
       delivery_flow_id?: string
       welcome_message?: string
+      model?: string
       evaluation_mode?: string
       completion_action?: string
     },

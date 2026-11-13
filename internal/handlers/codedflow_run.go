@@ -7,16 +7,38 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommercev2"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrleads"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"gorm.io/gorm"
 )
 
+func configureEcommerceV2(a *App) {
+	if a == nil {
+		return
+	}
+	tiqrecommercev2.Configure(tiqrecommercev2.Hooks{
+		BindingSettings: func(orgID uuid.UUID, accountName, flowKey string) models.JSONB {
+			var binding models.CodedFlowBinding
+			err := a.DB.Where(
+				"organization_id = ? AND whats_app_account = ? AND flow_key = ?",
+				orgID, accountName, flowKey,
+			).First(&binding).Error
+			if err != nil || binding.Settings == nil {
+				return nil
+			}
+			return binding.Settings
+		},
+	})
+}
+
 func tryEcommerceTransfer(a *App, chat codedflow.Chat, message string) (bool, error) {
+	configureEcommerceV2(a)
 	if chat == nil || chat.Session() == nil {
 		return false, nil
 	}
-	if codedflow.SessionKey(chat.Session()) != tiqrecommerce.FlowKey {
+	key := codedflow.SessionKey(chat.Session())
+	if key != tiqrecommerce.FlowKey && key != tiqrecommercev2.FlowKey {
 		return false, nil
 	}
 	conv := codedflow.NewConv(a, chat)
@@ -83,6 +105,7 @@ func (a *App) runCodedFlowPreview(
 	flowResponseData map[string]any,
 	preview *codedflow.PreviewSink,
 ) error {
+	configureEcommerceV2(a)
 	var archive *codedflow.PreviewSink
 	if preview == nil {
 		archive = &codedflow.PreviewSink{Session: session}

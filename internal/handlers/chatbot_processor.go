@@ -18,6 +18,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	_ "github.com/shridarpatil/whatomate/internal/handlers/tiqrdining"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	_ "github.com/shridarpatil/whatomate/internal/handlers/tiqrecommercev2"
 	_ "github.com/shridarpatil/whatomate/internal/handlers/tiqrleads"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"

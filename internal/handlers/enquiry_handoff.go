@@ -11,6 +11,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrdining"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommercev2"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrleads"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/ticker"
@@ -18,7 +19,7 @@ import (
 
 func isCodedEnquiryFlow(flowKey string) bool {
 	switch strings.TrimSpace(flowKey) {
-	case tiqrleads.FlowKey, tiqrecommerce.FlowKey, tiqrdining.FlowKey:
+	case tiqrleads.FlowKey, tiqrecommerce.FlowKey, tiqrecommercev2.FlowKey, tiqrdining.FlowKey:
 		return true
 	default:
 		return false

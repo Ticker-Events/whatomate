@@ -1,5 +1,9 @@
 # Glossary
 
+## Cart line
+
+One row in the session cart: a product option together with its capture answers. Two lines can share the same option when their capture answers differ.
+
 ## Session cart
 
 The product lines held in the WhatsApp chat session (`tiqr_cart`), including quantities, catalog prices, and capture answers. This is not the logged-in buyer cart on TiQR Store.

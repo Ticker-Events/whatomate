@@ -21,8 +21,13 @@ import { Textarea } from '@/components/ui/textarea'
 import CodedFlowPreview from '@/components/chatbot/flow-preview/CodedFlowPreview.vue'
 
 const TIQR_ECOMMERCE_KEY = 'tiqr_ecommerce'
+const TIQR_ECOMMERCE_V2_KEY = 'tiqr_ecommerce_v2'
 const TIQR_LEADS_KEY = 'tiqr_leads'
 const USE_DEFAULT = '__default__'
+
+function isEcommerceFlow(key: string): boolean {
+  return key === TIQR_ECOMMERCE_KEY || key === TIQR_ECOMMERCE_V2_KEY
+}
 
 type AccountOption = {
   name: string
@@ -43,6 +48,7 @@ type KeywordDraft = {
   deliveryFlowId: string
   welcomeMessage: string
   welcomeGeneratedAt: string
+  model: string
   evaluationMode: string
   completionAction: string
   saving: boolean
@@ -97,6 +103,7 @@ function applyFlows(rows: CodedFlowBinding[]) {
       deliveryFlowId: draftDeliveryValue(flow),
       welcomeMessage: flow.welcome_message || '',
       welcomeGeneratedAt: flow.welcome_generated_at || '',
+      model: flow.model || 'gemini-2.5-flash',
       evaluationMode: flow.evaluation_mode || 'rules',
       completionAction: flow.completion_action || 'record',
       saving: false,
@@ -207,6 +214,7 @@ async function save(flow: CodedFlowBinding) {
       pickup_flow_id?: string
       delivery_flow_id?: string
       welcome_message?: string
+      model?: string
       evaluation_mode?: string
       completion_action?: string
     } = {
@@ -214,10 +222,13 @@ async function save(flow: CodedFlowBinding) {
       is_enabled: draft.enabled,
       is_default: draft.isDefault,
     }
-    if (flow.key === TIQR_ECOMMERCE_KEY) {
+    if (isEcommerceFlow(flow.key)) {
       payload.pickup_flow_id = resolveStoredFlowId(draft.pickupFlowId)
       payload.delivery_flow_id = resolveStoredFlowId(draft.deliveryFlowId)
       payload.welcome_message = draft.welcomeMessage
+    }
+    if (flow.key === TIQR_ECOMMERCE_V2_KEY) {
+      payload.model = draft.model || 'gemini-2.5-flash'
     }
     if (flow.key === TIQR_LEADS_KEY) {
       payload.evaluation_mode = draft.evaluationMode || 'rules'
@@ -243,6 +254,7 @@ async function save(flow: CodedFlowBinding) {
     flow.stored_delivery_flow_id = saved.stored_delivery_flow_id
     flow.welcome_message = saved.welcome_message
     flow.welcome_generated_at = saved.welcome_generated_at
+    flow.model = saved.model
     flow.evaluation_mode = saved.evaluation_mode
     flow.completion_action = saved.completion_action
     draft.keywords = (flow.keywords || []).join(', ')
@@ -252,6 +264,7 @@ async function save(flow: CodedFlowBinding) {
     draft.deliveryFlowId = draftDeliveryValue(flow)
     draft.welcomeMessage = flow.welcome_message || ''
     draft.welcomeGeneratedAt = flow.welcome_generated_at || ''
+    draft.model = flow.model || 'gemini-2.5-flash'
     draft.evaluationMode = flow.evaluation_mode || 'rules'
     draft.completionAction = flow.completion_action || 'record'
     toast.success(t('codedFlows.saved'))
@@ -409,7 +422,7 @@ watch(showPreview, (open) => {
               />
             </div>
 
-            <div v-if="flow.key === TIQR_ECOMMERCE_KEY && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">
+            <div v-if="isEcommerceFlow(flow.key) && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">
               <div class="flex items-start justify-between gap-3">
                 <div>
                   <p class="text-xs font-medium">{{ $t('codedFlows.welcomeTitle') }}</p>
@@ -482,7 +495,22 @@ watch(showPreview, (open) => {
               </div>
             </div>
 
-            <div v-if="flow.key === TIQR_ECOMMERCE_KEY && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">
+            <div v-if="flow.key === TIQR_ECOMMERCE_V2_KEY && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">
+              <div>
+                <p class="text-xs font-medium">{{ $t('codedFlows.v2ModelTitle') }}</p>
+                <p class="text-xs text-muted-foreground mt-0.5">{{ $t('codedFlows.v2ModelHint') }}</p>
+              </div>
+              <div class="space-y-1.5">
+                <Label class="text-xs">{{ $t('codedFlows.v2ModelLabel') }}</Label>
+                <Input
+                  v-model="drafts[flow.key].model"
+                  :disabled="!canWrite"
+                  placeholder="gemini-2.5-flash"
+                />
+              </div>
+            </div>
+
+            <div v-if="isEcommerceFlow(flow.key) && drafts[flow.key]" class="space-y-3 rounded-lg border p-3">
               <div>
                 <p class="text-xs font-medium">{{ $t('codedFlows.customerDetailsFlows') }}</p>
                 <p class="text-xs text-muted-foreground mt-0.5">{{ $t('codedFlows.customerDetailsFlowsHint') }}</p>

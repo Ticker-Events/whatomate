@@ -9,7 +9,7 @@ TiQR Flows are conversations written in Go and shipped in the binary. An admin a
 
 Visual flows under **Chatbot → Flows** are a graph stored in the database. A TiQR Flow is a function. The outline shown in **Chatbot → TiQR Flows** is a label list for people. The function is what runs.
 
-The flow that ships today is **TiQR Ecommerce** (`tiqr_ecommerce`). It loads a TiQR store, then lets the customer buy for store pickup, check an order, or talk to an agent.
+Flows that ship today include **TiQR Ecommerce** (`tiqr_ecommerce`) and **TiQR Ecommerce V2** (`tiqr_ecommerce_v2`). V1 is a scripted shop for store pickup or delivery, order status, and agent handoff. V2 serves the same purpose through a Google ADK agent with grounded store tools and a configurable Gemini model. The V2 tool map lives in `docs/tiqr-ecommerce-v2.md`.
 
 ## Turning a flow on
 
