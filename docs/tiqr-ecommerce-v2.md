@@ -107,6 +107,22 @@ Matches v1: summary text, no pay link, then the session ends. While choosing an 
 - Interactive shells match V1 widgets so the chat is not a free-text thread.
 - Deviations from a previous step are handled by the agent naming a new step, without V1 intent mis-routes.
 
+## Session archive and Flow debug
+
+Live V2 turns write the same **session archive** as V1 (Firestore turns + Chat **Flow debug** / coded-flow **Import session log**):
+
+- Outbound shells via `DeliverCoded*` / `ExecChat*`
+- TiQR REST/MCP via `NoteAPI`
+- Each ADK tool result as `ai_calls` with role `adk_tool` (name, ok/error, truncated args/result, waiting step). Full Gemini prompts are not stored.
+
+## Interactive preview
+
+`POST /api/chatbot/coded-flows/tiqr_ecommerce_v2/preview` runs the real V2 flow (real Gemini when the agent runs). TiQR can be mocked (`mock: true` / `needs_mock`). While capturing:
+
+- `create_order` and `transfer_to_staff` never hit the live store or queue; they record preview-only results.
+- A missing TiQR mock stops the turn (`status=needs_mock`); after the operator supplies JSON, the same `session_id` re-runs the inbound turn.
+- Response `step` is the V2 waiting step when set.
+
 ## Admin settings
 
 Same TiQR Flows card as v1 for keywords, welcome, pickup/delivery Meta flow ids, plus **Model id** for V2 only.

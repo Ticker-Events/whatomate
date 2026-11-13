@@ -44,12 +44,15 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "get_store",
 		Description: "Load store profile and delivery modes. Call first when store is unknown.",
-	}, func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
+	}, instrument(rt, "get_store", func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
 		payload, ok := rt.callTiqr("store", "get_store", nil)
 		if !ok {
+			if rt.NeedsMock {
+				return errResult("preview needs mock for get_store"), nil
+			}
 			rt.State.StoreLoadRetries++
 			if rt.State.StoreLoadRetries >= 2 {
 				return errResult("store load failed after retry; transfer_to_staff"), nil
@@ -64,14 +67,14 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			s.SessionData["store"] = payload
 		}
 		return okResult(compactStore(payload), ""), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "list_collections",
 		Description: "List product collections. Grounds collection ids for later tools.",
-	}, func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
+	}, instrument(rt, "list_collections", func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -114,7 +117,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			codedflow.SetCursor(s.SessionData, "collections", 0)
 		}
 		return okResult(summaries, ""), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -124,7 +127,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "list_products",
 		Description: "List products in a grounded collection_id.",
-	}, func(_ agent.ToolContext, in listProductsArgs) (toolResult, error) {
+	}, instrument(rt, "list_products", func(_ agent.ToolContext, in listProductsArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -138,7 +141,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		grounded := groundProducts(rt, payload, "")
 		storeProductsSession(rt, grounded, in.CollectionID)
 		return okResult(grounded, ""), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -148,7 +151,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "search_products",
 		Description: "Search products by free-text query. Results are labeled as search results, not a collection.",
-	}, func(_ agent.ToolContext, in searchArgs) (toolResult, error) {
+	}, instrument(rt, "search_products", func(_ agent.ToolContext, in searchArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -164,7 +167,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		grounded := groundProducts(rt, payload, q)
 		storeProductsSession(rt, grounded, "")
 		return okResult(grounded, "search results for: "+q), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -174,7 +177,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "get_product",
 		Description: "Load one grounded product including options and add-ons.",
-	}, func(_ agent.ToolContext, in getProductArgs) (toolResult, error) {
+	}, instrument(rt, "get_product", func(_ agent.ToolContext, in getProductArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -200,14 +203,14 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			s.SessionData["product_name"] = asString(payload["name"])
 		}
 		return okResult(payload, ""), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "list_faqs",
 		Description: "Load store FAQs.",
-	}, func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
+	}, instrument(rt, "list_faqs", func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -222,14 +225,14 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			}
 		}
 		return okResult(rows, ""), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "get_store_info",
 		Description: "About us and policy fields.",
-	}, func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
+	}, instrument(rt, "get_store_info", func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -238,7 +241,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return okResult(map[string]any{}, "no store info"), nil
 		}
 		return okResult(payload, ""), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -254,7 +257,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "add_cart_line",
 		Description: "Add a cart line. Same option with different capture answers creates a separate line_id.",
-	}, func(_ agent.ToolContext, in addCartArgs) (toolResult, error) {
+	}, instrument(rt, "add_cart_line", func(_ agent.ToolContext, in addCartArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -263,7 +266,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return errResult(errMsg), nil
 		}
 		return okResult(line, formatCartSummary(rt.cart())), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -274,7 +277,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "update_cart_line",
 		Description: "Set quantity on a cart line_id (not option id).",
-	}, func(_ agent.ToolContext, in updateCartArgs) (toolResult, error) {
+	}, instrument(rt, "update_cart_line", func(_ agent.ToolContext, in updateCartArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -282,7 +285,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return errResult(msg), nil
 		}
 		return okResult(nil, formatCartSummary(rt.cart())), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -292,7 +295,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "remove_cart_line",
 		Description: "Remove one cart line by line_id.",
-	}, func(_ agent.ToolContext, in removeCartArgs) (toolResult, error) {
+	}, instrument(rt, "remove_cart_line", func(_ agent.ToolContext, in removeCartArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -301,7 +304,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return errResult(msg), nil
 		}
 		return okResult(map[string]any{"removed": name}, formatCartSummary(rt.cart())), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -315,7 +318,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "set_addons",
 		Description: "Set session catalog add-ons from grounded addon ids.",
-	}, func(_ agent.ToolContext, in addonsArgs) (toolResult, error) {
+	}, instrument(rt, "set_addons", func(_ agent.ToolContext, in addonsArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -340,7 +343,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			s.SessionData["commerce_addons"] = rows
 		}
 		return okResult(rows, "addons saved"), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -350,7 +353,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "set_fulfillment",
 		Description: "Set delivery_mode to pickup or delivery.",
-	}, func(_ agent.ToolContext, in fulfillmentArgs) (toolResult, error) {
+	}, instrument(rt, "set_fulfillment", func(_ agent.ToolContext, in fulfillmentArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -371,7 +374,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			s.SessionData["delivery_mode"] = mode
 		}
 		return okResult(map[string]any{"delivery_mode": mode}, ""), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -382,7 +385,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "set_delivery_pin",
 		Description: "Check a delivery pin. Does not quote a fee. Caps out-of-range retries at 3.",
-	}, func(_ agent.ToolContext, in pinArgs) (toolResult, error) {
+	}, instrument(rt, "set_delivery_pin", func(_ agent.ToolContext, in pinArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -392,14 +395,14 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return errResult(msg), nil
 		}
 		return okResult(data, asString(data["message"])), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "checkout_preview",
 		Description: "Priced quote for the session cart. This is the only price the customer should see.",
-	}, func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
+	}, instrument(rt, "checkout_preview", func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -447,7 +450,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			s.SessionData["checkout_preview"] = payload
 		}
 		return okResult(payload, "reply step=checkout_preview; confirm_items opens details"), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -457,7 +460,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "open_details_flow",
 		Description: "Open the details waiting-step shell (WhatsApp Flow). Prefer reply step=details after confirm_items.",
-	}, func(_ agent.ToolContext, in detailsArgs) (toolResult, error) {
+	}, instrument(rt, "open_details_flow", func(_ agent.ToolContext, in detailsArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -475,14 +478,14 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return errResult(err.Error()), nil
 		}
 		return okResult(nil, "details form sent"), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "create_order",
 		Description: "Place the order after the details Flow is submitted. Refused on confirm_items alone.",
-	}, func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
+	}, instrument(rt, "create_order", func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -496,6 +499,19 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		if len(lines) == 0 {
 			return errResult("cart is empty"), nil
 		}
+		if rt.capturing() {
+			payload := map[string]any{
+				"display_uid": "PREVIEW-ORDER",
+				"preview":     true,
+			}
+			if s := rt.session(); s != nil {
+				if s.SessionData == nil {
+					s.SessionData = models.JSONB{}
+				}
+				s.SessionData["order"] = payload
+			}
+			return okResult(payload, "preview-only order; reply step=order_placed then end_session"), nil
+		}
 		params := map[string]string{}
 		items, _ := json.Marshal(OrderItemsForAPI(lines))
 		params["items_json"] = string(items)
@@ -508,20 +524,23 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		}
 		payload, ok := rt.callTiqr("order", "create_order", params)
 		if !ok {
+			if rt.NeedsMock {
+				return errResult("preview needs mock for create_order"), nil
+			}
 			return errResult("create_order failed; ask missing fields or transfer_to_staff"), nil
 		}
 		if s := rt.session(); s != nil && s.SessionData != nil {
 			s.SessionData["order"] = payload
 		}
 		return okResult(payload, "order placed; reply with order number and Pay now if payment_url is present, then end_session"), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "list_orders",
 		Description: "List recent orders for this WhatsApp number.",
-	}, func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
+	}, instrument(rt, "list_orders", func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -547,7 +566,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			s.SessionData["orders"] = rows
 		}
 		return okResult(rows, ""), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -557,7 +576,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "lookup_order",
 		Description: "Lookup one order by display id. After summarizing, call end_session. Do not attach a pay link.",
-	}, func(_ agent.ToolContext, in lookupArgs) (toolResult, error) {
+	}, instrument(rt, "lookup_order", func(_ agent.ToolContext, in lookupArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -578,7 +597,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			payload["payment"] = pay
 		}
 		return okResult(payload, "summarize status with no pay link, then end_session"), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -603,9 +622,12 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			"order_placed, order_status, order_status_summary. " +
 			"Optional deviation_line is one text bubble before the shell. " +
 			"chrome_* is translated chrome only when the session language is not English.",
-	}, func(_ agent.ToolContext, in replyArgs) (toolResult, error) {
+	}, instrument(rt, "reply", func(_ agent.ToolContext, in replyArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
+		}
+		if rt.NeedsMock {
+			return errResult("preview needs mock; shell not sent"), nil
 		}
 		step := strings.TrimSpace(strings.ToLower(in.Step))
 		if step == "" {
@@ -633,7 +655,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return errResult(err.Error()), nil
 		}
 		return okResult(map[string]any{"step": step}, "shell sent"), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
@@ -643,7 +665,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "transfer_to_staff",
 		Description: "Hand off to staff. Refused until the customer asked for staff or agreed.",
-	}, func(_ agent.ToolContext, in transferArgs) (toolResult, error) {
+	}, instrument(rt, "transfer_to_staff", func(_ agent.ToolContext, in transferArgs) (toolResult, error) {
 		if !rt.bumpRound() {
 			return errResult("tool round limit"), nil
 		}
@@ -654,24 +676,30 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		if message == "" {
 			message = codedflowAgentHandoff
 		}
+		if rt.capturing() {
+			rt.Transfer = true
+			rt.Replied = true
+			_ = rt.Conv.App().DeliverCodedText(rt.Conv.ChatCtx(), "v2_transfer_preview", message)
+			return okResult(map[string]any{"preview": true}, "preview-only transfer recorded"), nil
+		}
 		rt.Transfer = true
 		rt.Replied = true
 		if err := rt.Conv.Transfer(message); err != nil {
 			return errResult(err.Error()), nil
 		}
 		return okResult(nil, "transferred"), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 
 	if err := add(functiontool.New(functiontool.Config{
 		Name:        "end_session",
 		Description: "End the shopping session (after order placed or order status summary).",
-	}, func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
+	}, instrument(rt, "end_session", func(_ agent.ToolContext, _ emptyArgs) (toolResult, error) {
 		rt.Ended = true
 		_ = rt.Conv.End()
 		return okResult(nil, "ended"), nil
-	})); err != nil {
+	}))); err != nil {
 		return nil, err
 	}
 

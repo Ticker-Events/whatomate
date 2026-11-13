@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/shridarpatil/whatomate/internal/handlers/codedflow"
 	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommerce"
+	"github.com/shridarpatil/whatomate/internal/handlers/tiqrecommercev2"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -197,7 +198,7 @@ func previewResponse(hold *codedPreviewHold, sink *codedflow.PreviewSink, runErr
 	return codedflow.CodedPreviewResponse{
 		SessionID:     hold.session.ID.String(),
 		Status:        status,
-		Step:          session.CurrentStep,
+		Step:          previewStepLabel(session),
 		Input:         input,
 		FlowCTA:       cta,
 		MockOperation: sink.NeedsMock,
@@ -206,6 +207,17 @@ func previewResponse(hold *codedPreviewHold, sink *codedflow.PreviewSink, runErr
 		AICalls:       aiCalls,
 		APICalls:      apiCalls,
 	}
+}
+
+// previewStepLabel prefers V2 waiting_step from _v2_state when present.
+func previewStepLabel(session *models.ChatbotSession) string {
+	if session == nil {
+		return ""
+	}
+	if step := tiqrecommercev2.WaitingStepFromSession(session); step != "" {
+		return step
+	}
+	return session.CurrentStep
 }
 
 func (a *App) previewHold(orgID, userID uuid.UUID, accountName, flowKey string, in codedPreviewInput) (*codedPreviewHold, error) {

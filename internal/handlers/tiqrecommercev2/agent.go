@@ -2,6 +2,7 @@ package tiqrecommercev2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -62,6 +63,10 @@ func runAgentTurn(c *codedflow.Conv) error {
 	// Keyword-only first turn: welcome shell with no model.
 	if userText == "" && buttonID == "" && len(rt.State.Transcript) == 0 {
 		store, _ := rt.callTiqr("store", "get_store", nil)
+		if rt.NeedsMock {
+			rt.persist()
+			return rt.previewNeedsMockErr()
+		}
 		if store != nil {
 			if c.Session().SessionData == nil {
 				c.Session().SessionData = models.JSONB{}
@@ -90,10 +95,18 @@ func runAgentTurn(c *codedflow.Conv) error {
 
 	ctx := context.Background()
 	if err := agentRunner(ctx, rt, settings.AI.APIKey, modelID, userText); err != nil {
+		if errors.Is(err, codedflow.ErrPreviewNeedsMock) || rt.NeedsMock {
+			rt.persist()
+			return rt.previewNeedsMockErr()
+		}
 		c.App().LogWarn("tiqr ecommerce v2 agent turn failed", "error", err)
-		if !rt.Replied {
+		if !rt.Replied && !rt.NeedsMock {
 			_ = rt.resendCurrentShell()
 		}
+	}
+	if rt.NeedsMock {
+		rt.persist()
+		return rt.previewNeedsMockErr()
 	}
 	rt.persist()
 	return nil
@@ -157,12 +170,15 @@ func runADKTurn(ctx context.Context, rt *Runtime, apiKey, modelID, userText stri
 				}
 			}
 		}
-		if rt.Replied || rt.Ended || rt.Transfer {
+		if rt.NeedsMock || rt.Replied || rt.Ended || rt.Transfer {
 			break
 		}
 		if rt.Rounds >= maxToolRounds {
 			break
 		}
+	}
+	if rt.NeedsMock {
+		return codedflow.ErrPreviewNeedsMock
 	}
 	if !rt.Replied && !rt.Ended && !rt.Transfer {
 		// No accepted shell — resend the current step shell (never free model text).

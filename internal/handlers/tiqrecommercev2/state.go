@@ -31,6 +31,12 @@ type TranscriptTurn struct {
 	Text string `json:"text"`
 }
 
+// WaitingStepFromSession returns the V2 waiting step stored on session state.
+func WaitingStepFromSession(session *models.ChatbotSession) string {
+	st := loadState(session)
+	return strings.TrimSpace(st.WaitingStep)
+}
+
 func loadState(session *models.ChatbotSession) TurnState {
 	st := TurnState{
 		FixedActions: defaultFixedActions(),

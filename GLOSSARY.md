@@ -31,3 +31,11 @@ The optional single text bubble sent before a step shell when the agent clarifie
 ## Binding tap
 
 A customer tap on a button, list row, or carousel card, or the exact title of that control. The agent must perform the V1 action for that id; a contradicting tool call is rejected.
+
+## Session archive
+
+The operator-facing record of a coded-flow shopping session: per-turn inbound, outbound WhatsApp messages, TiQR API calls, and AI/tool notes. Stored as PreviewSink turns (Firestore for live chats). _Avoid_: session log (UI copy only).
+
+## Flow debug
+
+The Chat UI that loads a contact’s session archive so operators can replay what the bot sent and which tools ran.

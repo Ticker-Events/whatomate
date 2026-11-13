@@ -1,6 +1,7 @@
 package tiqrecommercev2
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -20,6 +21,9 @@ type Runtime struct {
 
 	BindingButtonID string
 	BindingShowMore bool
+
+	NeedsMock     bool
+	MockOperation string
 
 	Replied  bool
 	Ended    bool
@@ -260,31 +264,18 @@ func (rt *Runtime) GateTransfer() string {
 }
 
 func (rt *Runtime) callTiqr(name, operation string, params map[string]string) (map[string]any, bool) {
-	if rt.Conv == nil || rt.Conv.App() == nil {
-		return nil, false
-	}
-	raw := make(map[string]any, len(params))
-	for k, v := range params {
-		raw[k] = v
-	}
-	out, err := rt.Conv.App().ExecChatTiqrStoreAPI(rt.Conv.ChatCtx(), name, map[string]any{
-		"api_type":  "rest",
-		"operation": operation,
-		"params":    raw,
-	})
-	if err != nil {
-		rt.LastErr = err.Error()
-		return nil, false
-	}
-	if out.Outcome != "http:2xx" {
-		return nil, false
-	}
-	payload := rt.Conv.ChatCtx().LastTiqr()
-	return payload, payload != nil
+	return rt.callTiqrAPI(name, operation, "rest", params)
 }
 
 func (rt *Runtime) callTiqrMCP(name, operation string, params map[string]string) (map[string]any, bool) {
+	return rt.callTiqrAPI(name, operation, "mcp", params)
+}
+
+func (rt *Runtime) callTiqrAPI(name, operation, apiType string, params map[string]string) (map[string]any, bool) {
 	if rt.Conv == nil || rt.Conv.App() == nil {
+		return nil, false
+	}
+	if rt.NeedsMock {
 		return nil, false
 	}
 	raw := make(map[string]any, len(params))
@@ -292,13 +283,24 @@ func (rt *Runtime) callTiqrMCP(name, operation string, params map[string]string)
 		raw[k] = v
 	}
 	out, err := rt.Conv.App().ExecChatTiqrStoreAPI(rt.Conv.ChatCtx(), name, map[string]any{
-		"api_type":  "mcp",
+		"api_type":  apiType,
 		"operation": operation,
 		"params":    raw,
 	})
 	if err != nil {
+		if errors.Is(err, codedflow.ErrPreviewNeedsMock) {
+			rt.markNeedsMock(operation)
+			rt.LastErr = err.Error()
+			return nil, false
+		}
 		rt.LastErr = err.Error()
 		return nil, false
+	}
+	if chat := rt.Conv.ChatCtx(); chat != nil {
+		if p := chat.Preview(); p != nil && p.NeedsMock != "" {
+			rt.markNeedsMock(p.NeedsMock)
+			return nil, false
+		}
 	}
 	if out.Outcome != "http:2xx" {
 		return nil, false
