@@ -18,17 +18,6 @@ func TestLineIDFor_DifferentCapturesStaySeparate(t *testing.T) {
 	assert.Equal(t, a, c)
 }
 
-func TestOrderItemsForAPI_KeepsDistinctLines(t *testing.T) {
-	lines := []CartLine{
-		{LineID: LineIDFor("1", map[string]string{"m": "a"}), ProductOption: "1", Quantity: 1, CaptureFields: map[string]string{"m": "a"}},
-		{LineID: LineIDFor("1", map[string]string{"m": "b"}), ProductOption: "1", Quantity: 2, CaptureFields: map[string]string{"m": "b"}},
-	}
-	items := OrderItemsForAPI(lines)
-	require.Len(t, items, 2)
-	assert.Equal(t, 1, items[0]["quantity"])
-	assert.Equal(t, 2, items[1]["quantity"])
-}
-
 func TestRuntime_CartLineIdentityAndGrounding(t *testing.T) {
 	session := &models.ChatbotSession{SessionData: models.JSONB{}}
 	rt := &Runtime{

@@ -2,10 +2,8 @@ package codedflow
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/shridarpatil/whatomate/internal/models"
 )
@@ -19,25 +17,22 @@ const (
 
 	// Firestore docs max ~1MiB. Keep headroom for index/meta fields.
 	firestoreTurnMaxBytes = 900_000
-	archiveContextValueMax = 2500
-	archiveAPIResponseMax  = 6000
-	archiveCurlMax         = 2000
-	archiveAIPromptMax     = 2000
-	archiveAIResponseMax   = 2000
 )
 
 // SessionArchive is the versioned log metadata. Full turns live in Firestore;
 // session_data keeps only this marker (turn_count, ids, status).
 type SessionArchive struct {
-	Version        int                  `json:"version"`
-	FlowKey        string               `json:"flow_key"`
-	SessionID      string               `json:"session_id"`
-	ContactID      string               `json:"contact_id"`
-	OrganizationID string               `json:"organization_id"`
-	StartedAt      string               `json:"started_at"`
-	EndedAt        string               `json:"ended_at,omitempty"`
-	Status         string               `json:"status"`
-	TurnCount      int                  `json:"turn_count"`
+	Version            int    `json:"version"`
+	FlowKey            string `json:"flow_key"`
+	SessionID          string `json:"session_id"`
+	ContactID          string `json:"contact_id"`
+	OrganizationID     string `json:"organization_id"`
+	StartedAt          string `json:"started_at"`
+	EndedAt            string `json:"ended_at,omitempty"`
+	Status             string `json:"status"`
+	TurnCount          int    `json:"turn_count"`
+	CatalogRevisionID  string `json:"catalog_revision_id,omitempty"`
+	CatalogFingerprint string `json:"catalog_fingerprint,omitempty"`
 	// Turns is legacy-only (old Postgres blobs). Not written to session_data.
 	Turns []SessionArchiveTurn `json:"turns,omitempty"`
 }
@@ -56,9 +51,12 @@ type SessionArchiveTurn struct {
 
 // CommittedArchiveTurn is one turn ready for Firestore, with its stable index.
 type CommittedArchiveTurn struct {
-	Index int
-	Turn  SessionArchiveTurn
-	Meta  *SessionArchive
+	Index             int
+	Turn              SessionArchiveTurn
+	Meta              *SessionArchive
+	CatalogRevisionID string
+	Catalog           map[string]any
+	CatalogChanged    bool
 }
 
 // LoadSessionArchive reads the archive marker from session_data, or nil.
@@ -126,6 +124,12 @@ func archiveMarkerToMap(archive *SessionArchive) map[string]any {
 	if archive.EndedAt != "" {
 		out["ended_at"] = archive.EndedAt
 	}
+	if archive.CatalogRevisionID != "" {
+		out["catalog_revision_id"] = archive.CatalogRevisionID
+	}
+	if archive.CatalogFingerprint != "" {
+		out["catalog_fingerprint"] = archive.CatalogFingerprint
+	}
 	return out
 }
 
@@ -174,19 +178,39 @@ func CommitArchiveTurn(
 	sink.FlushPendingAIDebug()
 	archive := EnsureSessionArchive(session, flowKey)
 	messages := append([]CodedPreviewMessage(nil), sink.Messages...)
-	// Per-message context duplicated full session_data and blew past Firestore's
-	// 1MiB doc limit. Keep one sanitized turn-level context instead.
+	// Per-message context duplicated full session_data. Keep one turn-level context.
 	for i := range messages {
 		messages[i].Context = nil
+	}
+	ctx, catalog, fingerprint := PrepareArchiveContext(PreviewSessionContext(session))
+	catalogChanged := false
+	catalogRevisionID := archive.CatalogRevisionID
+	if fingerprint != "" && fingerprint != archive.CatalogFingerprint {
+		catalogRevisionID = nextCatalogRevisionID(archive.CatalogRevisionID)
+		archive.CatalogRevisionID = catalogRevisionID
+		archive.CatalogFingerprint = fingerprint
+		catalogChanged = true
+		if ctx == nil {
+			ctx = map[string]any{}
+		}
+		ctx[CatalogRevisionKey] = catalogRevisionID
+	} else if catalogRevisionID != "" {
+		if ctx == nil {
+			ctx = map[string]any{}
+		}
+		ctx[CatalogRevisionKey] = catalogRevisionID
+		catalog = nil
+	} else {
+		catalog = nil
 	}
 	index := archive.TurnCount
 	turn := SessionArchiveTurn{
 		At:       time.Now().UTC().Format(time.RFC3339),
 		Inbound:  sanitizeInbound(inbound),
 		Messages: messages,
-		AICalls:  sanitizeArchiveAICalls(sink.AICalls),
-		APICalls: sanitizeArchiveAPICalls(sink.APICalls),
-		Context:  SanitizeArchiveContext(PreviewSessionContext(session)),
+		AICalls:  append([]CodedPreviewAICall(nil), sink.AICalls...),
+		APICalls: append([]CodedPreviewAPICall(nil), sink.APICalls...),
+		Context:  ctx,
 		Step:     strings.TrimSpace(session.CurrentStep),
 		Status:   string(session.Status),
 	}
@@ -202,7 +226,14 @@ func CommitArchiveTurn(
 		}
 	}
 	SaveSessionArchive(session, archive)
-	return &CommittedArchiveTurn{Index: index, Turn: turn, Meta: archive}
+	return &CommittedArchiveTurn{
+		Index:             index,
+		Turn:              turn,
+		Meta:              archive,
+		CatalogRevisionID: catalogRevisionID,
+		Catalog:           catalog,
+		CatalogChanged:    catalogChanged,
+	}
 }
 
 func sanitizeInbound(inbound map[string]any) map[string]any {
@@ -222,17 +253,24 @@ func sanitizeInbound(inbound map[string]any) map[string]any {
 	return out
 }
 
-// SanitizeArchiveContext drops private keys and caps value size so Firestore
-// turn writes stay under the document limit.
-func SanitizeArchiveContext(ctx map[string]any) map[string]any {
+// PrepareArchiveContext drops private keys and catalog blobs. Catalog is
+// returned separately for revision storage; the turn keeps a revision id.
+func PrepareArchiveContext(ctx map[string]any) (slim map[string]any, catalog map[string]any, fingerprint string) {
+	catalog, fingerprint = extractCatalogRevision(ctx)
 	if len(ctx) == 0 {
-		return nil
+		return nil, catalog, fingerprint
+	}
+	catalogKeySet := map[string]bool{}
+	for _, key := range archiveCatalogKeys {
+		catalogKeySet[key] = true
 	}
 	out := make(map[string]any, len(ctx))
 	for key, value := range ctx {
 		lower := strings.ToLower(key)
 		if key == ArchiveKey ||
 			key == LocalArchiveTurnsKey ||
+			key == v2StateKey ||
+			catalogKeySet[key] ||
 			strings.Contains(lower, "instruction") ||
 			strings.Contains(lower, "secret") ||
 			strings.Contains(lower, "token") ||
@@ -240,86 +278,18 @@ func SanitizeArchiveContext(ctx map[string]any) map[string]any {
 			strings.Contains(lower, "password") {
 			continue
 		}
-		out[key] = truncateArchiveValue(value, archiveContextValueMax)
+		out[key] = value
 	}
 	if len(out) == 0 {
-		return nil
+		out = nil
 	}
-	return out
+	return out, catalog, fingerprint
 }
 
-func sanitizeArchiveAPICalls(calls []CodedPreviewAPICall) []CodedPreviewAPICall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]CodedPreviewAPICall, len(calls))
-	for i, call := range calls {
-		call.Curl = truncateArchiveString(call.Curl, archiveCurlMax)
-		call.Response = truncateArchiveValue(call.Response, archiveAPIResponseMax)
-		call.Error = truncateArchiveString(call.Error, 500)
-		out[i] = call
-	}
-	return out
-}
-
-func sanitizeArchiveAICalls(calls []CodedPreviewAICall) []CodedPreviewAICall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]CodedPreviewAICall, len(calls))
-	for i, call := range calls {
-		call.Prompt = truncateArchiveString(call.Prompt, archiveAIPromptMax)
-		call.Response = truncateArchiveString(call.Response, archiveAIResponseMax)
-		call.Reasoning = truncateArchiveString(call.Reasoning, 1000)
-		call.Error = truncateArchiveString(call.Error, 500)
-		if len(call.Parsed) > 0 {
-			parsed := make(map[string]any, len(call.Parsed))
-			for k, v := range call.Parsed {
-				parsed[k] = truncateArchiveValue(v, archiveContextValueMax)
-			}
-			call.Parsed = parsed
-		}
-		out[i] = call
-	}
-	return out
-}
-
-func truncateArchiveValue(v any, maxRunes int) any {
-	if v == nil || maxRunes <= 0 {
-		return v
-	}
-	switch typed := v.(type) {
-	case string:
-		return truncateArchiveString(typed, maxRunes)
-	case []byte:
-		return truncateArchiveString(string(typed), maxRunes)
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return truncateArchiveString(fmt.Sprintf("%v", v), maxRunes)
-	}
-	if utf8.RuneCountInString(string(b)) <= maxRunes {
-		var out any
-		if json.Unmarshal(b, &out) == nil {
-			return out
-		}
-		return string(b)
-	}
-	if maxRunes <= 1 {
-		return "…"
-	}
-	return truncateArchiveString(string(b), maxRunes-1) + "…"
-}
-
-func truncateArchiveString(s string, maxRunes int) string {
-	if maxRunes <= 0 || s == "" {
-		return s
-	}
-	if utf8.RuneCountInString(s) <= maxRunes {
-		return s
-	}
-	r := []rune(s)
-	return string(r[:maxRunes])
+// SanitizeArchiveContext drops private keys and catalog blobs from a turn context.
+func SanitizeArchiveContext(ctx map[string]any) map[string]any {
+	slim, _, _ := PrepareArchiveContext(ctx)
+	return slim
 }
 
 // MarkArchiveEnded sets ended_at/status on the in-session archive marker.
@@ -352,81 +322,10 @@ func TurnToMap(turn SessionArchiveTurn) (map[string]any, error) {
 	return row, nil
 }
 
-// TurnToMapForFirestore converts a turn and shrinks it until it fits under the
-// Firestore document size limit.
+// TurnToMapForFirestore converts a turn for Firestore. Oversized turns are
+// split into part documents by PrepareArchiveWrite; content is not dropped.
 func TurnToMapForFirestore(turn SessionArchiveTurn) (map[string]any, error) {
-	row, err := TurnToMap(turn)
-	if err != nil {
-		return nil, err
-	}
-	if size := jsonByteLen(row); size <= firestoreTurnMaxBytes {
-		return row, nil
-	}
-
-	// Drop bulky API bodies first (already truncated, but many calls add up).
-	slim := turn
-	for i := range slim.APICalls {
-		slim.APICalls[i].Response = summaryArchiveValue(slim.APICalls[i].Response)
-		slim.APICalls[i].Curl = truncateArchiveString(slim.APICalls[i].Curl, 400)
-	}
-	row, err = TurnToMap(slim)
-	if err != nil {
-		return nil, err
-	}
-	if size := jsonByteLen(row); size <= firestoreTurnMaxBytes {
-		return row, nil
-	}
-
-	// Drop turn context next (messages/AI/API remain useful for Copy Log).
-	slim.Context = map[string]any{"_truncated": true}
-	for i := range slim.AICalls {
-		slim.AICalls[i].Prompt = ""
-		slim.AICalls[i].Parsed = nil
-	}
-	row, err = TurnToMap(slim)
-	if err != nil {
-		return nil, err
-	}
-	if size := jsonByteLen(row); size <= firestoreTurnMaxBytes {
-		return row, nil
-	}
-
-	// Last resort: keep step/status/inbound/messages only.
-	minimal := SessionArchiveTurn{
-		At:       slim.At,
-		Inbound:  slim.Inbound,
-		Messages: slim.Messages,
-		Step:     slim.Step,
-		Status:   slim.Status,
-		Context:  map[string]any{"_truncated": "size"},
-	}
-	for i := range minimal.Messages {
-		minimal.Messages[i].Context = nil
-		minimal.Messages[i].AI = nil
-	}
-	return TurnToMap(minimal)
-}
-
-func summaryArchiveValue(v any) any {
-	if v == nil {
-		return nil
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return map[string]any{"_truncated": true}
-	}
-	return map[string]any{
-		"_truncated": true,
-		"bytes":     len(b),
-	}
-}
-
-func jsonByteLen(v any) int {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return firestoreTurnMaxBytes + 1
-	}
-	return len(b)
+	return TurnToMap(turn)
 }
 
 // TurnFromMap converts a Firestore turn document back to SessionArchiveTurn.

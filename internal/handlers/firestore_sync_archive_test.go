@@ -19,19 +19,18 @@ import (
 func TestWriteSessionArchiveTurn_RetriesOnce(t *testing.T) {
 	// Serial: mutates package-level append/sync hooks.
 	var calls atomic.Int32
-	prev := appendSessionArchiveTurnFn
+	prev := appendSessionArchiveBundleFn
 	prevSync := syncContactForArchiveFn
 	t.Cleanup(func() {
-		appendSessionArchiveTurnFn = prev
+		appendSessionArchiveBundleFn = prev
 		syncContactForArchiveFn = prevSync
 	})
 
-	appendSessionArchiveTurnFn = func(
+	appendSessionArchiveBundleFn = func(
 		_ *App,
 		_ context.Context,
 		_ fs.SessionArchiveDoc,
-		_ int,
-		_ map[string]any,
+		_ *fs.SessionArchiveWriteBundle,
 	) error {
 		n := calls.Add(1)
 		if n == 1 {
@@ -64,22 +63,21 @@ func TestWriteSessionArchiveTurn_RetriesOnce(t *testing.T) {
 	assert.Equal(t, int32(2), calls.Load())
 }
 
-func TestWriteSessionArchiveTurn_FailsAfterRetry(t *testing.T) {
+func TestWriteSessionArchiveTurn_FailsAfterRetryEnqueues(t *testing.T) {
 	// Serial: mutates package-level append/sync hooks.
 	var calls atomic.Int32
-	prev := appendSessionArchiveTurnFn
+	prev := appendSessionArchiveBundleFn
 	prevSync := syncContactForArchiveFn
 	t.Cleanup(func() {
-		appendSessionArchiveTurnFn = prev
+		appendSessionArchiveBundleFn = prev
 		syncContactForArchiveFn = prevSync
 	})
 
-	appendSessionArchiveTurnFn = func(
+	appendSessionArchiveBundleFn = func(
 		_ *App,
 		_ context.Context,
 		_ fs.SessionArchiveDoc,
-		_ int,
-		_ map[string]any,
+		_ *fs.SessionArchiveWriteBundle,
 	) error {
 		calls.Add(1)
 		return errors.New("firestore down")
@@ -88,18 +86,29 @@ func TestWriteSessionArchiveTurn_FailsAfterRetry(t *testing.T) {
 		return nil
 	}
 
-	app := &App{Log: logf.New(logf.Opts{Level: logf.ErrorLevel})}
+	db := testutil.SetupTestDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+	contact := testutil.CreateTestContact(t, db, org.ID)
+	sessionID := uuid.New()
+
+	app := &App{DB: db, Log: logf.New(logf.Opts{Level: logf.ErrorLevel})}
 	err := app.writeSessionArchiveTurn(&codedflow.CommittedArchiveTurn{
 		Index: 1,
 		Turn:  codedflow.SessionArchiveTurn{Step: "products"},
 		Meta: &codedflow.SessionArchive{
-			SessionID: uuid.New().String(),
-			ContactID: uuid.New().String(),
-			TurnCount: 2,
+			SessionID:      sessionID.String(),
+			ContactID:      contact.ID.String(),
+			OrganizationID: org.ID.String(),
+			TurnCount:      2,
 		},
 	})
 	require.Error(t, err)
 	assert.Equal(t, int32(2), calls.Load())
+
+	var row models.SessionArchiveTurnRetry
+	require.NoError(t, db.Where("session_id = ? AND turn_index = ?", sessionID, 1).First(&row).Error)
+	assert.Equal(t, 1, row.Attempts)
+	assert.Contains(t, row.LastError, "firestore down")
 }
 
 func TestEnsureContactSyncedForArchive_LoadsContact(t *testing.T) {

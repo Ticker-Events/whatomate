@@ -2,6 +2,7 @@ package firestore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -16,10 +17,13 @@ import (
 )
 
 const (
-	collectionMessages        = "messages"
-	collectionContacts        = "contacts"
-	collectionSessionArchives = "sessionArchives"
-	collectionArchiveTurns    = "turns"
+	collectionMessages           = "messages"
+	collectionContacts           = "contacts"
+	collectionSessionArchives    = "sessionArchives"
+	collectionArchiveTurns       = "turns"
+	collectionArchiveTurnParts   = "parts"
+	collectionArchiveCatalogs    = "catalogRevisions"
+	collectionArchiveCatalogParts = "parts"
 )
 
 // SyncMessage writes or replaces a message document and updates the contact summary.
@@ -191,22 +195,65 @@ func (c *Client) AppendSessionArchiveTurn(
 	turnIndex int,
 	turn map[string]any,
 ) error {
+	return c.AppendSessionArchiveBundle(ctx, meta, &SessionArchiveWriteBundle{
+		TurnIndex: turnIndex,
+		Turn:      turn,
+	})
+}
+
+// SessionArchiveWriteBundle mirrors codedflow.ArchiveWriteBundle for Firestore writes.
+type SessionArchiveWriteBundle struct {
+	TurnIndex         int
+	Turn              map[string]any
+	TurnParts         []map[string]any
+	CatalogRevisionID string
+	Catalog           map[string]any
+	CatalogParts      []map[string]any
+	CatalogChanged    bool
+}
+
+// AppendSessionArchiveBundle writes a turn (and optional parts/catalog) with parent meta.
+func (c *Client) AppendSessionArchiveBundle(
+	ctx context.Context,
+	meta SessionArchiveDoc,
+	bundle *SessionArchiveWriteBundle,
+) error {
 	if !c.Enabled() {
 		return nil
+	}
+	if bundle == nil {
+		return fmt.Errorf("firestore append session archive turn: nil bundle")
 	}
 	contactID := strings.TrimSpace(meta.ContactID)
 	sessionID := strings.TrimSpace(meta.SessionID)
 	if contactID == "" || sessionID == "" {
 		return fmt.Errorf("firestore append session archive turn: missing contact or session id")
 	}
-	docID, payload, err := sessionArchiveTurnDoc(turnIndex, turn)
+	docID, payload, err := sessionArchiveTurnDoc(bundle.TurnIndex, bundle.Turn)
 	if err != nil {
 		return err
 	}
 	parent := sessionArchiveParent(c, contactID, sessionID)
 	batch := c.firestore.Batch()
-	// Turn first, then parent meta — both commit together.
-	batch.Set(parent.Collection(collectionArchiveTurns).Doc(docID), payload)
+	turnRef := parent.Collection(collectionArchiveTurns).Doc(docID)
+	batch.Set(turnRef, payload)
+	for i, part := range bundle.TurnParts {
+		partID := fmt.Sprintf("%04d", i)
+		batch.Set(turnRef.Collection(collectionArchiveTurnParts).Doc(partID), part)
+	}
+	if bundle.CatalogChanged && bundle.CatalogRevisionID != "" && bundle.Catalog != nil {
+		catRef := parent.Collection(collectionArchiveCatalogs).Doc(bundle.CatalogRevisionID)
+		catPayload := make(map[string]any, len(bundle.Catalog)+1)
+		for k, v := range bundle.Catalog {
+			catPayload[k] = v
+		}
+		catPayload["id"] = bundle.CatalogRevisionID
+		batch.Set(catRef, catPayload)
+		for i, part := range bundle.CatalogParts {
+			partID := fmt.Sprintf("%04d", i)
+			batch.Set(catRef.Collection(collectionArchiveCatalogParts).Doc(partID), part)
+		}
+	}
 	batch.Set(parent, sessionArchiveMetaData(meta), firestore.MergeAll)
 	if _, err := batch.Commit(ctx); err != nil {
 		return fmt.Errorf("firestore append session archive turn %s/%s: %w", sessionID, docID, err)
@@ -276,6 +323,7 @@ func (c *Client) GetSessionArchive(
 
 	iter := parent.Collection(collectionArchiveTurns).OrderBy("index", firestore.Asc).Documents(ctx)
 	defer iter.Stop()
+	catalogCache := map[string]map[string]any{}
 	for {
 		doc, iterErr := iter.Next()
 		if iterErr == iterator.Done {
@@ -288,9 +336,178 @@ func (c *Client) GetSessionArchive(
 		if data == nil {
 			data = map[string]any{}
 		}
-		turns = append(turns, data)
+		assembled, err := c.reassembleArchiveTurn(ctx, doc.Ref, data)
+		if err != nil {
+			return meta, nil, false, fmt.Errorf("firestore reassemble session archive turn %s/%s: %w", sessionID, doc.Ref.ID, err)
+		}
+		assembled, err = c.joinArchiveCatalog(ctx, parent, assembled, catalogCache)
+		if err != nil {
+			return meta, nil, false, fmt.Errorf("firestore join session archive catalog %s/%s: %w", sessionID, doc.Ref.ID, err)
+		}
+		turns = append(turns, assembled)
 	}
 	return meta, turns, true, nil
+}
+
+func (c *Client) reassembleArchiveTurn(ctx context.Context, turnRef *firestore.DocumentRef, data map[string]any) (map[string]any, error) {
+	if !archiveDocSplit(data) {
+		out := copyMap(data)
+		delete(out, "index")
+		return out, nil
+	}
+	parts, err := c.loadArchiveParts(ctx, turnRef.Collection(collectionArchiveTurnParts))
+	if err != nil {
+		return nil, err
+	}
+	return reassembleSplitDoc(data, parts)
+}
+
+func (c *Client) joinArchiveCatalog(
+	ctx context.Context,
+	parent *firestore.DocumentRef,
+	turn map[string]any,
+	cache map[string]map[string]any,
+) (map[string]any, error) {
+	ctxMap, _ := turn["context"].(map[string]any)
+	if ctxMap == nil {
+		return turn, nil
+	}
+	revID, _ := ctxMap["catalog_revision_id"].(string)
+	revID = strings.TrimSpace(revID)
+	if revID == "" {
+		return turn, nil
+	}
+	catalog, ok := cache[revID]
+	if !ok {
+		loaded, err := c.loadArchiveCatalog(ctx, parent, revID)
+		if err != nil {
+			return nil, err
+		}
+		catalog = loaded
+		cache[revID] = catalog
+	}
+	if len(catalog) == 0 {
+		return turn, nil
+	}
+	out := copyMap(turn)
+	mergedCtx := copyMap(ctxMap)
+	for k, v := range catalog {
+		if k == "id" || k == "_split" || k == "part_count" {
+			continue
+		}
+		mergedCtx[k] = v
+	}
+	out["context"] = mergedCtx
+	return out, nil
+}
+
+func (c *Client) loadArchiveCatalog(ctx context.Context, parent *firestore.DocumentRef, revID string) (map[string]any, error) {
+	ref := parent.Collection(collectionArchiveCatalogs).Doc(revID)
+	snap, err := ref.Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	data := snap.Data()
+	if data == nil {
+		return nil, nil
+	}
+	if !archiveDocSplit(data) {
+		out := copyMap(data)
+		delete(out, "id")
+		return out, nil
+	}
+	parts, err := c.loadArchiveParts(ctx, ref.Collection(collectionArchiveCatalogParts))
+	if err != nil {
+		return nil, err
+	}
+	return reassembleSplitDoc(data, parts)
+}
+
+func (c *Client) loadArchiveParts(ctx context.Context, col *firestore.CollectionRef) ([]map[string]any, error) {
+	iter := col.OrderBy("part", firestore.Asc).Documents(ctx)
+	defer iter.Stop()
+	var parts []map[string]any
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		data := doc.Data()
+		if data == nil {
+			data = map[string]any{}
+		}
+		parts = append(parts, data)
+	}
+	return parts, nil
+}
+
+func archiveDocSplit(doc map[string]any) bool {
+	if doc == nil {
+		return false
+	}
+	v, ok := doc["_split"].(bool)
+	return ok && v
+}
+
+func reassembleSplitDoc(main map[string]any, parts []map[string]any) (map[string]any, error) {
+	count := 0
+	switch v := main["part_count"].(type) {
+	case int:
+		count = v
+	case int64:
+		count = int(v)
+	case float64:
+		count = int(v)
+	}
+	if count < 1 {
+		return nil, fmt.Errorf("split archive doc missing part_count")
+	}
+	byPart := map[int]string{}
+	for _, part := range parts {
+		idx := 0
+		switch v := part["part"].(type) {
+		case int:
+			idx = v
+		case int64:
+			idx = int(v)
+		case float64:
+			idx = int(v)
+		}
+		data, _ := part["data"].(string)
+		if data != "" {
+			byPart[idx] = data
+		}
+	}
+	var b strings.Builder
+	for i := 0; i < count; i++ {
+		chunk, ok := byPart[i]
+		if !ok {
+			return nil, fmt.Errorf("missing archive part %d", i)
+		}
+		b.WriteString(chunk)
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal([]byte(b.String()), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func copyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func sessionArchiveDocFromData(data map[string]any) SessionArchiveDoc {

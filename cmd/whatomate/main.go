@@ -340,6 +340,11 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Retry failed session-archive Firestore writes
+	archiveRetryCtx, archiveRetryCancel := context.WithCancel(context.Background())
+	go app.StartSessionArchiveRetryProcessor(archiveRetryCtx)
+	lo.Info("Session archive retry processor started")
+
 	// Start Meta WhatsApp token refresh processor
 	tokenRefreshInterval := time.Duration(cfg.WhatsApp.TokenRefreshIntervalMinsOrDefault()) * time.Minute
 	tokenRefreshProcessor := handlers.NewTokenRefreshProcessor(app, tokenRefreshInterval)
@@ -401,6 +406,10 @@ func runServer(args []string) {
 	slaCancel()
 	slaProcessor.Stop()
 	lo.Info("SLA processor stopped")
+
+	lo.Info("Stopping session archive retry processor...")
+	archiveRetryCancel()
+	lo.Info("Session archive retry processor stopped")
 
 	lo.Info("Stopping token refresh processor...")
 	tokenRefreshCancel()

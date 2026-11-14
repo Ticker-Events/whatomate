@@ -113,8 +113,10 @@ Live V2 turns write the same **session archive** as V1 (Firestore turns + Chat *
 
 - Outbound shells via `DeliverCoded*` / `ExecChat*`
 - TiQR REST/MCP via `NoteAPI`
-- Each ADK tool result as `ai_calls` with role `adk_tool` (name, ok/error, truncated args/result, waiting step). Full Gemini prompts are not stored.
-- Turn documents are size-capped before Firestore write (no per-message session dumps; truncated API/AI bodies) so Copy Log stays under the 1MiB doc limit.
+- Each ADK tool result as `ai_calls` with role `adk_tool` (name, ok/error, args/result, waiting step). Full Gemini prompts are not stored.
+- Firestore is the source of truth for every turn. Postgres keeps the archive marker (`turn_count`, ids, status) and a retry queue for failed writes.
+- Turn context keeps cart, customer fields, step, and ids. Catalog blobs (`collections`, `products`, `store`, `options`) are stored once as a **catalog revision** when they change; the turn stores `catalog_revision_id`. `_v2_state` is not copied onto the turn.
+- When a turn or catalog revision would exceed ~900KB, it is split into **archive parts** under that document and reassembled on read. Content is not truncated with ellipsis.
 
 ## Interactive preview
 

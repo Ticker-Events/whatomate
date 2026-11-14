@@ -33,6 +33,21 @@ service cloud.firestore {
         match /turns/{turnId} {
           allow read: if orgMatches(contactOrgId(contactId));
           allow write: if false;
+
+          match /parts/{partId} {
+            allow read: if orgMatches(contactOrgId(contactId));
+            allow write: if false;
+          }
+        }
+
+        match /catalogRevisions/{revisionId} {
+          allow read: if orgMatches(contactOrgId(contactId));
+          allow write: if false;
+
+          match /parts/{partId} {
+            allow read: if orgMatches(contactOrgId(contactId));
+            allow write: if false;
+          }
         }
       }
     }

@@ -34,7 +34,15 @@ A customer tap on a button, list row, or carousel card, or the exact title of th
 
 ## Session archive
 
-The operator-facing record of a coded-flow shopping session: per-turn inbound, outbound WhatsApp messages, TiQR API calls, and AI/tool notes. Stored as PreviewSink turns (Firestore for live chats). _Avoid_: session log (UI copy only).
+The operator-facing record of a coded-flow shopping session: per-turn inbound, outbound WhatsApp messages, TiQR API calls, and AI/tool notes. Firestore is the source of truth for turns; Postgres keeps only a marker and a retry queue. _Avoid_: session log (UI copy only).
+
+## Catalog revision
+
+One stored copy of the session catalog blobs (`collections`, `products`, `store`, `options`) for a shopping session. A new revision is written only when that set changes; each turn keeps the revision id instead of copying the blobs.
+
+## Archive part
+
+A continuation document for a session-archive turn or catalog revision that would exceed Firestore’s document size limit. Parts are joined on read so Flow debug sees one full turn.
 
 ## Flow debug
 

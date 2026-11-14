@@ -137,38 +137,6 @@ func cartLinesToSession(lines []CartLine) []any {
 	return out
 }
 
-// OrderItemsForAPI merges quantities only for identical line ids (same option
-// and capture). Different capture answers stay separate until create_order,
-// where the API still needs product_option+quantity — notes carry the answers.
-func OrderItemsForAPI(lines []CartLine) []map[string]any {
-	type agg struct {
-		option string
-		qty    int
-	}
-	seen := map[string]int{}
-	order := make([]agg, 0, len(lines))
-	for _, line := range lines {
-		id := line.LineID
-		if id == "" {
-			id = LineIDFor(line.ProductOption, line.CaptureFields)
-		}
-		if i, ok := seen[id]; ok {
-			order[i].qty += line.Quantity
-			continue
-		}
-		seen[id] = len(order)
-		order = append(order, agg{option: line.ProductOption, qty: line.Quantity})
-	}
-	out := make([]map[string]any, 0, len(order))
-	for _, a := range order {
-		out = append(out, map[string]any{
-			"product_option": a.option,
-			"quantity":       a.qty,
-		})
-	}
-	return out
-}
-
 func updateCartLine(lines []CartLine, lineID string, qty int) ([]CartLine, bool) {
 	lineID = strings.TrimSpace(lineID)
 	if lineID == "" || qty < 1 {

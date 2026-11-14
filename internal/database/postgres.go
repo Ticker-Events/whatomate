@@ -104,6 +104,7 @@ func GetMigrationModels() []MigrationModel {
 		{"CommerceLifecycleEvent", &models.CommerceLifecycleEvent{}},
 		{"AIContext", &models.AIContext{}},
 		{"AgentTransfer", &models.AgentTransfer{}},
+		{"SessionArchiveTurnRetry", &models.SessionArchiveTurnRetry{}},
 
 		// User tracking
 		{"UserAvailabilityLog", &models.UserAvailabilityLog{}},

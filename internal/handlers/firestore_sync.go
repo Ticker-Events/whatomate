@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -10,17 +11,17 @@ import (
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	fs "github.com/shridarpatil/whatomate/pkg/firestore"
+	"gorm.io/gorm"
 )
 
-// appendSessionArchiveTurnFn writes one archive turn. Tests replace it.
-var appendSessionArchiveTurnFn = func(
+// appendSessionArchiveBundleFn writes one archive turn bundle. Tests replace it.
+var appendSessionArchiveBundleFn = func(
 	a *App,
 	ctx context.Context,
 	meta fs.SessionArchiveDoc,
-	index int,
-	turn map[string]any,
+	bundle *fs.SessionArchiveWriteBundle,
 ) error {
-	return a.Firestore.AppendSessionArchiveTurn(ctx, meta, index, turn)
+	return a.Firestore.AppendSessionArchiveBundle(ctx, meta, bundle)
 }
 
 // syncContactForArchiveFn merges the contact document. Tests replace it.
@@ -195,28 +196,112 @@ func (a *App) writeSessionArchiveTurnToFirestore(committed *codedflow.CommittedA
 }
 
 func (a *App) writeSessionArchiveTurn(committed *codedflow.CommittedArchiveTurn) error {
-	turnMap, err := codedflow.TurnToMapForFirestore(committed.Turn)
+	bundle, err := codedflow.PrepareArchiveWrite(committed)
 	if err != nil {
-		a.Log.Error("Failed to marshal session archive turn",
+		a.Log.Error("Failed to prepare session archive turn",
 			"error", err, "session_id", committed.Meta.SessionID)
 		return err
 	}
+	fsBundle := sessionArchiveWriteBundleFromCoded(bundle)
 	meta := sessionArchiveDocFromMeta(committed.Meta)
-	index := committed.Index
 
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		a.ensureContactSyncedForArchive(ctx, meta.ContactID)
-		lastErr = appendSessionArchiveTurnFn(a, ctx, meta, index, turnMap)
+		lastErr = appendSessionArchiveBundleFn(a, ctx, meta, fsBundle)
 		cancel()
 		if lastErr == nil {
 			return nil
 		}
 	}
 	a.Log.Error("Failed to append session archive turn to Firestore",
-		"error", lastErr, "session_id", meta.SessionID, "turn_index", index)
+		"error", lastErr, "session_id", meta.SessionID, "turn_index", committed.Index)
+	if qerr := a.enqueueSessionArchiveRetry(committed, bundle, lastErr); qerr != nil {
+		a.Log.Error("Failed to enqueue session archive turn retry",
+			"error", qerr, "session_id", meta.SessionID, "turn_index", committed.Index)
+	}
 	return lastErr
+}
+
+func sessionArchiveWriteBundleFromCoded(bundle *codedflow.ArchiveWriteBundle) *fs.SessionArchiveWriteBundle {
+	if bundle == nil {
+		return nil
+	}
+	return &fs.SessionArchiveWriteBundle{
+		TurnIndex:         bundle.TurnIndex,
+		Turn:              bundle.Turn,
+		TurnParts:         bundle.TurnParts,
+		CatalogRevisionID: bundle.CatalogRevisionID,
+		Catalog:           bundle.Catalog,
+		CatalogParts:      bundle.CatalogParts,
+		CatalogChanged:    bundle.CatalogChanged,
+	}
+}
+
+func (a *App) enqueueSessionArchiveRetry(
+	committed *codedflow.CommittedArchiveTurn,
+	bundle *codedflow.ArchiveWriteBundle,
+	writeErr error,
+) error {
+	if a == nil || a.DB == nil || committed == nil || committed.Meta == nil || bundle == nil {
+		return nil
+	}
+	payload, err := codedflow.BundleToMap(bundle)
+	if err != nil {
+		return err
+	}
+	payload["meta"] = map[string]any{
+		"version":         committed.Meta.Version,
+		"flow_key":        committed.Meta.FlowKey,
+		"session_id":      committed.Meta.SessionID,
+		"contact_id":      committed.Meta.ContactID,
+		"organization_id": committed.Meta.OrganizationID,
+		"started_at":      committed.Meta.StartedAt,
+		"ended_at":        committed.Meta.EndedAt,
+		"status":          committed.Meta.Status,
+		"turn_count":      committed.Meta.TurnCount,
+	}
+	sessionID, err := uuid.Parse(strings.TrimSpace(committed.Meta.SessionID))
+	if err != nil {
+		return err
+	}
+	contactID, err := uuid.Parse(strings.TrimSpace(committed.Meta.ContactID))
+	if err != nil {
+		return err
+	}
+	orgID, err := uuid.Parse(strings.TrimSpace(committed.Meta.OrganizationID))
+	if err != nil {
+		return err
+	}
+	errMsg := ""
+	if writeErr != nil {
+		errMsg = writeErr.Error()
+	}
+	row := models.SessionArchiveTurnRetry{
+		OrganizationID: orgID,
+		ContactID:      contactID,
+		SessionID:      sessionID,
+		TurnIndex:      committed.Index,
+		Payload:        models.JSONB(payload),
+		Attempts:       1,
+		LastError:      errMsg,
+		NextAttemptAt:  time.Now().UTC().Add(30 * time.Second),
+	}
+	var existing models.SessionArchiveTurnRetry
+	err = a.DB.Unscoped().Where("session_id = ? AND turn_index = ?", sessionID, committed.Index).First(&existing).Error
+	if err == nil {
+		existing.Payload = row.Payload
+		existing.Attempts = existing.Attempts + 1
+		existing.LastError = errMsg
+		existing.NextAttemptAt = row.NextAttemptAt
+		existing.DeletedAt = gorm.DeletedAt{}
+		return a.DB.Unscoped().Save(&existing).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return a.DB.Create(&row).Error
 }
 
 // ensureContactSyncedForArchive writes the contact document so Copy Log rules

@@ -1,7 +1,6 @@
 package codedflow
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -99,7 +98,7 @@ func TestSanitizeArchiveContextDropsPrivateKeys(t *testing.T) {
 	assert.NotContains(t, out, ArchiveKey)
 }
 
-func TestCommitArchiveTurnOmitsPerMessageContext(t *testing.T) {
+func TestCommitArchiveTurnOmitsPerMessageContextAndExtractsCatalog(t *testing.T) {
 	session := &models.ChatbotSession{
 		ContactID:      uuid.New(),
 		OrganizationID: uuid.New(),
@@ -108,7 +107,10 @@ func TestCommitArchiveTurnOmitsPerMessageContext(t *testing.T) {
 		StartedAt:      time.Now().UTC(),
 		SessionData: models.JSONB{
 			"_coded_flow": "tiqr_ecommerce_v2",
+			"_v2_state":    map[string]any{"transcript": []any{"a", "b"}},
 			"store":       map[string]any{"name": "Demo", "blob": strings.Repeat("x", 5000)},
+			"tiqr_cart":   []any{map[string]any{"product_option": "1", "quantity": "2"}},
+			"customer_email": "a@b.com",
 		},
 	}
 	session.ID = uuid.New()
@@ -122,12 +124,25 @@ func TestCommitArchiveTurnOmitsPerMessageContext(t *testing.T) {
 	require.Len(t, committed.Turn.Messages, 1)
 	assert.Nil(t, committed.Turn.Messages[0].Context)
 	require.NotNil(t, committed.Turn.Context)
-	store, ok := committed.Turn.Context["store"].(string)
-	require.True(t, ok, "oversized store value should be truncated to string")
-	assert.LessOrEqual(t, len([]rune(store)), archiveContextValueMax)
+	assert.NotContains(t, committed.Turn.Context, "store")
+	assert.NotContains(t, committed.Turn.Context, "_v2_state")
+	assert.Equal(t, "a@b.com", committed.Turn.Context["customer_email"])
+	assert.True(t, committed.CatalogChanged)
+	require.NotNil(t, committed.Catalog)
+	assert.Contains(t, committed.Catalog, "store")
+	assert.Equal(t, committed.CatalogRevisionID, committed.Turn.Context[CatalogRevisionKey])
+
+	// Unchanged catalog on the next turn does not write a new revision.
+	sink2 := &PreviewSink{Session: session}
+	sink2.Text("products", "Again")
+	second := CommitArchiveTurn(session, "tiqr_ecommerce_v2", sink2, map[string]any{"text": "hi"})
+	require.NotNil(t, second)
+	assert.False(t, second.CatalogChanged)
+	assert.Equal(t, committed.CatalogRevisionID, second.CatalogRevisionID)
+	assert.Nil(t, second.Catalog)
 }
 
-func TestTurnToMapForFirestoreCapsOversizedTurn(t *testing.T) {
+func TestPrepareArchiveWriteSplitsOversizedTurn(t *testing.T) {
 	huge := strings.Repeat("z", 200_000)
 	turn := SessionArchiveTurn{
 		At:   time.Now().UTC().Format(time.RFC3339),
@@ -139,19 +154,30 @@ func TestTurnToMapForFirestoreCapsOversizedTurn(t *testing.T) {
 			{Name: "checkout_preview", Path: "/checkout", Response: map[string]any{"body": huge}},
 			{Name: "get_product", Path: "/product", Response: map[string]any{"body": huge}},
 		},
-		Context: map[string]any{"dump": huge, "store": map[string]any{"raw": huge}},
+		Context: map[string]any{"dump": huge},
 		Messages: []CodedPreviewMessage{
-			{Type: "text", Content: "hi", Context: map[string]any{"dump": huge}},
+			{Type: "text", Content: "hi"},
 		},
 		AICalls: []CodedPreviewAICall{
 			{Role: "adk_tool", Prompt: huge, Response: huge, Parsed: map[string]any{"data": huge}},
 		},
 	}
-	row, err := TurnToMapForFirestore(turn)
+	bundle, err := PrepareArchiveWrite(&CommittedArchiveTurn{
+		Index: 0,
+		Turn:  turn,
+		Meta:  &SessionArchive{TurnCount: 1},
+	})
 	require.NoError(t, err)
-	b, err := json.Marshal(row)
+	require.NotEmpty(t, bundle.TurnParts)
+	assert.Equal(t, true, bundle.Turn[archiveSplitKey])
+
+	reassembled, err := ReassembleArchiveDocument(bundle.Turn, bundle.TurnParts)
 	require.NoError(t, err)
-	assert.LessOrEqual(t, len(b), firestoreTurnMaxBytes)
+	require.NotNil(t, reassembled)
+	assert.Equal(t, "products", reassembled["step"])
+	msgs, ok := reassembled["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, msgs, 1)
 }
 
 func TestHasSessionArchiveFromTurnCountAndLegacyTurns(t *testing.T) {

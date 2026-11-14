@@ -113,6 +113,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.CommerceLifecycleEvent{},
 		&models.AIContext{},
 		&models.AgentTransfer{},
+		&models.SessionArchiveTurnRetry{},
 		// Bulk message models
 		&models.BulkMessageCampaign{},
 		&models.BulkMessageRecipient{},

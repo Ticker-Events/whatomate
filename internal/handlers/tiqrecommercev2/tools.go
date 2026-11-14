@@ -1,8 +1,6 @@
 package tiqrecommercev2
 
 import (
-	"encoding/json"
-	"fmt"
 	"strings"
 
 	"google.golang.org/adk/agent"
@@ -411,20 +409,8 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return errResult("cart is empty"), nil
 		}
 		params := map[string]string{}
-		// Guest checkout-preview goes through REST create-style body via operation.
-		items, _ := json.Marshal(OrderItemsForAPI(lines))
-		params["items_json"] = string(items)
 		if s := rt.session(); s != nil && s.SessionData != nil {
-			params["delivery_mode"] = strings.TrimSpace(asString(s.SessionData["delivery_mode"]))
-			if params["delivery_mode"] == "" {
-				params["delivery_mode"] = modePickup
-			}
-			if lat, ok := anyToFloat64(s.SessionData["delivery_latitude"]); ok {
-				params["latitude"] = fmt.Sprintf("%.6f", lat)
-			}
-			if lng, ok := anyToFloat64(s.SessionData["delivery_longitude"]); ok {
-				params["longitude"] = fmt.Sprintf("%.6f", lng)
-			}
+			params = tiqrecommerce.CheckoutPreviewParams(map[string]any(s.SessionData))
 		}
 		payload, ok := rt.callTiqr("checkout_preview", "checkout_preview", params)
 		if !ok {
@@ -513,14 +499,8 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 			return okResult(payload, "preview-only order; reply step=order_placed then end_session"), nil
 		}
 		params := map[string]string{}
-		items, _ := json.Marshal(OrderItemsForAPI(lines))
-		params["items_json"] = string(items)
 		if s := rt.session(); s != nil && s.SessionData != nil {
-			params["delivery_mode"] = strings.TrimSpace(asString(s.SessionData["delivery_mode"]))
-			if params["delivery_mode"] == "" {
-				params["delivery_mode"] = modePickup
-			}
-			params["notes"] = tiqrecommerce.CodedOrderNotes(map[string]any(s.SessionData))
+			params = tiqrecommerce.PickupOrderParams(map[string]any(s.SessionData))
 		}
 		payload, ok := rt.callTiqr("order", "create_order", params)
 		if !ok {
