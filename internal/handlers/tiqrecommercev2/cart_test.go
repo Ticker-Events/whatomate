@@ -18,6 +18,25 @@ func TestLineIDFor_DifferentCapturesStaySeparate(t *testing.T) {
 	assert.Equal(t, a, c)
 }
 
+func TestFormatCartSummary_CustomerOmitsLineID(t *testing.T) {
+	lines := []CartLine{{
+		LineID:      "line_8c522fe7cbd1a433",
+		OptionName:  "CHOCO CARAMEL",
+		ProductName: "Cake",
+		Quantity:    1,
+	}}
+	customer := formatCartSummaryForCustomer(lines)
+	assert.Contains(t, customer, "1. CHOCO CARAMEL x1")
+	assert.NotContains(t, customer, "line_")
+	assert.NotContains(t, customer, "line_8c522fe7cbd1a433")
+
+	agent := formatCartSummaryForAgent(lines)
+	assert.Contains(t, agent, "1. CHOCO CARAMEL x1 (line_8c522fe7cbd1a433)")
+
+	stripped := stripStaleCartLineIDs("*Your cart:*\n1. CHOCO CARAMEL x1 (line_8c522fe7cbd1a433)")
+	assert.Equal(t, "*Your cart:*\n1. CHOCO CARAMEL x1", stripped)
+}
+
 func TestRuntime_CartLineIdentityAndGrounding(t *testing.T) {
 	session := &models.ChatbotSession{SessionData: models.JSONB{}}
 	rt := &Runtime{

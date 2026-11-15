@@ -234,7 +234,7 @@ Rules:
 		fmt.Fprintf(&b, "Active collection instructions: %s\n", rt.State.AIInstructions)
 	}
 	b.WriteString("\nSession cart:\n")
-	b.WriteString(formatCartSummary(rt.cart()))
+	b.WriteString(formatCartSummaryForAgent(rt.cart()))
 	b.WriteString("\n\nRecent transcript:\n")
 	start := 0
 	if len(rt.State.Transcript) > 12 {

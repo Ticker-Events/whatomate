@@ -263,7 +263,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		if errMsg != "" {
 			return errResult(errMsg), nil
 		}
-		return okResult(line, formatCartSummary(rt.cart())), nil
+		return okResult(line, formatCartSummaryForAgent(rt.cart())), nil
 	}))); err != nil {
 		return nil, err
 	}
@@ -282,7 +282,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		if msg := rt.UpdateCartLine(in.LineID, in.Quantity); msg != "" {
 			return errResult(msg), nil
 		}
-		return okResult(nil, formatCartSummary(rt.cart())), nil
+		return okResult(nil, formatCartSummaryForAgent(rt.cart())), nil
 	}))); err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		if msg != "" {
 			return errResult(msg), nil
 		}
-		return okResult(map[string]any{"removed": name}, formatCartSummary(rt.cart())), nil
+		return okResult(map[string]any{"removed": name}, formatCartSummaryForAgent(rt.cart())), nil
 	}))); err != nil {
 		return nil, err
 	}
@@ -416,7 +416,7 @@ func buildTools(rt *Runtime) ([]tool.Tool, error) {
 		if !ok {
 			// Fallback: surface session cart for the agent to describe while
 			// still requiring a successful preview before create_order in production.
-			summary := formatCartSummary(lines)
+			summary := formatCartSummaryForCustomer(lines)
 			if s := rt.session(); s != nil {
 				if s.SessionData == nil {
 					s.SessionData = models.JSONB{}

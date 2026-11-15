@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -187,7 +188,17 @@ func findCartLine(lines []CartLine, lineID string) (CartLine, bool) {
 	return CartLine{}, false
 }
 
-func formatCartSummary(lines []CartLine) string {
+// formatCartSummaryForCustomer builds WhatsApp cart text without internal line ids.
+func formatCartSummaryForCustomer(lines []CartLine) string {
+	return formatCartSummary(lines, false)
+}
+
+// formatCartSummaryForAgent includes line_ids so update/remove tools can target a row.
+func formatCartSummaryForAgent(lines []CartLine) string {
+	return formatCartSummary(lines, true)
+}
+
+func formatCartSummary(lines []CartLine, includeLineID bool) string {
 	if len(lines) == 0 {
 		return "Your cart is empty."
 	}
@@ -201,7 +212,11 @@ func formatCartSummary(lines []CartLine) string {
 		if name == "" {
 			name = "Item"
 		}
-		fmt.Fprintf(&b, "%d. %s x%d (%s)\n", i+1, name, line.Quantity, line.LineID)
+		if includeLineID && line.LineID != "" {
+			fmt.Fprintf(&b, "%d. %s x%d (%s)\n", i+1, name, line.Quantity, line.LineID)
+		} else {
+			fmt.Fprintf(&b, "%d. %s x%d\n", i+1, name, line.Quantity)
+		}
 		for _, key := range line.CaptureOrder {
 			label := line.CaptureLabels[key]
 			if label == "" {
@@ -220,6 +235,14 @@ func formatCartSummary(lines []CartLine) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// staleLineIDParen matches a trailing " (line_<16 hex>)" from older customer summaries.
+var staleLineIDParen = regexp.MustCompile(` \(line_[0-9a-f]{16}\)`)
+
+// stripStaleCartLineIDs removes parenthetical line ids from stored customer-facing summaries.
+func stripStaleCartLineIDs(summary string) string {
+	return staleLineIDParen.ReplaceAllString(summary, "")
 }
 
 func stringMapValues(m map[string]any) map[string]string {

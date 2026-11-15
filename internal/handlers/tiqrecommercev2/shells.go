@@ -643,7 +643,7 @@ func (rt *Runtime) cartShellBody(afterEdit bool) string {
 	if len(lines) == 0 {
 		return "Your cart is empty.\n\nPlease choose a collection below to add items, then you can check out."
 	}
-	summary := formatCartSummary(lines)
+	summary := formatCartSummaryForCustomer(lines)
 	question := "Would you like to add anything else, edit your cart, or place your order?"
 	if afterEdit {
 		return summary + "\n\n" + question
@@ -664,15 +664,15 @@ func (rt *Runtime) cartShellBody(afterEdit bool) string {
 }
 
 func (rt *Runtime) cartEditBody() string {
-	summary := formatCartSummary(rt.cart())
+	summary := formatCartSummaryForCustomer(rt.cart())
 	return summary + "\n\nTell me what to change. For example:\n- remove item 1\n- remove Kunafa\n- change item 2 to 1\n- reduce Chocolate to 1"
 }
 
 func (rt *Runtime) previewShellBody() string {
-	summary := formatCartSummary(rt.cart())
+	summary := formatCartSummaryForCustomer(rt.cart())
 	if preview, ok := sessionMap(rt, "checkout_preview"); ok {
 		if t := strings.TrimSpace(asString(preview["customer_summary"])); t != "" {
-			summary = t
+			summary = stripStaleCartLineIDs(t)
 		}
 	}
 	return summary + "\n\nPlease confirm these items before we continue checkout.\n\nYou can edit quantities or remove items first."
