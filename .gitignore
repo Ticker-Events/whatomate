@@ -64,3 +64,6 @@ test-results/
 # Docker 
 docker/.env
 .gitnexus
+
+# App Platform filled specs (contain secrets)
+digitalocean/app-platform/*.local.yaml

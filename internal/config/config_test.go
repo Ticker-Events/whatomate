@@ -120,6 +120,24 @@ port = 8080
 	assert.Equal(t, 1234, cfg.Server.Port, "WHATOMATE_SERVER_PORT must override file")
 }
 
+func TestLoad_EnvVarsPreserveLeafUnderscores(t *testing.T) {
+	t.Setenv("WHATOMATE_DATABASE_SSL_MODE", "require")
+	t.Setenv("WHATOMATE_DEFAULT_ADMIN_EMAIL", "ops@example.com")
+	t.Setenv("WHATOMATE_RATE_LIMIT_LOGIN_MAX_ATTEMPTS", "7")
+	t.Setenv("WHATOMATE_JWT_ACCESS_EXPIRY_MINS", "42")
+	t.Setenv("WHATOMATE_WHATSAPP_WEBHOOK_VERIFY_TOKEN", "tok")
+	t.Setenv("WHATOMATE_APP_ENCRYPTION_KEY", "enc-key-32-chars-minimum!!!!!!!!")
+
+	cfg, err := config.Load("")
+	require.NoError(t, err)
+	assert.Equal(t, "require", cfg.Database.SSLMode)
+	assert.Equal(t, "ops@example.com", cfg.DefaultAdmin.Email)
+	assert.Equal(t, 7, cfg.RateLimit.LoginMaxAttempts)
+	assert.Equal(t, 42, cfg.JWT.AccessExpiryMins)
+	assert.Equal(t, "tok", cfg.WhatsApp.WebhookVerifyToken)
+	assert.Equal(t, "enc-key-32-chars-minimum!!!!!!!!", cfg.App.EncryptionKey)
+}
+
 func TestLoad_EmptyConfigPathStillLoadsDefaults(t *testing.T) {
 	cfg, err := config.Load("")
 	require.NoError(t, err)

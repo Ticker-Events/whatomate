@@ -85,13 +85,13 @@ COPY --from=piper-dl /tmp/piper-models /opt/piper/models
 # Create directories
 RUN mkdir -p /app/uploads /app/audio
 
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Expose port
 EXPOSE 8080
 
-# Match the GoReleaser image's launch convention so the same orchestrator
-# args work against both tags: the binary is the ENTRYPOINT and CMD holds
-# only the default subcommand/flags. A Nomad job that sets
-# `args = ["server", "-migrate", ...]` (no `command`) then appends to the
-# entrypoint instead of replacing the binary with "server".
-ENTRYPOINT ["./whatomate"]
+# entrypoint writes WHATOMATE_CONFIG_TOML to /tmp when set (App Platform),
+# then execs the binary. DOKS keeps using the mounted /app/config.toml.
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["server", "-config", "config.toml", "-migrate"]

@@ -261,6 +261,45 @@ type RateLimitConfig struct {
 	APIWindowSeconds    int  `koanf:"api_window_seconds"`
 }
 
+// envConfigSections are top-level koanf section names, longest first so
+// "default_admin" matches before a shorter prefix would.
+var envConfigSections = []string{
+	"default_admin",
+	"rate_limit",
+	"whatsapp",
+	"database",
+	"codedflow",
+	"aisensy",
+	"firebase",
+	"storage",
+	"calling",
+	"server",
+	"cookie",
+	"ticker",
+	"redis",
+	"jwt",
+	"app",
+	"tts",
+	"ai",
+}
+
+// envVarToKoanfPath maps WHATOMATE_* env names to koanf paths.
+// Section-aware so leaf underscores stay intact:
+//
+//	WHATOMATE_DATABASE_HOST      -> database.host
+//	WHATOMATE_DATABASE_SSL_MODE  -> database.ssl_mode  (not database.ssl.mode)
+//	WHATOMATE_DEFAULT_ADMIN_EMAIL -> default_admin.email
+func envVarToKoanfPath(s string) string {
+	key := strings.ToLower(strings.TrimPrefix(s, "WHATOMATE_"))
+	for _, section := range envConfigSections {
+		prefix := section + "_"
+		if strings.HasPrefix(key, prefix) {
+			return section + "." + strings.TrimPrefix(key, prefix)
+		}
+	}
+	return strings.ReplaceAll(key, "_", ".")
+}
+
 // Load loads configuration from file and environment variables
 func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
@@ -273,10 +312,7 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	// Load from environment variables (WHATOMATE_ prefix)
-	// e.g., WHATOMATE_DATABASE_HOST -> database.host
-	if err := k.Load(env.Provider("WHATOMATE_", ".", func(s string) string {
-		return strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(s, "WHATOMATE_")), "_", ".")
-	}), nil); err != nil {
+	if err := k.Load(env.Provider("WHATOMATE_", ".", envVarToKoanfPath), nil); err != nil {
 		return nil, err
 	}
 
