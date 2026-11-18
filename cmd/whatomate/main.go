@@ -181,21 +181,6 @@ func runServer(args []string) {
 	}
 	lo.Info("Connected to PostgreSQL")
 
-	// Run migrations if requested
-	if *migrate {
-		if err := database.RunMigrationWithProgress(db, &cfg.DefaultAdmin); err != nil {
-			lo.Fatal("Migration failed", "error", err)
-		}
-		// Backfill v2 graph for any legacy chatbot flow still on Steps[].
-		// Idempotent — re-running is a no-op once every row is converted.
-		if err := handlers.BackfillChatbotFlowGraph(db, lo); err != nil {
-			lo.Fatal("Chatbot flow graph backfill failed", "error", err)
-		}
-		if err := database.EncryptLegacyChatbotSecrets(db, cfg.App.EncryptionKey); err != nil {
-			lo.Fatal("Chatbot secret encryption migration failed", "error", err)
-		}
-	}
-
 	// Connect to Redis
 	rdb, err := database.NewRedis(&cfg.Redis)
 	if err != nil {
@@ -325,7 +310,8 @@ func runServer(args []string) {
 		Name:           "Whatomate",
 	}
 
-	// Start server in goroutine
+	// Start server in goroutine before migrations so readiness probes (e.g. App
+	// Platform /health) can connect while schema apply is still running.
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	go func() {
 		lo.Info("Server listening", "address", addr)
@@ -333,6 +319,21 @@ func runServer(args []string) {
 			lo.Fatal("Server failed", "error", err)
 		}
 	}()
+
+	// Run migrations if requested (after listen — /health does not need schema).
+	if *migrate {
+		if err := database.RunMigrationWithProgress(db, &cfg.DefaultAdmin); err != nil {
+			lo.Fatal("Migration failed", "error", err)
+		}
+		// Backfill v2 graph for any legacy chatbot flow still on Steps[].
+		// Idempotent — re-running is a no-op once every row is converted.
+		if err := handlers.BackfillChatbotFlowGraph(db, lo); err != nil {
+			lo.Fatal("Chatbot flow graph backfill failed", "error", err)
+		}
+		if err := database.EncryptLegacyChatbotSecrets(db, cfg.App.EncryptionKey); err != nil {
+			lo.Fatal("Chatbot secret encryption migration failed", "error", err)
+		}
+	}
 
 	// Start SLA processor (runs every minute)
 	slaProcessor := handlers.NewSLAProcessor(app, time.Minute)
