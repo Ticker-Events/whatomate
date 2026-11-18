@@ -86,7 +86,7 @@ RUN chmod +x /entrypoint.sh
 # Expose port
 EXPOSE 8080
 
-# entrypoint writes WHATOMATE_CONFIG_TOML to /tmp when set (App Platform),
-# then execs the binary. DOKS keeps using the mounted /app/config.toml.
+# entrypoint runs migrate, then execs the binary. DOKS overrides command to
+# ./whatomate directly (skips this entrypoint) and mounts /app/config.toml.
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["server", "-config", "config.toml", "-migrate"]
+CMD ["server", "-config", "config.toml"]
