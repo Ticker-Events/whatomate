@@ -67,3 +67,5 @@ docker/.env
 
 # App Platform filled specs (contain secrets)
 digitalocean/app-platform/*.local.yaml
+.cursor/
+.gomodcache/
