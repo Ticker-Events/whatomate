@@ -1,0 +1,270 @@
+# TiQR Agent (Whatomate) — DigitalOcean App Platform
+# Backend only: single service runs API + embedded workers.
+# UI is deployed separately on Vercel.
+#
+# Create / update:
+#   python3 digitalocean/app-platform/generate-local-spec.py
+#   doctl apps create --spec digitalocean/app-platform/tiqr-agent.local.yaml
+#   doctl apps update <app-id> --spec digitalocean/app-platform/tiqr-agent.local.yaml
+#
+# Config is individual WHATOMATE_* envs (see internal/config/config.go).
+# Redis is the App Platform Valkey DB below; WHATOMATE_REDIS_* bind to it.
+name: tiqr-agent
+region: blr
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+features:
+  - buildpack-stack=ubuntu-22
+ingress:
+  rules:
+    - component:
+        name: tiqr-agent
+      match:
+        path:
+          prefix: /
+databases:
+  # Production Valkey (engine VALKEY requires production + cluster_name).
+  # Create cluster: doctl databases create tiqr-agent-valkey --engine valkey --region sgp1 ...
+  - name: agent-valkey
+    engine: VALKEY
+    version: "8"
+    production: true
+    cluster_name: tiqr-agent-valkey
+services:
+  - name: tiqr-agent
+    image:
+      registry_type: DOCR
+      repository: tiqr-agent
+      tag: latest
+      deploy_on_push:
+        enabled: true
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-2gb
+    http_port: 8080
+    # entrypoint ensures /tmp/whatomate-config.toml exists; config comes from WHATOMATE_* envs.
+    run_command: /entrypoint.sh server -workers 1 -migrate -config /tmp/whatomate-config.toml
+    health_check:
+      http_path: /health
+      # -migrate on cold start can exceed default probes; allow ~5+ min before failing.
+      initial_delay_seconds: 120
+      period_seconds: 15
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 24
+    envs:
+      - key: WHATOMATE_REDIS_HOST
+        scope: RUN_TIME
+        value: ${agent-valkey.HOSTNAME}
+      - key: WHATOMATE_REDIS_PORT
+        scope: RUN_TIME
+        value: ${agent-valkey.PORT}
+      - key: WHATOMATE_REDIS_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+        value: ${agent-valkey.PASSWORD}
+      - key: WHATOMATE_REDIS_USERNAME
+        scope: RUN_TIME
+        value: default
+      - key: WHATOMATE_REDIS_TLS
+        scope: RUN_TIME
+        value: "true"
+      - key: WHATOMATE_REDIS_DB
+        scope: RUN_TIME
+        value: "0"
+      - key: WHATOMATE_APP_ENVIRONMENT
+        scope: RUN_TIME
+        value: production
+      - key: WHATOMATE_SERVER_HOST
+        scope: RUN_TIME
+        value: 0.0.0.0
+      - key: WHATOMATE_SERVER_PORT
+        scope: RUN_TIME
+        value: "8080"
+      - key: WHATOMATE_COOKIE_SECURE
+        scope: RUN_TIME
+        value: "true"
+      # BEGIN_GENERATED_ENVS
+      - key: WHATOMATE_APP_NAME
+        scope: RUN_TIME
+        value: TiQR Agent
+      - key: WHATOMATE_APP_DEBUG
+        scope: RUN_TIME
+        value: "false"
+      - key: WHATOMATE_APP_ENCRYPTION_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME_32_PLUS_CHAR_AES_KEY
+      - key: WHATOMATE_SERVER_READ_TIMEOUT
+        scope: RUN_TIME
+        value: "30"
+      - key: WHATOMATE_SERVER_WRITE_TIMEOUT
+        scope: RUN_TIME
+        value: "30"
+      - key: WHATOMATE_SERVER_BASE_PATH
+        scope: RUN_TIME
+        value: ""
+      - key: WHATOMATE_SERVER_ALLOWED_ORIGINS
+        scope: RUN_TIME
+        value: https://agent.tiqr.store
+      - key: WHATOMATE_DATABASE_HOST
+        scope: RUN_TIME
+        value: CHANGE_ME.neon.tech
+      - key: WHATOMATE_DATABASE_PORT
+        scope: RUN_TIME
+        value: "5432"
+      - key: WHATOMATE_DATABASE_USER
+        scope: RUN_TIME
+        value: CHANGE_ME
+      - key: WHATOMATE_DATABASE_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      - key: WHATOMATE_DATABASE_NAME
+        scope: RUN_TIME
+        value: neondb
+      - key: WHATOMATE_DATABASE_SSL_MODE
+        scope: RUN_TIME
+        value: require
+      - key: WHATOMATE_DATABASE_MAX_OPEN_CONNS
+        scope: RUN_TIME
+        value: "25"
+      - key: WHATOMATE_DATABASE_MAX_IDLE_CONNS
+        scope: RUN_TIME
+        value: "5"
+      - key: WHATOMATE_DATABASE_CONN_MAX_LIFETIME
+        scope: RUN_TIME
+        value: "300"
+      - key: WHATOMATE_JWT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME_AT_LEAST_32_CHAR_JWT_SECRET
+      - key: WHATOMATE_JWT_ACCESS_EXPIRY_MINS
+        scope: RUN_TIME
+        value: "15"
+      - key: WHATOMATE_JWT_REFRESH_EXPIRY_DAYS
+        scope: RUN_TIME
+        value: "1"
+      - key: WHATOMATE_WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      - key: WHATOMATE_WHATSAPP_API_VERSION
+        scope: RUN_TIME
+        value: v21.0
+      - key: WHATOMATE_WHATSAPP_BASE_URL
+        scope: RUN_TIME
+        value: https://graph.facebook.com
+      - key: WHATOMATE_WHATSAPP_CONFIG_ID
+        scope: RUN_TIME
+        value: CHANGE_ME
+      - key: WHATOMATE_WHATSAPP_APP_ID
+        scope: RUN_TIME
+        value: CHANGE_ME
+      - key: WHATOMATE_WHATSAPP_APP_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      - key: WHATOMATE_WHATSAPP_TOKEN_REFRESH_DAYS_BEFORE
+        scope: RUN_TIME
+        value: "10"
+      - key: WHATOMATE_WHATSAPP_TOKEN_REFRESH_INTERVAL_MINS
+        scope: RUN_TIME
+        value: "60"
+      - key: WHATOMATE_STORAGE_TYPE
+        scope: RUN_TIME
+        value: s3
+      - key: WHATOMATE_STORAGE_S3_BUCKET
+        scope: RUN_TIME
+        value: CHANGE_ME.sgp1.digitaloceanspaces.com
+      - key: WHATOMATE_STORAGE_S3_REGION
+        scope: RUN_TIME
+        value: sgp1
+      - key: WHATOMATE_STORAGE_S3_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      - key: WHATOMATE_STORAGE_S3_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      - key: WHATOMATE_COOKIE_DOMAIN
+        scope: RUN_TIME
+        value: ""
+      - key: WHATOMATE_RATE_LIMIT_ENABLED
+        scope: RUN_TIME
+        value: "true"
+      - key: WHATOMATE_RATE_LIMIT_LOGIN_MAX_ATTEMPTS
+        scope: RUN_TIME
+        value: "10"
+      - key: WHATOMATE_RATE_LIMIT_REGISTER_MAX_ATTEMPTS
+        scope: RUN_TIME
+        value: "10"
+      - key: WHATOMATE_RATE_LIMIT_REFRESH_MAX_ATTEMPTS
+        scope: RUN_TIME
+        value: "30"
+      - key: WHATOMATE_RATE_LIMIT_SSO_MAX_ATTEMPTS
+        scope: RUN_TIME
+        value: "10"
+      - key: WHATOMATE_RATE_LIMIT_WINDOW_SECONDS
+        scope: RUN_TIME
+        value: "60"
+      - key: WHATOMATE_RATE_LIMIT_TRUST_PROXY
+        scope: RUN_TIME
+        value: "true"
+      - key: WHATOMATE_RATE_LIMIT_API_MAX_REQUESTS
+        scope: RUN_TIME
+        value: "200"
+      - key: WHATOMATE_RATE_LIMIT_API_WINDOW_SECONDS
+        scope: RUN_TIME
+        value: "60"
+      - key: WHATOMATE_DEFAULT_ADMIN_EMAIL
+        scope: RUN_TIME
+        value: hello@tiqr.events
+      - key: WHATOMATE_DEFAULT_ADMIN_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      - key: WHATOMATE_DEFAULT_ADMIN_FULL_NAME
+        scope: RUN_TIME
+        value: Admin
+      - key: WHATOMATE_CALLING_MAX_CALL_DURATION
+        scope: RUN_TIME
+        value: "300"
+      - key: WHATOMATE_CALLING_AUDIO_DIR
+        scope: RUN_TIME
+        value: ./audio
+      - key: WHATOMATE_CALLING_TRANSFER_TIMEOUT_SECS
+        scope: RUN_TIME
+        value: "120"
+      - key: WHATOMATE_CALLING_RECORDING_ENABLED
+        scope: RUN_TIME
+        value: "false"
+      - key: WHATOMATE_CALLING_UDP_PORT_MIN
+        scope: RUN_TIME
+        value: "10000"
+      - key: WHATOMATE_CALLING_UDP_PORT_MAX
+        scope: RUN_TIME
+        value: "10100"
+      - key: WHATOMATE_CALLING_PUBLIC_IP
+        scope: RUN_TIME
+        value: ""
+      - key: WHATOMATE_AISENSY_BASE_URL
+        scope: RUN_TIME
+        value: https://backend.aisensy.com/direct-apis/t1
+      - key: WHATOMATE_AISENSY_WEBHOOK_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: ""
+      - key: WHATOMATE_FIREBASE_CREDENTIALS
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME_FIREBASE_SERVICE_ACCOUNT_JSON
+      - key: WHATOMATE_TICKER_URL
+        scope: RUN_TIME
+        value: https://staging-api.tiqr.events
+      - key: WHATOMATE_TICKER_PUSHKEY
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      # END_GENERATED_ENVS
