@@ -68,5 +68,6 @@ graphify-out
 
 # App Platform filled specs (contain secrets)
 digitalocean/app-platform/*.local.yaml
+digitalocean/app-platform/*.local.env
 .cursor/
 .gomodcache/
