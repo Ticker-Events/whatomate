@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -57,6 +57,15 @@ const isDeleting = ref(false)
 const whatsappConfig = ref<{ app_id: string; config_id: string; api_version: string } | null>(null)
 const isConnectingFB = ref(false)
 const showOnboardingDialog = ref(false)
+const signupSession = ref({ wabaId: '', phoneNumberId: '' })
+const signupCodeReceived = ref(false)
+let signupPopupWatch = 0
+
+const signupFinishEvents = new Set([
+  'FINISH',
+  'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+  'FINISH_ONLY_WABA',
+])
 
 const canWrite = computed(() => authStore.hasPermission('accounts', 'write'))
 const canDelete = computed(() => authStore.hasPermission('accounts', 'delete'))
@@ -81,8 +90,13 @@ watch(() => organizationsStore.selectedOrgId, () => {
   fetchWhatsAppConfig()
 })
 onMounted(async () => {
+  window.addEventListener('message', onSignupMessage)
   consumeFacebookReturn()
   await Promise.all([fetchAccounts(), fetchWhatsAppConfig()])
+})
+onUnmounted(() => {
+  window.removeEventListener('message', onSignupMessage)
+  window.clearInterval(signupPopupWatch)
 })
 
 async function fetchAccounts() {
@@ -116,6 +130,60 @@ function oauthReturnUri(): string {
   return `${window.location.origin}/settings/accounts`
 }
 
+function parseSignupMessage(raw: unknown): { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } } | null {
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+  if (raw && typeof raw === 'object') return raw as { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } }
+  return null
+}
+
+function onSignupMessage(event: MessageEvent) {
+  if (event.origin === 'https://www.facebook.com' || event.origin === 'https://web.facebook.com') {
+    const data = parseSignupMessage(event.data)
+    if (!data || data.type !== 'WA_EMBEDDED_SIGNUP' || !signupFinishEvents.has(data.event || '')) return
+    signupSession.value = {
+      wabaId: data.data?.waba_id || signupSession.value.wabaId,
+      phoneNumberId: data.data?.phone_number_id || signupSession.value.phoneNumberId,
+    }
+    return
+  }
+
+  if (event.origin !== window.location.origin) return
+  const payload = event.data as { type?: string; code?: string; error?: string } | null
+  if (!payload || payload.type !== 'tiqr-facebook-signup') return
+  if (!payload.code) {
+    isConnectingFB.value = false
+    toast.error(payload.error || 'Facebook login was cancelled')
+    return
+  }
+  signupCodeReceived.value = true
+  finishSignup(payload.code)
+}
+
+function waitForSignupSession(): Promise<void> {
+  if (signupSession.value.wabaId) return Promise.resolve()
+  return new Promise((resolve) => {
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      if (signupSession.value.wabaId || Date.now() - started >= 2000) {
+        window.clearInterval(timer)
+        resolve()
+      }
+    }, 50)
+  })
+}
+
+async function finishSignup(code: string) {
+  isConnectingFB.value = true
+  await waitForSignupSession()
+  exchangeCodeForToken(code, signupSession.value.phoneNumberId, signupSession.value.wabaId, oauthReturnUri())
+}
+
 function consumeFacebookReturn() {
   const params = new URLSearchParams(window.location.search)
   const code = params.get('code')
@@ -123,13 +191,17 @@ function consumeFacebookReturn() {
 
   const redirectUri = oauthReturnUri()
   window.history.replaceState({}, '', redirectUri)
-  if (!code) {
-    toast.error(params.get('error_description') || 'Facebook login was cancelled')
+  const error = params.get('error_description') || params.get('error') || ''
+  if (window.opener && window.opener !== window) {
+    window.opener.postMessage({ type: 'tiqr-facebook-signup', code: code || '', error }, window.location.origin)
+    window.close()
     return
   }
-
-  isConnectingFB.value = true
-  exchangeCodeForToken(code, '', '', redirectUri)
+  if (!code) {
+    toast.error(error || 'Facebook login was cancelled')
+    return
+  }
+  finishSignup(code)
 }
 
 function launchWhatsAppSignup(isCoexistence: boolean = true) {
@@ -148,14 +220,35 @@ function launchWhatsAppSignup(isCoexistence: boolean = true) {
     response_type: 'code',
     config_id: whatsappConfig.value.config_id,
     override_default_response_type: 'true',
-    display: 'page',
+    display: 'popup',
     extras: JSON.stringify(extras),
   })
 
   const version = whatsappConfig.value.api_version || 'v21.0'
+  signupSession.value = { wabaId: '', phoneNumberId: '' }
+  signupCodeReceived.value = false
+  const popup = window.open(
+    `https://www.facebook.com/${version}/dialog/oauth?${params.toString()}`,
+    'whatsapp_signup',
+    'popup,width=600,height=780'
+  )
+  if (!popup) {
+    toast.error('The Facebook window was blocked. Allow popups for this site and try again.')
+    return
+  }
+  popup.focus()
   showOnboardingDialog.value = false
   isConnectingFB.value = true
-  window.location.assign(`https://www.facebook.com/${version}/dialog/oauth?${params.toString()}`)
+  window.clearInterval(signupPopupWatch)
+  signupPopupWatch = window.setInterval(() => {
+    if (!popup.closed) return
+    window.clearInterval(signupPopupWatch)
+    window.setTimeout(() => {
+      if (signupCodeReceived.value) return
+      isConnectingFB.value = false
+      toast.error('Facebook closed before a WhatsApp Business Account was shared. Finish the signup window and try again.')
+    }, 800)
+  }, 400)
 }
 
 async function exchangeCodeForToken(code: string, phoneNumberId: string, wabaId: string, redirectUri: string) {

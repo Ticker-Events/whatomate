@@ -809,6 +809,63 @@ func (c *Client) GetSharedWABA(ctx context.Context, accessToken string) (*Shared
 	return &resp, nil
 }
 
+type graphIDList struct {
+	Data []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"data"`
+}
+
+func (c *Client) firstGraphID(ctx context.Context, rawURL, accessToken string) string {
+	respBody, err := c.doRequest(ctx, http.MethodGet, rawURL, nil, accessToken)
+	if err != nil {
+		c.Log.Debug("graph id lookup failed", "error", err)
+		return ""
+	}
+	var resp graphIDList
+	if err := json.Unmarshal(respBody, &resp); err != nil || len(resp.Data) == 0 {
+		return ""
+	}
+	return resp.Data[0].ID
+}
+
+// FindBusinessWABA looks up a WhatsApp Business Account the token can access.
+// /me/accounts returns Facebook Pages, not WABAs, so embedded signup tokens
+// often have no id there even after a successful connect.
+func (c *Client) FindBusinessWABA(ctx context.Context, accessToken, apiVersion, userID string) (string, error) {
+	if apiVersion == "" {
+		apiVersion = "v21.0"
+	}
+	base := c.getBaseURL()
+	if userID != "" {
+		assigned := fmt.Sprintf("%s/%s/%s/assigned_whatsapp_business_accounts?fields=id,name&limit=5", base, apiVersion, userID)
+		if id := c.firstGraphID(ctx, assigned, accessToken); id != "" {
+			return id, nil
+		}
+	}
+
+	bizBody, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("%s/%s/me/businesses?fields=id,name&limit=20", base, apiVersion), nil, accessToken)
+	if err != nil {
+		return "", nil
+	}
+	var businesses graphIDList
+	if err := json.Unmarshal(bizBody, &businesses); err != nil {
+		return "", nil
+	}
+	for _, biz := range businesses.Data {
+		if biz.ID == "" {
+			continue
+		}
+		for _, edge := range []string{"owned_whatsapp_business_accounts", "client_whatsapp_business_accounts"} {
+			rawURL := fmt.Sprintf("%s/%s/%s/%s?fields=id,name&limit=5", base, apiVersion, biz.ID, edge)
+			if id := c.firstGraphID(ctx, rawURL, accessToken); id != "" {
+				return id, nil
+			}
+		}
+	}
+	return "", nil
+}
+
 // WABAPhoneNumbersResponse represents the response containing phone numbers for a WABA
 type WABAPhoneNumbersResponse struct {
 	Data []struct {

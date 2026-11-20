@@ -959,11 +959,19 @@ func (a *App) discoverWABAID(ctx context.Context, orgID uuid.UUID, accessToken s
 		}
 	}
 
-	a.Log.Warn("No WABA ID found in granular scopes, falling back to /me/accounts strategy")
+	a.Log.Warn("No WABA ID found in granular scopes, falling back to business assets")
 	sharedInfo, err := a.WhatsApp.GetSharedWABA(ctx, accessToken)
 	if err == nil && len(sharedInfo.Data) > 0 {
 		return sharedInfo.Data[0].ID, nil
 	}
+	wabaID, err := a.WhatsApp.FindBusinessWABA(ctx, accessToken, a.Config.WhatsApp.APIVersion, debugInfo.UserID)
+	if err != nil {
+		return "", err
+	}
+	if wabaID != "" {
+		return wabaID, nil
+	}
+	a.Log.Warn("No WhatsApp Business Account on token", "user_id", debugInfo.UserID, "scopes", debugInfo.Scopes)
 	return "", nil
 }
 
