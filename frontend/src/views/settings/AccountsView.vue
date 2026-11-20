@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -25,12 +25,6 @@ import {
   Smartphone,
   Network
 } from 'lucide-vue-next'
-
-declare global {
-  interface Window {
-    FB: any
-  }
-}
 
 const { t } = useI18n()
 const organizationsStore = useOrganizationsStore()
@@ -61,16 +55,8 @@ const isDeleting = ref(false)
 
 // Facebook Embedded Signup State
 const whatsappConfig = ref<{ app_id: string; config_id: string; api_version: string } | null>(null)
-const isFBSDKLoaded = ref(false)
 const isConnectingFB = ref(false)
 const showOnboardingDialog = ref(false)
-const signupSession = ref({ wabaId: '', phoneNumberId: '' })
-
-const signupFinishEvents = new Set([
-  'FINISH',
-  'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
-  'FINISH_ONLY_WABA',
-])
 
 const canWrite = computed(() => authStore.hasPermission('accounts', 'write'))
 const canDelete = computed(() => authStore.hasPermission('accounts', 'delete'))
@@ -95,47 +81,9 @@ watch(() => organizationsStore.selectedOrgId, () => {
   fetchWhatsAppConfig()
 })
 onMounted(async () => {
-  window.addEventListener('message', onEmbeddedSignupMessage)
+  consumeFacebookReturn()
   await Promise.all([fetchAccounts(), fetchWhatsAppConfig()])
 })
-onUnmounted(() => {
-  window.removeEventListener('message', onEmbeddedSignupMessage)
-})
-
-function onEmbeddedSignupMessage(event: MessageEvent) {
-  if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return
-  const data = parseSignupMessage(event.data)
-  if (!data || data.type !== 'WA_EMBEDDED_SIGNUP' || !signupFinishEvents.has(data.event || '')) return
-  signupSession.value = {
-    wabaId: data.data?.waba_id || signupSession.value.wabaId,
-    phoneNumberId: data.data?.phone_number_id || signupSession.value.phoneNumberId,
-  }
-}
-
-function parseSignupMessage(raw: unknown): { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } } | null {
-  if (typeof raw === 'string') {
-    try {
-      return JSON.parse(raw)
-    } catch {
-      return null
-    }
-  }
-  if (raw && typeof raw === 'object') return raw as { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } }
-  return null
-}
-
-function waitForSignupSession(): Promise<void> {
-  if (signupSession.value.wabaId) return Promise.resolve()
-  return new Promise((resolve) => {
-    const started = Date.now()
-    const timer = window.setInterval(() => {
-      if (signupSession.value.wabaId || Date.now() - started >= 2000) {
-        window.clearInterval(timer)
-        resolve()
-      }
-    }, 50)
-  })
-}
 
 async function fetchAccounts() {
   isLoading.value = true
@@ -159,123 +107,55 @@ async function fetchWhatsAppConfig() {
       config_id: response.data.data.whatsapp_config_id,
       api_version: response.data.data.whatsapp_api_version || 'v21.0'
     }
-    if (whatsappConfig.value.app_id && whatsappConfig.value.config_id) {
-      loadFacebookSDK()
-    }
   } catch (error: any) {
     console.error('Failed to fetch WhatsApp config:', error)
   }
 }
 
-function loadFacebookSDK() {
-  if (isFBSDKLoaded.value || !whatsappConfig.value?.app_id) return
-
-  const script = document.createElement('script')
-  script.src = 'https://connect.facebook.net/en_US/sdk.js'
-  script.async = true
-  script.defer = true
-  script.onload = () => {
-    window.FB.init({
-      appId: whatsappConfig.value!.app_id,
-      cookie: true,
-      xfbml: true,
-      version: whatsappConfig.value!.api_version
-    })
-    isFBSDKLoaded.value = true
-  }
-  document.body.appendChild(script)
+function oauthReturnUri(): string {
+  return `${window.location.origin}/settings/accounts`
 }
 
-function dialogRedirectUri(url: string | URL | null | undefined): string {
-  if (url == null || url === '') return ''
-  try {
-    return new URL(String(url), window.location.origin).searchParams.get('redirect_uri') || ''
-  } catch {
-    return ''
-  }
-}
+function consumeFacebookReturn() {
+  const params = new URLSearchParams(window.location.search)
+  const code = params.get('code')
+  if (!code && !params.get('error')) return
 
-function launchWhatsAppSignup(isCoexistence: boolean = true) {
-  if (!isFBSDKLoaded.value) {
-    toast.error('Facebook SDK not loaded yet. Please wait...')
+  const redirectUri = oauthReturnUri()
+  window.history.replaceState({}, '', redirectUri)
+  if (!code) {
+    toast.error(params.get('error_description') || 'Facebook login was cancelled')
     return
   }
 
-  if (!whatsappConfig.value) {
+  isConnectingFB.value = true
+  exchangeCodeForToken(code, '', '', redirectUri)
+}
+
+function launchWhatsAppSignup(isCoexistence: boolean = true) {
+  if (!whatsappConfig.value?.app_id || !whatsappConfig.value?.config_id) {
     toast.error('WhatsApp configuration not loaded')
     return
   }
 
+  const extras = isCoexistence
+    ? { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3', version: 'v3' }
+    : { setup: {}, sessionInfoVersion: '3' }
+
+  const params = new URLSearchParams({
+    client_id: whatsappConfig.value.app_id,
+    redirect_uri: oauthReturnUri(),
+    response_type: 'code',
+    config_id: whatsappConfig.value.config_id,
+    override_default_response_type: 'true',
+    display: 'page',
+    extras: JSON.stringify(extras),
+  })
+
+  const version = whatsappConfig.value.api_version || 'v21.0'
   showOnboardingDialog.value = false
   isConnectingFB.value = true
-  signupSession.value = { wabaId: '', phoneNumberId: '' }
-
-  const loginOptions: any = {
-    config_id: whatsappConfig.value.config_id,
-    response_type: 'code',
-    override_default_response_type: true
-  }
-
-  if (isCoexistence) {
-    loginOptions.extras = {
-      setup: {},
-      featureType: 'whatsapp_business_app_onboarding',
-      sessionInfoVersion: '3',
-      version: 'v3'
-    }
-  } else {
-    loginOptions.extras = {
-      setup: {},
-      sessionInfoVersion: '3'
-    }
-  }
-
-  // FB.login puts a session-specific xd_arbiter URL on the dialog, not this page.
-  // The code exchange is rejected unless that same string is sent back.
-  const originalOpen = window.open.bind(window)
-  let oauthRedirectUri = ''
-  window.open = (url?: string | URL, target?: string, features?: string) => {
-    const captured = dialogRedirectUri(url)
-    if (captured) oauthRedirectUri = captured
-    return originalOpen(url, target, features)
-  }
-  try {
-    window.FB.login(
-      async (response: any) => {
-        if (response.authResponse) {
-          const code = response.authResponse.code
-          if (!code) {
-            toast.error('Incomplete data from Facebook: missing authorization code')
-            isConnectingFB.value = false
-            return
-          }
-
-          // waba_id and phone_number_id arrive in a WA_EMBEDDED_SIGNUP postMessage,
-          // not on authResponse. The message usually lands just before this callback.
-          await waitForSignupSession()
-          const phoneNumberId = response.authResponse.phone_number_id || signupSession.value.phoneNumberId
-          const wabaId = response.authResponse.waba_id || signupSession.value.wabaId
-          if (!wabaId) {
-            toast.error('Facebook did not return a WhatsApp Business Account. Finish the signup window and try again.')
-            isConnectingFB.value = false
-            return
-          }
-
-          exchangeCodeForToken(code, phoneNumberId, wabaId, oauthRedirectUri)
-        } else if (response.error) {
-          console.error('Facebook SDK error:', response.error)
-          toast.error(`Facebook error: ${response.error.message || 'Unknown error'}`)
-          isConnectingFB.value = false
-        } else {
-          toast.error('Facebook login was cancelled')
-          isConnectingFB.value = false
-        }
-      },
-      loginOptions
-    )
-  } finally {
-    window.open = originalOpen
-  }
+  window.location.assign(`https://www.facebook.com/${version}/dialog/oauth?${params.toString()}`)
 }
 
 async function exchangeCodeForToken(code: string, phoneNumberId: string, wabaId: string, redirectUri: string) {
@@ -400,7 +280,7 @@ async function confirmDelete() {
                       v-if="whatsappConfig?.app_id && whatsappConfig?.config_id"
                       size="lg"
                       @click="showOnboardingDialog = true"
-                      :disabled="isConnectingFB || !isFBSDKLoaded"
+                      :disabled="isConnectingFB"
                       class="bg-gradient-to-br from-facebook to-facebook-dark hover:from-facebook-hover hover:to-facebook-hoverDark text-white border-none shadow-none"
                     >
                       <Facebook v-if="!isConnectingFB" class="mr-2 h-5 w-5" />
