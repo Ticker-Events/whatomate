@@ -26,6 +26,12 @@ import {
   Network
 } from 'lucide-vue-next'
 
+declare global {
+  interface Window {
+    FB: any
+  }
+}
+
 const { t } = useI18n()
 const organizationsStore = useOrganizationsStore()
 const authStore = useAuthStore()
@@ -55,6 +61,7 @@ const isDeleting = ref(false)
 
 // Facebook Embedded Signup State
 const whatsappConfig = ref<{ app_id: string; config_id: string; api_version: string } | null>(null)
+const isFBSDKLoaded = ref(false)
 const isConnectingFB = ref(false)
 const showOnboardingDialog = ref(false)
 const signupSession = ref({ wabaId: '', phoneNumberId: '' })
@@ -121,6 +128,7 @@ async function fetchWhatsAppConfig() {
       config_id: response.data.data.whatsapp_config_id,
       api_version: response.data.data.whatsapp_api_version || 'v21.0'
     }
+    if (whatsappConfig.value.app_id) loadFacebookSDK()
   } catch (error: any) {
     console.error('Failed to fetch WhatsApp config:', error)
   }
@@ -128,6 +136,37 @@ async function fetchWhatsAppConfig() {
 
 function oauthReturnUri(): string {
   return `${window.location.origin}/settings/accounts`
+}
+
+function loadFacebookSDK() {
+  if (isFBSDKLoaded.value || !whatsappConfig.value?.app_id || document.getElementById('facebook-jssdk')) {
+    if (window.FB) isFBSDKLoaded.value = true
+    return
+  }
+  const script = document.createElement('script')
+  script.id = 'facebook-jssdk'
+  script.src = 'https://connect.facebook.net/en_US/sdk.js'
+  script.async = true
+  script.defer = true
+  script.onload = () => {
+    window.FB.init({
+      appId: whatsappConfig.value!.app_id,
+      cookie: true,
+      xfbml: false,
+      version: whatsappConfig.value!.api_version
+    })
+    isFBSDKLoaded.value = true
+  }
+  document.body.appendChild(script)
+}
+
+function dialogRedirectUri(url: string | URL | null | undefined): string {
+  if (url == null || url === '') return ''
+  try {
+    return new URL(String(url), window.location.origin).searchParams.get('redirect_uri') || ''
+  } catch {
+    return ''
+  }
 }
 
 function parseSignupMessage(raw: unknown): { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } } | null {
@@ -162,7 +201,7 @@ function onSignupMessage(event: MessageEvent) {
     return
   }
   signupCodeReceived.value = true
-  finishSignup(payload.code)
+  finishSignup(payload.code, oauthReturnUri())
 }
 
 function waitForSignupSession(): Promise<void> {
@@ -178,10 +217,15 @@ function waitForSignupSession(): Promise<void> {
   })
 }
 
-async function finishSignup(code: string) {
+async function finishSignup(code: string, redirectUri: string) {
   isConnectingFB.value = true
   await waitForSignupSession()
-  exchangeCodeForToken(code, signupSession.value.phoneNumberId, signupSession.value.wabaId, oauthReturnUri())
+  if (!signupSession.value.wabaId) {
+    isConnectingFB.value = false
+    toast.error('Facebook did not share a WhatsApp Business Account. Finish the WhatsApp signup steps, then try again.')
+    return
+  }
+  exchangeCodeForToken(code, signupSession.value.phoneNumberId, signupSession.value.wabaId, redirectUri)
 }
 
 function consumeFacebookReturn() {
@@ -201,47 +245,71 @@ function consumeFacebookReturn() {
     toast.error(error || 'Facebook login was cancelled')
     return
   }
-  finishSignup(code)
+  finishSignup(code, oauthReturnUri())
 }
 
 function launchWhatsAppSignup(isCoexistence: boolean = true) {
-  if (!whatsappConfig.value?.app_id || !whatsappConfig.value?.config_id) {
+  if (!isFBSDKLoaded.value || !window.FB) {
+    toast.error('Facebook SDK not loaded yet. Please wait...')
+    return
+  }
+  if (!whatsappConfig.value?.config_id) {
     toast.error('WhatsApp configuration not loaded')
     return
   }
 
-  const extras = isCoexistence
-    ? { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3', version: 'v3' }
-    : { setup: {}, sessionInfoVersion: '3' }
-
-  const params = new URLSearchParams({
-    client_id: whatsappConfig.value.app_id,
-    redirect_uri: oauthReturnUri(),
-    response_type: 'code',
+  const loginOptions: Record<string, unknown> = {
     config_id: whatsappConfig.value.config_id,
-    override_default_response_type: 'true',
-    display: 'popup',
-    extras: JSON.stringify(extras),
-  })
+    response_type: 'code',
+    override_default_response_type: true,
+    extras: isCoexistence
+      ? { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3', version: 'v3' }
+      : { setup: {}, sessionInfoVersion: '3' }
+  }
 
-  const version = whatsappConfig.value.api_version || 'v21.0'
   signupSession.value = { wabaId: '', phoneNumberId: '' }
   signupCodeReceived.value = false
-  const popup = window.open(
-    `https://www.facebook.com/${version}/dialog/oauth?${params.toString()}`,
-    'whatsapp_signup',
-    'popup,width=600,height=780'
-  )
+
+  // FB.login puts a session-specific xd_arbiter URL on the dialog. The code
+  // exchange is rejected unless that same string is sent back. The WhatsApp
+  // account id arrives in a separate WA_EMBEDDED_SIGNUP message, not on the code.
+  const originalOpen = window.open.bind(window)
+  let oauthRedirectUri = ''
+  let popup: Window | null = null
+  window.open = (url?: string | URL, target?: string, features?: string) => {
+    const captured = dialogRedirectUri(url)
+    if (captured) oauthRedirectUri = captured
+    const opened = originalOpen(url, target, features)
+    if (opened) popup = opened
+    return opened
+  }
+  try {
+    window.FB.login((response: { authResponse?: { code?: string }; error?: { message?: string } }) => {
+      window.clearInterval(signupPopupWatch)
+      if (!response.authResponse?.code) {
+        isConnectingFB.value = false
+        toast.error(response.error?.message || 'Facebook login was cancelled')
+        return
+      }
+      signupCodeReceived.value = true
+      finishSignup(response.authResponse.code, oauthRedirectUri)
+    }, loginOptions)
+  } finally {
+    window.open = originalOpen
+  }
+
   if (!popup) {
+    isConnectingFB.value = false
     toast.error('The Facebook window was blocked. Allow popups for this site and try again.')
     return
   }
   popup.focus()
   showOnboardingDialog.value = false
   isConnectingFB.value = true
+  const opened = popup
   window.clearInterval(signupPopupWatch)
   signupPopupWatch = window.setInterval(() => {
-    if (!popup.closed) return
+    if (!opened.closed) return
     window.clearInterval(signupPopupWatch)
     window.setTimeout(() => {
       if (signupCodeReceived.value) return

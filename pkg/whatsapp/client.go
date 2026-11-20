@@ -755,10 +755,13 @@ type TokenDebugInfo struct {
 
 // GetTokenDebugInfo retrieves information about an access token
 func (c *Client) GetTokenDebugInfo(ctx context.Context, inputToken, accessToken string) (*TokenDebugInfo, error) {
-	url := fmt.Sprintf("%s/debug_token?input_token=%s", c.getBaseURL(), inputToken)
+	q := url.Values{}
+	q.Set("input_token", inputToken)
+	// Versioned debug_token is what returns granular_scopes.target_ids for Embedded Signup.
+	rawURL := fmt.Sprintf("%s/v21.0/debug_token?%s", c.getBaseURL(), q.Encode())
 
 	// debug_token requires an app access token or a user access token
-	respBody, err := c.doRequest(ctx, http.MethodGet, url, nil, accessToken)
+	respBody, err := c.doRequest(ctx, http.MethodGet, rawURL, nil, accessToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get token debug info: %w", err)
 	}

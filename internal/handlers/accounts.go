@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -951,12 +952,11 @@ func (a *App) discoverWABAID(ctx context.Context, orgID uuid.UUID, accessToken s
 		return "", fmt.Errorf("failed to validate token details: %w", err)
 	}
 
-	for _, scopeName := range []string{"whatsapp_business_management", "whatsapp_business_messaging"} {
-		for _, scope := range debugInfo.GranularScopes {
-			if scope.Scope == scopeName && len(scope.TargetIds) > 0 {
-				return scope.TargetIds[0], nil
-			}
+	for _, scope := range debugInfo.GranularScopes {
+		if len(scope.TargetIds) == 0 || !strings.Contains(scope.Scope, "whatsapp") {
+			continue
 		}
+		return scope.TargetIds[0], nil
 	}
 
 	a.Log.Warn("No WABA ID found in granular scopes, falling back to business assets")
@@ -986,7 +986,7 @@ func (a *App) discoverWABAAndPhone(ctx context.Context, orgID uuid.UUID, accessT
 			return "", "", "", err
 		}
 		if discoveredWABAID == "" {
-			return "", "", "", fmt.Errorf("could not discover WhatsApp Business Account ID from token")
+			return "", "", "", fmt.Errorf("Facebook did not share a WhatsApp Business Account. Finish the WhatsApp signup steps, then try again")
 		}
 		wabaID = discoveredWABAID
 		a.Log.Info("Discovered WABA ID", "waba_id", wabaID)
