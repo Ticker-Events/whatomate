@@ -66,13 +66,8 @@ const isConnectingFB = ref(false)
 const showOnboardingDialog = ref(false)
 const signupSession = ref({ wabaId: '', phoneNumberId: '' })
 const signupCodeReceived = ref(false)
+const signupNotice = ref('')
 let signupPopupWatch = 0
-
-const signupFinishEvents = new Set([
-  'FINISH',
-  'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
-  'FINISH_ONLY_WABA',
-])
 
 const canWrite = computed(() => authStore.hasPermission('accounts', 'write'))
 const canDelete = computed(() => authStore.hasPermission('accounts', 'delete'))
@@ -169,25 +164,59 @@ function dialogRedirectUri(url: string | URL | null | undefined): string {
   }
 }
 
-function parseSignupMessage(raw: unknown): { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } } | null {
-  if (typeof raw === 'string') {
+function isFacebookOrigin(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname
+    return host === 'facebook.com' || host.endsWith('.facebook.com')
+  } catch {
+    return false
+  }
+}
+
+function firstId(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number') return String(value).trim()
+  if (!Array.isArray(value)) return ''
+  for (const item of value) {
+    const id = firstId(item)
+    if (id) return id
+  }
+  return ''
+}
+
+function parseSignupMessage(raw: unknown): Record<string, unknown> | null {
+  let value = raw
+  for (let i = 0; i < 2 && typeof value === 'string'; i++) {
     try {
-      return JSON.parse(raw)
+      value = JSON.parse(value)
     } catch {
       return null
     }
   }
-  if (raw && typeof raw === 'object') return raw as { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } }
-  return null
+  if (!value || typeof value !== 'object') return null
+  return value as Record<string, unknown>
 }
 
 function onSignupMessage(event: MessageEvent) {
-  if (event.origin === 'https://www.facebook.com' || event.origin === 'https://web.facebook.com') {
+  if (isFacebookOrigin(event.origin)) {
     const data = parseSignupMessage(event.data)
-    if (!data || data.type !== 'WA_EMBEDDED_SIGNUP' || !signupFinishEvents.has(data.event || '')) return
-    signupSession.value = {
-      wabaId: data.data?.waba_id || signupSession.value.wabaId,
-      phoneNumberId: data.data?.phone_number_id || signupSession.value.phoneNumberId,
+    if (!data || data.type !== 'WA_EMBEDDED_SIGNUP') return
+    const details = data.data && typeof data.data === 'object' ? data.data as Record<string, unknown> : {}
+    const wabaId = firstId(details.waba_id) || firstId(details.waba_ids) || firstId(details.messaging_account_ids)
+    const phoneNumberId = firstId(details.phone_number_id)
+    if (wabaId || phoneNumberId) {
+      signupSession.value = {
+        wabaId: wabaId || signupSession.value.wabaId,
+        phoneNumberId: phoneNumberId || signupSession.value.phoneNumberId,
+      }
+    }
+    const eventName = String(data.event || '')
+    if (eventName === 'CANCEL') {
+      const step = firstId(details.current_step)
+      signupNotice.value = step
+        ? `Facebook signup stopped at ${step}. Finish the WhatsApp steps and try again.`
+        : 'Facebook signup was cancelled before a WhatsApp Business Account was shared.'
+    } else if (eventName === 'ERROR') {
+      signupNotice.value = firstId(details.error_message) || 'Facebook reported an error during WhatsApp signup.'
     }
     return
   }
@@ -205,11 +234,11 @@ function onSignupMessage(event: MessageEvent) {
 }
 
 function waitForSignupSession(): Promise<void> {
-  if (signupSession.value.wabaId) return Promise.resolve()
+  if (signupSession.value.wabaId || signupNotice.value) return Promise.resolve()
   return new Promise((resolve) => {
     const started = Date.now()
     const timer = window.setInterval(() => {
-      if (signupSession.value.wabaId || Date.now() - started >= 2000) {
+      if (signupSession.value.wabaId || signupNotice.value || Date.now() - started >= 2000) {
         window.clearInterval(timer)
         resolve()
       }
@@ -220,9 +249,9 @@ function waitForSignupSession(): Promise<void> {
 async function finishSignup(code: string, redirectUri: string) {
   isConnectingFB.value = true
   await waitForSignupSession()
-  if (!signupSession.value.wabaId) {
+  if (!signupSession.value.wabaId && signupNotice.value) {
     isConnectingFB.value = false
-    toast.error('Facebook did not share a WhatsApp Business Account. Finish the WhatsApp signup steps, then try again.')
+    toast.error(signupNotice.value)
     return
   }
   exchangeCodeForToken(code, signupSession.value.phoneNumberId, signupSession.value.wabaId, redirectUri)
@@ -263,12 +292,13 @@ function launchWhatsAppSignup(isCoexistence: boolean = true) {
     response_type: 'code',
     override_default_response_type: true,
     extras: isCoexistence
-      ? { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3', version: 'v3' }
+      ? { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3' }
       : { setup: {}, sessionInfoVersion: '3' }
   }
 
   signupSession.value = { wabaId: '', phoneNumberId: '' }
   signupCodeReceived.value = false
+  signupNotice.value = ''
 
   // FB.login puts a session-specific xd_arbiter URL on the dialog. The code
   // exchange is rejected unless that same string is sent back. The WhatsApp
